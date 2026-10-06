@@ -6,11 +6,11 @@ import (
 )
 
 // Driver factories select a concrete implementation from a config string, in the
-// switch-with-ErrInvalidDriver-default style of internal/common/provider (AD2).
+// switch-with-ErrInvalidDriver-default style of internal/common/provider.
 //
-// The factory signatures carry extra wiring beyond the design §5 sketch
+// The factory signatures carry wiring beyond the driver config
 // (newEngine also takes ship targets + a Runner; newScheduler takes the
-// snapshot.toml path + a Runner): the mock seam (R2.4) and the btrbk-target /
+// snapshot.toml path + a Runner): the mock seam and the btrbk-target /
 // systemd ExecStart rendering require them. The interface method sets are
 // unchanged — this is a constructor call-surface concern only.
 
@@ -25,7 +25,7 @@ func newEngine(cfg EngineConfig, targets []string, run Runner, log *slog.Logger)
 		return e, nil
 	case "snapper":
 		// snapper does not use ship targets — remote transfer is the shippers'
-		// job, so the targets wiring stays btrbk-only (R6.2).
+		// job, so the targets wiring stays btrbk-only.
 		e := newSnapperEngine(cfg, run)
 		e.log = log
 		return e, nil
@@ -53,7 +53,7 @@ func newShipper(cfg ShipConfig, run Runner, retention Retention, log *slog.Logge
 		return newResticShipper(cfg, run, retention), nil
 	case "archive":
 		// retention is the [engine.retention] GFS policy; the archive shipper applies
-		// it to the rclone remote after a successful ship (T5.1, R4). An all-zero
+		// it to the rclone remote after a successful ship. An all-zero
 		// policy makes the prune a no-op.
 		a := newArchiveShipper(cfg, run, retention)
 		a.log = log
@@ -91,7 +91,7 @@ func newScheduler(cfg ScheduleConfig, configPath string, run Runner) (Scheduler,
 	}
 }
 
-// newNotifier is defined in notify.go (story 005, T3.1): it composes one driver per
+// newNotifier is defined in notify.go: it composes one driver per
 // populated NotifyConfig sub-table and fans out behind the Notifier interface. The
 // notifier factory lives beside the drivers it builds rather than here with the
 // engine/shipper/scheduler factories.

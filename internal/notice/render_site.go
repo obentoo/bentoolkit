@@ -8,9 +8,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// RenderSiteYAML renders n as the site's notice file (site story 002, "Data
-// Models"): id, type, severity, title, summary, body, affects, published,
-// updated, in that order (R4.1). The schema has no author and no revision —
+// RenderSiteYAML renders n as the site's notice file, with the fields of the
+// site's notice data model: id, type, severity, title, summary, body, affects,
+// published, updated, in that order. The schema has no author and no revision —
 // those live in the news item only.
 //
 // The document is built as a yaml.Node tree rather than marshalled from a

@@ -5,15 +5,11 @@ package report
 //
 // # It carries structure, never presentation
 //
-// Every field below answers "what does this block SAY" and none of them answers
-// "how does it look" (R7.1). There is no width here, no colour, no padding, no
-// border character and no terminal dimension, and there is no field one could
-// be smuggled into: the strings are the model's own, at full length, exactly as
-// the run established them. A renderer decides the rest from its own budget, so
-// the same Section prints as an 80-column table, as a pipe table with no width
-// at all, and as a pane inside a box, without any of the three being able to
-// change what the block says. The package doc states why that makes this a
-// model type and not a rendering one (D2).
+// Every field answers "what does this block SAY" and none answers "how does it
+// look": no width, colour, padding, border or terminal dimension. The strings
+// are the model's own, at full length, so the same Section prints as an
+// 80-column table, a pipe table or a pane inside a box without any renderer
+// being able to change what the block says.
 //
 // # A section with no rows is a section, not an absence
 //
@@ -31,8 +27,7 @@ type Section struct {
 	// which is how "nothing to validate" is said without an empty frame.
 	Rows Table
 	// Notes is what is said after the rows: what was left out and why, and
-	// what the run did not do. S044-R2.5 lives here — an omitted row is stated,
-	// never silent.
+	// what the run did not do. An omitted row is stated here, never silent.
 	Notes []string
 }
 
@@ -81,8 +76,7 @@ type Row struct {
 	// Empty means this row has nothing of its own to add, which is a decision
 	// about content and not a sign that the report held no reason: a result
 	// whose reason repeats its plan entry leaves this empty so the sentence is
-	// printed once (R7.2), while the report itself still carries the whole
-	// string (R7.4). Every writer omits an empty detail rather than printing a
-	// bare indent.
+	// printed once, while the report itself still carries the whole string.
+	// Every writer omits an empty detail rather than printing a bare indent.
 	Detail string
 }

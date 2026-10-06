@@ -12,30 +12,21 @@ import (
 
 // AnnotateAuthorship records, for every package whose two ebuilds were compared
 // and found to differ, whether the overlay's own content proves the difference
-// originates here — and which file proves it (R2.1, R2.2).
+// originates here — and which file proves it.
 //
-// It runs ONLY over Verified == VerifiedDiffers, and that is not an
-// optimisation. A package whose ebuilds are byte-identical holds no difference
-// whose authorship there is anything to attribute, and one whose content was
-// never compared holds no difference anyone has seen. Examining either would
-// produce a claim about a divergence that does not exist, so every other result
-// keeps the zero Authorship — "the report cannot tell" — which is also what an
-// API-only run leaves on every package.
+// It runs ONLY over Verified == VerifiedDiffers: an identical or never-compared
+// package holds no difference to attribute, so every other result keeps the
+// zero Authorship — "the report cannot tell" — as an API-only run does.
 //
-// It returns nothing, deliberately. Every way this can fail is a way of not
-// knowing: an unreadable ebuild, an upstream tree that would not resolve. The
-// design's error table gives all of them the same answer — unproved, never an
-// error — because verifyAgainstLocalContent already reads an unreadable file as
-// "nothing is known", and one unreadable file must not come to mean two
-// different things in two neighbouring functions.
+// It returns nothing, deliberately. Every way this can fail (an unreadable
+// ebuild, an upstream tree that would not resolve) is a way of not knowing and
+// reads as unproved, never an error — verifyAgainstLocalContent already reads an
+// unreadable file as "nothing is known", and one unreadable file must not mean
+// two different things in two neighbouring functions.
 //
-// It runs AFTER CompareWithProvider returns rather than inside its goroutines,
-// so nothing here is concurrent and the report it annotates is already sorted.
-//
-// Nothing it writes can change a Verdict (025 R4.5): it adds two fields to a
-// finished result and edits none.
-//
-// _Requirements: R2.1, R2.2, R2.3_
+// It runs AFTER CompareWithProvider returns, so nothing here is concurrent and
+// the report is already sorted. Nothing it writes can change a Verdict: it adds
+// two fields to a finished result and edits none.
 func AnnotateAuthorship(report *CompareReport, prov provider.Provider, opts CompareOptions) {
 	for i := range report.Results {
 		// Indexed rather than ranged over a copy: this pass exists to write two
@@ -74,12 +65,12 @@ func proveAuthorship(result CompareResult, prov provider.Provider, opts CompareO
 		// the check never made. It is package-relative ("files/<name>") because
 		// the finding line already carries the atom: printed that way, the
 		// operator confirms the claim by pasting it after the package directory
-		// rather than by knowing what ${FILESDIR} expands to (R2.2).
+		// rather than by knowing what ${FILESDIR} expands to.
 		//
 		// pruneFilesDir is Portage's fixed name for that directory and is spelled
-		// once in this package; prune.go already owns the constant, and R6 makes
-		// prune consult this very check, so a second spelling would be a second
-		// thing to keep in step.
+		// once in this package; prune.go already owns the constant, and prune
+		// consults this very check, so a second spelling would be a second thing
+		// to keep in step.
 		named := path.Join(pruneFilesDir, ref)
 		// FromSlash, because a reference keeps its subdirectory: thunderbird
 		// really writes "${FILESDIR}/icon/${PN}-r2.desktop", and joining the
@@ -155,50 +146,22 @@ type ebuildVar struct{ token, value string }
 // ebuildFilesdirRefs resolves the filenames an ebuild references under
 // ${FILESDIR}, from its text alone — no sourcing, no bash, no filesystem.
 //
-// Each returned string is a path RELATIVE TO ${FILESDIR}, in slash form, which
-// for all but a handful of references is a plain basename. The caller joins it
-// onto a files/ directory (filepath.Join with filepath.FromSlash) and asks
-// whether that repository ships it; a name ::gentoo does not have is proof the
-// divergence originates here, because a reference to a patch upstream never had
-// cannot be inherited from upstream (R2.1).
+// Each result is a path RELATIVE TO ${FILESDIR}, in slash form; a name ::gentoo
+// does not ship proves the divergence originates here, because a patch upstream
+// never had cannot be inherited from upstream. The subdirectory is KEPT:
+// thunderbird writes "${FILESDIR}/icon/${PN}-r2.desktop", and flattening it would
+// stat a path no repository has and report the miss as proof.
 //
-// It is why the subdirectory is KEPT rather than flattened to the basename the
-// design's summary names. mail-client/thunderbird-153.0.2.ebuild:1056 really
-// writes "${FILESDIR}/icon/${PN}-r2.desktop"; returning "thunderbird-r2.desktop"
-// would send the caller to stat files/thunderbird-r2.desktop — a path no
-// repository has — and the miss would be reported as proof of our authorship
-// when the ebuild is upstream's verbatim. The flat case is unaffected: with no
-// subdirectory the relative path IS the basename.
+// Expansion is the point: 108 of the overlay's 254 references spell the name
+// through ${PN}, including both packages this check exists to prove. Only ${PN},
+// ${P}, ${PV} and ${PVR} expand — the ones derivable from the filename. A
+// reference using any other variable resolves to nothing (no guess, no error:
+// it is the ordinary unproved case), and only that reference is dropped.
 //
-// EXPANSION IS THE POINT, not decoration. 108 of the overlay's 254 ${FILESDIR}
-// references spell the filename through ${PN}, including both packages this
-// check exists to prove: kde-plasma/spectacle writes "${FILESDIR}/${PN}-opencv5.patch"
-// and net-libs/nodejs writes "${FILESDIR}"/${PN}-26.5.1-paxmarking.patch. A
-// matcher that skipped expansion would look for "${PN}-opencv5.patch", find it
-// nowhere, and report both packages as unproved — inverting the whole result.
-//
-// Only ${PN}, ${P}, ${PV} and ${PVR} are expanded, because those four are the
-// only ones derivable from the ebuild's own filename, which the caller already
-// holds as pkg and version. Every other variable — ${MOZ_PN}, ${PATCH_VER}, a
-// loop variable — would need the ebuild's environment, so its reference resolves
-// to NOTHING: no filename, no guess, and no error, since an unresolvable
-// reference is the ordinary unproved case (R2.3) rather than a failure. Only the
-// reference carrying the unknown variable is dropped; the resolvable ones beside
-// it still resolve, so one exotic line cannot disarm a package's whole proof.
-//
-// The result is DEDUPLICATED, in first-seen source order. Deduplicated because
-// the caller asks a set question — does upstream ship this file? — and an ebuild
-// that references one patch from two USE branches would otherwise make a single
-// missing file read as two findings. Source order because the order must not
-// come from map iteration: the caller's report and its tests would then differ
-// run to run.
-//
-// This function is pure. That is what lets `prune` (5.1) call the same resolver,
-// so the two commands cannot disagree about what proves authorship, and what
-// lets the whole thing be tested without a filesystem.
-//
-// _Requirements: R2.1, R2.4 — it reads references only, and asserts nothing from
-// the size of a difference, a timestamp, or which side the file belongs to._
+// The result is deduplicated, in first-seen source order: the caller asks a set
+// question, and map order would make reports differ run to run. It is pure, so
+// `prune` calls the same resolver and the two commands cannot disagree about
+// what proves authorship.
 func ebuildFilesdirRefs(ebuild []byte, pkg, version string) []string {
 	// PVR is the version as the filename spells it, revision included; PV is the
 	// same with the revision removed; P is built from PV, never from PVR. Getting

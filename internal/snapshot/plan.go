@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// plan.go — pure dry-run plan helpers (story 008, R2 + R3.2).
+// plan.go — pure dry-run plan helpers.
 //
 // The --dry-run decision lives in the cmd layer; this file contributes the
 // accurate "would ..." lines because the package owns the data they describe:
@@ -19,7 +19,7 @@ import (
 // no I/O, no Runner, no state.
 
 // PlanApply returns the actions `snapshot apply` would perform for cfg as
-// human-readable "would ..." lines (008 R2.1): the engine config work it would
+// human-readable "would ..." lines: the engine config work it would
 // do (driver-aware, mirroring WriteEngineConfig — a file for btrbk, snapper
 // commands for snapper) and — when a systemd schedule is configured — the unit
 // files it would install plus the systemctl invocations (mirroring
@@ -39,7 +39,7 @@ func PlanApply(cfg *Config, configPath string) []string {
 }
 
 // PlanRun returns the pipeline `snapshot run` would execute for cfg as
-// human-readable "would ..." lines (008 R2.2): per subvolume the engine
+// human-readable "would ..." lines: per subvolume the engine
 // create+prune, then one ship line per [[ship]] target, in manager.go's Run
 // order.
 func PlanRun(cfg *Config) []string {
@@ -54,7 +54,7 @@ func PlanRun(cfg *Config) []string {
 }
 
 // PlanPrune returns the actions `snapshot prune` would perform for cfg as
-// human-readable "would ..." lines (008 R3.2): per subvolume the engine-native
+// human-readable "would ..." lines: per subvolume the engine-native
 // prune (driver-aware invocation summary), then one remote GFS line per
 // in-scope archive ship with the retention it would enforce — Manager.Prune's
 // order. A non-empty shipScope mirrors the real --ship scoping: the engine
@@ -120,8 +120,7 @@ func shipName(sh ShipConfig) string {
 // planEngineConfig returns the engine-config line(s) for cfg's driver,
 // mirroring WriteEngineConfig: btrbk renders one btrbk.conf next to the
 // snapshot.toml at configPath; snapper provisions one config per subvolume
-// through its own create-config, then applies the managed keys with set-config
-// (018 R5).
+// through its own create-config, then applies the managed keys with set-config.
 //
 // The snapper lines name the two commands rather than the file that used to be
 // written, because that is what apply now does — and the difference is not
@@ -131,7 +130,7 @@ func shipName(sh ShipConfig) string {
 //
 // Both lines are emitted unconditionally, and in particular the plan does NOT
 // ask snapper which subvolumes are already covered: a dry-run states intent and
-// never probes the host to predict an outcome (the purity 016 R6.3 established).
+// never probes the host to predict an outcome (the dry-run purity rule).
 // Hence "if not already covered" — the honest phrasing for a step whose need is
 // only known at apply time.
 func planEngineConfig(cfg *Config, configPath string) []string {

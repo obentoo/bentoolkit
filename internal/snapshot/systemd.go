@@ -13,7 +13,7 @@ import (
 // ErrSchedulerFailed wraps a non-zero exit from systemctl.
 var ErrSchedulerFailed = errors.New("snapshot scheduler command failed")
 
-// Unit file names and defaults (system scope, AD7).
+// Unit file names and defaults (system scope).
 const (
 	serviceUnitName     = "bentoo-snapshot.service"
 	timerUnitName       = "bentoo-snapshot.timer"
@@ -27,7 +27,8 @@ const (
 var systemdUnitDir = "/etc/systemd/system"
 
 // serviceTemplate renders the oneshot service that runs the pipeline. PrivateMounts
-// isolates mount propagation for safe read-only mounts in later stories (AD7).
+// isolates mount propagation, so the read-only mounts a shipper makes stay
+// private to the run.
 var serviceTemplate = template.Must(template.New("service").Parse(`[Unit]
 Description=bentoo snapshot run
 Documentation=man:btrbk(1)
@@ -87,7 +88,7 @@ func newSystemdScheduler(configPath string, run Runner) *systemdScheduler {
 }
 
 // systemdExecArg renders one ExecStart argument so systemd reads it back as the
-// same single literal word (053 R7.2-R7.4). A control character is refused:
+// same single literal word. A control character is refused:
 // systemd.service(5) allows none on a command line, and a newline would start a
 // new directive. `%` and `$` are doubled so neither a specifier
 // (systemd.unit(5)) nor a variable expansion (systemd.service(5) "Command
@@ -155,10 +156,9 @@ func renderTimerUnit(cfg ScheduleConfig) (string, error) {
 }
 
 // Apply renders and installs the units, then reloads systemd and enables the
-// timer (R4.1, R4.2). Writes are atomic and overwrite in place, so re-applying
-// reconciles without duplicates (R4.3). Both units are rendered before either
-// is written, so a render failure writes no unit and runs no systemctl
-// (053 R7.4, R7.5).
+// timer. Writes are atomic and overwrite in place, so re-applying
+// reconciles without duplicates. Both units are rendered before either
+// is written, so a render failure writes no unit and runs no systemctl.
 func (s *systemdScheduler) Apply(ctx context.Context, cfg ScheduleConfig) error {
 	servicePath := filepath.Join(s.unitDir, serviceUnitName)
 	timerPath := filepath.Join(s.unitDir, timerUnitName)
@@ -189,7 +189,7 @@ func (s *systemdScheduler) Apply(ctx context.Context, cfg ScheduleConfig) error 
 }
 
 // Remove disables the timer and deletes the unit files, then reloads systemd
-// (R4 inverse). systemctl errors are wrapped; missing files are not an error.
+// (the inverse of Apply). systemctl errors are wrapped; missing files are not an error.
 func (s *systemdScheduler) Remove(ctx context.Context) error {
 	if err := s.systemctl(ctx, "disable", "--now", timerUnitName); err != nil {
 		return err

@@ -18,19 +18,19 @@ import (
 )
 
 // snapperDescription tags every snapshot created by bentoo so they are
-// identifiable in `snapper list` output (R1.2).
+// identifiable in `snapper list` output.
 const snapperDescription = "bentoo snapshot"
 
 // snapperDateLayout is the timestamp format of the `date` field in
-// `snapper --jsonout list` output (016 R3.1). snapper emits this layout there
+// `snapper --jsonout list` output. snapper emits this layout there
 // irrespective of the ambient locale, so no LC_ALL pinning is needed to parse
 // it — unlike the human-readable table, which localizes its Date column.
 const snapperDateLayout = "2006-01-02 15:04:05"
 
-// snapperEngine drives snapper, implementing the 004 Engine contract (R1.1).
+// snapperEngine drives snapper, implementing the Engine contract.
 // Snapshot creation/pruning/listing shell out via the Runner seam
-// (exec.CommandContext underneath, R6.1); the destructive work stays inside
-// snapper. The driver is additive beside btrbk (R6.2) and addresses snapper's
+// (exec.CommandContext underneath); the destructive work stays inside
+// snapper. The driver is additive beside btrbk and addresses snapper's
 // per-subvolume configs by name derived from the subvolume path
 // (snapperConfigName).
 type snapperEngine struct {
@@ -53,13 +53,12 @@ func newSnapperEngine(cfg EngineConfig, run Runner) *snapperEngine {
 
 func (e *snapperEngine) Name() string { return "snapper" }
 
-// Create runs `snapper -c <config> create` with the bentoo description tag
-// (R1.2), the timeline cleanup algorithm (so Prune's `cleanup timeline`
-// governs these snapshots, R1.4), and --print-number so the trimmed stdout
-// becomes the snapshot's ID, and Path follows snapperSnapshotPath (053 R1.1).
-// Output that is not a positive number yields a snapshot with no ID or Path
-// and one warning (053 R1.4). A non-zero exit is wrapped with ErrEngineFailed
-// so the Manager can record a failed stage (R6.1).
+// Create runs `snapper -c <config> create` with the bentoo description tag,
+// the timeline cleanup algorithm (so Prune's `cleanup timeline` governs these
+// snapshots), and --print-number so the trimmed stdout becomes the snapshot's
+// ID, and Path follows snapperSnapshotPath. Output that is not a positive
+// number yields a snapshot with no ID or Path and one warning. A non-zero exit
+// is wrapped with ErrEngineFailed so the Manager can record a failed stage.
 func (e *snapperEngine) Create(ctx context.Context, subvolume string) (Snapshot, error) {
 	args := []string{
 		"-c", snapperConfigName(subvolume), "create",
@@ -103,7 +102,7 @@ func snapperSnapshotPath(subvolume, id string) string {
 	return filepath.Join(subvolume, ".snapshots", id, "snapshot")
 }
 
-// Prune runs `snapper -c <config> cleanup timeline` (R1.4). Retention is
+// Prune runs `snapper -c <config> cleanup timeline`. Retention is
 // delegated to snapper's native timeline cleanup (the TIMELINE_LIMIT_* keys of
 // its config), so the policy argument is accepted but not re-applied here —
 // mirroring btrbkEngine.Prune.
@@ -116,7 +115,7 @@ func (e *snapperEngine) Prune(ctx context.Context, subvolume string, _ Retention
 }
 
 // List runs `snapper --jsonout -c <config> list` and parses the JSON payload
-// into snapshots (R1.3, 016 R3.1).
+// into snapshots.
 //
 // JSON is requested rather than the human-readable table because snapper 0.13.1
 // draws that table with U+2502 ("│") column separators instead of the ASCII "|"
@@ -126,7 +125,7 @@ func (e *snapperEngine) Prune(ctx context.Context, subvolume string, _ Retention
 // listing robust against both without depending on LC_ALL.
 //
 // A non-zero exit is wrapped with ErrEngineFailed so the Manager can record a
-// failed stage (R6.1).
+// failed stage.
 func (e *snapperEngine) List(ctx context.Context, subvolume string) ([]Snapshot, error) {
 	out, err := e.run.Run(ctx, "snapper", []string{"--jsonout", "-c", snapperConfigName(subvolume), "list"}, nil)
 	if err != nil {
@@ -136,7 +135,7 @@ func (e *snapperEngine) List(ctx context.Context, subvolume string) ([]Snapshot,
 }
 
 // snapperListEntry mirrors the fields consumed from one element of
-// `snapper --jsonout list` output (016 R3.2): the snapshot's number, type,
+// `snapper --jsonout list` output: the snapshot's number, type,
 // creation timestamp, and description. snapper 0.13.1 emits eight further
 // fields per entry (subvolume, default, active, pre-number, user, used-space,
 // cleanup, userdata); encoding/json ignores what is not declared here, so a
@@ -149,39 +148,27 @@ type snapperListEntry struct {
 }
 
 // parseSnapperListJSON extracts snapshots from `snapper --jsonout -c <config>
-// list` output (016 R3.2). It supersedes the previous table scan, which
-// returned nothing on snapper 0.13.1: that release separates the table's
-// columns with U+2502 ("│") rather than the ASCII "|" the scan split on, so
-// every row was discarded and `bentoo snapshot list` printed "(none)" while
-// `snapper list` showed real snapshots. JSON carries no separator to guess at
-// and no locale-dependent rendering.
+// list` output. JSON replaced a table scan that returned nothing on snapper
+// 0.13.1, whose table separates columns with U+2502 ("│") rather than "|";
+// JSON has no separator to guess at and no locale-dependent rendering.
 //
-// The payload is one object keyed by config name — {"root": [...]} — and
-// `-c <config>` makes that exactly one key. Rather than assume which key, every
-// key's entries are collected, walked in sorted key order so the result stays
-// deterministic (Go randomizes map iteration) in the multi-key shape snapper is
-// not observed to emit. Keying off snapperConfigName instead would turn any
-// future change in snapper's key into another silently empty listing — the very
-// failure being fixed here.
+// The payload is one object keyed by config name — {"root": [...]}. Every key's
+// entries are collected in sorted key order, so the result stays deterministic;
+// keying off snapperConfigName instead would turn a future change in snapper's
+// key into a silently empty listing.
 //
-// The "current" pseudo-snapshot, number 0, is skipped (016 R3.3). An empty or
-// snapshot-less payload yields an empty list and no error (016 R3.4).
+// The "current" pseudo-snapshot, number 0, is skipped. An empty or
+// snapshot-less payload yields an empty list and no error. Path follows
+// snapper's layout <subvolume>/.snapshots/<id>/snapshot; CreatedAt is a
+// best-effort parse against snapperDateLayout, a blank or unparseable date
+// leaving the zero time rather than failing the listing.
 //
-// ID and Path derivation are unchanged from the table parser: the path follows
-// snapper's fixed on-disk layout <subvolume>/.snapshots/<id>/snapshot. CreatedAt
-// is a best-effort parse of the date field against snapperDateLayout — a blank
-// date (number 0 carries one) or an unparseable one leaves the zero time rather
-// than failing the whole listing.
-//
-// The signature returns no error, so a malformed payload could only surface as
-// an empty list, which reads as "no snapshots" — indistinguishable from the bug
-// this replaces. An unmarshal failure is therefore announced as a warning on log
-// before returning empty, mirroring how archiveShipper.pruneRemote reports
-// unparseable `rclone lsjson` output. A blank payload is not malformed: it is
-// R3.4's empty case and stays quiet. A nil log discards.
+// An empty list alone would read as "no snapshots", so an unmarshal failure is
+// logged as a warning on log before returning empty. A blank payload is the
+// empty case and stays quiet. A nil log discards.
 func parseSnapperListJSON(out []byte, subvolume string, log *slog.Logger) []Snapshot {
 	if len(bytes.TrimSpace(out)) == 0 {
-		return nil // no output at all: an empty listing, not a parse failure (016 R3.4)
+		return nil // no output at all: an empty listing, not a parse failure
 	}
 	var configs map[string][]snapperListEntry
 	if err := json.Unmarshal(out, &configs); err != nil {
@@ -194,7 +181,7 @@ func parseSnapperListJSON(out []byte, subvolume string, log *slog.Logger) []Snap
 	for _, config := range slices.Sorted(maps.Keys(configs)) {
 		for _, entry := range configs[config] {
 			if entry.Number == 0 {
-				continue // the "current" pseudo-snapshot, not a real one (016 R3.3)
+				continue // the "current" pseudo-snapshot, not a real one
 			}
 			id := strconv.Itoa(entry.Number)
 			snap := Snapshot{

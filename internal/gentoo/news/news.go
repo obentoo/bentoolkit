@@ -3,7 +3,7 @@
 // /var/lib/gentoo/news and the GLEP 42 news items that list names.
 //
 // Every file is opened read-only; this package never writes portage's news
-// files (R4.5).
+// files.
 package news
 
 import (
@@ -330,7 +330,7 @@ func sectionLocation(data []byte, name string) (location string, ok bool) {
 	return location, ok
 }
 
-// readFile returns the content of the file at path, opened read-only (R4.5),
+// readFile returns the content of the file at path, opened read-only,
 // refusing a file larger than maxFileBytes.
 func readFile(path string) ([]byte, error) {
 	// path is the unread list or repos.conf path the caller configured, an

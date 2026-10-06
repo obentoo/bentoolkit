@@ -14,7 +14,7 @@ import (
 // selects on these rather than on a string it typed a second time.
 //
 // They are the report's own vocabulary rather than an internal detail: a run
-// states how many of its differences fell into each of them (R2.4, R2.5).
+// states how many of its differences fell into each of them.
 const (
 	// hunkVersionMove is a difference a version move already contains — the same
 	// change, in the same hand, between two versions nobody here decided
@@ -25,7 +25,7 @@ const (
 	// something the version move does not account for.
 	hunkOurs = "ours"
 	// hunkUnclassified is a difference NOBODY attributed. It is deliberately not
-	// "ours by elimination" (R2.3): with the version move genuinely mixed in and
+	// "ours by elimination": with the version move genuinely mixed in and
 	// no evidence separating it, calling the residue ours is the tempting answer
 	// and the one that would propose realigning 492 lines of deliberate slotting
 	// work as though they were noise.
@@ -55,12 +55,10 @@ const (
 // End are 1-based and the range is HALF-OPEN, [Start, End), so a pure insertion
 // — a hunk that removes nothing — is the empty range Start == End at the line it
 // was inserted before, exactly as a unified diff's `@@ -5,0 +6,2 @@` says it.
-//
-// _Requirements: R2.2, R2.3, R2.4_
 type Hunk struct {
 	// Class is version-move, ours or unclassified, and is never empty on a hunk
 	// this package returns: every difference lands in exactly one class, which
-	// is what makes the three counts add up to the number of differences (R2.4).
+	// is what makes the three counts add up to the number of differences.
 	Class string
 	// Start and End are the half-open line range the hunk replaces in the
 	// baseline, 1-based.
@@ -85,20 +83,18 @@ type Hunk struct {
 // Reduced=false with Span=0 is "no third point existed"; Reduced=false with a
 // large Span is "a third point existed and was REFUSED for being too wide", and
 // those are different facts about the same package. A classification whose reach
-// is invisible is indistinguishable from a guess (R2.5).
+// is invisible is indistinguishable from a guess.
 //
 // It renders nothing at its zero value, which is what lets it ride on an
 // existing result without changing a byte of what a run that asked for no
 // baseline review prints.
-//
-// _Requirements: R2.2, R2.3, R2.4, R2.5_
 type Classified struct {
 	// VersionMove, Ours and Unclassified are the per-class counts. They always
 	// sum to the number of hunks returned beside them.
 	VersionMove, Ours, Unclassified int
 	// Reduced reports that the classification is an attributed one rather than a
-	// shrug: either a usable third point was accepted (D3's first two
-	// preferences), or the baseline is our own version and no version noise was
+	// shrug: either a usable third point was accepted (one of the first two
+	// preferences for choosing it), or the baseline is our own version and no version noise was
 	// possible in the first place.
 	Reduced bool
 	// Span is the version distance the third point covers, in the release steps
@@ -112,8 +108,8 @@ type Classified struct {
 // VersionMove is the pair of ebuilds whose difference IS a version move: the
 // third point the reduction subtracts.
 //
-// It carries the already-chosen pair rather than a bare third path because D3's
-// two preferences diff different pairs — `diff(baseline, gentoo_newer)` when
+// It carries the already-chosen pair rather than a bare third path because the
+// two ways of choosing a third point diff different pairs — `diff(baseline, gentoo_newer)` when
 // ::gentoo carries two versions spanning ours, `diff(our_previous, ours)` when
 // we carry the previous version — and a callee handed one lone path could not
 // tell which of the two roles it was being given. Choosing is the caller's job;
@@ -121,69 +117,27 @@ type Classified struct {
 //
 // Both fields are PATHS to ebuild files, like ReduceDiff's own two, because the
 // span is a distance between two VERSIONS and the version is in the filename.
-//
-// _Requirements: R2.2_
 type VersionMove struct{ From, To string }
 
 // ReduceDiff compares our ebuild against its baseline and says, difference by
 // difference, what caused each one — so that the model is asked only what
-// deterministic work could not answer.
+// deterministic work could not answer. our and baseline are PATHS, as in
+// CompareAxes, because the versions are in the filenames.
 //
-// our and baseline are PATHS to ebuild files, as in CompareAxes. They are paths
-// and not contents because the versions are in the filenames and the reduction
-// needs all four of them: Span is a version distance and the bound compares it
-// against the baseline distance, so a contents-taking signature would have
-// needed two more parameters carrying what the paths already say.
+//  1. It diffs the FULL CONTENT whether or not the versions match; everything
+//     below only labels the differences, never decides whether they are sought.
+//  2. Same version: no version move exists, so every difference is ours by
+//     construction (the nodejs case: 492 differing lines, all ours).
+//  3. Different versions with a usable third point: a hunk of ours that matches
+//     a hunk of the move is that move showing through; what survives is ours.
+//  4. Different versions, no usable third point: the whole diff is unclassified
+//     and the report says it was unreduced.
 //
-// # What it does, in D3's order
-//
-//  1. It diffs the FULL CONTENT of the two ebuilds, whether or not the versions
-//     match (R2.1). Everything below only decides how the differences are
-//     labelled; none of it decides whether they are looked for.
-//  2. Same version: no version move exists between the two files, so no
-//     difference between them can be attributed to one. Every difference is ours
-//     by construction and no model is needed to say so — this is the nodejs
-//     case, 492 differing lines at one version, all of them ours.
-//  3. Different versions, with a usable third point: the third point's own diff
-//     is a version move written in somebody's hand, and any hunk of ours that
-//     matches a hunk of it is that move showing through. What survives is ours.
-//  4. Different versions with no usable third point: nothing is attributed. The
-//     whole diff is unclassified and the report says the classification was
-//     unreduced (R2.3).
-//
-// # The third point is bounded
-//
-// An unbounded one recreates the nodejs failure mode INSIDE the reduction. A
-// move spanning several series carries so much churn that it subsumes real
-// divergences and classifies deliberate work as version noise — the exact error
-// this exists to prevent, arriving through the subtraction instead of through
-// the model, where nobody is looking for it. So a third point whose span is
-// wider than the distance from the baseline to us subtracts NOTHING and says it
-// reduced nothing; subtracting less and reporting Reduced=true would be the same
-// failure with better manners.
-//
-// # Matching is by text, and it errs one way
-//
-// A hunk of ours matches a hunk of the move when their texts are equal: the same
-// lines removed and the same lines added, in the same order, with no line numbers
-// involved. Where the two diffs group changed lines differently — one edit of
-// ours spanning what the move split in two — nothing matches and the hunk stays
-// ours. That is the conservative direction and it is chosen on purpose: an
-// under-subtraction leaves a version-move hunk to be judged as ours, which costs
-// a question; an over-subtraction deletes a decision from the report, which is
-// what the story exists to prevent.
-//
-// # No error return
-//
-// There is nothing here a caller could do differently. An ebuild that will not
-// read has no differences to classify, and the zero Classified with no hunks
-// says exactly that while rendering nothing — the same answer as two identical
-// ebuilds, which is also the truthful one: this pass ran and found nothing to
-// attribute. Whether the baseline ebuild could be read at all is already reported
-// upstream, by Baseline.Unexamined, and repeating it here as an error the
-// annotation pass would have to swallow would put the same fact in two places.
-//
-// _Requirements: R2, R2.1, R2.2, R2.3, R2.4, R2.5_
+// A third point wider than the baseline-to-us distance would classify
+// deliberate work as noise, so it subtracts NOTHING (Reduced=false). Matching is
+// by exact hunk text and errs toward ours: under-subtraction costs a question,
+// over-subtraction deletes a decision. No error return: an unreadable ebuild
+// has nothing to classify; Baseline.Unexamined already reports it.
 func ReduceDiff(our, baseline string, move *VersionMove) (Classified, []Hunk) {
 	ourText, err := reduceReadEbuild(our)
 	if err != nil {
@@ -194,7 +148,7 @@ func ReduceDiff(our, baseline string, move *VersionMove) (Classified, []Hunk) {
 		return Classified{}, nil
 	}
 
-	// R2.1: the content comparison happens before any version is read, so no
+	// The content comparison happens before any version is read, so no
 	// version relationship can decide whether the ebuilds get compared at all.
 	hunks := reduceHunks(baselineText, ourText)
 	if len(hunks) == 0 {
@@ -250,7 +204,7 @@ func ReduceDiff(our, baseline string, move *VersionMove) (Classified, []Hunk) {
 // It refuses, in each case returning the span it did manage to measure so the
 // refusal is legible rather than a silent shrug:
 //
-//   - No third point at all — D3's third preference.
+//   - No third point at all — the last of the ways of choosing one.
 //   - A version it could not read, on any of the four ebuilds. An unreadable
 //     version is a bound nobody could check, and an unchecked bound is precisely
 //     the failure this function exists to prevent.
@@ -394,7 +348,7 @@ func reduceMarkAll(hunks []Hunk, class string) []Hunk {
 // the summary cannot drift from what it describes: every hunk is counted exactly
 // once and the three counts sum to the number of differences on every path
 // through ReduceDiff, by construction rather than by four separate authors
-// remembering to keep them level (R2.4, R2.5).
+// remembering to keep them level.
 //
 // A class this file never writes would still be counted — as unclassified, and
 // normalised to it — because a difference that fell out of the arithmetic

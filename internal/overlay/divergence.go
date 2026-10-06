@@ -17,7 +17,7 @@ import (
 // that merely mentions the tag is prose and stays prose.
 //
 // The convention is not invented here: sys-devel/binutils-2.47 already writes
-// this reason in a comment, in prose, and nothing reads it (D5). The tag is
+// this reason in a comment, in prose, and nothing reads it. The tag is
 // what makes the comment machine-readable.
 const divergenceTag = "BENTOO-DIVERGENCE:"
 
@@ -30,25 +30,23 @@ const divergenceDropWhenKey = "drop-when:"
 //
 // # It is NOT overlay.Divergence
 //
-// Divergence (compare.go:143) is the REGISTRY axis — Patched, Reason, Entry —
+// Divergence (compare.go) is the REGISTRY axis — Patched, Reason, Entry —
 // supplied by the caller from packages.toml, one answer per package, feeding the
 // `redundant` verdict. This one is the EBUILD axis: one answer per hunk, living
 // beside the code it describes so it travels when the ebuild is copied to a new
-// version, which is exactly when a divergence is silently inherited today (D5).
+// version, which is exactly when a divergence is silently inherited.
 // Two names because they answer two questions; merging them would make a
 // registry entry and a maintainer's note mean the same thing.
-//
-// _Requirements: R3, R3.1, R3.4_
 type DeclaredDivergence struct {
 	// Axis is the property the divergence is about, AS THE MAINTAINER WROTE IT.
-	// §7 of the protocol spells it upper-case (`INHERIT:`) and D4's axes are
-	// lower-case (`inherit`); neither side is authoritative, so nothing is
+	// The tag's documentation spells it upper-case (`INHERIT:`) and the axis
+	// names are lower-case (`inherit`); neither side is authoritative, so nothing is
 	// normalised here and every consumer compares it with strings.EqualFold.
 	// Rewriting the word would also cost the report the maintainer's own
 	// spelling for the sake of a comparison that is one call away.
 	Axis string
 	// Reason is the maintainer's words, verbatim and uncapped. A declaration
-	// without one is what R3 exists to abolish, so an empty Reason never
+	// without one is what declarations exist to abolish, so an empty Reason never
 	// reaches this field: the tag is reported as malformed instead.
 	Reason string
 	// DropWhen is the condition from the `drop-when:` continuation line, empty
@@ -59,44 +57,29 @@ type DeclaredDivergence struct {
 	// Expired reports that DropWhen has been checked against the ::gentoo tree
 	// and is met. It is written by EvaluateDeclarations, never by the parser:
 	// expiry is a question about the tree, and reading it off the ebuild's own
-	// text would answer it from the wrong source (R3.3).
+	// text would answer it from the wrong source.
 	Expired bool
 }
 
-// ParseDivergences reads one ebuild and returns the divergences it declares.
-//
-// The shape, as §7 proposed it and D5 adopted it:
+// ParseDivergences reads one ebuild and returns the divergences it declares, in
+// this shape:
 //
 //	# BENTOO-DIVERGENCE: INHERIT: gstreamer-meson does not handle the qt6 option list
 //	#   drop-when: gentoo-version >= 1.29
 //
-// The second line is optional and must immediately follow the first. A
-// declaration parsed here is reported as declared and is questioned no further
-// (R3.1); an axis that carries no declaration is reported as undeclared (R3.4).
+// The optional second line must immediately follow the first. A parsed
+// declaration is questioned no further; an axis with none is undeclared.
 //
-// # An ebuild is a bash script, not a list of lines
+// The tag is recognised only on a line that is WHOLLY a comment, outside any
+// quoted string or heredoc body: an ebuild that echoes its own documentation
+// writes the tag as data, and since declared divergences are quiet, a phantom
+// tag would buy a package permanent silence on an axis nobody declared. Nothing
+// is expanded, evaluated or executed.
 //
-// The tag is recognised only on a line that is WHOLLY a comment and is neither
-// inside a quoted string nor inside a heredoc body. That is not fussiness: an
-// ebuild that echoes or installs its own documentation writes the tag as data,
-// and a line-oriented matcher would read a package's own output back as policy.
-// Every phantom declaration silences a real divergence — the whole filter is
-// "declared divergences are quiet" (D7), so a tag invented out of quoted text
-// buys a package permanent silence on an axis nobody ever declared.
-//
-// Nothing is expanded, evaluated or executed: an ebuild that would delete the
-// tree when sourced is just a file with some lines in it here.
-//
-// # A malformed tag is reported, not dropped
-//
-// A tag somebody meant as a declaration and mistyped comes back as an error
-// naming the file, the line and the text, while the well-formed declarations
-// beside it are still returned — buildDivergenceMap's precedent, whose own
-// comment says one bad key must not blank the whole map. Silently dropping it
-// would read as "this divergence was never declared", and the maintainer would
-// be asked to declare it again on every run, forever.
-//
-// _Requirements: R3, R3.1, R3.4_
+// A malformed tag comes back as an error naming the file, line and text, while
+// the well-formed declarations beside it are still returned (as in
+// buildDivergenceMap): dropping it silently would read as "never declared" and
+// ask the maintainer to declare it again on every run, forever.
 func ParseDivergences(ebuildPath string) ([]DeclaredDivergence, error) {
 	data, err := os.ReadFile(ebuildPath) //nolint:gosec // the ebuild to read is the caller's whole request; the path is an overlay ebuild resolved from a directory listing, never from registry input
 	if err != nil {
@@ -208,7 +191,7 @@ func divergenceComment(line string) (string, bool) {
 // The split is on the FIRST colon, so a reason may contain as many more as the
 // maintainer needs — "see bug 942071: the eclass lost the option" survives
 // whole. Both halves must carry something: an axis with no reason is the
-// undocumented divergence R3 exists to abolish, and a reason with no axis names
+// undocumented divergence declarations exist to abolish, and a reason with no axis names
 // nothing the report can attach it to.
 func divergenceAxisReason(tail string) (axis, reason string, ok bool) {
 	axis, reason, found := strings.Cut(tail, ":")
@@ -222,9 +205,9 @@ func divergenceAxisReason(tail string) (axis, reason string, ok bool) {
 // divergenceDropWhen returns the condition on a `drop-when:` continuation line.
 //
 // The condition comes back VERBATIM and unparsed. Which predicates are
-// machine-checkable is D6's question and EvaluateDropWhen's job; a parser that
-// rejected the prose ones here would delete exactly the conditions a human must
-// check, which is the case D6 says matters most.
+// machine-checkable is EvaluateDropWhen's job; a parser that rejected the prose
+// ones here would delete exactly the conditions a human must check, which is the
+// case that matters most.
 //
 // A key with nothing after it states no condition and is treated as no
 // continuation at all, because "no end in sight" is already the legal and
@@ -245,11 +228,12 @@ func divergenceDropWhen(line string) (string, bool) {
 
 // divergenceCutFold is strings.CutPrefix with a case-insensitive comparison.
 //
-// The vocabulary is written in two cases in the two places that define it — §7
-// spells the tag and the axis upper-case, D4 and D6 spell the axes and the key
-// lower-case — and neither is authoritative. Matching either way costs nothing
-// and keeps a maintainer's `# Bentoo-Divergence:` from being read as prose,
-// which would report a declared divergence as undeclared (R3.4).
+// The vocabulary is written in two cases in the two places that define it — the
+// documented tag spells the tag and axis upper-case (`INHERIT`), while the axis
+// names and the drop-when key are lower-case (`inherit`) — and neither is
+// authoritative. Matching either way costs nothing and keeps a maintainer's
+// `# Bentoo-Divergence:` from being read as prose, which would report a declared
+// divergence as undeclared.
 func divergenceCutFold(s, prefix string) (string, bool) {
 	if len(s) < len(prefix) || !strings.EqualFold(s[:len(prefix)], prefix) {
 		return "", false
@@ -293,7 +277,7 @@ func (s *divergenceShell) readHeredocBody(line string) {
 	// Trailing blanks are forgiven on the delimiter line. Bash is stricter, but
 	// a heredoc this reader never closes would swallow every declaration below
 	// it, and reporting a declared divergence as undeclared is the more
-	// expensive way to be wrong (R3.4).
+	// expensive way to be wrong.
 	if strings.TrimRight(closing, " \t") == s.heredoc {
 		s.heredoc = ""
 		s.heredocStripsTabs = false
@@ -418,30 +402,20 @@ func divergenceDelimiterStart(c byte) bool {
 	}
 }
 
-// The CLOSED vocabulary of exit conditions (D6): three predicates, each of them
-// answerable by reading the local ::gentoo tree and nothing else, and each of
-// them a question about ONE PACKAGE rather than about ::gentoo at large — which
-// is why the atom travels with the condition through everything below.
+// The CLOSED vocabulary of exit conditions: three predicates, each answerable
+// from the local ::gentoo tree alone, and each about ONE PACKAGE — which is why
+// the atom travels with the condition through everything below. Closed on
+// purpose: a vocabulary that guessed what a sentence meant would sooner or later
+// silently retire a divergence nobody retired.
 //
-// Closed on purpose. A vocabulary that grew by working out what a sentence
-// probably meant would sooner or later decide, silently, that a divergence
-// nobody retired is over. Refusing is the whole value of this evaluator.
-//
-// They are named `vocab*` rather than `dropWhen*` like everything else in this
-// half of the file, and the reason is worth writing down because it is invisible
-// and it will happen again. gosec's G101 matches the IDENTIFIER against
-// `(?i)…|pw|…`, and `dropWhen` contains "pW" — the p of "drop" against the W of
-// "When". Any constant so named whose value is a string long enough to clear
-// G101's entropy threshold reads as a hardcoded credential and fails the CI
-// lint; `gentoo-has-package` is the one of the three that is long enough, which
-// is why only it was flagged and why renaming the SUFFIX changed nothing.
-//
-// Fixed by the name rather than by a //nolint, for the reason filesdirMarker
-// gives in authorship.go: a suppression is something every later reader has to
-// re-evaluate, and these are three public vocabulary keywords.
+// They are named `vocab*`, not `dropWhen*`, because gosec's G101 matches the
+// IDENTIFIER against `(?i)…|pw|…` and `dropWhen` contains "pW": a so-named
+// constant with a long enough string value (`gentoo-has-package`) reads as a
+// hardcoded credential and fails the CI lint. Fixed by the name rather than a
+// //nolint, for the reason filesdirMarker gives in authorship.go.
 const (
 	// vocabVersionWord asks whether ::gentoo now ships a release at least as
-	// new as the one named. It is D5's worked case: sys-devel/binutils-2.47 says
+	// new as the one named. The worked case: sys-devel/binutils-2.47 says
 	// in prose that our ebuild goes away as soon as ::gentoo ships 2.47.
 	vocabVersionWord = "gentoo-version"
 	// vocabHasPackageWord asks whether ::gentoo carries the package at all. It
@@ -464,29 +438,18 @@ const (
 const dropWhenAtLeast = ">="
 
 // EvaluateDropWhen answers a declaration's exit condition against the local
-// ::gentoo tree — and says whether it answered it at all (R3.2).
+// ::gentoo tree — and says whether it answered it at all.
 //
-// # `checkable` is an answer, not an error
+// met=false with checkable=true: evaluated, not met. checkable=false: NOT
+// EVALUATED — outside the vocabulary, or the tree could not answer. It is a
+// return value rather than an error because a caller that dropped it would
+// collapse "a human must check this" into "we checked, and no". Read as unmet,
+// a prose condition keeps its divergence alive forever; read as met, it retires
+// deliberate work with no cause at all.
 //
-// met=false says the condition WAS evaluated and is not met: the divergence
-// still earns its place. checkable=false says it was NOT EVALUATED — the
-// condition is outside the vocabulary above, or the tree could not answer it.
-// Both come back with met=false and only `checkable` tells them apart, which is
-// why it is a return value rather than an error: a caller that dropped it would
-// collapse "a human must check this" into "we checked, and no".
-//
-// Both collapses are silent and both are expensive (D6). Read as unmet, a prose
-// condition keeps its divergence alive forever, because nothing will ever retire
-// it. Read as met, it retires the divergence with no cause at all, and work
-// somebody did deliberately rejoins the realignment queue.
-//
-// It reads one directory listing and at most one ebuild, both inside gentooTree.
-// It starts no process, resolves no host and never consults git: the local
-// /var/db/repos/gentoo is a shallow clone whose history is absent by
-// construction, so an evaluator reaching for `git log` would be answering from a
-// source that is not there (R1.4). The answer is in the tree's content.
-//
-// _Requirements: R3, R3.2_
+// It reads one directory listing and at most one ebuild inside gentooTree,
+// starts no process, resolves no host and never consults git: the local
+// /var/db/repos/gentoo is a shallow clone with no history to read.
 func EvaluateDropWhen(condition, gentooTree, atom string) (met, checkable bool) {
 	keyword, argument, stated := dropWhenPredicate(condition)
 	if !stated {
@@ -514,22 +477,20 @@ func EvaluateDropWhen(condition, gentooTree, atom string) (met, checkable bool) 
 // local ::gentoo tree.
 //
 // A declaration is EXPIRED when its condition was evaluated and is met, and in
-// no other case (R3.3). An unmet condition leaves the divergence declared,
+// no other case. An unmet condition leaves the divergence declared,
 // because it still earns its place; a condition the vocabulary does not cover
 // leaves it declared too, because nothing was evaluated that could retire it.
 //
 // Expiry is what puts a divergence back in front of the model — an expired
 // declaration is treated as UNDECLARED from then on, where a declared and
-// unexpired one is never sent (D7) — so the field is written here, in
-// production. Left to each reader to derive from `met && checkable`, the one
-// reader that got it wrong would silence a divergence or resurrect one, and the
+// unexpired one is never sent — so the field is written here, in production.
+// Left to each reader to derive from `met && checkable`, the one reader that got
+// it wrong would silence a divergence or resurrect one, and the
 // struct would carry a field nothing ever set.
 //
 // Everything else comes back VERBATIM: the axis, the reason and the condition
 // are the maintainer's words, and this pass reads the tree and reports rather
-// than editing anybody's ebuild (R3.6). The input slice is not modified.
-//
-// _Requirements: R3, R3.2, R3.3_
+// than editing anybody's ebuild. The input slice is not modified.
 func EvaluateDeclarations(declared []DeclaredDivergence, gentooTree, atom string) []DeclaredDivergence {
 	evaluated := slices.Clone(declared)
 	for i := range evaluated {
@@ -546,7 +507,7 @@ func EvaluateDeclarations(declared []DeclaredDivergence, gentooTree, atom string
 // follows it, and reports whether there was anything at all to split.
 //
 // The keyword is the first WORD, so the vocabulary is spelled with blanks
-// between its parts exactly as D6 writes it. `gentoo-version>=2.47` is therefore
+// between its parts exactly as the vocabulary writes it. `gentoo-version>=2.47` is therefore
 // prose and is reported as prose rather than repaired — a reader that repaired
 // one spelling would have to decide how far to go, and every step past the first
 // is a guess about what somebody meant.
@@ -574,7 +535,7 @@ func dropWhenPredicate(condition string) (keyword, argument string, stated bool)
 // # A live ebuild ships nothing
 //
 // Live ebuilds are excluded, and that is the difference between this predicate
-// working and being meaningless. ::gentoo's sys-devel/binutils — D5's own worked
+// working and being meaningless. ::gentoo's sys-devel/binutils — the worked
 // case — carries binutils-9999.ebuild, which builds from git master and orders
 // ABOVE every release there is. Counted, it would satisfy `gentoo-version >= X`
 // for every X anybody could write, retiring each such divergence on the day it
@@ -652,7 +613,7 @@ func dropWhenInheritsMet(eclass, gentooTree, atom string) (met, checkable bool) 
 	if err != nil {
 		// The ebuild is there and will not read. "We could not look" is not "it
 		// does not inherit that", so nothing is evaluated — the same line
-		// Baseline.Unexamined draws for the same reason (D2).
+		// Baseline.Unexamined draws for the same reason.
 		return false, false
 	}
 	// Exact match: an eclass name is a filename in ::gentoo's eclass/ directory,
@@ -730,8 +691,8 @@ func dropWhenLiveVersion(version string) bool {
 // the fact that it is NOT a condition is the entire point of it.
 //
 // The tool knows THAT the two ebuilds differ; it does not know when the
-// difference stops being wanted. That is a decision, and D6 says a condition
-// nobody decided must never be evaluated: a machine-checkable one written here
+// difference stops being wanted. That is a decision, and a condition nobody
+// decided must never be evaluated: a machine-checkable one written here
 // would be answered by EvaluateDropWhen on the very next run and would retire
 // the divergence on the tool's own authority — "retired with no cause", arriving
 // through the candidate generator instead of through a maintainer's ebuild.
@@ -746,60 +707,28 @@ func dropWhenLiveVersion(version string) bool {
 const candidateExitPlaceholder = "TODO: state when this divergence stops applying, or delete this line"
 
 // candidateContinuation opens the second line of a candidate — the comment mark
-// and the indent that sets it under the tag, in the shape §7 proposed and D5
-// adopted: `#`, three blanks, then the key.
+// and the indent that sets it under the tag: `#`, three blanks, then the key.
 const candidateContinuation = "#   "
 
 // CandidateDeclarations proposes one `# BENTOO-DIVERGENCE:` block per structural
-// difference that no declaration covers (R3.5).
+// difference that no declaration covers.
 //
-// On today's overlay this is the whole output: the registry declares ZERO
-// divergences, so every difference in every package is undeclared and the first
-// run's real product is not a realignment but a set of declarations somebody can
-// accept. The second run is the cheap one.
+// It returns text and writes nothing: the overlay auto-commits and pushes within
+// minutes, so a declaration written here would be PUBLISHED unread. A maintainer
+// accepts or edits the candidates.
 //
-// # It returns text, and writes nothing (R3.6)
+// No model, reviewer or provider is a parameter, so none can be reached: under
+// `--no-review` there is no model description at all, and a candidate needing
+// one would be unsatisfiable on the run that most needs it. The block therefore
+// states WHAT diverges ("ours passes 85 build options, ::gentoo's passes 2"),
+// and the reason is the maintainer's to write.
 //
-// The blocks come back as strings for a human to paste. That is not tidiness: the
-// overlay auto-commits and pushes within minutes, so a declaration this function
-// wrote would be a declaration it PUBLISHED, with nobody having read it. R3.5
-// emits candidates; a maintainer accepts them. Nothing here opens a file at all,
-// in any branch.
-//
-// # No model, no reviewer, no provider
-//
-// A candidate is built from the axis and the deterministic finding ALONE, and the
-// signature is the guarantee rather than a promise: none of the three is a
-// parameter, so none can be reached. It has to be that way in both directions —
-// group 3 declares no dependency on group 5, and under `--no-review` there is no
-// model description in existence, so a candidate that needed one would be
-// unsatisfiable on the run that most needs the output. Enriching these blocks with
-// the model's words belongs where the model already is.
-//
-// The consequence is that the block states WHAT diverges, not why. "ours passes 85
-// build options, ::gentoo's passes 2" is a fact, and the reason it is acceptable
-// is the maintainer's to write — which is what "accept or EDIT" means. What the
-// candidate saves is the transcription, and it is enough: a block a maintainer has
-// to go and research before pasting is not a candidate.
-//
-// # One candidate per axis, and declared axes are silent
-//
-// Per axis rather than per package, because a package diverging on both its
-// inherit line and its option list has made two decisions, and one blanket
-// declaration covering both would retire them together the day either one
-// expires.
-//
-// An axis a declaration already covers produces nothing (R3.1): re-proposing what
-// the ebuild already says trains a maintainer to skip the section, and then the one
-// real candidate in it goes unread too. An EXPIRED declaration is the exception and
-// gets its candidate back (R3.3) — the day a reason runs out must not be the day
-// its divergence goes quiet forever.
-//
-// The axis is matched with strings.EqualFold, because the two are spelled in two
-// cases by the two documents that define them and DeclaredDivergence.Axis keeps
-// the maintainer's spelling verbatim.
-//
-// _Requirements: R3, R3.5, R3.6_
+// One candidate per axis, because two divergent axes are two decisions and one
+// blanket declaration would retire both the day either expires. A covered axis
+// produces nothing — re-proposing it trains a maintainer to skip the section —
+// unless its declaration EXPIRED, which earns a fresh candidate. The axis is
+// matched with strings.EqualFold: DeclaredDivergence.Axis keeps the
+// maintainer's spelling verbatim.
 func CandidateDeclarations(axes []AxisFinding, declared []DeclaredDivergence) []string {
 	var candidates []string
 	for _, finding := range axes {
@@ -826,7 +755,7 @@ func CandidateDeclarations(axes []AxisFinding, declared []DeclaredDivergence) []
 func candidateCovered(axis string, declared []DeclaredDivergence) bool {
 	for _, declaration := range declared {
 		if declaration.Expired {
-			// Expired is undeclared from here on (R3.3, D7): the divergence rejoins
+			// Expired is undeclared from here on: the divergence rejoins
 			// the queue, so it earns a fresh candidate.
 			continue
 		}
@@ -837,12 +766,12 @@ func candidateCovered(axis string, declared []DeclaredDivergence) bool {
 	return false
 }
 
-// candidateBlock renders one finding as the two-line declaration D5 adopted:
+// candidateBlock renders one finding as the two-line declaration:
 //
 //	# BENTOO-DIVERGENCE: INHERIT: ::gentoo inherits gstreamer-meson; ours inherits meson
 //	#   drop-when: TODO: state when this divergence stops applying, or delete this line
 //
-// The axis is upper-cased to match §7's spelling of the tag. Nothing else is
+// The axis is upper-cased to match the documented spelling of the tag. Nothing else is
 // rewritten, and what comes out parses back through ParseDivergences as exactly
 // one well-formed declaration — a candidate that would not survive being pasted is
 // not one.

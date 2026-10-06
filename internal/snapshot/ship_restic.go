@@ -20,8 +20,8 @@ type mounter interface {
 // resticShipper backs up a snapshot into a restic repository (design §4.1). It
 // never moves bytes from a live subvolume directly: a transient read-only mount
 // (via mount) exposes the snapshot, restic reads from there, and the mount is
-// always torn down afterward (R7.3). All subprocesses go through run (R7). The
-// actual `restic backup`/`forget` lives in Send (T2.2); this file is the mount
+// always torn down afterward. All subprocesses go through run. The
+// actual `restic backup`/`forget` lives in Send; this file is the mount
 // machinery only.
 type resticShipper struct {
 	name         string
@@ -42,16 +42,16 @@ func (r *resticShipper) Name() string {
 	return "restic"
 }
 
-// Send backs snap up into the restic repository (R1.1): it exposes the snapshot
+// Send backs snap up into the restic repository: it exposes the snapshot
 // through a transient read-only mount and runs `restic backup <mountPath>`, then
 // — when a retention policy is configured — prunes the repo with
-// `restic forget --prune` (R1.4). Both subprocesses go through r.run (R7.2); the
-// mount is always torn down afterward by runWithMount (R7.3).
+// `restic forget --prune`. Both subprocesses go through r.run; the
+// mount is always torn down afterward by runWithMount.
 //
-// Secrets (G4/R6): the repo URL and the password-FILE PATH are passed as argv
+// Secrets: the repo URL and the password-FILE PATH are passed as argv
 // flags (--repo / --password-file). Those are non-secret locators; the password
 // VALUE itself lives only inside the file and is never read here, never placed in
-// argv/stdin, and never logged (R6.1, R6.2).
+// argv/stdin, and never logged.
 func (r *resticShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, error) {
 	if snap.Path == "" || snap.ID == "" {
 		return ShipReport{}, fmt.Errorf("ship %q subvolume %q: %w", r.Name(), snap.Subvolume, ErrSnapshotUnidentified)
@@ -66,7 +66,7 @@ func (r *resticShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, er
 			return err
 		}
 
-		// Prune is skipped entirely when no retention is configured (R1.4): an
+		// Prune is skipped entirely when no retention is configured: an
 		// empty policy means "keep everything", so issuing forget would be wrong.
 		if keep := r.retentionFlags(); len(keep) > 0 {
 			forget := append([]string{"forget", "--prune"}, keep...)
@@ -88,8 +88,8 @@ func (r *resticShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, er
 	}, nil
 }
 
-// resticSnapshotJSON mirrors the fields consumed from `restic snapshots --json`
-// (008 R5.2): the short id, creation time, and backed-up paths of one snapshot.
+// resticSnapshotJSON mirrors the fields consumed from `restic snapshots --json`:
+// the short id, creation time, and backed-up paths of one snapshot.
 // restic marshals times as RFC 3339, which time.Time decodes natively.
 type resticSnapshotJSON struct {
 	ShortID string    `json:"short_id"`
@@ -98,8 +98,8 @@ type resticSnapshotJSON struct {
 }
 
 // ListRemote enumerates the repository's snapshots via
-// `restic --repo X --password-file Y snapshots --json` (008 R5.2). The argv is
-// the shared repo locator (repoFlags — non-secret paths/URLs, R6.1) plus the
+// `restic --repo X --password-file Y snapshots --json`. The argv is
+// the shared repo locator (repoFlags — non-secret paths/URLs) plus the
 // read-only `snapshots --json` query; the JSON array maps to Snapshot values
 // (ID = short_id, CreatedAt = time, Subvolume = the backed-up paths).
 func (r *resticShipper) ListRemote(ctx context.Context) ([]Snapshot, error) {
@@ -124,13 +124,13 @@ func (r *resticShipper) ListRemote(ctx context.Context) ([]Snapshot, error) {
 }
 
 // repoFlags returns the repository locator flags shared by backup and forget.
-// Both values are non-secret paths/URLs (R6.1): --repo is the repository URL and
+// Both values are non-secret paths/URLs: --repo is the repository URL and
 // --password-file is the PATH to the password file, not the password itself.
 func (r *resticShipper) repoFlags() []string {
 	return []string{"--repo", r.repo, "--password-file", r.passwordFile}
 }
 
-// retentionFlags maps the retention policy to restic's --keep-* flags (R1.4). Each
+// retentionFlags maps the retention policy to restic's --keep-* flags. Each
 // count > 0 contributes its interval flag; PreserveMin "latest" maps to
 // --keep-last 1 (always retain the most recent snapshot). Any other non-empty
 // PreserveMin (e.g. a btrbk-style duration like "2d") has no restic equivalent
@@ -156,9 +156,9 @@ func (r *resticShipper) retentionFlags() []string {
 }
 
 // runWithMount mounts snap read-only, invokes fn with the mount path, and
-// ALWAYS cleans up the mount afterward — including when fn returns an error
-// (R7.3). When both fail, the two errors are joined, so neither masks the
-// other and errors.Is matches both (053 R4.6).
+// ALWAYS cleans up the mount afterward — including when fn returns an error.
+// When both fail, the two errors are joined, so neither masks the
+// other and errors.Is matches both.
 func (r *resticShipper) runWithMount(ctx context.Context, snap Snapshot, fn func(path string) error) (err error) {
 	path, cleanup, err := r.mount.Mount(ctx, snap)
 	if err != nil {
@@ -177,11 +177,11 @@ func (r *resticShipper) runWithMount(ctx context.Context, snap Snapshot, fn func
 	return err
 }
 
-// umountTimeout bounds the transient mount's unmount (053 R4.1). It is a var
+// umountTimeout bounds the transient mount's unmount. It is a var
 // only so tests can shrink it; it is not configurable.
 var umountTimeout = 30 * time.Second
 
-// transientMounter is the production mounter (R7): it mounts a read-only btrfs
+// transientMounter is the production mounter: it mounts a read-only btrfs
 // snapshot at a fresh temp dir and returns a cleanup that unmounts it and removes
 // the dir. Its own unit tests script mount/umount through a mock Runner; the
 // shipper's tests use a fakeMounter.
@@ -206,7 +206,7 @@ func (m *transientMounter) Mount(ctx context.Context, snap Snapshot) (string, fu
 	// cleanup unmounts on a context that outlives a cancelled Send, bounded by
 	// umountTimeout, and removes the directory only once the unmount succeeded
 	// and only if it is empty: a directory that may still be a mounted snapshot
-	// is never walked (053 R4.1-R4.3).
+	// is never walked.
 	cleanup := func() error {
 		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), umountTimeout)
 		defer cancel()
@@ -234,7 +234,7 @@ func (m *transientMounter) Mount(ctx context.Context, snap Snapshot) (string, fu
 }
 
 // Compile-time assertions: transientMounter is a mounter; resticShipper is a
-// Shipper and contributes to `list --remote` (008 R5.2).
+// Shipper and contributes to `list --remote`.
 var (
 	_ mounter      = (*transientMounter)(nil)
 	_ Shipper      = (*resticShipper)(nil)

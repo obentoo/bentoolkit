@@ -7,7 +7,7 @@ import "context"
 //
 // Every method that runs git takes, first, the context that stops it: when ctx
 // is done the git child is stopped and the method returns an error wrapping
-// ctx.Err() (S054-R5.1, S054-R5.2).
+// ctx.Err().
 type GitExecutor interface {
 	// Status returns the current git status as a list of StatusEntry
 	Status(ctx context.Context) ([]StatusEntry, error)

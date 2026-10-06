@@ -21,21 +21,17 @@ import (
 const reviewCacheFileName = "divergence_reviews.json"
 
 // reviewCache stores one model classification per pair of compared ebuilds,
-// indexed by their content (R5.7), so a repeated run prints the same commentary
-// and issues no second request.
+// indexed by their content, so a repeated run prints the same commentary and
+// issues no second request.
 //
-// THERE IS NO EXPIRY, and that is a decision rather than an omission.
-// autoupdate.AnalysisCache expires after 24h because it caches a reading of a
-// remote PAGE, which changes under the same URL. This caches a reading of two
-// FILES and is keyed on their content: when either changes the index changes,
-// the old entry becomes unreachable, and the new pair is a genuinely new
-// question. An expiry could therefore only ever discard a still-correct answer
-// and pay for it with a second request.
+// THERE IS NO EXPIRY, on purpose. autoupdate.AnalysisCache expires because a
+// remote PAGE changes under the same URL; this is keyed on the content of two
+// FILES, so a change makes the old entry unreachable and an expiry could only
+// discard a still-correct answer and pay for a second request.
 //
 // NOTHING HERE FAILS A RUN. Every error is absorbed into a miss or a skipped
 // write, which is why no method returns one: a cache is an optimisation, and a
-// run that refused to proceed without one would have made it a dependency
-// (design.md's error table).
+// run that refused to proceed without one would have made it a dependency.
 //
 // One cache per run. "Warn once" below is scoped to this value, so the count the
 // operator sees is one line per failure per run — not one per package, which on
@@ -52,8 +48,8 @@ type reviewCache struct {
 	//
 	// Warning here is a deliberate, narrow exception to "a library returns
 	// errors, it does not log". A cache failure is not about the caller's
-	// subject: design.md's error table answers every one of them with "carry on
-	// without the cache", so by the time the run continues there is no error
+	// subject: every one of them is answered with "carry on without the
+	// cache", so by the time the run continues there is no error
 	// left to return and no result it belongs to.
 	log *slog.Logger
 
@@ -70,8 +66,8 @@ type reviewCache struct {
 	//
 	// It is a SECOND MAP rather than a second cache file, because the two are one
 	// optimisation with one place to fail: one directory to resolve, one file to
-	// replace atomically, one "warn once" for a run. D7 says the verdict reuses
-	// this cache, and this is what reusing it means.
+	// replace atomically, one "warn once" for a run. That is what reusing this
+	// cache for the verdict means.
 	//
 	// It is a second map rather than the same one because the fingerprints
 	// COLLIDE by construction: for a package at ::gentoo's own version the two
@@ -97,7 +93,7 @@ type reviewCache struct {
 // that will never be retired.
 type reviewCacheFile struct {
 	Notes map[string]ReviewNote `json:"notes"`
-	// Realign is the realignment verdicts (R4.1), added to the SAME file rather
+	// Realign is the realignment verdicts, added to the SAME file rather
 	// than to a second one — which is the growth this object shape was wrapped
 	// for. A file written before this field existed decodes with it absent, which
 	// reads as an empty verdict cache and costs one recomputation; a file written
@@ -151,8 +147,8 @@ func defaultReviewCacheDir() (string, error) {
 
 // get returns the note stored for the two ebuilds in req, if there is one.
 //
-// The lookup reads req.Ours and req.Theirs and nothing else: R5.7 keys a
-// classification on the content of the two compared files, so the same pair of
+// The lookup reads req.Ours and req.Theirs and nothing else: a classification
+// is keyed on the content of the two compared files, so the same pair of
 // files under a different atom is the same question and hits. In practice two
 // packages never carry identical ebuilds; when they do, the reading of their
 // difference is identical too.
@@ -208,7 +204,7 @@ func (c *reviewCache) persist() {
 // reads the commentary pair: the judgement is a reading of the two files, so the
 // same pair under a different atom is the same question and hits. That is what
 // makes the SECOND run cheap, and the second run being cheap is the only reason
-// the first run's 237 calls are payable (D7).
+// the first run's 237 calls are payable.
 func (c *reviewCache) getRealign(req RealignRequest) (RealignNote, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -234,7 +230,7 @@ func (c *reviewCache) putRealign(req RealignRequest, note RealignNote) {
 	c.persist()
 }
 
-// contentFingerprint is the index R5.7 specifies: sha256(ours) + ":" +
+// contentFingerprint is the cache index: sha256(ours) + ":" +
 // sha256(theirs), hex-encoded because it is used as a JSON object member name.
 //
 // The ORDER is part of the identity. ReviewNote.Origin names a SIDE, so the same
@@ -259,7 +255,7 @@ func contentFingerprint(ours, theirs []byte) string {
 // and the two failures are told apart only by whether they are worth a word. A
 // file that is not there is the ordinary first run and says nothing. A file that
 // is there and will not read, or will not parse, is a real (if harmless) failure
-// and gets the one warning design.md's error table allows.
+// and gets the one warning a cache failure is allowed.
 func (c *reviewCache) load() {
 	data, err := os.ReadFile(c.path)
 	if err != nil {

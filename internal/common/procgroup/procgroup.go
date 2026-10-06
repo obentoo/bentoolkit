@@ -1,5 +1,5 @@
 // Package procgroup stops a child process — and, on Unix, every process that
-// child started — when the context it was started under is done (story 054).
+// child started — when the context it was started under is done.
 //
 // # The defect
 //
@@ -8,8 +8,8 @@
 // pipe that cmd.Stdout is copied from, and Wait does not return while any
 // descriptor for that pipe is open. A cancelled run therefore lasted as long as
 // its longest-lived descendant: a download, a compile, or forever for a stalled
-// push. Story 046 measured it on overlay manifest: 30 s to come back from a
-// cancel delivered at 300 ms, against a grandchild that slept 30 s.
+// push. Measured on overlay manifest: 30 s to come back from a cancel
+// delivered at 300 ms, against a grandchild that slept 30 s.
 //
 // # The modes
 //
@@ -54,7 +54,7 @@ import (
 
 // GracePeriod is how long a cancelled child and its descendants get between
 // SIGTERM and SIGKILL, and how long Wait keeps draining their output after the
-// cancel (R1.2, R1.3, R1.4). A caller that bounds a child by a deadline
+// cancel. A caller that bounds a child by a deadline
 // therefore returns within that deadline plus GracePeriod.
 const GracePeriod = 5 * time.Second
 
@@ -65,7 +65,7 @@ var grace = GracePeriod
 
 // Result returns the error a caller should act on after Wait (or Run) of a
 // command configured by this package: err itself, except that
-// exec.ErrWaitDelay after a successful exit is success (R1.5).
+// exec.ErrWaitDelay after a successful exit is success.
 //
 // WaitDelay's timer also starts when Wait sees the child exit NORMALLY. A child
 // that exits 0 while a helper it left behind still holds the output pipe makes

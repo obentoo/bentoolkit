@@ -4,36 +4,22 @@ import "strings"
 
 // Finding is one thing a pass under internal/overlay established for the
 // operator, held as a VALUE instead of as a line this package composed and
-// coloured (S046-R5.1, S046-R5.2).
+// coloured.
 //
-// # Why the values exist at all
+// A fact held only as a printed line — colour picked, width applied, magnitude
+// interpolated — cannot be exported to JSON, re-laid-out for Markdown or a log,
+// counted or filtered by the command that received it, or tested without
+// capturing stdout. Returning the facts is what lets `overlay compare` move
+// into the report envelope.
 //
-// Everything in this file used to be a string built by the terminal printer
-// and handed to the caller already decided: a colour picked, a width applied, a
-// magnitude and a filename interpolated into a sentence. A fact in that shape
-// can be printed and nothing else. It cannot be exported to JSON, it cannot be
-// re-laid-out for a Markdown file or a log, it cannot be counted or filtered by
-// the command that received it, and it cannot be tested without capturing
-// stdout — which is the whole of design decision S046-D7. Returning the facts is what makes
-// `overlay compare`'s migration into the report envelope possible in story 047;
-// the migration is not possible while the facts only exist as printed lines.
+// The shape is deliberately flat, with optional fields: every producer in this
+// package answers the same two questions — WHAT is this about, and WHAT was
+// found — so a renderer walks one list rather than type-switching over a union,
+// as CompareResult already carries its four annotation passes.
 //
-// # The shape is deliberately flat, with optional fields
-//
-// Four more files under this package return findings after this one
-// (annotate_baseline.go, baseline.go, realign_reviewer.go, status.go), and they
-// all answer the same two questions — WHAT is this about, and WHAT was found —
-// over different subject matter. A flat struct whose inapplicable fields are
-// simply zero is how CompareResult already carries its four annotation passes
-// (Authorship, Review, Baseline, Axes), and it is what lets a renderer walk one
-// list rather than a union it has to type-switch over.
-//
-// Every optional field below therefore has a zero value that means NOTHING WAS
-// ESTABLISHED, never a claim. That is not a coincidence and it is not free:
-// Authorship and ReviewOrigin were both given "unproved" / "unknown" zeros for
-// exactly this reason, and a field whose zero asserted something — a
-// CompareStatus, whose zero is the real answer "up-to-date" — is deliberately
-// NOT here for that reason. See Status's absence, below.
+// Every optional field's zero value means NOTHING WAS ESTABLISHED, never a
+// claim; a field whose zero would assert something (a CompareStatus, whose zero
+// is "up-to-date") is deliberately NOT here — see Status's absence, below.
 type Finding struct {
 	// Kind names WHICH finding this is, so a renderer can group, count or
 	// suppress a class of them without pattern-matching the prose. It is the
@@ -43,30 +29,18 @@ type Finding struct {
 	// Atom is what the finding is about: "<category>/<package>", exactly as an
 	// operator types it.
 	//
-	// It is a FIELD and never a fragment of Detail, and that is the single
-	// property S046-R5.1 asks for by name. An identifier formatted into a
-	// sentence cannot be counted, cannot be filtered on, cannot key a lookup and
-	// cannot be re-emitted as a JSON field — it can only be printed, which is
-	// the defect this whole file exists to remove.
+	// It is a FIELD and never a fragment of Detail: an identifier formatted into
+	// a sentence cannot be counted, filtered on, used as a lookup key or
+	// re-emitted as a JSON field — it can only be printed.
 	//
-	// # It is empty on a RUN-scoped finding, and nowhere else
-	//
-	// Exactly one kind is about the run rather than about a package:
-	// FindingBaselineSkipped, which says no ::gentoo tree was reached at all, so
-	// nothing was compared against ::gentoo. It has no package to name because
-	// it is not about one — every package in the run is equally unexamined —
-	// and it may not borrow one either: naming a package would assert about that
-	// package something the run never established, while repeating the sentence
-	// across all 321 of them would turn one run-level outcome into 321 identical
-	// rows and bury the per-package findings underneath. MarkBaselineSkipped
-	// already refuses to record a per-package state for the same reason.
-	//
-	// That is NOT a licence for a blank atom elsewhere. renderCompareFindings'
-	// section caveat is deliberately not a Finding on exactly this argument: it
-	// is about a subset the CALLER chose, which is not a subject the report can
-	// name at all, and a consumer holding the findings re-derives it from them.
-	// A package-scoped finding with no atom is a bug, and this story's tests
-	// assert it as one.
+	// It is empty on a RUN-scoped finding, and nowhere else. Exactly one kind is
+	// about the run: FindingBaselineSkipped, which says no ::gentoo tree was
+	// reached. Naming a package would assert something the run never established
+	// about it, and repeating the sentence on all 321 packages would bury the
+	// per-package findings. That is NOT a licence for a blank atom elsewhere:
+	// renderCompareFindings' section caveat is not a Finding for the same reason
+	// (it is about a subset the CALLER chose), and a package-scoped finding with
+	// no atom is a bug the tests assert as one.
 	Atom string
 
 	// Detail is what was found, in one sentence the producer wrote and NOBODY
@@ -74,23 +48,16 @@ type Finding struct {
 	// trailing newline. The "⚠ " that opens a warning today is the renderer's,
 	// and so is the atom in front of the colon.
 	//
-	// # It overlaps the fields below, on purpose
+	// It overlaps the fields below on purpose, as report.ManifestTarget.Error
+	// does beside its Package: the fields are the FACTS, and this is the
+	// producer's own sentence over them, kept verbatim so today's rendered line
+	// survives unchanged and a later rewrite has a before to diff against.
 	//
-	// The sentence names the version, the magnitude and the proving file, all of
-	// which are also fields. The duplication is the same one
-	// report.ManifestTarget.Error carries beside report.ManifestTarget.Package:
-	// the fields are the FACTS, and this is the producer's own sentence over
-	// them, kept verbatim so that today's rendered line survives the move
-	// unchanged and story 047 has a before to diff its rewrite against.
-	//
-	// What is NOT flattened in here is the thing that must not be: a
-	// divergence's EFFECT and the provenance of that effect are Effect below,
-	// held apart from this sentence. A report that headlines "ours:
-	// files/nodejs-26.7.0-gcc17.patch" tells an operator deciding whether to
-	// keep or delete a copy nothing they can decide on; what it must headline is
-	// what the divergence DOES, together with who says so. Composed into this
-	// string it could never be re-headlined, and 047 would inherit the defect
-	// with no way to fix it.
+	// A divergence's EFFECT and its provenance are NOT flattened in here; they
+	// are Effect below. "ours: files/nodejs-26.7.0-gcc17.patch" tells an operator
+	// deciding whether to keep or delete a copy nothing; what must be headlined
+	// is what the divergence DOES and who says so, and composed into this string
+	// it could never be re-headlined.
 	Detail string
 
 	// Version is the overlay's version the finding was established at, and
@@ -115,7 +82,7 @@ type Finding struct {
 	// ::gentoo's, ours against upstream's, and are zero on every finding that has
 	// no difference to measure.
 	//
-	// They DESCRIBE and never decide (S032-R1.3): a large diff authorises nothing and
+	// They DESCRIBE and never decide: a large diff authorises nothing and
 	// a small one forbids nothing. compare_diff_counts_fence_test.go holds that
 	// mechanically over CompareResult's own DiffAdded/DiffRemoved, and these two
 	// are named differently precisely so the fence keeps watching the source of
@@ -130,26 +97,21 @@ type Finding struct {
 	// every run that asked for no baseline review, and is the same predicate
 	// (`== (Classified{})`) that keeps those runs' rendering unchanged.
 	//
-	// It is the STRUCT and not a sentence, which is S046-R5.1's own argument applied
-	// to numbers instead of to an identifier. "17 differences against the
-	// baseline, 4 of them attributed to nobody" can be printed and nothing else:
-	// it cannot be summed across a run, it cannot key a threshold a consumer
-	// sets for itself, and it reaches a JSON export as a string a reader would
-	// have to parse the digits back out of. The counts are what the reduction
-	// established; Detail is the producer's own sentence over them, exactly as
-	// Detail is a sentence over Version and Upstream above.
+	// It is the STRUCT and not a sentence, for the reason Atom is a field: "17
+	// differences against the baseline, 4 of them attributed to nobody" cannot be
+	// summed across a run, key a consumer's threshold, or reach a JSON export
+	// without its digits being parsed back out. Detail is the sentence over it.
 	//
-	// It DESCRIBES and never decides, on the same terms as Added and Removed: a
-	// large unclassified count authorises no realignment and forbids none (S034-R2.3,
-	// S032-R5.8). Reduced and Span are carried with the three counts rather than
-	// dropped because they are read TOGETHER — a third point that was refused
-	// for being too wide and one that was never offered both attribute nothing,
-	// and only the span tells them apart (S034-R2.5).
+	// It DESCRIBES and never decides, like Added and Removed: a large
+	// unclassified count authorises no realignment and forbids none. Reduced and
+	// Span are carried with the three counts because they are read TOGETHER — a
+	// third point refused for being too wide and one never offered both
+	// attribute nothing, and only the span tells them apart.
 	Classified Classified
 
 	// Authorship is what the overlay's own CONTENT proved about where a
 	// difference came from. Its zero, AuthorshipUnproved, means THE REPORT CANNOT
-	// TELL and is never "the change is upstream's" (S032-R2.3) — which is exactly the
+	// TELL and is never "the change is upstream's" — which is exactly the
 	// "nothing was established" zero every optional field here needs.
 	Authorship Authorship
 
@@ -178,11 +140,11 @@ type Finding struct {
 	// claim: Effect.Text is what the difference does, Origin is where it came
 	// from, and a model can be useful about one while saying nothing about the
 	// other. It is COMMENTARY in both cases — nothing that decides a verdict or
-	// an exit code may read it (S032-R5.8).
+	// an exit code may read it.
 	Origin ReviewOrigin
 
 	// Proposal is the `patched` declaration a model offered for a divergence it
-	// read as ours (S032-R5.4), empty otherwise.
+	// read as ours, empty otherwise.
 	//
 	// It is carried AT FULL LENGTH. The rendered line caps it at
 	// patchedReasonCap so one model's essay cannot decide the width of the
@@ -224,21 +186,21 @@ const (
 	FindingCompared FindingKind = iota
 	// FindingStaleDeclaration is a registry entry describing a divergence that no
 	// longer exists — the two ebuilds are byte-identical — so it is suppressing a
-	// removal recommendation for nothing (S025-R4.2).
+	// removal recommendation for nothing.
 	FindingStaleDeclaration
 	// FindingUndeclaredDivergence is the loud one: our ebuild is not the one
 	// ::gentoo ships and no entry says why, on a package the report is about to
-	// list as a removal candidate (S025-R4.3). Authorship and ProvedBy say whether the
+	// list as a removal candidate. Authorship and ProvedBy say whether the
 	// content settled who wrote the difference; unproved is NOT a finding that it
-	// is ::gentoo's (S032-R2.3).
+	// is ::gentoo's.
 	FindingUndeclaredDivergence
 	// FindingDeclaredDivergence is the declaration itself, stated wherever it has
-	// not already been contradicted (S025-R3.8). It is what makes a patched package
+	// not already been contradicted. It is what makes a patched package
 	// visible at all on an API-only run, where no content check can run and a
 	// patched package would otherwise print exactly like an unpatched one.
 	FindingDeclaredDivergence
 
-	// The BASELINE REVIEW's kinds (S034), added to this same type by
+	// The BASELINE REVIEW's kinds, added to this same type by
 	// annotate_baseline.go rather than to a type of its own — which is what the
 	// paragraph above promised the later producers would do, and what lets one
 	// renderer walk a list holding both a comparison's findings and a baseline
@@ -252,58 +214,56 @@ const (
 	// have to be told apart by pattern-matching the prose, which is the defect
 	// the whole vocabulary exists to remove.
 
-	// FindingBaseline names the ::gentoo ebuild one package was measured against
-	// (S034-R1.1): which version, how far it is from ours, and the path, so
+	// FindingBaseline names the ::gentoo ebuild one package was measured
+	// against: which version, how far it is from ours, and the path, so
 	// "what was this compared with" is answered by the report rather than
 	// re-derived by whoever reads it. Upstream carries the baseline's version
 	// beside Version, which is ours.
 	FindingBaseline
 	// FindingBaselineUnexamined is the per-package "we could not look": ::gentoo
 	// carries the package but the ebuild would not read, or a baseline was named
-	// and could not be opened (S034-D2). It is stated rather than left silent
+	// and could not be opened. It is stated rather than left silent
 	// because a package nobody could measure is otherwise indistinguishable from
 	// one that matched ::gentoo exactly.
 	FindingBaselineUnexamined
 	// FindingBaselineSkipped is the RUN-level version of the same absence: no
-	// ::gentoo tree was reached at all, so nothing was compared against ::gentoo
-	// (S034-R1.5). It is the one kind with no Atom — see the field's own doc for
-	// why it may not borrow one — and the one the caller derives an exit code
-	// from (S034-D9).
+	// ::gentoo tree was reached at all, so nothing was compared against ::gentoo.
+	// It is the one kind with no Atom — see the field's own doc for why it may
+	// not borrow one — and the one the caller derives an exit code from.
 	FindingBaselineSkipped
 	// FindingAxisDivergence is one structural axis on which our ebuild differs
-	// from the baseline: inherit, options, iuse or deps (S034-R2.4). The DETAIL
+	// from the baseline: inherit, options, iuse or deps. The DETAIL
 	// is what makes it actionable — "the inherit lines differ" never told anyone
 	// which eclass ::gentoo delegates the option list to — so the difference is
 	// stated and not merely counted.
 	FindingAxisDivergence
 	// FindingEbuildDeclaration is a `# BENTOO-DIVERGENCE:` tag our own ebuild
-	// carries (S034-R3.1): the maintainer's account, in the ebuild, of why a
+	// carries: the maintainer's account, in the ebuild, of why a
 	// difference is there. It is NOT FindingDeclaredDivergence, which is the
 	// registry's `patched` entry — two different files, written and edited by
 	// different acts, and one kind for both would leave a consumer unable to say
 	// which of them it had read.
 	FindingEbuildDeclaration
 	// FindingExpiredDeclaration is such a declaration whose `drop-when:`
-	// condition has been evaluated against the tree and is MET (S034-R3.3): the
+	// condition has been evaluated against the tree and is MET: the
 	// divergence it was protecting is back in front of the review. It is the
 	// loud one and is its own kind so a renderer can keep it loud — read as an
-	// ordinary declaration it would stay quiet forever, which is the failure
-	// S034-R3.3 exists to prevent.
+	// ordinary declaration it would stay quiet forever.
 	FindingExpiredDeclaration
 	// FindingClassification is what the three-way reduction made of one
-	// package's differences (S034-R2.4, S034-R2.5). Classified carries the counts and
+	// package's differences. Classified carries the counts and
 	// the reach as numbers; Detail is the sentence over them.
 	FindingClassification
 	// FindingOtherRepo is a repository other than ::gentoo that was consulted
-	// about this package (S034-R6.1). It is INFORMATIVE ONLY (S034-R6.2) — a
+	// about this package. It is INFORMATIVE ONLY — a
 	// repository outside ::gentoo has not been through the same review, and
 	// nothing proposes a realignment from one.
 	FindingOtherRepo
 	// FindingRealignVerdict is a MODEL's reading of whether a divergence still
-	// earns its place (S034-R4.1). Its Effect carries the model's own sentence
+	// earns its place. Its Effect carries the model's own sentence
 	// with EffectReviewed on it, so a renderer can say whose words these are; it
 	// is commentary and nothing that decides a verdict or an exit code may read
-	// it (S032-R5.8).
+	// it.
 	FindingRealignVerdict
 )
 
@@ -408,7 +368,7 @@ const (
 	// is, because somebody committed it on purpose.
 	EffectDeclared
 	// EffectReviewed is a MODEL's reading of the two ebuilds — a reading, never a
-	// proof, and never an input to anything this report decides (S032-R5.8). A
+	// proof, and never an input to anything this report decides. A
 	// renderer that drops the distinction invites the operator to act on a guess.
 	EffectReviewed
 )
@@ -417,8 +377,8 @@ const (
 //
 // Whitespace-only text yields the ZERO Effect rather than an EffectDeclared with
 // nothing in it: a source label over an empty sentence claims the maintainer
-// said something, and they did not. S025-R1.3 rejects such a reason at validation
-// time, but LoadPackagesConfig never calls ValidatePackageConfig, so the compare
+// said something, and they did not. Validation rejects such a reason, but
+// LoadPackagesConfig never calls ValidatePackageConfig, so the compare
 // path sees entries validation never judged — this is a production case, not
 // defensive padding.
 func declared(text string) Effect {

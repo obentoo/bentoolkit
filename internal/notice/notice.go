@@ -1,6 +1,5 @@
 // Package notice authors bentoo notices: one input becomes a GLEP 42 news item
-// in the overlay and a YAML file in the site repository, sharing one ID
-// (story 071).
+// in the overlay and a YAML file in the site repository, sharing one ID.
 //
 // The package is pure where it can be — validation and both renderers touch no
 // disk — so every file format is pinned by tests before anything is written.
@@ -18,7 +17,7 @@ import (
 	"unicode/utf8"
 )
 
-// Limits of the GLEP 42 news item and the site schema (site story 002, R2).
+// Limits of the GLEP 42 news item and the site's notice schema.
 const (
 	maxNameLen    = 20
 	maxTitleLen   = 50
@@ -136,7 +135,7 @@ func New(in Input, now time.Time) (Notice, error) {
 	}, nil
 }
 
-// ValidateSeverity checks a --severity value (R1.2).
+// ValidateSeverity checks a --severity value.
 func ValidateSeverity(s string) error {
 	if !slices.Contains(allowedSeverities, s) {
 		return fmt.Errorf("--severity %q: must be one of %s: %w",
@@ -146,7 +145,7 @@ func ValidateSeverity(s string) error {
 }
 
 // ValidateTitle checks a --title value: 1..50 code points, single line, no
-// forbidden control character (R1.4, R1.10, R1.12).
+// forbidden control character.
 func ValidateTitle(s string) error {
 	n := utf8.RuneCountInString(s)
 	if n == 0 || n > maxTitleLen {
@@ -156,7 +155,7 @@ func ValidateTitle(s string) error {
 }
 
 // ValidateSummary checks a --summary value: 1..300 code points, single line,
-// no forbidden control character (R1.9, R1.10, R1.12).
+// no forbidden control character.
 func ValidateSummary(s string) error {
 	n := utf8.RuneCountInString(s)
 	if n == 0 || n > maxSummaryLen {
@@ -178,8 +177,8 @@ func validateName(s string) error {
 }
 
 // checkText refuses C0 controls other than tab and line feed, and the
-// noncharacters U+FFFE and U+FFFF (R1.10). A single-line field refuses tab
-// and line feed too (R1.12): the news item's Title header is one line.
+// noncharacters U+FFFE and U+FFFF. A single-line field refuses tab
+// and line feed too: the news item's Title header is one line.
 func checkText(field, s string, singleLine bool) error {
 	for i, r := range s {
 		bad := r == 0xFFFE || r == 0xFFFF || (r < 0x20 && r != '\t' && r != '\n')
@@ -194,7 +193,7 @@ func checkText(field, s string, singleLine bool) error {
 }
 
 // publicationDate parses --published (YYYY-MM-DD), defaulting to today in UTC,
-// and refuses a date after today in UTC (R1.11).
+// and refuses a date after today in UTC.
 func publicationDate(s string, now time.Time) (time.Time, error) {
 	y, m, d := now.UTC().Date()
 	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)

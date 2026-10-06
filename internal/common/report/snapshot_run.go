@@ -7,60 +7,34 @@ import (
 
 // SnapshotRun is everything one `snapshot run` established: the subvolumes it
 // set out to operate on, the steps it ran over them, and the two counts that
-// summarize the lot (R1.6). It is the Payload behind KindSnapshotRun.
+// summarize the lot. It is the Payload behind KindSnapshotRun.
 //
-// # This is the payload the envelope was designed to be tested by
+// Not one field is a package, a version, an ebuild or an atom, and Run did not
+// grow to carry them: everything domain-specific — a subvolume, a pipeline
+// step, a ship target — is here, so the envelope never mentions btrfs.
 //
-// design.md D6 picked `snapshot run` for its DISTANCE from the check path, and
-// the distance is visible in the field list below: not one of these names is a
-// package, a version, an ebuild or an atom, and no field of Run had to grow to
-// carry them. Everything domain-specific about a snapshot run — a subvolume, a
-// pipeline step, a ship target — is HERE, and everything the envelope states
-// about it ("the run reached the end of its plan", "this many planned units
-// were never reached") is stated in words that never mention btrfs. That is D1
-// holding under a second vocabulary rather than being asserted about one.
+// The manifest counts REGENERATED targets and this counts SUCCEEDED steps. The
+// arity matches by coincidence; a universal tally on the envelope would make
+// one command lie in the other's vocabulary, which is why these two ints are
+// not reused from ManifestRun.
 //
-// # Two columns, and they are not the manifest's two
-//
-// A step either did what it was asked or it did not, which happens to be the
-// same arity `overlay manifest` counts with — and it is a coincidence, not a
-// shared type. The manifest counts REGENERATED targets and this counts
-// SUCCEEDED steps; the two words are not interchangeable, the units are not the
-// same size, and a universal tally on the envelope would have had to pick one
-// of the two vocabularies and make the other command lie in it. That is why the
-// tally is a payload's business (D1) and why these two ints are declared here
-// rather than reused from ManifestRun.
-//
-// # It says nothing about whether the run finished
-//
-// "The run reached the end of its plan" and "this many planned units were never
-// reached" are true of any batch, so they are the envelope's (Run.Complete,
-// Run.NotEvaluated) and are deliberately absent here — exactly as they are
-// absent from ManifestRun, and for the same reason: a payload that restated
-// them would be a second place for a finished run to be described as a partial
-// one, and the two could disagree inside a single document.
+// Whether the run finished is the envelope's (Run.Complete, Run.NotEvaluated);
+// restating it here would be a second place for a finished run to be described
+// as a partial one.
 type SnapshotRun struct {
 	// Subvolumes is every subvolume the run set out to operate on, in
 	// configuration order, whatever became of each.
 	//
-	// # The Go name is plural and the JSON key is singular, deliberately
+	// The JSON key is singular on purpose: it names the question a consumer
+	// asks — "which subvolume did this run operate on?" — while the Go name
+	// names what the field holds, a list, because a run covers every subvolume
+	// its configuration names.
 	//
-	// The key names the QUESTION R1.6 asks — "which subvolume did this run
-	// operate on?" — and `.payload.subvolume` is how a consumer asks it. The
-	// Go name names what the field HOLDS, which is a list, because a run
-	// covers every subvolume its configuration names and a single string could
-	// only be a join or a lie. snapshot.StageResult.Err with `json:"error"` is
-	// the same deliberate split in this repository: the two names have
-	// different readers, and each is written for its own.
-	//
-	// # It is the PLAN, and Steps below is what the run reached
-	//
-	// The two are not the same list and must not be derived from each other. A
-	// run whose create failed for the first subvolume skips that subvolume's
-	// remaining steps; a run cancelled between subvolumes never produces a step
-	// for the rest. In both cases this field still names every subvolume the
-	// run set out to cover, which is what lets a reader see WHICH one is
-	// missing from the rows — the envelope's NotEvaluated says only how many.
+	// It is the PLAN, and Steps below is what the run reached; neither is
+	// derived from the other. A failed create skips that subvolume's remaining
+	// steps and a cancelled run never produces steps for the rest, yet this
+	// field still names every subvolume, which is what lets a reader see WHICH
+	// one is missing — the envelope's NotEvaluated says only how many.
 	Subvolumes []string `json:"subvolume"`
 	// Steps is every pipeline step that reached an outcome, in the order the
 	// run established them.
@@ -68,7 +42,7 @@ type SnapshotRun struct {
 	// A nil slice reaches the JSON export as null and an empty one as [], and
 	// the two say different things: the first is a producer that established
 	// nothing, the second a run that ran no step at all. Neither is rewritten
-	// into the other on the way out (R4.3).
+	// into the other on the way out.
 	//
 	// The ORDER is information rather than presentation — "prune failed after
 	// create succeeded" and "create failed and prune never ran" are different
@@ -76,7 +50,7 @@ type SnapshotRun struct {
 	// list — so nothing here or downstream sorts it.
 	Steps []SnapshotStep `json:"steps"`
 	// Ok is how many steps did what they were asked, and Failed is how many did
-	// not (R1.6).
+	// not.
 	//
 	// They are FIELDS although the rows below could be walked to re-derive
 	// them, for the reason ManifestRun.Ok gives at length: this document is
@@ -124,18 +98,10 @@ type SnapshotStep struct {
 	// address carries a host, a user and a remote path, and this value travels
 	// into a file an operator may attach to a bug report.
 	//
-	// THE SCOPE OF THAT DECISION IS THIS FIELD AND THE THREE BESIDE IT. This
-	// comment used to close by generalising it to "every other field here", so
-	// that nothing in the type "may carry a credential or a host identifier" —
-	// and Error, twelve lines below, is producer stderr taken verbatim, where a
-	// failed btrbk ssh send prints `user@host:/path`. The generalisation was
-	// therefore false about the one field most likely to carry an address, and
-	// a false safety claim is worse than none: it is the sentence a reader
-	// consults before deciding an export is safe to attach.
-	//
-	// Subvolume, Step and Target are each a name this package controls the shape
-	// of, and each honours it. Error is not, and says so itself (S046-R2.3
-	// applied to the type's own documentation). Narrowed at sub-task 15.7.
+	// That rule covers Subvolume, Step and Target, each a name this package
+	// controls the shape of. It does NOT cover Error, which is producer stderr
+	// taken verbatim and says so itself; claiming the whole type address-free
+	// would be a false safety claim about the field most likely to carry one.
 	Target string `json:"target"`
 	// Success reports that the step did what it was asked.
 	//
@@ -147,24 +113,16 @@ type SnapshotStep struct {
 	// Error is why this step failed, in the producer's own words, and empty for
 	// a step that did not fail.
 	//
-	// It carries the failing command's own stderr, joined on by the runner,
-	// which is the only text that says what actually went wrong. It is taken
-	// verbatim and never reworded: a rewritten diagnostic is one the operator
-	// cannot search for.
-	//
-	// VERBATIM CUTS BOTH WAYS, and this field is the exception to Target's
-	// no-address rule rather than a case of it. Whatever the failing command
-	// wrote is what lands here — and a failed `btrbk ssh` send writes
-	// `user@host:/path`, so a remote address CAN reach an export through this
-	// field. Nothing scrubs it, deliberately: a diagnostic edited to be safe is
-	// a diagnostic that no longer matches what the operator can search for or
+	// It carries the failing command's own stderr, taken verbatim and never
+	// reworded: a rewritten diagnostic is one the operator cannot search for or
 	// reproduce.
 	//
-	// The consequence is stated rather than hidden, because the alternative is a
-	// reader who trusts the type's own comment and attaches the export anyway:
-	// an export that includes a FAILED ship step should be read before it is
-	// shared. Redaction, if it is ever wanted, belongs at the producer that
-	// knows which text is an address — not here, where it is an opaque string.
+	// VERBATIM CUTS BOTH WAYS: this field is the exception to Target's
+	// no-address rule. A failed `btrbk ssh` send writes `user@host:/path`, so a
+	// remote address CAN reach an export through here, and nothing scrubs it.
+	// An export that includes a FAILED ship step should be read before it is
+	// shared; redaction, if ever wanted, belongs at the producer that knows
+	// which text is an address.
 	//
 	// It carries no subvolume and no step name: both sit beside it in this same
 	// row, and a copy of either in here would print twice on every failure.
@@ -176,23 +134,18 @@ type SnapshotStep struct {
 //
 // # One block, because the run establishes one thing
 //
-// The check produces four sections because it answers four questions. A
-// snapshot run answers one — for each step, did it do what it was asked — and a
-// second heading would sit above content the first already carries. A report
-// padded with empty blocks trains a reader to skim past the one that matters.
+// A snapshot run answers one question — for each step, did it do what it was
+// asked — and a second heading would sit above content the first already
+// carries. A report padded with empty blocks trains a reader to skim past the
+// one that matters.
 //
 // # ShowAll decides what is LISTED and never what is counted
 //
-// A step that succeeded has nothing to report about, which is precisely the
-// class of unit SectionOptions.ShowAll governs: listed when the flag asks,
-// counted otherwise, with the omission stated in words (S046-R2.3, S044-R8.3). The count
-// comes from the run's own Ok, never from the rows, so the number above the
-// table cannot move when the listing does (R8.3).
-//
-// A FAILED step is always listed, whatever the flag says. It is the reason an
-// operator is reading a snapshot report at all — a run that worked needs no
-// reader — and a report that hid failures behind a flag would be answering a
-// question nobody asked.
+// A successful step is listed when SectionOptions.ShowAll asks and counted
+// otherwise, with the omission stated in words. The count comes from the run's
+// own Ok, never from the rows, so the number cannot move when the listing does.
+// A FAILED step is always listed: it is the reason an operator reads a snapshot
+// report at all.
 func (r SnapshotRun) Sections(opts SectionOptions) []Section {
 	return []Section{snapshotSection(r, opts.ShowAll)}
 }
@@ -200,29 +153,21 @@ func (r SnapshotRun) Sections(opts SectionOptions) []Section {
 // snapshotSection is the block: the subvolumes the run covered, the counts, the
 // rows they were taken over, and the sentences saying what was left out and why.
 func snapshotSection(r SnapshotRun, listEvery bool) Section {
-	// R1.6 has two halves and this is the first of them. It is stated BEFORE
-	// anything else and on every path out of this function, including the two
-	// that return no rows at all, because "which subvolume did this run operate
-	// on" must not be a question whose answer depends on --all: a run in which
-	// every step succeeded lists no row by default, and the subvolume would
-	// otherwise vanish from the report of the run that went perfectly.
+	// Which subvolume the run operated on is stated BEFORE anything else and on
+	// every path out of this function, including the two that return no rows,
+	// because the answer must not depend on --all: a run in which every step
+	// succeeded lists no row by default, and the subvolume would otherwise
+	// vanish from the report of the run that went perfectly.
 	s := Section{Title: "Snapshot Run", Lead: []string{snapshotScope(r)}}
 
-	// A run with no step still produces a report, and the report still says so
-	// in a sentence rather than as an empty table under a heading — a report is
-	// what an operator gets INSTEAD of a crash (R1.4), so reading one must not
-	// be where the crash arrives.
+	// A run with no step still produces a report, and says so in a sentence
+	// rather than as an empty table — a report is what an operator gets INSTEAD
+	// of a crash, so reading one must not be where the crash arrives.
 	//
-	// # The guard is on the COUNTS, not on the rows
-	//
-	// Ok and Failed are separate fields from Steps and nothing in the type makes
-	// the three agree; the adapter sets all of them from one traversal, which is
-	// why production never reaches the gap. But the sentence below is a CLAIM
-	// ABOUT THE COUNTS, and asserting it from the length of a different field is
-	// how a report starts lying about the one thing R1.6 asks it to state. A
-	// payload carrying "2 succeeded, 1 failed" and no rows would have announced
-	// that nothing was counted — false, and false in the direction that matters,
-	// because the reader is told a run did nothing when it did.
+	// The guard is on the COUNTS, not on the rows. Nothing in the type makes Ok,
+	// Failed and Steps agree, and the sentence below is a claim about the
+	// counts: a payload carrying "2 succeeded, 1 failed" and no rows must not
+	// announce that nothing was counted.
 	if r.Ok+r.Failed == 0 && len(r.Steps) == 0 {
 		s.Lead = append(s.Lead, "No step has an outcome to report, so nothing is counted as succeeded or as failed.")
 		return s
@@ -232,8 +177,8 @@ func snapshotSection(r SnapshotRun, listEvery bool) Section {
 
 	// Counts without the rows they were taken over. The counts are still
 	// stated, because they are what the run established; what is missing is the
-	// per-step detail, and R2.3 says a report states what it omitted rather
-	// than omitting it silently.
+	// per-step detail, and a report states what it omitted rather than
+	// omitting it silently.
 	if len(r.Steps) == 0 {
 		s.Notes = []string{"No per-step row reached this report, so the counts above are stated without the list they were taken over."}
 		return s
@@ -242,7 +187,7 @@ func snapshotSection(r SnapshotRun, listEvery bool) Section {
 	s.Rows.Headers = []string{"SUBVOLUME", "STEP", "STATE"}
 	for _, step := range r.Steps {
 		if step.Success && !listEvery {
-			// Counted in the note below, not listed here (S044-R8.3).
+			// Counted in the note below, not listed here.
 			continue
 		}
 		s.Rows.Rows = append(s.Rows.Rows, Row{
@@ -256,7 +201,7 @@ func snapshotSection(r SnapshotRun, listEvery bool) Section {
 	return s
 }
 
-// snapshotScope is R1.6's first half: which subvolume the run operated on.
+// snapshotScope says which subvolume the run operated on.
 //
 // # It counts as well as naming, and the count is len()
 //
@@ -282,7 +227,7 @@ func snapshotScope(r SnapshotRun) string {
 		len(r.Subvolumes), strings.Join(r.Subvolumes, ", "))
 }
 
-// snapshotTally is R1.6's second half in one sentence: how the steps came out.
+// snapshotTally says in one sentence how the steps came out.
 //
 // The total is Ok+Failed rather than len(Steps) for the reason the guard above
 // gives — the counts are what the run established, and a total taken over a
@@ -344,7 +289,7 @@ func snapshotDetail(step SnapshotStep) string {
 	return foldToOneLine(step.Error)
 }
 
-// snapshotNotes is what the table left out, and why (S046-R2.3, S044-R8.3).
+// snapshotNotes is what the table left out, and why.
 func snapshotNotes(r SnapshotRun, listEvery bool) []string {
 	var notes []string
 
@@ -355,8 +300,8 @@ func snapshotNotes(r SnapshotRun, listEvery bool) []string {
 		if listEvery {
 			// The count is stated even when every row is present, for the
 			// reason the check's own up-to-date note is: a count never depends
-			// on which rows were listed (R8.3), so the sentence keeps its shape
-			// in both directions and only its tail changes.
+			// on which rows were listed, so the sentence keeps its shape in
+			// both directions and only its tail changes.
 			notes = append(notes, fmt.Sprintf("%d step(s) succeeded and are listed above.", r.Ok))
 		} else {
 			notes = append(notes, fmt.Sprintf("%d step(s) succeeded and are not listed; pass --all to list them.", r.Ok))
@@ -364,8 +309,8 @@ func snapshotNotes(r SnapshotRun, listEvery bool) []string {
 	}
 
 	// The other omission, stated once for the run because it is one decision
-	// rather than a property of any row (R2.3). The producer times every stage
-	// and persists the timings with the run result, which is where `snapshot
+	// rather than a property of any row. The producer times every stage and
+	// persists the timings with the run result, which is where `snapshot
 	// status` reads them from; carrying them here would put a value in the
 	// report that differs between two runs of the same shape, and this report
 	// is read to find out WHAT happened.

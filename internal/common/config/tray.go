@@ -8,19 +8,19 @@ import (
 
 const (
 	// DefaultTrayInterval is how often bentoo-tray checks the feed when
-	// tray.interval is absent (S072-R11.2).
+	// tray.interval is absent.
 	DefaultTrayInterval = 6 * time.Hour
-	// MinTrayInterval is the floor tray.interval is clamped to (S072-R11.3).
+	// MinTrayInterval is the floor tray.interval is clamped to.
 	MinTrayInterval = time.Hour
 	// DefaultTrayFeedURL is the notices feed bentoo-tray reads by default.
 	DefaultTrayFeedURL = "https://obentoo.org/notices.json"
 )
 
 // mutableNoticeTypes are the notice types tray.mute may silence. "security" is
-// deliberately absent: a security notice can never be muted (S072-R6.13).
+// deliberately absent: a security notice can never be muted.
 var mutableNoticeTypes = []string{"release", "news", "announcement"}
 
-// TrayConfig is the `tray:` block read by bentoo-tray (S072-R11.1). The getters
+// TrayConfig is the `tray:` block read by bentoo-tray. The getters
 // apply the defaults and return their warnings as strings: this package does
 // not log, the caller does.
 type TrayConfig struct {

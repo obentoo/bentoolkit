@@ -9,7 +9,7 @@ import (
 
 // allowedRepoURLSchemes is the set of URL schemes accepted for a git remote.
 // Anything outside this set (e.g. "file", "javascript", "data") is rejected to
-// prevent local-file disclosure and pseudo-scheme injection. (R2.1)
+// prevent local-file disclosure and pseudo-scheme injection.
 var allowedRepoURLSchemes = map[string]bool{
 	"http":  true,
 	"https": true,
@@ -20,7 +20,7 @@ var allowedRepoURLSchemes = map[string]bool{
 // forbiddenBranchRunes is the set of single characters that must never appear
 // in a branch name. These are git ref metacharacters and shell-dangerous
 // characters; rejecting them keeps us strictly no more permissive than
-// "git check-ref-format". (R2.2, AD-9)
+// "git check-ref-format".
 const forbiddenBranchRunes = "~^:?*[\\"
 
 // rtlOverride is the Unicode "Right-to-Left Override" code point (U+202E).
@@ -45,7 +45,7 @@ const rtlOverride = '\u202e'
 // treated as a valid SSH remote: it has no scheme and no shell metacharacters
 // of concern here, and the design explicitly allows the "ssh" transport.
 //
-// On failure it returns an error wrapping ErrInvalidRepoURL. (R2.1)
+// On failure it returns an error wrapping ErrInvalidRepoURL.
 func ValidateRepoURL(raw string) error {
 	if strings.TrimSpace(raw) == "" {
 		return fmt.Errorf("%w: empty URL", ErrInvalidRepoURL)
@@ -122,7 +122,7 @@ func isSCPLikeSSHURL(raw string) bool {
 //
 // On failure it returns an error wrapping ErrInvalidBranch. The rule set is
 // intentionally never more permissive than git: any branch this function
-// accepts also passes "git check-ref-format --branch". (R2.2, AD-9)
+// accepts also passes "git check-ref-format --branch".
 func ValidateBranch(b string) error {
 	if b == "" {
 		return fmt.Errorf("%w: branch name is empty", ErrInvalidBranch)

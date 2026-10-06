@@ -12,7 +12,7 @@ import (
 )
 
 // Group configures the unstarted cmd so that, when its context is done, the
-// child and every process it started are stopped (R1.1, R1.2, R1.3, R1.6):
+// child and every process it started are stopped:
 //
 //  1. at Start, the child becomes the leader of a new process group;
 //  2. cmd.Cancel sends SIGTERM to the whole group at once;
@@ -20,14 +20,10 @@ import (
 //  4. cmd.WaitDelay is GracePeriod, so Wait returns by then even if a process
 //     that left the group (setsid) still holds the output pipe.
 //
-// Step 3 is a timer armed by Cancel, not left to WaitDelay, because when
-// WaitDelay expires os/exec calls Process.Kill, which reaches the group LEADER
-// only: a descendant that ignored SIGTERM would outlive it, orphaned and still
-// running — the very defect this package fixes.
-//
-// A group that is already gone when the context is done is not an error:
-// Cancel returns os.ErrProcessDone, which os/exec reads as "it finished on its
-// own". Any other refusal is returned wrapped, naming the group.
+// Step 3 is a timer armed by Cancel, not left to WaitDelay, because WaitDelay's
+// Process.Kill reaches the group LEADER only, leaving a SIGTERM-ignoring
+// descendant orphaned and running. A group already gone is not an error
+// (os.ErrProcessDone); any other refusal is returned wrapped, naming the group.
 //
 // Only Setpgid (and a zero Pgid, so the child LEADS the group and -pid names
 // it) is written into cmd.SysProcAttr; every other field the caller set there
@@ -50,7 +46,7 @@ func Group(cmd *exec.Cmd) {
 
 // signalGroup sends sig, called name in the error, to every process in process
 // group pgid. A group that no longer exists is os.ErrProcessDone, the answer
-// os/exec reads as "it finished on its own" (R1.6); any other refusal is
+// os/exec reads as "it finished on its own"; any other refusal is
 // returned wrapped, naming the group.
 func signalGroup(pgid int, sig syscall.Signal, name string) error {
 	err := syscall.Kill(-pgid, sig)
@@ -84,8 +80,8 @@ func killGroup(pgid int) {
 
 // Foreground configures the unstarted cmd for a child that must stay in the
 // caller's process group — the terminal's foreground group — because it may
-// prompt there: sudo's password, git's ssh passphrase or https credentials
-// (R1.4). A child moved to a background group would be stopped by SIGTTIN at
+// prompt there: sudo's password, git's ssh passphrase or https credentials.
+// A child moved to a background group would be stopped by SIGTTIN at
 // its first read, and the operator could no longer signal it from the terminal.
 //
 // When the context is done, cmd.Cancel sends SIGTERM to the direct child only;
@@ -96,7 +92,7 @@ func killGroup(pgid int) {
 //
 // A child that has already exited is not an error (os.ErrProcessDone). Any
 // other refusal — EPERM from a child now running as another user — is returned
-// wrapped, naming the pid (R3.7).
+// wrapped, naming the pid.
 func Foreground(cmd *exec.Cmd) {
 	cmd.Cancel = func() error {
 		// Process is non-nil: os/exec calls Cancel only after a successful Start.
@@ -113,72 +109,23 @@ func Foreground(cmd *exec.Cmd) {
 
 // KillGroupNow makes a cancelled run's child die together with everything it
 // spawned, so cmd.Wait comes back when the work stops rather than when the last
-// orphan happens to finish (S046-R1.3, S046-R1.4). It is how overlay manifest
-// has stopped pkgdev since story 046, moved here unchanged (R8.1): until story
-// 054 it was stopWithDescendants, in package overlay.
+// orphan finishes. It is how overlay manifest stops pkgdev; new spawners use
+// Group. The child leads a new process group, and on cancel cmd.Cancel sends
+// SIGKILL to the whole group at once — no SIGTERM, no grace, no WaitDelay. A
+// group already gone is os.ErrProcessDone; any other refusal is returned
+// unwrapped, as kill(2) gave it, as overlay manifest always reported.
 //
-// Configure an unstarted cmd with it. At Start the child becomes the leader of
-// a new process group; when the context is done, cmd.Cancel sends SIGKILL to
-// the whole group at once. There is no SIGTERM, no grace and no WaitDelay. A
-// group that is already gone is os.ErrProcessDone. Any other refusal is
-// returned exactly as kill(2) gave it, unwrapped, because that is the error
-// overlay manifest has always reported; os/exec hands it to Wait's caller only
-// when the child then exits 0.
+// Why the group and not WaitDelay: pkgdev's fetchers inherit the stdout pipe,
+// so a cancelled run lasted as long as a grandchild (30.002s against a 30s
+// sleeper, cancel at 300ms) and could not render its partial report. WaitDelay
+// returns by ABANDONING those fetchers onto a distdir about to be deleted, and
+// its timer also fires after a NORMAL exit, turning a lingering helper into a
+// reported failure. Killing the group ends the work: 301ms.
 //
-// New spawners use Group. This mode exists so that an interrupted pkgdev is
-// asked to stop exactly as it always has been.
-//
-// # The problem it solves, measured rather than assumed
-//
-// exec.CommandContext kills the DIRECT child on cancellation and nothing below
-// it. pkgdev is a script: the process we spawn forks fetchers and helpers, and
-// each of them inherits the pipe that cmd.Stdout is being copied from. Wait does
-// not return while any descriptor for that pipe is open — the standard library
-// says so in as many words ("If WaitDelay is zero, I/O pipes will be read until
-// EOF, which might not occur until orphaned subprocesses of the command have
-// also closed their descriptors") — so a cancelled target held the whole run
-// open for the LIFETIME OF A GRANDCHILD. With a child that sleeps 30 seconds,
-// Wait measured 30.002s after a cancel delivered at 300ms.
-//
-// That is not a slow interrupt, it is a broken one: the report is assembled
-// before it is rendered (S046-R1.3), so a run that cannot return cannot report,
-// and S046-R1.4's "render the report established up to that point" never
-// happens.
-//
-// # Why the whole GROUP is killed, and not just bounded with WaitDelay
-//
-// cmd.WaitDelay is this repository's usual answer (internal/snapshot/runner.go,
-// the three autoupdate fixers) and it does return promptly — but it returns by
-// ABANDONING the descendant: the same measurement showed the grandchild still
-// running afterwards. For a manifest run those descendants are network fetchers
-// holding a distdir this process is about to delete, so "prompt" would be bought
-// with orphaned downloads writing into a directory that no longer exists.
-//
-// WaitDelay also has a second edge that does not fit here: its timer starts when
-// the child EXITS as well as when the context is done, so a lingering grandchild
-// after a perfectly successful pkgdev would turn a regenerated Manifest into a
-// reported failure. Story 046 exists to stop reports claiming things that did
-// not happen.
-//
-// Putting the child in its own process group and signalling the NEGATED pid
-// signals every process in it. Nothing is left holding the pipe, so Wait returns
-// because the work really ended. The same measurement: 301ms.
-//
-// # What it costs
-//
-//  1. The child is no longer in the terminal's foreground process group, so a
-//     ctrl+c typed at a terminal no longer reaches pkgdev directly. It reaches
-//     it through us — `overlay manifest` wires signal.NotifyContext for exactly
-//     this and cancels the run context, which is what calls the function below.
-//     The delivery path becomes one we control instead of two racing ones.
-//  2. A descendant that calls setsid() leaves the group and is beyond this
-//     signal. Such a process would already hang a run that was never cancelled,
-//     so nothing here is made worse; it is simply not made better either.
-//  3. SIGKILL, not SIGTERM, because that is the signal exec.CommandContext
-//     already sends its direct child (Process.Kill). Sending something gentler
-//     to the group would change what an interrupted pkgdev is asked to do: a
-//     decision story 046 had no reason to take, and one R8.1 keeps untaken.
-//     Group is the mode that asks with SIGTERM first.
+// The cost: ctrl+c no longer reaches pkgdev directly but through
+// signal.NotifyContext in `overlay manifest`; a setsid() descendant escapes
+// (it would hang an uncancelled run anyway); and SIGKILL stays because it is
+// what exec.CommandContext already sent. Group is the mode that asks first.
 func KillGroupNow(cmd *exec.Cmd) {
 	leadNewGroup(cmd)
 

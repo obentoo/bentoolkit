@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Group is the fallback for platforms without process groups (R1.7). There is
+// Group is the fallback for platforms without process groups. There is
 // no group to signal and no portable way to reach a grandchild, so it only sets
 // cmd.WaitDelay to GracePeriod: once the context is done, os/exec stops the
 // direct child through cmd.Cancel (exec.CommandContext's Process.Kill) and,
@@ -17,7 +17,7 @@ func Group(cmd *exec.Cmd) {
 	cmd.WaitDelay = grace
 }
 
-// Foreground is the fallback for platforms without process groups (R1.7): as
+// Foreground is the fallback for platforms without process groups: as
 // Group does here, it only sets cmd.WaitDelay to GracePeriod.
 func Foreground(cmd *exec.Cmd) {
 	cmd.WaitDelay = grace
@@ -30,15 +30,15 @@ func Foreground(cmd *exec.Cmd) {
 // It is generous on purpose. WaitDelay's timer also starts when the child exits
 // NORMALLY, so a short delay would turn a successful pkgdev whose helper lingers
 // a moment into a target reported as failed — a failure invented by the
-// reporting path, which is the class of defect story 046 exists to remove. Ten
+// reporting path, exactly the kind of false report this package prevents. Ten
 // seconds is long enough that only a genuinely stuck descendant reaches it, and
 // short enough that an interrupt still returns while the operator is watching.
 const manifestWaitDelay = 10 * time.Second
 
-// KillGroupNow is the non-Unix substitute for overlay manifest's group kill
-// (R8.1), and it is deliberately weaker than the Unix one — see the Unix
+// KillGroupNow is the non-Unix substitute for overlay manifest's group kill,
+// and it is deliberately weaker than the Unix one — see the Unix
 // KillGroupNow for what is being worked around and why the group kill is the
-// answer there. Until story 054 it was stopWithDescendants, in package overlay.
+// answer there.
 //
 // syscall.SysProcAttr has no Setpgid field outside Unix, so there is no group to
 // signal and no portable way to reach a grandchild at all. WaitDelay is what

@@ -1,6 +1,6 @@
 // Package messages is bentoo-tray's message catalog: every menu label,
 // notification text and summary format the tray shows, in English, in one
-// place (S072-R9.6). It is a leaf package: it imports nothing of this module,
+// place. It is a leaf package: it imports nothing of this module,
 // so the desktop wrappers, the tray policy and the command can all use it.
 package messages
 
@@ -15,35 +15,33 @@ type Key int
 // Catalog keys. A key whose entry is a format says so, with its verbs.
 const (
 	// TooltipOne is the tray tooltip for exactly one unread notice; %d is the
-	// count (R8.1).
+	// count.
 	TooltipOne Key = iota
 	// TooltipMany is the tray tooltip for any other unread count, zero
-	// included; %d is the count (R8.1).
+	// included; %d is the count.
 	TooltipMany
 	// MenuMore counts the unread notices the menu does not list; %d is the
-	// count (R9.1).
+	// count.
 	MenuMore
-	// MenuCheckNow is the menu entry that checks the feed at once (R9.2).
+	// MenuCheckNow is the menu entry that checks the feed at once.
 	MenuCheckNow
-	// MenuMarkAllRead is the menu entry that marks every notice read (R9.2).
+	// MenuMarkAllRead is the menu entry that marks every notice read.
 	MenuMarkAllRead
-	// MenuPauseHour is the menu entry that pauses notifications for an hour
-	// (R9.3).
+	// MenuPauseHour is the menu entry that pauses notifications for an hour.
 	MenuPauseHour
 	// MenuPauseTomorrow is the menu entry that pauses notifications until
-	// the next day (R9.3).
+	// the next day.
 	MenuPauseTomorrow
-	// MenuResume is the menu entry that ends a pause (R9.3).
+	// MenuResume is the menu entry that ends a pause.
 	MenuResume
-	// MenuQuit is the menu entry that exits the tray (R9.5).
+	// MenuQuit is the menu entry that exits the tray.
 	MenuQuit
-	// ActionOpen is the notification action that opens a notice (R6.5).
+	// ActionOpen is the notification action that opens a notice.
 	ActionOpen
-	// ActionMarkRead is the notification action that marks a notice read
-	// (R6.5).
+	// ActionMarkRead is the notification action that marks a notice read.
 	ActionMarkRead
 	// SummaryNewNotices is the burst summary notification; %d is the count,
-	// always more than three (R6.8).
+	// always more than three.
 	SummaryNewNotices
 )
 

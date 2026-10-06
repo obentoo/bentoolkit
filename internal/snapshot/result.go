@@ -9,7 +9,7 @@ import (
 )
 
 // Stage names recorded in a RunResult, in pipeline order. StageGFS is the
-// on-demand remote GFS sweep of `snapshot prune` (008 R3.1) — distinct from
+// on-demand remote GFS sweep of `snapshot prune` — distinct from
 // StagePrune (the engine-local prune) so a RunResult tells the two apart.
 const (
 	StageCreate = "create"
@@ -65,7 +65,7 @@ func (r *RunResult) Failed() bool {
 	return false
 }
 
-// StateDir is the directory holding persisted snapshot state (A1). It is a var so
+// StateDir is the directory holding persisted snapshot state. It is a var so
 // tests can redirect it away from the system path.
 var StateDir = func() string { return "/var/lib/bentoo/snapshot" }
 
@@ -109,7 +109,7 @@ func LoadLastRun() (*RunResult, error) {
 // atomicWrite writes data to path via a temp file in the same directory followed
 // by a rename, so a reader never observes a partial file. The parent directory is
 // created (0o750) if missing. Shared by RunResult persistence and systemd unit
-// generation (NFR-Security: atomic temp + rename).
+// generation.
 func atomicWrite(path string, data []byte, perm os.FileMode) error {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o750); err != nil {

@@ -1,5 +1,5 @@
 // Package tray is bentoo-tray's event loop and its notification and icon
-// policy (S072-R2, R6, R8, R9).
+// policy.
 package tray
 
 import (
@@ -16,7 +16,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/tray/state"
 )
 
-// Notification action keys reported back in ActionInvoked (R6.5).
+// Notification action keys reported back in ActionInvoked.
 const (
 	actionDefault  = "default"
 	actionMarkRead = "mark-read"
@@ -37,16 +37,16 @@ const (
 )
 
 // burstLimit is the most non-critical notices sent one by one in a check;
-// more become a single summary (R6.8).
+// more become a single summary.
 const burstLimit = 3
 
-// menuEntries is how many unread notices the menu lists (R9.1).
+// menuEntries is how many unread notices the menu lists.
 const menuEntries = 10
 
 // acceptFeed reports whether a fetched feed may replace the current notices.
-// A serial lower than the last accepted one is a rollback (R2.4); an equal
+// A serial lower than the last accepted one is a rollback; an equal
 // serial is the same build fetched again and is accepted. A feed whose
-// expiry has passed is stale (R2.5). reason names the offending values for
+// expiry has passed is stale. reason names the offending values for
 // the WARN the caller logs.
 func acceptFeed(st state.State, f notices.Feed, now time.Time) (ok bool, reason string) {
 	if f.Serial < st.Serial {
@@ -63,17 +63,17 @@ func acceptFeed(st state.State, f notices.Feed, now time.Time) (ok bool, reason 
 //
 // Each accepted notice's display fields are upserted, keeping its Read and
 // Notified flags. On a first run every accepted notice that is not security is
-// marked read (R6.9). The messages are then built from the state, not from
+// marked read. The messages are then built from the state, not from
 // accepted alone: every record neither Read nor Notified, whose type is not
-// muted (R6.4) and that the pause does not hold (R6.10), is pending, so a
-// pause end, a 304 or a restart still sends what was held or failed (R6.11,
-// R6.12). Critical notices are sent one by one; more than burstLimit others
+// muted and that the pause does not hold, is pending, so a pause end, a 304
+// or a restart still sends what was held or failed. Critical notices are sent
+// one by one; more than burstLimit others
 // become one summary with an empty NoticeID whose Covers lists, sorted, the
-// IDs it stands for (R6.8).
+// IDs it stands for.
 //
 // It never sets Notified: the caller does after a successful Send, for the
 // message's NoticeID or, for a summary, for every ID in Covers. A failed Send
-// leaves them pending, which is what retries it (R6.12).
+// leaves them pending, which is what retries it.
 func decideNotifications(st *state.State, accepted []notices.Notice, firstRun, paused bool, cfg config.TrayConfig) []notify.Message {
 	if st.Notices == nil {
 		st.Notices = map[string]state.Record{}
@@ -88,7 +88,7 @@ func decideNotifications(st *state.State, accepted []notices.Notice, firstRun, p
 		st.Notices[n.ID] = r
 	}
 
-	// GetMute already drops "security" (R6.13); its warnings are run's to log.
+	// GetMute already drops "security"; its warnings are run's to log.
 	muted, _ := cfg.GetMute()
 	var critical, other []string
 	for _, id := range sortedIDs(st.Notices, false) {
@@ -128,7 +128,7 @@ func decideNotifications(st *state.State, accepted []notices.Notice, firstRun, p
 }
 
 // noticeMessage is the notification of one notice: its title as summary and
-// its summary as body (R6.1), with Open and Mark as read (R6.5). Escaping is
+// its summary as body, with Open and Mark as read. Escaping is
 // notify.Send's job.
 func noticeMessage(id string, r state.Record, downgrade bool) notify.Message {
 	return notify.Message{
@@ -143,8 +143,8 @@ func noticeMessage(id string, r state.Record, downgrade bool) notify.Message {
 	}
 }
 
-// urgencyFor maps a severity to an urgency (R6.2); downgrade sends critical
-// at normal urgency (R6.3).
+// urgencyFor maps a severity to an urgency; downgrade sends critical
+// at normal urgency.
 func urgencyFor(severity string, downgrade bool) byte {
 	switch severity {
 	case severityInfo:
@@ -160,8 +160,8 @@ func urgencyFor(severity string, downgrade bool) byte {
 }
 
 // viewFor is what the tray shows for st: the unread count, whether an unread
-// notice is critical (R8.4, R8.5, R8.7), the menuEntries newest unread
-// notices with how many more exist (R9.1), and whether a pause is set.
+// notice is critical, the menuEntries newest unread
+// notices with how many more exist, and whether a pause is set.
 func viewFor(st state.State) sni.View {
 	v := sni.View{Paused: !st.PauseUntil.IsZero()}
 	for _, id := range sortedIDs(st.Notices, true) {

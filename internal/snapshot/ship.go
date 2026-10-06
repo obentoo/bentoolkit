@@ -14,7 +14,7 @@ type ShipReport struct {
 }
 
 // Shipper replicates a snapshot to a remote target. Drivers are selected from
-// ship.type via newShipper (R3.1).
+// ship.type via newShipper.
 type Shipper interface {
 	Name() string
 	Send(ctx context.Context, snap Snapshot) (ShipReport, error)

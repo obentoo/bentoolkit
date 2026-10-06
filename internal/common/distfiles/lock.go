@@ -23,40 +23,26 @@ import (
 // else is downloading this right now" is a transient state that resolves by
 // itself and whose right answer is to fail this package and let the next run
 // have it; "this directory cannot be written to" is an environment fault that
-// will still be there next time. D5's classifier must be able to tell them
-// apart without reading either message.
+// will still be there next time. The failure classifier must be able to tell
+// them apart without reading either message.
 var ErrDistfileLocked = errors.New("distfile is locked by another writer")
 
 // The lock file sits IN the distdir, next to the distfile it guards, and is
 // named "." + <distfile> + ".bentoo_lockfile".
 //
-// # Why in the distdir rather than beside it
+// The distdir is the only directory every writer is guaranteed to share: two
+// runs may differ in TMPDIR, home, mount namespace and user and still share one
+// DISTDIR (the `portageq distdir` default), so a lock kept anywhere else would
+// let exactly those runs miss each other. It is also the directory Probe has
+// already proved writable. Creating a file there changes no mode and no owner;
+// the cost is a name in a directory shared with the host package manager, so
+// the name is a dotfile, says whose it is, and is removed on release.
 //
-// The distdir is the only directory that all the writers this lock exists to
-// separate are guaranteed to share. Two `bentoo` runs may have different
-// TMPDIRs, different homes, different mount namespaces and different users, and
-// still be pointed at one DISTDIR — indeed that is the ordinary case, since the
-// default comes from `portageq distdir` and is the same answer for everyone on
-// the host. A lock kept anywhere else would let exactly those two runs miss each
-// other, which is the collision R2.4 is about. It is also the only directory
-// this package has already proved writable (Probe), and the one directory the
-// story forbids swapping for a temporary one.
-//
-// Creating a file inside a directory is not changing that directory, so R2.5 is
-// untouched: no mode and no owner is altered, here or anywhere else in this
-// file. What a lock file does cost is a name in a directory shared with the host
-// package manager, which is why the name is a dotfile, says whose it is, and is
-// removed on release.
-//
-// # Why this shape of name
-//
-// Portage names the lock for a distfile "." + <distfile> + ".portage_lockfile"
-// (portage/locks.py:251), and one of those appears in this very directory
-// whenever an emerge fetches. Mirroring the shape means an operator who has seen
-// portage's recognises ours at a glance, and the single word that differs is the
-// word that says which tool to blame. The names cannot collide with each other,
-// with a real distfile (which never begins with a dot), with Probe's
-// .bentoo-distdir-probe-* or with Quarantine's <name>._bentoo_quarantine_.*.
+// The shape mirrors portage's "." + <distfile> + ".portage_lockfile"
+// (portage/locks.py:251), so an operator recognises it and the one differing
+// word names the tool to blame. It cannot collide with a real distfile (never a
+// leading dot), with Probe's .bentoo-distdir-probe-* or with Quarantine's
+// <name>._bentoo_quarantine_.*.
 const (
 	lockFilePrefix = "."
 	lockFileSuffix = ".bentoo_lockfile"
@@ -70,9 +56,9 @@ const (
 // Two minutes is chosen against what the lock is held for: the entire pkgdev
 // invocation, download included. A waiter is therefore usually waiting on a real
 // download, and a bound short enough to be useful has to be willing to give up
-// on a slow one. Giving up is the specified outcome (D4) and the cheap one — the
+// on a slow one. Giving up is the specified outcome and the cheap one — the
 // package is reported as failed and the next run finds the distfile already
-// fetched and verified, which is R2.1's reuse. Waiting is the expensive one: the
+// fetched and verified, and reuses it. Waiting is the expensive one: the
 // sweep runs under a semaphore, so a waiter is holding a worker slot the whole
 // time it waits (autoupdate/sweep.go, `func ExecuteOverlaySweep`).
 //
@@ -89,42 +75,24 @@ var lockWait = 2 * time.Minute
 var lockPoll = 25 * time.Millisecond
 
 // FetchLock is the exclusive claim one manifest step holds over the distfile
-// names it is about to fetch, for the whole of its pkgdev invocation. It is D4's
-// first half and the thing R2.4 asks for, and it is also the load-bearing
-// assumption under D3's ownership rule.
+// names it is about to fetch, for the whole of its pkgdev invocation, so that
+// concurrent writers never fetch onto the same path.
 //
-// # The window it closes
-//
-// FetchScope decides what this run may delete by measuring which expected names
-// were ABSENT before the fetch: absent then, therefore ours now. That inference
-// is only true if nothing else can write those names in between, and between
-// RecordFetchScope's Lstat and CleanupFailedFetch's Remove there is a long gap —
-// a whole download. Without this lock a second worker can create a file under
-// one of those names inside that gap, and our failure branch then deletes a
-// download that is not ours: the exact half of R2.4 that says one worker's
-// failure must not delete a file another worker is using.
-//
-// Quarantine has the same shape of gap and says so (see its Concurrency note):
-// a file that appears between its Lstat and its Rename is not seen. The lock is
-// what closes both, which is why it is taken before either of them runs.
-//
-// # Where it goes in the manifest step
+// It also underpins FetchScope's ownership rule ("absent before the fetch,
+// therefore ours now"), which only holds if nothing else writes those names
+// during the download between RecordFetchScope's Lstat and CleanupFailedFetch's
+// Remove; without the lock our failure branch could delete another worker's
+// download. Quarantine has the same Lstat-to-Rename gap. Hence the order:
 //
 //	resolve -> LOCK -> Quarantine -> prepopulate -> record -> pkgdev -> on failure: cleanup -> RELEASE
 //
-// Held across the lot. Taking it later would leave Quarantine's window open;
-// releasing it earlier would leave FetchScope's open. Release is safe to defer
-// immediately after a successful LockFetch, and safe to call more than once.
+// Release is safe to defer right after a successful LockFetch and safe to call
+// more than once.
 //
-// # What it does NOT cover
-//
-// The host's own package manager. Portage serializes its fetches under
-// FEATURES=distlocks, but pkgdev does not participate in that mechanism — see
-// D4 in this story's design.md for the evidence — so a sweep running at the same
-// time as an emerge that wants the same distfile is not serialized by anything.
-// That is a documented limitation of the tool, not something this type can fix
-// from outside, and inventing a private handshake with portage would be worse
-// than saying so.
+// It does NOT cover the host's package manager: portage serializes fetches
+// under FEATURES=distlocks, but pkgdev does not take part, so a sweep and an
+// emerge wanting the same distfile are not serialized by anything. That is a
+// documented limitation; a private handshake with portage would be worse.
 type FetchLock struct {
 	// distdir is kept with the locks so a diagnostic can name the directory
 	// the contention is in, and so the two halves cannot be given different
@@ -147,46 +115,31 @@ type heldLock struct {
 }
 
 // LockFetch takes an exclusive lock on every distfile name in names and returns
-// them as one claim, or returns an error having released whatever it managed to
-// take. There is no partial success: a step that holds three of four locks is
-// unprotected on the fourth, which is the only one that matters.
+// them as one claim, or an error having released whatever it took: holding
+// three of four locks leaves the fourth unprotected.
 //
-// Each name is reduced with distfileName first, and one that does not reduce to
-// a filename is dropped rather than locked. The reduction is what keeps the lock
-// file inside the distdir — the name is untrusted input, and this directory is
-// shared with the system package manager — and a string that is not a filename
-// cannot name a file in this directory for two writers to collide on. Duplicates
-// collapse: locking one name twice would deadlock against ourselves.
+// Each name is reduced with distfileName and dropped if it is not a filename,
+// which keeps the lock file inside the shared distdir despite untrusted input.
+// Duplicates collapse (locking a name twice would self-deadlock), and names are
+// locked in sorted order so two workers sharing distfiles cannot wait on each
+// other in a cycle. An empty distdir is refused, as in Probe: filepath.Join("",
+// name) would lock in the working directory and separate nobody.
 //
-// The reduced names are locked in sorted order, and that is not cosmetic. Two
-// workers whose packages share two distfiles would otherwise be able to take
-// them in opposite orders and wait on each other; one global order over one
-// shared directory makes a cycle impossible, so the only way this call ends is
-// with the locks or with the timeout.
+// ctx ends the wait as lockWait does, whichever comes first, because a waiter
+// holds a sweep worker slot. A ctx already done is refused before any lock
+// file is created; one that ends during contention ends the wait at once and
+// releases the locks taken so far. Both errors wrap ctx.Err(), not
+// ErrDistfileLocked: being cancelled is not contention.
 //
-// An empty distdir is refused, as in Probe, Quarantine and RecordFetchScope:
-// filepath.Join("", name) resolves against the WORKING directory, so the lock
-// would be taken somewhere nobody asked about and would separate nobody from
-// anybody.
-//
-// ctx ends the wait as lockWait does, whichever comes first (S054-R2.4). A
-// cancelled run will not fetch under the locks it is waiting for, and a waiter
-// holds a sweep worker slot for as long as it waits. A ctx that is already done
-// is refused before a single lock file is created (S054-R2.5); one that ends
-// while a name is contended ends the wait at once, and the locks this call had
-// already taken are released exactly as on any other error. Both errors wrap
-// ctx.Err() and not ErrDistfileLocked: being cancelled is not contention.
-//
-// A caller that gets an error MUST NOT go on to fetch. That is the whole point:
-// a fetch racing another fetch onto the same path is what R2.4 forbids, and
-// "report the package as failed" is the specified answer (D4).
+// A caller that gets an error MUST NOT go on to fetch; it reports the package
+// as failed.
 func LockFetch(ctx context.Context, distdir string, names []string) (*FetchLock, error) {
 	if distdir == "" {
 		return nil, errors.New("cannot lock distfiles: no distdir was resolved")
 	}
 	// Checked before any lock file exists, so a run cancelled before its
 	// manifest step began leaves nothing behind in a directory it shares with
-	// the host's package manager (S054-R2.5).
+	// the host's package manager.
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("claiming distfiles in %s: %w", distdir, err)
 	}
@@ -243,38 +196,23 @@ func (l *FetchLock) Release() {
 }
 
 // acquireLock takes one distfile's lock, waiting until deadline or until ctx is
-// done, whichever comes first. The pause between two attempts selects on
-// ctx.Done(), so a cancel ends the wait at once rather than at the next poll,
-// with an error that wraps ctx.Err() and names the distfile (S054-R2.4).
+// done, whichever comes first. The pause between attempts selects on
+// ctx.Done(), so a cancel ends the wait at once with an error that wraps
+// ctx.Err() and names the distfile.
 //
-// # The rule, and why there are two mechanisms
+// O_CREATE|O_EXCL alone decides acquisition: whoever creates the file holds
+// the lock. The flock on that file is a heartbeat, not a second arbiter: the
+// kernel drops it when the holder dies, even by SIGKILL, so a lock whose flock
+// can be taken has no live holder and is reaped, and one whose flock cannot be
+// taken is waited for. The PID in the file only feeds the timeout message, so
+// PID reuse can mislead the message but never the lock.
 //
-// Acquisition is decided by O_CREATE|O_EXCL and by nothing else: whoever creates
-// the file holds the lock (D4). The flock taken on that same file is not a
-// second arbiter — it is a heartbeat. The kernel drops an flock when the process
-// holding it dies, for any reason and including SIGKILL, so "can I flock the
-// existing lock file?" is an exact answer to "is its holder still alive?", with
-// no timeout to tune and no PID to guess at. That is the staleness rule: a lock
-// whose flock can be taken has no live holder and is reaped; a lock whose flock
-// cannot be taken is live and is waited for. A killed run therefore blocks the
-// next one for as long as it takes that run to notice, and not one moment more.
-//
-// The PID written into the file is for the human, exactly as D4 says: it is what
-// the timeout error reports so a stuck lock can be traced to a process. Nothing
-// in this file decides anything from it, so PID reuse cannot mislead the lock —
-// only the message, and only into naming a process that has since been recycled.
-//
-// # Why the reap cannot steal a live lock
-//
-// Reaping is unlink-then-recreate, which is the classic way to destroy the lock
-// you were only supposed to clean up. It is safe here because the unlink happens
-// while holding the dead file's flock AND only after confirming the path still
-// names that same inode. Two waiters cannot both be in that state: flock admits
-// one, and the loser's confirmation then fails, because the path no longer names
-// the inode it opened. The one gap left is the instant between a creator's
-// O_EXCL and its flock, where its file is briefly reapable; the creator closes
-// it by re-confirming the path still names its own file before it declares
-// itself the holder, and starting over if it does not.
+// Reaping (unlink-then-recreate) cannot steal a live lock: the unlink happens
+// while holding the dead file's flock AND after confirming the path still
+// names that inode, so of two waiters flock admits one and the other's check
+// fails. A creator, briefly reapable between its O_EXCL and its flock,
+// re-confirms the path names its own file before declaring itself the holder,
+// and starts over if not.
 func acquireLock(ctx context.Context, distdir, name string, deadline time.Time) (*heldLock, error) {
 	path := filepath.Join(distdir, lockFilePrefix+name+lockFileSuffix)
 
@@ -286,7 +224,7 @@ func acquireLock(ctx context.Context, distdir, name string, deadline time.Time) 
 		// (see waitForLock's os.Open) and taking flock on that descriptor; at
 		// 0600 every user but the holder gets EACCES there, cannot tell "held"
 		// from "broken", and cannot reap a lock a dead run left behind — which
-		// is the exact mutual exclusion R2.4 asks for, lost. Nothing secret is
+		// is the exact mutual exclusion this lock exists for, lost. Nothing secret is
 		// in the file: it carries the holder's PID so a stale lock is
 		// diagnosable, and no user but the owner may write it.
 		file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644) //nolint:gosec // G302: 0o644 is readable by design, see above; G304: path is the host distdir joined with a lock name built from distfileName, which refuses anything but one bare file name
@@ -459,9 +397,9 @@ func pathNamesFile(path string, file *os.File) (bool, error) {
 // flock(2) and not fcntl(2): an flock belongs to the OPEN FILE DESCRIPTION, so
 // two goroutines in one process that opened the file separately contend exactly
 // as two processes do. POSIX record locks belong to the process, and would hand
-// the second goroutine of a sweep a lock the first one already holds — the
-// concurrency R2.4 names first is the one they would not see: the workers of
-// one sweep (autoupdate/sweep.go, `func ExecuteOverlaySweep`).
+// the second goroutine of a sweep a lock the first one already holds, missing
+// the most common concurrency of all: the workers of one sweep
+// (autoupdate/sweep.go, `func ExecuteOverlaySweep`).
 //
 // The descriptor is reached through SyscallConn rather than Fd so the file
 // cannot be closed or garbage-collected underneath the call.

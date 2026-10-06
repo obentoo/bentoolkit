@@ -12,7 +12,7 @@ import (
 var ErrInvalidShipTarget = errors.New("invalid ssh ship target")
 
 // sshShipper replicates snapshots to a remote btrbk target over ssh. bentoolkit
-// moves no bytes itself (AD5): the target is contributed to the rendered
+// moves no bytes itself: the target is contributed to the rendered
 // btrbk.conf and btrbk performs send/receive during engine Create. Send therefore
 // only records which target was served.
 type sshShipper struct {
@@ -36,7 +36,7 @@ func (s *sshShipper) Name() string {
 }
 
 // Send reports the replication target for snap. The transfer itself is delegated
-// to btrbk (Delegated=true), so no subprocess runs here (R3.2).
+// to btrbk (Delegated=true), so no subprocess runs here.
 func (s *sshShipper) Send(_ context.Context, snap Snapshot) (ShipReport, error) {
 	return ShipReport{
 		Target:    s.cfg.Target,
@@ -63,8 +63,7 @@ func validSSHTarget(target string) bool {
 }
 
 // collectShipTargets returns the ssh targets across all ship entries, in order,
-// for contribution to the btrbk.conf. Non-ssh ship types are ignored (none exist
-// in story 004).
+// for contribution to the btrbk.conf. Non-ssh ship types are ignored.
 func collectShipTargets(ships []ShipConfig) []string {
 	var targets []string
 	for _, sh := range ships {

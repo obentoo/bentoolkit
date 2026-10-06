@@ -16,14 +16,14 @@ import (
 
 // execCommand is the injectable context-aware command factory. It defaults to
 // exec.CommandContext and is overridable in tests so engine/shipper drivers run
-// without a real btrbk/systemd binary (AD3, R2.4). Mirrors the
+// without a real btrbk/systemd binary. Mirrors the
 // internal/autoupdate claude_code.go seam.
 var execCommand = exec.CommandContext
 
 // runnerEnv returns the environment every execRunner child process inherits: the
 // parent environment with LC_ALL=C appended, so snapper and btrbk emit
-// locale-independent dates and messages that the parsers can actually match
-// (R4.1). The appended entry overrides any LC_ALL inherited from the parent
+// locale-independent dates and messages that the parsers can actually match.
+// The appended entry overrides any LC_ALL inherited from the parent
 // because os/exec keeps only the last value of a duplicated key. It is a pure
 // helper so the locale contract is unit-testable without spawning a process.
 func runnerEnv() []string {
@@ -32,8 +32,8 @@ func runnerEnv() []string {
 
 // Runner is the subprocess seam shared by the engine and shipper drivers. Every
 // external command goes through Run, or through the optional Piper seam for a
-// streamed multi-stage pipe (053 R5.1); both bind each process to ctx via
-// exec.CommandContext so a cancelled parent kills the child (R8.1). stdin is
+// streamed multi-stage pipe; both bind each process to ctx via
+// exec.CommandContext so a cancelled parent kills the child. stdin is
 // piped on the process's standard input, never placed in argv.
 type Runner interface {
 	Run(ctx context.Context, name string, args []string, stdin []byte) (stdout []byte, err error)
@@ -41,7 +41,7 @@ type Runner interface {
 
 // execRunner is the production Runner backed by execCommand. An optional reporter
 // surfaces stage/done progress for each command; a nil reporter (the default) is
-// normalized to a no-op so behavior is unchanged from before this story (R3.3).
+// normalized to a no-op, so the runner emits no progress events.
 type execRunner struct {
 	reporter tui.Reporter
 	taskID   string
@@ -52,11 +52,11 @@ type execRunner struct {
 // wrap it (e.g. with ErrEngineFailed) without losing the diagnostic.
 //
 // It emits a TaskStage(taskID, name) before running and a TaskDone(taskID, ok)
-// after (R6.2: snapshot subprocess sites get stage/done events). Snapshot
+// after. Snapshot
 // commands do not stream meaningful progress, so no live tail is attached.
 //
 // The child always runs under LC_ALL=C (see runnerEnv) so its output is stable
-// enough to parse on a non-English host (R4.1); the trade-off is that a
+// enough to parse on a non-English host; the trade-off is that a
 // command's own error text arrives in English, and it is surfaced verbatim.
 func (e execRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
 	rep := e.reporter
@@ -67,7 +67,7 @@ func (e execRunner) Run(ctx context.Context, name string, args []string, stdin [
 
 	cmd := execCommand(ctx, name, args...)
 	// Pin the child locale to C so every subprocess (snapper, btrbk) produces
-	// parseable, non-localized output regardless of the host locale (R4.1).
+	// parseable, non-localized output regardless of the host locale.
 	cmd.Env = runnerEnv()
 	// On cancel, CommandContext kills only the direct child; orphaned
 	// grandchildren (shell pipelines) can keep the stdout/stderr pipes open and
@@ -91,7 +91,7 @@ func (e execRunner) Run(ctx context.Context, name string, args []string, stdin [
 	return stdout.Bytes(), err
 }
 
-// Piper is the optional streaming seam of a Runner (053 R5.1). runPipe requires
+// Piper is the optional streaming seam of a Runner. runPipe requires
 // it: a multi-stage pipe such as `btrfs send | zstd | rclone rcat` must not hold
 // any stage's whole output in memory, which a Run-only Runner cannot avoid.
 type Piper interface {
@@ -123,7 +123,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 }
 
 // Pipe runs stages at once, stage i's stdout connected to stage i+1's stdin by
-// an OS pipe, so the stream never passes through this process (053 R5.1). The
+// an OS pipe, so the stream never passes through this process. The
 // pipe ends are *os.File on purpose: os/exec hands a file straight to the
 // child, while any other io.Reader/io.Writer costs an in-process copy.
 //
@@ -131,8 +131,8 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 // WaitDelay as Run. The first stage to exit non-zero cancels the others; every
 // stage is still waited for. The returned error names the root failure (see
 // pipeRootFailure), wraps its exit error and carries the last
-// 64 KiB of every stage's stderr (053 R5.4). When ctx itself is cancelled, the
-// error also wraps ctx.Err() (053 R5.6). It returns the last 64 KiB of the
+// 64 KiB of every stage's stderr. When ctx itself is cancelled, the
+// error also wraps ctx.Err(). It returns the last 64 KiB of the
 // final stage's stdout.
 func (e execRunner) Pipe(ctx context.Context, stages []PipeStage) ([]byte, error) {
 	if len(stages) == 0 {
@@ -275,50 +275,24 @@ func pipeStderr(stages []PipeStage, stderrs []*tailBuffer) error {
 
 // defaultRunner returns the production Runner used by the factories when no
 // Runner is injected. Its reporter is nil (normalized to a no-op in Run), so it
-// is byte-for-byte equivalent to the pre-story behavior (R3.3).
+// emits no progress events.
 func defaultRunner() Runner { return execRunner{} }
 
 // NewReportingRunner returns a production Runner that emits stage/done progress
 // events to r (keyed by id) for every command it runs. A nil reporter is
 // normalized to a no-op.
 //
-// It has NO production caller, and never has had one. Sub-task 6.1 is where
-// that was measured: its pre-authored test argued for a second, recording
-// runner "beside the reporting one" on the premise that this constructor's
-// behaviour "is inherited by every driver in this package", and the grep that
-// checked the premise found only the two tests named below. That same
-// measurement error is what closed 6.1 as [~] (superseded-by: 6.2) —
-// snapshot.RunResult.Stages already carried one outcome per step, in the
-// semantic vocabulary a report needs, so the runner never had to accumulate
-// anything. The orphaning itself is older than story 046: this function landed
-// with its two tests in commit e2c0f21 and has had exactly these callers since.
-//
-//   - runner_reporter_test.go:57, TestSnapshotRunnerEmitsStageDone
-//   - runner_reporter_test.go:80, TestSnapshotRunnerReportsFailure
-//
-// It stays because it is the seam story 047 wires — the story's Out of Scope
-// defers the remaining commands to it — and it is the only seam there is:
-//
-//   - This is the ONE place in the package that sets execRunner.reporter or
-//     execRunner.taskID; every other execRunner literal is the zero value.
-//     Delete it and both fields are permanently zero, which makes the nil
-//     branch and both rep.TaskStage/rep.TaskDone calls in execRunner.Run
-//     provably dead. The deletion would not stop at this function; it would
-//     take the package's whole progress-event path with it.
-//   - execRunner is unexported, so nothing outside internal/snapshot can build
-//     a reporting Runner by hand. This constructor is that capability's export.
-//   - What 047 has to write is one assignment at the caller. cmd/bentoo's
-//     `deps.snapshotRunner` field is nil in production and already reaches
-//     every driver through NewManager, newEngine, newShipper and newScheduler,
-//     so NewReportingRunner(rep, id) there is what turns a snapshot run's
-//     subprocesses into stage/done events.
-//   - Those two tests are the only executable proof that Run emits
-//     stage:<id>:<name> before a command and done:<id>:<ok> after it, on
-//     success and on failure alike. 047 inherits that contract already checked.
-//
-// The sentence this replaced said "Drivers wire this when a TUI/plain reporter
-// is active". No driver does, and none ever did — it described the intended
-// wiring as though it had already happened.
+// It has no production caller yet: cmd/bentoo's deps.snapshotRunner is nil in
+// production. It stays because it is the only place that sets
+// execRunner.reporter and execRunner.taskID. execRunner is unexported, so
+// nothing outside the package can build a reporting Runner, and without this
+// constructor both fields stay zero and Run's progress-event path is dead code.
+// Wiring it is one assignment: deps.snapshotRunner already reaches every driver
+// through NewManager, newEngine, newShipper and newScheduler, so
+// NewReportingRunner(rep, id) there turns a snapshot run's subprocesses into
+// stage/done events. TestSnapshotRunnerEmitsStageDone and
+// TestSnapshotRunnerReportsFailure prove that Run emits stage:<id>:<name>
+// before a command and done:<id>:<ok> after it, on success and on failure.
 func NewReportingRunner(r tui.Reporter, id string) Runner {
 	if r == nil {
 		r = tui.Noop()

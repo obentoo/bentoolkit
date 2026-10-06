@@ -16,8 +16,7 @@ import (
 // DefaultGitCloneTimeout bounds each git run the provider makes against its
 // remote: a clone, and an update's pull, fetch and reset taken together. When
 // it elapses, git and every process it started are stopped, and the error
-// wraps context.DeadlineExceeded and reads "git <op> timed out after 5m0s"
-// (S054-R5.3, S054-R5.5, S054-R5.9, S054-R5.10).
+// wraps context.DeadlineExceeded and reads "git <op> timed out after 5m0s".
 const DefaultGitCloneTimeout = 5 * time.Minute
 
 // gitTimeout is the bound cloneRepo and updateRepo apply. It is
@@ -52,7 +51,7 @@ type GitCloneProvider struct {
 
 	// reporter receives stage/done/tail events for the clone. It may be nil
 	// (this struct is often built as a literal without a constructor default),
-	// so cloneRepo nil-guards it locally. (R3.3)
+	// so cloneRepo nil-guards it locally.
 	reporter tui.Reporter
 	// taskID identifies this provider's task in reporter events.
 	taskID string
@@ -109,7 +108,7 @@ func (p *GitCloneProvider) SetReporter(r tui.Reporter, id string) {
 // The resolved repository URL and branch name are validated before any work is
 // done: a malicious scheme (e.g. file://, javascript:) or a branch name that
 // enables git flag-injection causes an early error wrapping ErrInvalidRepoURL
-// or ErrInvalidBranch respectively. (R2.1, R2.2)
+// or ErrInvalidBranch respectively.
 func NewGitCloneProvider(repoInfo *RepositoryInfo) (*GitCloneProvider, error) {
 	// Determine the git URL
 	gitURL := repoInfo.URL
@@ -255,7 +254,7 @@ func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 	// Bound the clone with a timeout so a hung or slow remote cannot block
 	// indefinitely; the caller's context is the parent, so cancelling the
 	// lookup also stops the clone. git runs in group mode (gitCommand), so the
-	// bound stops its transport too (S054-R5.10).
+	// bound stops its transport too.
 	parent := ctx
 	ctx, cancel := context.WithTimeout(parent, gitTimeout)
 	defer cancel()
@@ -263,7 +262,7 @@ func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 	// Clone with depth 1 for faster clone (we only need latest files).
 	// The literal "--" end-of-options separator ensures git can never
 	// interpret the positional URL/path as an option, even if it begins
-	// with "-" (defense-in-depth against flag-injection; AD-9). The
+	// with "-" (defense-in-depth against flag-injection). The
 	// documented syntax is: git clone [<options>] [--] <repo> [<dir>].
 	// p.Branch needs no separator: it is the value of --branch, which git
 	// takes as given and never parses as an option.
@@ -277,7 +276,7 @@ func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 	)
 
 	// Nil-guard locally: GitCloneProvider is frequently built as a struct
-	// literal with no constructor default for reporter (R3.3).
+	// literal with no constructor default for reporter.
 	rep := p.reporter
 	if rep == nil {
 		rep = tui.Noop()
@@ -285,7 +284,7 @@ func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 	rep.TaskStage(p.taskID, "clone")
 
 	// Stream git's progress (written to stderr) live while still capturing the
-	// full combined output verbatim for the error path (R7.1). Under the default
+	// full combined output verbatim for the error path. Under the default
 	// Noop reporter this is byte-identical to the previous CombinedOutput path.
 	sc := tui.NewStreamCapture(rep, p.taskID, tui.StreamStdout)
 	cmd.Stdout = sc
@@ -314,7 +313,7 @@ func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 // The three commands share ONE context, bounded by DefaultGitCloneTimeout on
 // top of ctx, so together they take at most that long, and each runs in group
 // mode (gitCommand), so a cancel or the bound stops git together with its
-// transport (S054-R5.9). When ctx is done or the bound elapses, updateRepo
+// transport. When ctx is done or the bound elapses, updateRepo
 // returns at once with an error naming the git operation that was running and
 // wrapping the context's error; it never starts the next command.
 //
@@ -370,8 +369,7 @@ func (p *GitCloneProvider) updateRepo(ctx context.Context) error {
 //
 //   - the child leads its own process group (procgroup.Group): when ctx is
 //     done, git and every process it started (the transport, ssh, a
-//     credential helper) get SIGTERM, and SIGKILL procgroup.GracePeriod later
-//     (S054-R5.9);
+//     credential helper) get SIGTERM, and SIGKILL procgroup.GracePeriod later;
 //   - GIT_TERMINAL_PROMPT=0 makes git fail at once where it would otherwise
 //     ask for credentials on the terminal. A child outside the terminal's
 //     foreground group that reads the terminal is stopped by SIGTTIN, so a
@@ -395,7 +393,7 @@ func gitCommand(ctx context.Context, args ...string) *exec.Cmd {
 // "signal: terminated", whatever caused it. A done parent means the caller
 // stopped the run, or the caller's own deadline did, which is not this bound,
 // so the parent's error is wrapped as it is. A done run context under a live
-// parent hit the bound (S054-R5.5). run is read first: contexts never come
+// parent hit the bound. run is read first: contexts never come
 // back to life, so a parent that is live after that read was live before it,
 // and a cancel landing between the two reads is the parent's.
 func interrupted(parent, run context.Context, op string) error {

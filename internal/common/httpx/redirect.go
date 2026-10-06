@@ -9,7 +9,7 @@ import (
 
 // maxRedirects is net/http's own default limit. Installing any CheckRedirect
 // replaces the default policy, and with it the limit, so CredentialRedirectPolicy
-// re-imposes it (S052-R4.5).
+// re-imposes it.
 const maxRedirects = 10
 
 // CredentialHeaders are the request headers that carry a credential, in
@@ -23,29 +23,22 @@ var CredentialHeaders = []string{"Authorization", "X-Api-Key", "X-Auth-Token", "
 var ErrInsecureRedirect = errors.New("insecure redirect")
 
 // CredentialRedirectPolicy is an http.Client.CheckRedirect policy that never
-// lets a credential header follow a redirect somewhere it was not sent to
-// (audit findings A4, A5). It applies three rules, in order:
+// lets a credential header follow a redirect somewhere it was not sent to:
 //
 //  1. A chain stops after 10 redirects, as net/http's default policy does.
-//  2. If the original request was https and carried a credential header, a
-//     redirect to an http URL is refused with an error wrapping
-//     ErrInsecureRedirect that names the target host; no request is sent to
-//     it. The decision reads the ORIGINAL request, so it holds even when the
-//     hop also changes host and an earlier hop already dropped the headers.
-//  3. Once the chain has left the original hostname — on this hop or any
-//     earlier one — every credential header is deleted from the request and
-//     the redirect is followed. Hostnames are compared case-insensitively and
-//     exactly: no subdomain match, port ignored.
+//  2. An https request that carried a credential header refuses a redirect to
+//     an http URL with an error wrapping ErrInsecureRedirect that names the
+//     target host. It reads the ORIGINAL request, so it holds even when an
+//     earlier hop already changed host and dropped the headers.
+//  3. Once the chain has left the original hostname, on this hop or an earlier
+//     one, every credential header is deleted and the redirect followed.
+//     Hostnames compare case-insensitively and exactly; the port is ignored.
 //
-// Rule 3 reads the whole chain, not the previous hop, because net/http copies
-// the headers of the INITIAL request onto every hop before calling
-// CheckRedirect (net/http client.go, makeHeadersCopier): a header deleted on
-// one hop is back on the next, so a policy that only compared adjacent hops
-// would hand the credential back on a hop that returns to the first host.
-//
-// Go itself strips Authorization (and cookies) on a cross-domain hop, but not
-// custom headers such as X-Api-Key or Private-Token, and it does not refuse an
-// https to http hop at all. The policy never logs or returns a header value.
+// Rule 3 reads the whole chain because net/http copies the INITIAL request's
+// headers onto every hop (client.go, makeHeadersCopier): a header deleted on
+// one hop is back on the next. Go strips Authorization on a cross-domain hop
+// but not X-Api-Key or Private-Token, and never refuses https to http. The
+// policy never logs or returns a header value.
 func CredentialRedirectPolicy(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return errors.New("stopped after 10 redirects")

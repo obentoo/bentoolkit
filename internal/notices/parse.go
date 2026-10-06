@@ -14,8 +14,8 @@ import (
 // feedVersion is the only JSON Feed version this client reads.
 const feedVersion = "https://jsonfeed.org/version/1.1"
 
-// The patterns below mirror the site's notice schema (site story 002,
-// src/content/noticeSchema.ts), so an item the site publishes is an item the
+// The patterns below mirror the site's notice schema
+// (src/content/noticeSchema.ts), so an item the site publishes is an item the
 // tray accepts.
 var (
 	// idPattern is a GLEP 42 news item name: YYYY-MM-DD-<short-name>. The
@@ -78,7 +78,7 @@ type wireRange struct {
 // _bentoo extension. Every error wraps ErrInvalidFeed; an item that breaks the
 // contract is reported as an *ItemError naming its ID and the failing field.
 // A feed is all or nothing: one bad item rejects the whole document, so the
-// caller keeps its previous notices (R2.6).
+// caller keeps its previous notices.
 func ParseFeed(data []byte) (Feed, error) {
 	var w wireFeed
 	if err := json.Unmarshal(data, &w); err != nil {

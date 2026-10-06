@@ -36,7 +36,7 @@ const (
 	nameOwnerChangedName = busIface + "." + nameOwnerChanged
 )
 
-// The item's fixed properties (R8.1).
+// The item's fixed properties.
 const (
 	itemID       = "bentoo-tray"
 	itemTitle    = "bentoo"
@@ -49,7 +49,7 @@ const (
 	statusNeedsAttention = "NeedsAttention"
 )
 
-// appIndicatorPackage is what a GNOME user installs to get a watcher (R8.2).
+// appIndicatorPackage is what a GNOME user installs to get a watcher.
 const appIndicatorPackage = "gnome-shell-extension-appindicator"
 
 // defaultCallTimeout bounds a bus call whose context has no deadline. Neither
@@ -58,8 +58,8 @@ const appIndicatorPackage = "gnome-shell-extension-appindicator"
 const defaultCallTimeout = 25 * time.Second
 
 // registerBudget is how long one registration may take, retries included: a
-// watcher that has just taken its name may not have exported its object yet
-// (R8.3 allows 5 s).
+// watcher that has just taken its name may not have exported its object yet,
+// and re-registration is allowed 5 s.
 const registerBudget = 5 * time.Second
 
 // registerRetry is the pause between two registration attempts.
@@ -100,7 +100,7 @@ type View struct {
 
 // Event is a click on the menu item ItemID. NoticeID is the notice that item
 // lists at click time; it is empty for the fixed entries and for an id whose
-// notice is no longer listed (R9.7).
+// notice is no longer listed.
 type Event struct {
 	ItemID   int32
 	NoticeID string
@@ -131,7 +131,7 @@ type shown struct {
 	tooltip string
 }
 
-// render maps a View to what the item shows (R8.4, R8.5, R8.7, R8.1).
+// render maps a View to what the item shows.
 func render(v View) shown {
 	unread := max(v.Unread, 0)
 	s := shown{variant: variantPlain, status: statusActive}
@@ -232,10 +232,10 @@ func (i *Item) pixmaps(v variant) []Pixmap {
 }
 
 // Start exports /StatusNotifierItem, registers it with the
-// StatusNotifierWatcher when one is on the bus (R8.1) or logs the R8.2 WARN
+// StatusNotifierWatcher when one is on the bus or logs the no-watcher WARN
 // once when none is, and returns. Tracking the watcher continues in the
 // background until ctx ends or the connection closes: whenever a watcher
-// takes the name, the item registers with it again within 5 s (R8.3).
+// takes the name, the item registers with it again within 5 s.
 //
 // Bus calls made by Start are bounded by ctx's deadline, or by 25 s when it
 // has none. Start may be called once.
@@ -307,7 +307,7 @@ func (i *Item) Start(ctx context.Context) error {
 	return nil
 }
 
-// warnNoWatcher logs the R8.2 WARN. Callers make sure it runs once.
+// warnNoWatcher logs the no-watcher WARN. Callers make sure it runs once.
 func (i *Item) warnNoWatcher() {
 	i.log.Warn("no StatusNotifierWatcher on the session bus: running with notifications only; on GNOME, install "+
 		appIndicatorPackage+" to show the tray icon",
@@ -465,8 +465,8 @@ func (itemObject) ContextMenu(_, _ int32) *dbus.Error { return nil }
 // Scroll is a scroll over the icon.
 func (itemObject) Scroll(_ int32, _ string) *dbus.Error { return nil }
 
-// SetState shows v: the icon variant and status (R8.4, R8.5, R8.7), the
-// unread count in the tooltip (R8.1) and the menu (R9.1, R9.3, R9.5). Before
+// SetState shows v: the icon variant and status, the
+// unread count in the tooltip and the menu. Before
 // Start it only records v. It emits NewIcon and NewAttentionIcon when the
 // variant changes, NewStatus when the status does, NewToolTip when the
 // tooltip does, and ItemsPropertiesUpdated for the entries whose label
@@ -632,7 +632,7 @@ func (i *Item) registrar(ctx context.Context) {
 }
 
 // register registers the item with the watcher, retrying for up to
-// registerBudget (R8.3). It gives up early when the watcher leaves.
+// registerBudget. It gives up early when the watcher leaves.
 func (i *Item) register(ctx context.Context) {
 	names := i.conn.Names()
 	if len(names) == 0 {

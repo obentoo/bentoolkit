@@ -1,31 +1,31 @@
 // Package report is the view model of one `overlay autoupdate` run: the
 // packages it scanned, the validation it planned, what the gates answered, and
-// the counts that summarize all of it (R1.1).
+// the counts that summarize all of it.
 //
 // # It describes a run, it does not display one
 //
 // Nothing in this package is a rendering. It holds no ANSI escape sequence, no
 // column width, no padding, no border character and no terminal dimension, and
-// no field describes one (R1.2). A renderer takes every value it shows from
+// no field describes one. A renderer takes every value it shows from
 // these types, so a fact the model does not carry is a fact no renderer can
 // invent — and shortening a long string is always a rendering decision, never a
-// loss of data (R7.4).
+// loss of data.
 //
 // That separation is the defect this package exists to remove: the check path
 // formatted each section at the moment it printed it, so nothing held "what
 // this run found" as a value, and nothing could be rendered twice, exported,
 // counted or tested without running the command again.
 //
-// # A Section is structure, and structure is not presentation (D2)
+// # A Section is structure, and structure is not presentation
 //
 // Section, Table and Row live here, and at first that looks like the rule above
 // being broken. It is not, and the distinction is worth stating because a later
 // reader will ask.
 //
-// R1.2 forbids the model from holding PRESENTATION: escape sequences, column
+// The rule forbids the model from holding PRESENTATION: escape sequences, column
 // widths, padding, borders, terminal dimensions. A Section holds none of those.
 // It holds STRUCTURE — this block is called X, it says these sentences, it has
-// these rows, it notes these omissions (R7.1). How wide a column is, whether a
+// these rows, it notes these omissions. How wide a column is, whether a
 // title is bold, what a border looks like: all still decided in
 // internal/common/report/render, from its own Options.Width and its own
 // lipgloss.Width measurement, neither of which has a field to land in here.
@@ -33,7 +33,7 @@
 // The alternative preserves the letter of the rule and loses its purpose. If
 // Section stayed in render, then render would need a translator per payload, so
 // it would import every domain's types and every new kind of run would edit it
-// — the very thing R7.4 forbids. The rule exists to keep presentation out of
+// — the very coupling this package exists to avoid. The rule exists to keep presentation out of
 // the model; keeping Section in render would instead pull every model into
 // presentation.
 //
@@ -47,13 +47,13 @@
 //
 // # The model is built before anything is printed
 //
-// A run assembles the whole report first (R1.4), so a run that fails to render,
+// A run assembles the whole report first, so a run that fails to render,
 // or that is interrupted, still holds a complete description of what it found.
 // Run.Complete and Run.NotEvaluated are how such a run says so, and they sit on
 // the ENVELOPE rather than on a payload: "the run reached the end of its plan"
 // and "this many planned units were never reached" are answerable for a batch of
 // packages, of subvolumes or of ebuilds alike, so a payload that carried them
-// would be carrying them a second time (D1).
+// would be carrying them a second time.
 package report
 
 // Outcome is what a run managed to establish about one planned package.
@@ -61,9 +61,9 @@ package report
 // There are four values rather than three because "we could not evaluate this"
 // and "you told us not to evaluate this" are different answers, and folding
 // them together lets a defect in the toolkit hide behind the operator's own
-// policy (R5). Which of the four a package earns is decided from a typed cause
+// policy. Which of the four a package earns is decided from a typed cause
 // carried by the validation result, never by matching text in a human-readable
-// reason (S044-R5.4).
+// reason.
 type Outcome string
 
 const (
@@ -76,24 +76,23 @@ const (
 	Errored Outcome = "errored"
 	// Inconclusive means no deciding gate answered because THE TOOLKIT could
 	// not evaluate the package — an unsupported build system, an unpreparable
-	// tree, a missing dependency (R5.2). A package whose result records no
+	// tree, a missing dependency. A package whose result records no
 	// cause at all lands here too, so an unclassified case stays visible
-	// instead of being absorbed into policy (S044-R5.6).
+	// instead of being absorbed into policy.
 	Inconclusive Outcome = "inconclusive"
 	// Skipped means no gate was run because POLICY said not to run one — a
-	// configured depth of none, a package type the run excludes (R5.3). It is
+	// configured depth of none, a package type the run excludes. It is
 	// the operator's own decision reported back, not a limitation.
 	Skipped Outcome = "skipped"
 )
 
-// Tally is the run's four counts, one per Outcome (R5.1).
+// Tally is the run's four counts, one per Outcome.
 //
-// This amends archived story 033's three-column tally (S033-R9.5) by dividing
-// its third column: proved and errored are untouched and count exactly the
-// packages they counted before (S044-R5.7). The invariant that column set protected
-// is preserved — each planned package lands in exactly one column, and the
-// columns sum to the number of planned packages (S044-R5.5,
-// AutoupdateCheck.Reconciles).
+// It divides the third column of the earlier three-column tally: proved and
+// errored are untouched and count exactly the packages they counted before.
+// The invariant that column set protected is preserved — each planned package
+// lands in exactly one column, and the columns sum to the number of planned
+// packages (AutoupdateCheck.Reconciles).
 type Tally struct {
 	// Proved counts the packages whose deciding gates all passed.
 	Proved int `json:"proved"`
@@ -120,13 +119,13 @@ func (t Tally) Total() int {
 // AutoupdateCheck is everything one `overlay autoupdate check` run found. It is
 // the Payload behind KindAutoupdateCheck.
 //
-// It is assembled in full before any output is produced (R1.4). A run that is
+// It is assembled in full before any output is produced. A run that is
 // interrupted still produces one of these; that it WAS interrupted, and how much
-// of its plan it never reached, is said by the Run around it and not here (D1) —
+// of its plan it never reached, is said by the Run around it and not here —
 // those two facts are true of any batch, and a payload restating them would be a
 // second place for a finished run to be described as a partial one.
 //
-// # Everything below is story 044's, unchanged
+// # Everything below predates the envelope, unchanged
 //
 // The field names, the JSON tags and Reconciles are exactly what they were when
 // this type was called Report and sat at the document root. The rename is a move
@@ -153,7 +152,7 @@ type AutoupdateCheck struct {
 	// and NotEvaluated moved up, and the asymmetry is the line between the two
 	// halves: this check counts four validation outcomes, a manifest run counts
 	// ok and failed, and one universal tally would either lose the four or
-	// invent columns the other has no answer for (D1).
+	// invent columns the other has no answer for.
 	Tally Tally `json:"tally"`
 	// DistfilesToFetch is how many packages this run has to hold a tarball
 	// for: an upper bound per package, not a download count, since a distfile
@@ -175,7 +174,7 @@ type AutoupdateCheck struct {
 }
 
 // Reconciles reports whether the tally accounts for every planned package
-// exactly once (S044-R5.5, preserving S033-R9.5).
+// exactly once.
 //
 // The denominator is the plan, not the result list: a package that produced no
 // row still had to be counted somewhere, and comparing against the rows would
@@ -268,13 +267,13 @@ type PlanEntry struct {
 	Depth string `json:"depth"`
 	// Reason names the input that decided the depth, in full, and quotes an
 	// override's stated justification where one exists. It is never shortened
-	// here; a renderer that lacks the room shortens its own copy (R7.4).
+	// here; a renderer that lacks the room shortens its own copy.
 	Reason string `json:"reason"`
 	// Skipped marks an entry no gate will run for, because policy said so — a
 	// depth of none, or a package type the run excludes. It travels with the
 	// entry rather than being derived when the entry is shown, because the
 	// reason has to travel with it, and because it is what separates Skipped
-	// from Inconclusive in the tally (R5.3).
+	// from Inconclusive in the tally.
 	Skipped bool `json:"skipped"`
 }
 
@@ -299,15 +298,15 @@ type ValidationRow struct {
 	// reason where there is one, otherwise the reason the run reported for the
 	// depth or the plan. It is never shortened, never truncated and never
 	// summarized in the model — that is a rendering decision, and doing it
-	// here would make it a loss of data (R7.4).
+	// here would make it a loss of data.
 	//
 	// A row that produced no verdict always carries a reason: a package
 	// reported without one reads as a result.
 	Reason string `json:"reason"`
 	// SameReasonAsPlan reports that Reason repeats the plan entry's reason
 	// word for word. The run sets it; a renderer uses it to print a reason
-	// once instead of twice (R7.2), and a differing reason is new information
-	// that gets printed (R7.3). It is computed where the two strings are both
+	// once instead of twice, and a differing reason is new information
+	// that gets printed. It is computed where the two strings are both
 	// in hand rather than by a renderer that would have to go looking for the
 	// plan entry.
 	SameReasonAsPlan bool `json:"same_reason_as_plan"`

@@ -14,11 +14,11 @@ const (
 	// indent is how far a section's body sits from the left margin; gap is the
 	// space between two columns.
 	//
-	// Neither is a field width, and the difference is the whole of S044-R6.3. A field
-	// width decides how much room a VALUE gets, so it depends on the values this
-	// run produced and can therefore be measured — that is what columnWidth
-	// does. These two are the air BETWEEN fields: nothing in a run's data can
-	// make two columns need more or less of it, so there is nothing to measure.
+	// Neither is a field width. A field width decides how much room a VALUE
+	// gets, so it depends on the values this run produced and can therefore be
+	// measured — that is what columnWidth does. These two are the air BETWEEN
+	// fields: nothing in a run's data can make two columns need more or less of
+	// it, so there is nothing to measure.
 	indent = 2
 	gap    = 2
 
@@ -31,36 +31,21 @@ const (
 // Options is everything a caller may decide about one rendering. It holds no
 // fact about the run — those all come from the sections it is rendering.
 //
-// # One field, and the count is the design
+// Its one field, Width, is a line budget measured off the terminal the output
+// is going to, which nothing upstream of a renderer can know; that is the whole
+// of what a renderer is entitled to decide.
 //
-// Width is a line budget measured off the terminal the output is going to, and
-// nothing upstream of a renderer can know it. That is the whole of what a
-// renderer is entitled to decide, so it is the whole of this struct.
-//
-// # What is deliberately NOT here
-//
-// ShowAll and SkipPlan used to sit beside it, and they answer a different
-// question — whether a list is stated or only counted, whether a section is
-// stated at all. Neither is a fact about a device. Both now live on
-// report.SectionOptions, which is what a payload is ASKED when it builds its
-// sections (story 046, sub-task 2.3).
-//
-// The distinction is the one this package exists to hold: SectionOptions is what
-// the report should SAY, Options is what the device ALLOWS. A renderer reading
-// ShowAll would be deciding content, and the same run would then say different
-// things in plain and in fullscreen with nothing in the model able to explain
-// why. Nothing may be added here that a payload could have answered.
-//
-// # An export takes no Options, and that absence is the requirement
-//
-// Markdown and JSON have no width to shorten to and no listing to honour, so
-// neither takes one — an omission that is the requirement rather than an
-// oversight (S044-R9.3). Giving an export path a parameter of this type would be
-// giving it questions an export must never ask.
+// ShowAll and SkipPlan are deliberately NOT here: whether a list is stated or
+// only counted is content, so they live on report.SectionOptions, what a
+// payload is ASKED. SectionOptions is what the report should SAY, Options is
+// what the device ALLOWS; a renderer reading ShowAll would make plain and
+// fullscreen say different things. Nothing may be added here that a payload
+// could have answered. Markdown and JSON take no Options at all, so an export
+// path cannot ask questions an export must never ask.
 type Options struct {
 	// Width is the line budget in display cells: no rendered line exceeds it
-	// (S046-R6.3). Zero means "ask the device", which is terminalWidth's job, so a
-	// caller that has no opinion does not have to invent one.
+	// Zero means "ask the device", which is terminalWidth's job, so a caller
+	// that has no opinion does not have to invent one.
 	//
 	// Read it through cells() rather than directly: the zero is a question, not
 	// an answer.
@@ -90,81 +75,42 @@ func (o Options) cells() int {
 	return terminalWidth()
 }
 
-// Plain renders blocks as text with no escape sequence in it (R2.1, R2.2).
+// Plain renders blocks as text with no escape sequence in it.
 //
-// # It takes sections, not a report
+// It takes sections, not a report: everything here is layout (column widths,
+// cuts, underlined headings), and nothing knows what a package or a gate is, so
+// a new command is a new payload rather than an edit here. The caller decides
+// WHAT the report says; this decides only how it LOOKS.
 //
-// Everything below this line is layout: how wide a column is, where a value is
-// cut, how a heading is underlined. Nothing below this line knows what a
-// package is, what a validation gate is, or which command produced the run —
-// and that is what makes a fourth command a new file rather than an edit to
-// this one. The caller decides WHAT the report says by handing over the
-// sections; this decides only how they LOOK (R2.1).
+// It is the mode a pipe, a redirect, a cron mail and a CI transcript receive:
+// no colour, no cursor movement, no live region. lipgloss is used only to
+// MEASURE, never to render, so the no-escape property holds by construction.
+// It draws no box, which a log cannot use and which costs two cells per line;
+// sections are separated by a title and a rule built from borderStyle's own
+// segment, so changing the border once changes every mode.
 //
-// # It is the mode a log file gets
-//
-// Plain is what a pipe, a redirect, a cron mail and a CI transcript receive, so
-// it contains no colour, no cursor movement and no live region: every byte it
-// writes is a byte a reader without a terminal still wants. Nothing here calls
-// lipgloss's renderer — lipgloss is used only to MEASURE (lipgloss.Width) — so
-// the no-escape property holds by construction rather than by discipline.
-//
-// # It draws no box
-//
-// A frame around a table is decoration a log cannot use, and it costs two cells
-// of every line's budget to carry. Sections are separated by a title and a rule
-// instead. The rule is built from borderStyle's own horizontal segment, so plain
-// is not a second place where a line character is spelled out: change the border
-// once and every mode follows.
-//
-// # Every write is checked
-//
-// A report redirected to a full disk is an ordinary failure, not an exotic one,
-// and a renderer that swallowed it would report success for output nobody
-// received. The first failing write is returned, wrapped, and stops the rest.
+// Every write is checked: the first failing write is returned, wrapped, and
+// stops the rest, rather than reporting success for output nobody received.
 func Plain(w io.Writer, blocks []report.Section, opts Options) error {
 	return write(w, blocks, plainStyle(opts.cells()))
 }
 
 // Markdown renders blocks as a Markdown document: the same sections, in the
-// syntax a pull request comment, an issue and a file in a repository all read
-// (R9).
+// syntax a pull request comment, an issue and a file in a repository all read.
 //
-// # It takes no Options, and that absence IS the requirement
+// It takes no Options, and that absence IS the requirement: an export carries
+// the complete report — every package, every reason in full, whatever the
+// terminal was asked for — and with no width or ShowAll to honour, an export
+// that mirrored screen truncation cannot be written. A report is kept BECAUSE
+// the terminal is gone; if threading a width in here ever looks convenient,
+// that is the defect arriving as a convenience.
 //
-// S044-R9.3 says an export carries the complete report — every package, every reason
-// in full, no shortening, whatever the terminal was asked for. Stating that as a
-// signature rather than as a branch is what makes it hold: there is no width
-// here to shorten to and no ShowAll here to honour, so an export that mirrored
-// screen truncation is not something to remember not to write. It cannot be
-// written.
-//
-// That matters because such an export is a useless record: a report is kept
-// precisely BECAUSE the terminal is gone, and one missing exactly what the
-// terminal dropped answers no question later. If threading a width in here ever
-// starts to look convenient, that is the defect arriving as a convenience.
-//
-// # Every scanned package is listed, and that is now the CALLER's promise
-//
-// The screen counts the up-to-date packages rather than listing them, because
-// they are the bulk of a 269-package overlay and the reader can re-run with
-// --all (R8.3). A file has no such budget and no re-run: a record that named
-// only the interesting packages could not answer "was this one checked at all",
-// which is the question a kept report is kept for.
-//
-// Sections arrive built, so that choice was made before this function was
-// reached — which is the only place it was ever decidable. This function has
-// never been able to add a row it was not handed, and now it cannot be mistaken
-// for the place the decision lives either (S044-R9.3).
-//
-// # It differs from Plain by table syntax and nothing else
-//
-// Both are handed the same []report.Section and hand it to a style (D8).
-// Nothing about what the report SAYS is decided here — including which rows
-// carry a reason of their own, which the caller settles once (R7.2, R7.3). A
-// result whose reason repeats its plan entry prints no second copy in the export
-// either, and that drops a DUPLICATE rather than information: the sentence is
-// still in the document, whole, on the plan row that first stated it.
+// Listing every scanned package (the screen only counts the up-to-date ones)
+// is the caller's promise, made when the sections were built, so a kept report
+// can answer "was this one checked at all". It differs from Plain by table
+// syntax and nothing else: both hand the same sections to a style. A result
+// whose reason repeats its plan entry prints no second copy here either, which
+// drops a DUPLICATE: the sentence is still whole on the plan row.
 func Markdown(w io.Writer, blocks []report.Section) error {
 	return write(w, blocks, markdownStyle())
 }
@@ -174,7 +120,7 @@ func Markdown(w io.Writer, blocks []report.Section) error {
 // style is the syntax half of a renderer: how a heading is written, how a
 // sentence is written, how a table is written.
 //
-// It is the ONLY thing separating plain from Markdown (D8). What a report says,
+// It is the ONLY thing separating plain from Markdown. What a report says,
 // in what order, with which rows carrying a reason, was settled by whoever built
 // the sections — both styles are handed the same []report.Section and neither
 // may add to it or take from it.
@@ -183,8 +129,9 @@ func Markdown(w io.Writer, blocks []report.Section) error {
 //
 // plainStyle takes the line budget and closes over it. markdownStyle takes no
 // argument at all, and this struct has no field to hold one, so an export has
-// nowhere to receive a width even from a caller offering it. S044-R9.3 rests on that
-// absence rather than on a branch somebody has to remember.
+// nowhere to receive a width even from a caller offering it. An export's
+// completeness rests on that absence rather than on a branch somebody has to
+// remember.
 type style struct {
 	// heading writes the section title, however this syntax marks one.
 	heading func(out *lineWriter, title string)
@@ -199,25 +146,17 @@ type style struct {
 // paint is the decoration half of the terminal syntax: which escape sequences a
 // finished line is wrapped in, and nothing else.
 //
-// # It receives a line that is already laid out
+// Every function here is handed a COMPLETE line — indent, padded cells, gaps —
+// and may only return it wrapped. It never sees a cell, so it cannot change a
+// width, a cut, an order or a word: the visible characters of a decorated
+// render come from the same code as an undecorated one, which keeps the content
+// identical in every mode by construction. A style that PADS (lipgloss's Width,
+// Padding, Margin, Border) would add visible cells and break that; bold, faint
+// and a foreground colour do not.
 //
-// Every function here is handed a COMPLETE line — indent, padded cells, gaps,
-// the lot — and may only return it wrapped. It never sees a cell, so it cannot
-// change a width, a shortening, an order or a word, and the visible characters
-// of a decorated render are produced by exactly the same code as an undecorated
-// one. That is what makes S044-R2.4 — same content in every mode, presentation apart
-// — hold by construction rather than by two writers being kept in agreement.
-//
-// The consequence is a real constraint on what may be put in one of these
-// fields: a style that PADS (lipgloss's Width, Padding, Margin, Border) adds
-// visible cells and breaks the property. Bold, faint and a foreground colour do
-// not.
-//
-// # A nil field is the identity
-//
-// The zero paint decorates nothing, so plainStyle passes paint{} and emits byte
-// for byte what it emitted before this seam existed — which is what keeps R2.1
-// (no escape sequence reaches a log) true without a branch to remember.
+// A nil field is the identity: plainStyle passes paint{} and emits byte for
+// byte what it did before this seam existed, so no escape sequence reaches a
+// log without a branch to remember.
 type paint struct {
 	// heading wraps a section title.
 	heading func(string) string
@@ -242,7 +181,7 @@ func decorate(f func(string) string, s string) string {
 // then padded with spaces.
 //
 // Both terminal modes are built from this one call, differing only in the paint
-// they hand it (D8, extended to a third style).
+// they hand it.
 func textStyle(width int, p paint) style {
 	return style{
 		heading: func(out *lineWriter, title string) { writePlainHeading(out, title, width, p) },
@@ -251,7 +190,7 @@ func textStyle(width int, p paint) style {
 	}
 }
 
-// plainStyle is that syntax with no decoration at all (R2.1).
+// plainStyle is that syntax with no decoration at all.
 func plainStyle(width int) style {
 	return textStyle(width, paint{})
 }
@@ -261,7 +200,7 @@ func plainStyle(width int) style {
 //
 // Every field is a plain function and not a closure, because there is nothing
 // for one to close over — which is what an export having no settings looks like
-// in code (S044-R9.3).
+// in code.
 func markdownStyle() style {
 	return style{
 		heading: writeMarkdownHeading,
@@ -291,7 +230,7 @@ func write(w io.Writer, blocks []report.Section, st style) error {
 // writeSection prints one section — heading, lead, rows, notes — in that order,
 // in every syntax.
 //
-// The ORDER is shared and the SYNTAX is not, which is the whole of D8. The two
+// The ORDER is shared and the SYNTAX is not. The two
 // blank lines are shared too: a table is preceded by one only when a lead was
 // printed above it, and notes always are, so the shape of a section survives the
 // change of syntax.
@@ -330,15 +269,15 @@ func writePlainHeading(out *lineWriter, title string, width int, p paint) {
 }
 
 // writePlainTable prints a table whose every column was measured from the values
-// this run will actually print (R6.1, R6.3).
+// this run will actually print.
 //
 // A row's detail is CUT to one line while prose is WRAPPED, and the asymmetry is
 // deliberate. A sentence standing on its own loses nothing by occupying three
 // lines. A reason wrapped between two rows costs the table the property that
 // makes it scannable — one record, one line — and a reader looking for the next
 // package has to re-find the column instead of following it down. The cut is
-// marked (S044-R6.4) and the model still holds the whole string, so a syntax with no
-// width budget prints all of it (R7.4).
+// marked and the model still holds the whole string, so a syntax with no width
+// budget prints all of it.
 func writePlainTable(out *lineWriter, t report.Table, width int, p paint) {
 	widths := plainColumnWidths(t, width)
 
@@ -449,7 +388,7 @@ func plainRow(cells []string, widths []int) string {
 //
 // It measures with lipgloss.Width for the reason columnWidth does: a CJK
 // character is one rune, three bytes and two cells, and only the last of those
-// is the number the terminal aligns on (R6.2).
+// is the number the terminal aligns on.
 func pad(value string, cells int) string {
 	if missing := cells - lipgloss.Width(value); missing > 0 {
 		return value + strings.Repeat(" ", missing)
@@ -477,8 +416,8 @@ func writeProse(out *lineWriter, text string, width int) {
 // rule is the horizontal line under a section title, as wide as the title.
 //
 // It is assembled from borderStyle's own top segment rather than from a
-// character written here, so the border is decided in one place for every mode
-// (D9). The segment is repeated by count and then measured back to it, which is
+// character written here, so the border is decided in one place for every
+// mode. The segment is repeated by count and then measured back to it, which is
 // what makes the rule exactly as wide as asked for even if a future border is
 // built from a wide character.
 //
@@ -524,7 +463,7 @@ const (
 // end the ROW, and the syntax has no escape for that one: a row is one line by
 // definition. Folding a break to a space is the single place this writer alters
 // a value, and it alters only the break — every character around it still
-// reaches the reader, which is what separates folding from shortening (S044-R9.3).
+// reaches the reader, which is what separates folding from shortening.
 // CRLF is listed before CR so a Windows line ending folds to one space and not
 // to two; a Replacer prefers the pattern given first.
 //
@@ -550,35 +489,26 @@ func writeMarkdownHeading(out *lineWriter, title string) {
 //
 // Nothing is wrapped and nothing is cut. A document has no line to fit, and
 // hard-wrapping a paragraph that will be re-flowed by whatever renders it only
-// puts breaks where the reader's window is not (S044-R9.3).
+// puts breaks where the reader's window is not.
 func writeMarkdownProse(out *lineWriter, text string) {
 	out.line(text)
 }
 
 // writeMarkdownTable writes a table as pipe rows.
 //
-// # Nothing is measured and nothing is padded
+// Nothing is measured and nothing is padded: whatever renders a pipe table
+// aligns it, and a column width here would be the first place a line budget
+// could enter the export path. Every cell holds its value in full, including
+// the ~230-character reason the terminal shows sixty cells of.
 //
-// A pipe table needs no alignment in its source — whatever renders it aligns
-// the columns — so this writer computes no width at all. That is not tidiness:
-// a column width here would be the first place a line budget could enter the
-// export path, and an export carries the complete report (S044-R9.3). Every cell
-// holds its value in full, including the ~230-character reason the terminal
-// shows sixty cells of.
+// The column count is report.Table.Columns, which reads the header AND every
+// row, so a row with an extra cell is printed rather than dropped and the two
+// syntaxes cannot disagree about it.
 //
-// # The column count is the model's, not this writer's
-//
-// report.Table.Columns reads the header AND every row, so a row carrying an
-// extra cell is printed rather than silently dropped. Asking the table itself
-// is what makes it impossible for the two syntaxes to disagree about how many
-// columns a table has: there is one answer, and neither writer computes it.
-//
-// # Each row is COPIED into a slice of its own
-//
-// Never appended to in place. The header and the cells belong to the section,
-// and appending the reason cell onto one of those slices could write into the
-// backing array the section still holds — a renderer quietly editing the report
-// it was given. Copying costs one allocation per row and cannot.
+// Each row is COPIED into a slice of its own, never appended to in place:
+// appending the reason cell onto the section's own slice could write into the
+// backing array the section still holds, a renderer quietly editing the report
+// it was given.
 func writeMarkdownTable(out *lineWriter, t report.Table) {
 	columns := t.Columns()
 	withDetail := hasDetail(t)
@@ -621,7 +551,7 @@ func hasDetail(t report.Table) bool {
 //
 // The leading and trailing pipes are optional in the syntax and written anyway:
 // they make a row that ends in an empty cell — a result whose reason the plan
-// already stated (R7.2) — still show that the cell is there.
+// already stated — still show that the cell is there.
 func markdownRow(cells []string) string {
 	escaped := make([]string, len(cells))
 	for i, cell := range cells {

@@ -16,7 +16,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
-// Errors of Revise (R5.4 to R5.6).
+// Errors of Revise.
 var (
 	ErrNotFound        = errors.New("no news item with this ID")
 	ErrSiteMissing     = errors.New("the site has no notice file with this ID")
@@ -38,10 +38,10 @@ func (c Changes) given() bool {
 
 // Revise opens the text of notice id in edit, applies changes, and rewrites
 // the news item in overlay and — when sitePath is not empty — the site file,
-// each replaced atomically (R5). The news item's Revision goes up by one and
+// each replaced atomically. The news item's Revision goes up by one and
 // the site file's updated becomes now in UTC; Posted, published and the ID
-// stay (R5.2). Nothing is written when the text comes back unchanged and no
-// field was given (R5.6), or when any check fails.
+// stay. Nothing is written when the text comes back unchanged and no
+// field was given, or when any check fails.
 func Revise(ctx context.Context, id string, changes Changes, overlay, sitePath string,
 	edit BodyEditor, now time.Time,
 ) (Result, error) {
@@ -132,7 +132,7 @@ func Revise(ctx context.Context, id string, changes Changes, overlay, sitePath s
 }
 
 // applyChanges returns cur with every given field replaced, each validated as
-// New validates it (R5.3).
+// New validates it.
 func applyChanges(cur Notice, c Changes, hasSite bool) (Notice, []string, error) {
 	next := cur
 	var warnings []string

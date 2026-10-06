@@ -28,10 +28,10 @@ var (
 
 // Every git operation is bounded, on top of the context its caller passes.
 // NetworkTimeout bounds the ones that talk to a remote: Push, PushDryRun and
-// Fetch (S054-R5.3). LocalTimeout bounds every other one: status, add, commit,
-// merge, rebase, rev-parse and rev-list (S054-R5.4). An operation that runs
+// Fetch. LocalTimeout bounds every other one: status, add, commit,
+// merge, rebase, rev-parse and rev-list. An operation that runs
 // past its bound is stopped; its error wraps context.DeadlineExceeded and reads
-// "git <op> timed out after <bound>" (S054-R5.5).
+// "git <op> timed out after <bound>".
 const (
 	NetworkTimeout = 5 * time.Minute
 	LocalTimeout   = 1 * time.Minute
@@ -52,12 +52,12 @@ type GitRunner struct {
 
 	// reporter receives stage/done/tail events for mutating and streaming ops.
 	// Defaults to tui.Noop() so callers that supply no reporter behave exactly
-	// as before (R3.3).
+	// as before.
 	reporter tui.Reporter
 	// taskID identifies this runner's task in reporter events.
 	taskID string
 	// execCommand builds the underlying *exec.Cmd; it is a seam so tests can
-	// substitute the subprocess. Defaults to exec.CommandContext (R3.3). It
+	// substitute the subprocess. Defaults to exec.CommandContext. It
 	// receives the bounded context of the run, and the command it returns must
 	// be created by exec.CommandContext on that context: the runner sets the
 	// command's Cancel (procgroup.Foreground), which os/exec refuses to start
@@ -70,7 +70,7 @@ type GitRunnerOption func(*GitRunner)
 
 // NewGitRunner creates a new GitRunner for the specified working directory.
 // With no options it uses a no-op reporter and exec.CommandContext, so
-// existing no-arg callers are unaffected (R3.3).
+// existing no-arg callers are unaffected.
 func NewGitRunner(workDir string, opts ...GitRunnerOption) *GitRunner {
 	g := &GitRunner{
 		workDir:     workDir,
@@ -131,7 +131,7 @@ func (g *GitRunner) WorkDir() string {
 // ssh passphrase, https credentials or a gpg pinentry, and a child in a
 // background group would be stopped by SIGTTIN at its first read. When either
 // context is done git gets SIGTERM, and SIGKILL procgroup.GracePeriod later if
-// it is still running (S054-R5.2).
+// it is still running.
 func (g *GitRunner) run(ctx context.Context, timeout time.Duration, stdout, stderr io.Writer, args ...string) error {
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -160,7 +160,7 @@ func (g *GitRunner) run(ctx context.Context, timeout time.Duration, stdout, stde
 // only "signal: terminated", whatever caused it. A done parent means the caller
 // stopped the run, or the caller's own deadline did, which is not this
 // operation's bound, so the parent's error is wrapped as it is. A done run
-// context under a live parent hit the bound (S054-R5.5). run is read first:
+// context under a live parent hit the bound. run is read first:
 // contexts never come back to life, so a parent that is live after that read
 // was live before it, and a cancel landing between the reads is the parent's.
 func interrupted(parent, run context.Context, timeout time.Duration, op string) error {
@@ -184,7 +184,7 @@ func stoppedByContext(err error) bool {
 
 // runCommand runs a git command bounded by timeout (see run) and returns its
 // stdout, its stderr and an error. A failure git reported itself carries
-// ErrGitCommand and the last tui.MaxCapturedBytes of stderr (S054-R7.2), or is
+// ErrGitCommand and the last tui.MaxCapturedBytes of stderr, or is
 // the bare run error when git wrote nothing to stderr.
 func (g *GitRunner) runCommand(ctx context.Context, timeout time.Duration, args ...string) (stdout, stderr string, err error) {
 	var stdoutBuf, stderrBuf bytes.Buffer
@@ -201,8 +201,8 @@ func (g *GitRunner) runCommand(ctx context.Context, timeout time.Duration, args 
 
 // runExplained runs a local git command that explains its failures on stdout
 // as well as stderr (merge conflicts, a refused fast-forward, a stopped
-// rebase) and folds both streams, cut to their last tui.MaxCapturedBytes
-// (S054-R7.2), into the error, so the caller can read the explanation and
+// rebase) and folds both streams, cut to their last tui.MaxCapturedBytes,
+// into the error, so the caller can read the explanation and
 // detect a conflict.
 func (g *GitRunner) runExplained(ctx context.Context, args ...string) error {
 	stdout, stderr, err := g.runCommand(ctx, localTimeout, args...)
@@ -346,7 +346,7 @@ const bentooScratchExclude = ":(exclude,glob)**/.*.bentoo-*"
 
 // Add stages files for commit with path validation. Each path follows "--",
 // so a file whose name begins with "-" is staged as a file, never read as an
-// option (S054-R5.6); bentooScratchExclude keeps bentoo's scratch files out.
+// option; bentooScratchExclude keeps bentoo's scratch files out.
 func (g *GitRunner) Add(ctx context.Context, paths ...string) error {
 	return g.staged("add", func() error {
 		if len(paths) == 0 {
@@ -476,9 +476,9 @@ func (g *GitRunner) PushDryRun(ctx context.Context) (string, error) {
 // Fetch fetches changes from a remote repository. It is a streaming op: git's
 // progress output (which it writes to stderr) is tailed live via a
 // tui.StreamCapture and also captured, so a failing fetch preserves its output
-// in the returned error (R7.1) — the last tui.MaxCapturedBytes of it, which is
-// what Captured keeps (S054-R7.2). Under the default Noop reporter and
-// exec.CommandContext this is behavior-equivalent to a buffered fetch (R3.3).
+// in the returned error — the last tui.MaxCapturedBytes of it, which is
+// what Captured keeps. Under the default Noop reporter and
+// exec.CommandContext this is behavior-equivalent to a buffered fetch.
 // It is bounded by NetworkTimeout, and a cancel or a timeout is reported as
 // runCommand reports it (see run).
 //
@@ -499,7 +499,7 @@ func (g *GitRunner) Fetch(ctx context.Context, remote string) error {
 		return runErr
 	}
 	// Preserve the captured output in the error, mirroring runCommand's
-	// wrapping (R7.1).
+	// wrapping.
 	if captured := strings.TrimSpace(sc.Captured()); captured != "" {
 		return errors.Join(ErrGitCommand, errors.New(captured))
 	}
@@ -509,7 +509,7 @@ func (g *GitRunner) Fetch(ctx context.Context, remote string) error {
 // Merge merges a branch into the current branch.
 // If there are conflicts, the error message includes the conflict details from
 // stdout. "--end-of-options" precedes the branch, so a name beginning with "-"
-// is read as a revision, never as an option (S054-R5.7).
+// is read as a revision, never as an option.
 func (g *GitRunner) Merge(ctx context.Context, branch string) error {
 	return g.staged("merge", func() error {
 		return g.runExplained(ctx, "merge", "--end-of-options", branch)

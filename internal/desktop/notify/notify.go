@@ -1,6 +1,6 @@
 // Package notify sends desktop notifications over
 // org.freedesktop.Notifications and reports the actions the user takes on
-// them (S072-R6).
+// them.
 package notify
 
 import (
@@ -41,7 +41,7 @@ const (
 )
 
 // capBodyMarkup is the capability a server advertises when it interprets the
-// body as markup (R6.6). It is matched exactly: a vendor capability that only
+// body as markup. It is matched exactly: a vendor capability that only
 // contains the name does not count.
 const capBodyMarkup = "body-markup"
 
@@ -49,7 +49,7 @@ const capBodyMarkup = "body-markup"
 const (
 	appName      = "bentoo"
 	appIcon      = "bentoo-tray"
-	desktopEntry = "bentoo-tray" // R6.7
+	desktopEntry = "bentoo-tray"
 	// expireTimeout -1 leaves the expiry to the server's default.
 	expireTimeout = int32(-1)
 )
@@ -81,8 +81,8 @@ type Action struct {
 
 // Message is one notification. A summary message has an empty NoticeID.
 // Summary and Body are notice-supplied plain text: Send passes the summary as
-// is (R6.14) and escapes the body only for a server that advertises
-// body-markup (R6.6). Urgency is the spec's urgency hint: 0 low, 1 normal,
+// is and escapes the body only for a server that advertises
+// body-markup. Urgency is the spec's urgency hint: 0 low, 1 normal,
 // 2 critical.
 type Message struct {
 	NoticeID, Summary, Body string
@@ -284,7 +284,7 @@ func (n *Notifier) loadCapabilities(ctx context.Context, ownerSeq dbus.Sequence)
 // bodyMarkup reports whether the current server advertises body-markup,
 // asking it when the cached capabilities belong to an earlier owner or were
 // never read. On a failed read it reports false: the body goes out as plain
-// text, which is what R6.6 prescribes for a server not known to parse markup.
+// text, which is what a server not known to parse markup must get.
 func (n *Notifier) bodyMarkup(ctx context.Context) (bool, error) {
 	n.mu.Lock()
 	caps, ownerSeq := n.caps, n.ownerSeq
@@ -330,9 +330,9 @@ func (n *Notifier) Events() <-chan Event {
 }
 
 // Send shows m and returns the ID the server assigned to it. The summary is
-// sent as plain text (R6.14); the body is escaped only when the server
-// advertises body-markup, and sent as is otherwise (R6.6). m.Actions are sent
-// in order as key/label pairs (R6.5). Errors name the notice.
+// sent as plain text; the body is escaped only when the server
+// advertises body-markup, and sent as is otherwise. m.Actions are sent
+// in order as key/label pairs. Errors name the notice.
 //
 // ctx should carry a deadline: a server that accepts the call and never
 // answers is otherwise waited for up to 25 s. A slow or hung server delays
@@ -605,10 +605,9 @@ func (n *Notifier) handleOwnerChanged(sig *dbus.Signal) {
 var markupEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
 // Escape makes notice-supplied text safe for the body of a server that
-// advertises body-markup (R6.6): & becomes &amp;, < becomes &lt;, > becomes
+// advertises body-markup: & becomes &amp;, < becomes &lt;, > becomes
 // &gt;. Text that already looks like an entity is escaped again, because it
-// is text, not markup. The summary is plain text by spec and never escaped
-// (R6.14).
+// is text, not markup. The summary is plain text by spec and never escaped.
 func Escape(s string) string {
 	return markupEscaper.Replace(s)
 }

@@ -24,9 +24,9 @@ const (
 	menuTextDirection        = "ltr"
 )
 
-// Menu ids (design.md). Notice entries take ids from firstNoticeID upward,
-// one per notice ID, given on first listing and kept for the process lifetime
-// (R9.7): a check that re-renders the menu between show and click must never
+// Menu ids, fixed values. Notice entries take ids from firstNoticeID upward,
+// one per notice ID, given on first listing and kept for the process lifetime:
+// a check that re-renders the menu between show and click must never
 // make a click open another notice.
 const (
 	menuRootID          int32 = 0
@@ -43,7 +43,7 @@ const (
 	firstNoticeID int32 = 1000
 )
 
-// maxNoticeEntries is how many notices the menu lists (R9.1).
+// maxNoticeEntries is how many notices the menu lists.
 const maxNoticeEntries = 10
 
 // maxTitleRunes bounds a notice label, ellipsis included: titles come from
@@ -128,7 +128,7 @@ type menuEvent struct {
 	Timestamp uint32
 }
 
-// noticeIDs gives each notice ID its menu id (R9.7). Ids are never reused,
+// noticeIDs gives each notice ID its menu id. Ids are never reused,
 // so an id that once named a notice names that notice or nothing.
 type noticeIDs struct {
 	ids  map[string]int32
@@ -156,7 +156,7 @@ func (n *noticeIDs) given(id int32) bool {
 	return id >= firstNoticeID && id < n.next
 }
 
-// buildMenu maps a View to the menu (R9.1, R9.3, R9.5): the notices, the
+// buildMenu maps a View to the menu: the notices, the
 // count of those not listed, then Check now and Mark all as read, the pause
 // entries or Resume while paused, and Quit last, in groups split by
 // separators. Entries beyond maxNoticeEntries are counted with More. Notice
@@ -559,7 +559,7 @@ func (o menuObject) AboutToShowGroup(ids []int32) ([]int32, []int32, *dbus.Error
 }
 
 // handleEvent delivers a click on an entry of the current menu, with the
-// notice the id lists now (R9.7). A click on the id of a notice no longer
+// notice the id lists now. A click on the id of a notice no longer
 // listed is delivered with an empty NoticeID: the host may still show the
 // previous menu, and the click is the reader's to ignore. It reports false
 // when id is neither in the menu nor ever given to a notice; events on the

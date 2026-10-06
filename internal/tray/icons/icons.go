@@ -1,4 +1,4 @@
-// Package icons holds the tray icon as SNI pixmaps (S072-R8.6). The pixmaps
+// Package icons holds the tray icon as SNI pixmaps. The pixmaps
 // are PNGs pre-rendered from misc/tray/icons/*.svg by `make tray-icons` and
 // embedded, so the Go build needs no SVG library.
 package icons
@@ -16,15 +16,15 @@ import (
 	"github.com/obentoo/bentoolkit/internal/desktop/sni"
 )
 
-// Variant selects one of the three icon states (S072-R12.4).
+// Variant selects one of the three icon states.
 type Variant int
 
 const (
 	// Plain is the icon with no badge.
 	Plain Variant = iota
-	// Unread adds an orange dot: unread notices, none critical (S072-R8.4).
+	// Unread adds an orange dot: unread notices, none critical.
 	Unread
-	// Critical adds a red dot: an unread notice is critical (S072-R8.7).
+	// Critical adds a red dot: an unread notice is critical.
 	Critical
 )
 

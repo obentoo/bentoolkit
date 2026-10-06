@@ -20,10 +20,10 @@ import (
 )
 
 const (
-	// MaxBodyBytes is the largest feed body accepted (R2.8).
+	// MaxBodyBytes is the largest feed body accepted.
 	MaxBodyBytes int64 = 1 << 20
 
-	// Timeout bounds a whole fetch made with the default client (R2.8).
+	// Timeout bounds a whole fetch made with the default client.
 	Timeout = 30 * time.Second
 
 	// drainLimit bounds how much of an unread body is discarded before the
@@ -33,16 +33,16 @@ const (
 )
 
 var (
-	// ErrInsecureURL is returned by New for a feed URL that is not https (R2.9).
+	// ErrInsecureURL is returned by New for a feed URL that is not https.
 	ErrInsecureURL = errors.New("feed URL is not https")
 
-	// ErrTooLarge is returned by Fetch when the body exceeds MaxBodyBytes (R2.8).
+	// ErrTooLarge is returned by Fetch when the body exceeds MaxBodyBytes.
 	ErrTooLarge = errors.New("feed body exceeds 1 MiB")
 )
 
 // Result is the outcome of a fetch that received a response. Status and Bytes
 // are set whenever a response arrived, including alongside an error, so the
-// caller can log them on every outcome (R13.3).
+// caller can log them on every outcome.
 type Result struct {
 	NotModified bool
 	ETag        string
@@ -75,10 +75,10 @@ type Fetcher struct {
 }
 
 // New returns a Fetcher for rawURL. A URL that is not an absolute https URL
-// with a host is refused with ErrInsecureURL naming it (R2.9). A nil client is
+// with a host is refused with ErrInsecureURL naming it. A nil client is
 // replaced by the default: a 30 s timeout, the shared transport and the
 // credential-safe redirect policy. An empty userAgent is replaced by
-// "bentoo-tray/<version>" (R2.10).
+// "bentoo-tray/<version>".
 func New(rawURL string, client *http.Client, userAgent string) (*Fetcher, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Scheme != "https" || u.Host == "" {
@@ -102,13 +102,13 @@ func DefaultClient() *http.Client {
 	}
 }
 
-// DefaultUserAgent returns "bentoo-tray/<version>" (R2.10).
+// DefaultUserAgent returns "bentoo-tray/<version>".
 func DefaultUserAgent() string {
 	return "bentoo-tray/" + version.Short()
 }
 
-// Fetch GETs the feed, sending etag as If-None-Match when it is not empty
-// (R2.3). A 304 yields a Result with NotModified set and no feed (R2.12); a
+// Fetch GETs the feed, sending etag as If-None-Match when it is not empty.
+// A 304 yields a Result with NotModified set and no feed; a
 // 200 yields the parsed feed and the response's ETag. Any other status is a
 // *StatusError; a body past MaxBodyBytes is ErrTooLarge; a 200 whose body is
 // not a valid feed is an error wrapping notices.ErrInvalidFeed. Every error

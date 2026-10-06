@@ -34,7 +34,7 @@ type Package struct {
 	// Slot is the part of the SLOT record before "/" (the subslot is dropped).
 	Slot string
 	// Repo is the repository record, or empty when the package has none
-	// (R5.6: such a package is not installed from any named repository).
+	// (such a package is not installed from any named repository).
 	Repo string
 }
 
@@ -56,7 +56,7 @@ func (r Reader) Installed(ctx context.Context) (pkgs []Package, skipped int, err
 // skipped and counted in skipped, never fatal, so one bad entry does not hide
 // the rest. Entries that are not packages (stray files, directory names
 // without a version part) are ignored without being counted. A missing
-// repository record yields an empty Repo (R5.6).
+// repository record yields an empty Repo.
 //
 // err is non-nil only when root itself cannot be listed or ctx is done; it
 // wraps the cause with %w and names root.

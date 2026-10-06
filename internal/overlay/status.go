@@ -211,29 +211,19 @@ func StagedStatusWithExecutor(ctx context.Context, executor git.GitExecutor) ([]
 const statusCleanTree = "No changes detected (working directory clean)"
 
 // FormatStatus renders package statuses as the lines a caller prints, and
-// chooses NO APPEARANCE (S046-R5.2).
+// chooses NO APPEARANCE.
 //
-// # What left, and why the composition stayed
-//
-// Three things here used to be built by the terminal printer package: the clean-tree
-// sentence arrived dimmed, the package heading arrived blue and bold, and every
-// change's status arrived in the colour of its git letter. A colour is a
-// decision only a terminal can use — the same status could not then be written
-// to a Markdown file, exported as JSON, diffed or counted (design.md D7) — so
-// the library no longer makes it, and whoever is printing does.
-//
-// Two of those helpers were doing something ELSE as well, and that part stayed:
-// output.FormatPackage joined the category to the package, and
-// output.FormatStatus wrapped the status in brackets. Composing the facts into a
-// line is what this function is for; only the appearance crossed the boundary,
-// which is why the import went and the shape of the text did not.
+// A colour is a decision only a terminal can use — the same status could not
+// then be written to a Markdown file, exported as JSON, diffed or counted — so
+// the library no longer makes it, and whoever is printing does. Composing the
+// facts into a line (category joined to package, status in brackets) is what
+// this function is for, so that stayed.
 //
 // The result is byte-identical to what the command printed OFF A TTY, since
 // fatih/color returns bare text there — so every pipe, log and CI run reads
-// exactly what it read yesterday. On a terminal the colour is gone, and story
-// 047 is where the whole CLI's presentation is restyled through the report
-// renderers; reintroducing it here would put the decision back in the library
-// that just gave it up.
+// exactly what it read before. The CLI's presentation is restyled through the
+// report renderers; reintroducing colour here would put the decision back in
+// the library that just gave it up.
 func FormatStatus(statuses []PackageStatus) string {
 	if len(statuses) == 0 {
 		return statusCleanTree

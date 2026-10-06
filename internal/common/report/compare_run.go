@@ -6,148 +6,36 @@ import (
 	"strings"
 )
 
-// Authored for story 047, sub-task 2.1 — S047-R1.1, S047-R1.4.
-// Sections and its helpers added by sub-task 2.2 — S047-R1.1, S047-R3.2,
-// S047-R3.3, S047-R6.1, S047-R6.2.
-// GroupKeep and the label it derives added by sub-task 2.3 — S047-R2.1,
-// S047-R2.2, S047-R2.3, S047-R2.4, S047-R2.5.
+// This file declares the payload for `overlay compare`, renders it, and carries
+// GroupKeep, the rule that fills its keep groups — the one-file-per-payload rule
+// manifest_run.go states. It adds no key at the root of an exported document
+// and changes no existing one, so SchemaVersion stays 2 and this fifth kind
+// costs a consumer no migration.
 //
-// This file declares the payload for `overlay compare`, RENDERS it, and — since
-// sub-task 2.3 — carries the rule that fills its groups, which is the
-// one-file-per-payload rule manifest_run.go states. What is still missing at
-// this commit is named rather than left to be discovered: the Kind constant
-// that names this payload in an exported document is sub-task 2.4's, so nothing
-// in cmd/bentoo builds a CompareRun.
-//
-// # Amended by sub-task 2.3: KeepGroups has a producer now
-//
-// The paragraph above used to say that the slice "is filled by sub-task 2.3, so
-// the group arm of the keep section below is written and has no data to run
-// on yet". It is amended rather than deleted, because the ordering it described
-// is the one this file followed: the arm was written first, and 2.3 supplied it
-// with data rather than with behaviour. GroupKeep is what fills the slice, and
-// it is exported because the adapter that calls it is in another package
-// (S047-D2).
-//
-// # Amended by sub-task 2.2: CompareRun DOES satisfy Payload now
-//
-// This header used to say the opposite, and gave the reason for the ordering:
-// a type that satisfied Payload before it had sections would satisfy it by
-// returning no blocks, and a report that renders as nothing is worse than a
-// type that cannot be rendered yet, because only one of the two fails to
-// compile when something asks for it. The sentence is amended rather than
-// deleted, because the ordering it argued for is the one this file followed.
-//
-// # The fifth payload, and the fifth file
-//
-// manifest_run.go states the rule this file follows: one file per payload,
-// struct and Sections together, so that "a fourth kind of run is a new file" is
-// literally true. This is the fifth, and it adds no key at the root of an
-// exported document and changes no existing one — SchemaVersion stays 2, which
-// is what S047-R1.4 asks for and what makes a fifth kind cost no migration for
-// a consumer that story 046 has only just migrated (S047-D8).
-//
-// # Evidence that the field guard actually covers this file (S047-R8.1)
-//
-// TestPackageDeclaresNoPresentationField parses every .go file in this package
-// and walks every struct field, so the types below ARE inspected. It would also
-// have passed had this file never been written, which is why a green run here
-// is not evidence: a guard is worth nothing until it has been seen to fail over
-// the subject it is claimed to cover. The story artifacts recording that
-// (.draft/) are not committed, so the transcript is written out here, the same
-// way boundary_fields_test.go and render/contract_test.go write out theirs.
-//
-// The sweep's reach was measured rather than assumed. Its field count is
-// logged only on failure, so it was read with a throwaway program replicating
-// the walk: 83 struct fields in this package before this file, 111 after. The
-// difference is 28, which is exactly what the five types below declare — so the
-// guard did not merely pass, it looked at 28 fields it had never seen.
-//
-// Measured on 2026-09-04 against HEAD ab5a471. ONE mutation, applied alone to
-// this file, run, and reverted immediately; the restore was verified by md5sum
-// against a digest taken before the mutation (ff5c05162dfbd7df89c98b062f59482e,
-// unchanged after the revert).
-//
-// Mutation: KeepGroup's ByCategory renamed to CategoryIndent — a name whose
-// second camel-case word is in presentationWords, chosen because "category"
-// stays legal and only the added word can be what fires.
-//
-//	$ go test ./internal/common/report/ -run 'TestPackageDeclaresNoPresentationField|TestPackageImportsNoPresentation' -race -count=1 -v
-//
-//	=== RUN   TestPackageDeclaresNoPresentationField
-//	    boundary_fields_test.go:311: compare_run.go: KeepGroup.CategoryIndent declares presentation: the word "indent" is a rendering concern, not a fact about a run.
-//	            indentation is how a renderer shows nesting
-//	            <the Remedy line — fieldViolation closes every message with it, word for word>
-//	--- FAIL: TestPackageDeclaresNoPresentationField (0.02s)
-//	=== RUN   TestPackageImportsNoPresentation
-//	--- PASS: TestPackageImportsNoPresentation (0.00s)
-//
-// The failure names the FILE, the TYPE and the FIELD, which is the whole of
-// what a maintainer meeting it needs, and it names this file rather than a
-// package. The import guard stayed green under the mutation, as it should:
-// renaming a field crosses no import rule, and a mutation that reddened both
-// would have been measuring something other than what it claimed.
-//
-// # Why the last line of that transcript is elided
-//
-// fieldViolation closes every message it builds with a fixed Remedy sentence,
-// and that sentence ends in two citations written bare. This package publishes
-// a ceiling on bare citations (citation_test.go, TestCitationDebtDoesNotGrow)
-// and the ceiling is currently AT its measured value, so pasting the sentence
-// whole would raise the count by two and fail the guard — a transcript that
-// breaks the tree is a transcript nobody keeps. The elision follows the
-// convention already in the package: boundary_fields_test.go's second mutation
-// names the Remedy line instead of repeating it, for its own reason, and
-// render/contract_test.go elides a message tail with an ellipsis character.
+// TestPackageDeclaresNoPresentationField walks every struct field in this
+// package, so the types below are inspected: renaming KeepGroup.ByCategory to
+// CategoryIndent fails it with a message naming this file, the type and the
+// field.
 
 // CompareRun is everything one `overlay compare` run established: the
 // repository the overlay was compared against, how much was scanned and how
 // much the two trees have in common, what the run recommends for each package
-// it has an opinion about, and the tally that summarizes the lot (S047-R1.1).
+// it has an opinion about, and the tally that summarizes the lot.
 // It is the Payload behind the `overlay.compare` kind.
 //
-// # Every field is a primitive, and that is a dependency rule rather than taste
+// Every field is a primitive because this package may not import
+// internal/overlay (boundary_test.go's forbiddenImports lists it): conversion
+// happens once, at the adapter in cmd/bentoo, and internal/overlay's enum
+// vocabulary never becomes a wire contract that changes without notice.
 //
-// Nothing below is an overlay.Verdict, an overlay.Verification or an
-// overlay.Finding. This package may not import internal/overlay at all:
-// boundary_test.go's forbiddenImports has listed it since story 046's sub-task
-// 16.4, and TestPackageImportsNoPresentation fails the suite for a single such
-// import, naming the path and the remedy. Every conversion therefore happens
-// once, at the adapter in cmd/bentoo, which is where the four kinds that came
-// before convert too (S047-D1).
+// KeepGroups is a FIELD, never something Sections computes: a group computed at
+// render time would exist on the terminal and nowhere in the exported file.
 //
-// The rule buys more than a green guard. overlay.CompareResult carries Verdict,
-// Verification, Authorship, a review note, a baseline and two slices of
-// findings; marshalling those would publish internal/overlay's enum vocabulary
-// as a wire contract, and every later change to an enum would then change the
-// export without anything saying so (S047-D1).
-//
-// # A group is a FIELD here, never something Sections computes
-//
-// KeepGroups is data this payload carries, not a grouping a renderer performs.
-// manifest_run.go and snapshot_run.go state the rule for counts and it is the
-// same rule for a group: a fact the run established travels as a field,
-// "because a program holding a file cannot call a method". A JSON export is
-// exactly that program. Grouped at render time instead, the exported document
-// would carry every keep entry flat, with no trace that most of them move
-// together, and the terminal and the file would then disagree about what one
-// run found (S047-D2).
-//
-// # It says nothing about whether the run finished
-//
-// "The run reached the end of its package list" and "this many packages were
-// never reached" are true of any batch, so they are the envelope's
-// (Run.Complete, Run.NotEvaluated) and are deliberately absent here — exactly
-// as they are absent from ManifestRun and SnapshotRun, and for the same reason:
-// a payload that restated them would be a second place for a finished run to be
-// described as a partial one, and the two could disagree inside one document.
-//
-// The distinction is sharper for this kind than for the two before it, because
-// a compare run has two ways to fall short. It can be interrupted, and it can
-// finish its list while failing to establish facts it set out to establish — a
-// review killed, an upstream lookup that errored, a version pair the content
-// check refused. Both are the envelope's to state, and the adapter is what adds
-// them up (S047-D4); nothing here re-derives either from the counts below.
+// Whether the run finished is the envelope's (Run.Complete, Run.NotEvaluated),
+// never restated here. A compare run falls short two ways — interrupted, or
+// finished while failing to establish facts: a review killed, an upstream
+// lookup that errored, a pair the content check refused — and the adapter adds
+// both up; nothing here re-derives either from the counts below.
 type CompareRun struct {
 	// Repository is the repository the overlay's packages were compared
 	// against, in the operator's own words — "gentoo" for the ::gentoo tree.
@@ -162,29 +50,15 @@ type CompareRun struct {
 	// many of those the compared repository also carries, and OnlyLocal how
 	// many it carries no version of at all.
 	//
-	// # They are FIELDS, taken from the run, never derived from each other
+	// They are FIELDS because a program holding the exported file cannot call a
+	// method, and none is derived from another: the producer counts them on
+	// different axes, so a subtraction here would invent an answer the run never
+	// gave. A filter flag narrows none of them — a filtered row was evaluated,
+	// the operator merely chose not to look at it.
 	//
-	// This is the rule ManifestRun.Ok gives at length, and it applies to all
-	// three: the document is read by a program holding the exported file, and a
-	// program holding a file cannot call a method. A count that exists only as
-	// a method is a count the export does not carry.
-	//
-	// The second half matters as much. Nothing here subtracts one of the three
-	// from another. They are counted on different axes by the producer — how
-	// many packages exist, how many reached a comparison, how many the remote
-	// lacks — and a subtraction taken here would invent an answer the run never
-	// gave and print it beside two the run did. The adapter takes each from the
-	// producer's own counter, and a run narrowed by a filter flag narrows none
-	// of them: a filtered row was evaluated, the operator merely chose not to
-	// look at it (S047-R5.3).
-	//
-	// # None of them carries omitempty, and that is load-bearing
-	//
-	// A zero dropped from the document reads as "the producer never said",
-	// which is the conflation Run.Complete and Run.NotEvaluated exist to remove
-	// one level up. "The remote carries every package we do" and "nobody
-	// counted the ones it does not" are different answers, and the first is the
-	// case that would lose its zero on a healthy overlay.
+	// None carries omitempty: a dropped zero reads as "the producer never said",
+	// and "the remote carries every package we do" is the healthy case that
+	// would lose its zero.
 	Scanned   int `json:"scanned"`
 	InBoth    int `json:"in_both"`
 	OnlyLocal int `json:"only_local"`
@@ -194,42 +68,28 @@ type CompareRun struct {
 	// It is the list an operator acts on destructively, which is why the entry
 	// beside it carries a reading state and a diff cell rather than a bare
 	// verdict — a recommendation to delete is only as good as the evidence that
-	// somebody looked (S047-R3.1).
+	// somebody looked.
 	//
 	// A nil slice reaches the JSON export as null and an empty one as [], and
 	// the two say different things: the first is a producer that established
 	// nothing, the second a run that found nothing redundant. The renderer
 	// rewrites neither into the other, so the adapter normalises every slice
 	// here to non-nil and a consumer never has to tell "no rows" from "the
-	// producer forgot" (S047-D8).
+	// producer forgot".
 	Redundant []ComparePkg `json:"redundant"`
 	// NeedsRebase is every package ::gentoo moved ahead of while the overlay
 	// carries changes of its own, so ours owes a bump AND a re-application of
 	// the delta.
 	//
-	// # It is its own list because its ADVICE is its own
+	// It is its own list because its advice is its own: folding it into
+	// Redundant would recommend deleting changes ::gentoo has no copy of — the
+	// most expensive mistake this report exists to prevent — and folding it
+	// into Keep would report the copy as earning its place while it falls
+	// behind. `overlay compare` already printed this table (verdictSections in
+	// internal/overlay/compare.go), so leaving the field out would have been a
+	// regression.
 	//
-	// The three lists around it answer three different questions, and this one is
-	// the answer that is neither "remove ours" nor "keep ours as it stands":
-	// somebody has to do work. Folding it into Redundant would recommend deleting
-	// an ebuild that carries changes ::gentoo has no copy of, which is the single
-	// most expensive mistake this whole report exists to prevent; folding it into
-	// Keep would report the overlay copy as earning its place while it silently
-	// falls behind.
-	//
-	// # It is not in design.md's literal struct, and that was a gap rather than a decision
-	//
-	// design.md gives CompareRun with three package lists and a four-column
-	// VerdictTally, so a run with a needs-rebase package counted it and named it
-	// nowhere. `overlay compare` prints that table today — verdictSections in
-	// internal/overlay/compare.go carries "Needs Rebase (our changes must be
-	// re-applied on top of ::gentoo's version)" between the redundant and keep
-	// sections — and story 047's Unchanged Behavior keeps every verdict computing
-	// the same answer it computes now. Dropping the table would have been a
-	// regression the story never asked for, so the field was added and the
-	// deviation recorded.
-	//
-	// Nil versus empty says what it says on Redundant above (S047-D8).
+	// Nil versus empty says what it says on Redundant above.
 	NeedsRebase []ComparePkg `json:"needs_rebase"`
 	// Keep is every package the run recommends keeping, in the order the run
 	// established them.
@@ -248,26 +108,20 @@ type CompareRun struct {
 	// KeepGroups is the sets of kept packages that share one version pair, as
 	// the run established them.
 	//
-	// It is a field for the reason the type doc gives above, and the reason is
-	// not stylistic: this is the only place the exported document says that a
-	// large block of entries moves together. A reader of the file that had only
-	// the flat list could re-derive the grouping, but re-deriving it means
-	// re-implementing the rule — which pair counts, whether a package carrying
-	// a finding may be absorbed, how ties break — and two implementations of
-	// one rule is how a terminal and a file come to disagree (S047-D2).
+	// It is a field because it is the only place the exported document says a
+	// large block of entries moves together; re-deriving it from the flat list
+	// means re-implementing the rule — which pair counts, whether a package
+	// carrying a finding may be absorbed, how ties break — and two
+	// implementations of one rule is how a terminal and a file disagree.
 	//
-	// A group is never a group of one: a version pair with a single member is
-	// an ordinary row, and grouping exists to compress repetition rather than
-	// to introduce a second name for a single package (S047-R2.5). Groups are
-	// ordered by member count descending, ties broken by the first member's
-	// atom, because a total order is what makes two runs over one overlay
-	// produce byte-identical output (S047-R2.4).
+	// A group is never a group of one: grouping compresses repetition rather
+	// than giving a single package a second name. Groups are ordered by member
+	// count descending, ties broken by the first member's atom, so two runs over
+	// one overlay produce byte-identical output.
 	//
-	// GroupKeep, below, is the rule that fills it, and the field was declared
-	// one sub-task before that rule existed — the ordering this package already
-	// uses for a payload written ahead of its adapter. It is the ADAPTER that
-	// calls GroupKeep, never Sections: a group computed while rows are drawn
-	// would exist on a terminal and nowhere in the exported file (S047-D2).
+	// GroupKeep fills it, and it is the ADAPTER that calls GroupKeep, never
+	// Sections: a group computed while rows are drawn would exist on a terminal
+	// and nowhere in the exported file.
 	KeepGroups []KeepGroup `json:"keep_groups"`
 	// Unknown is every package the run reached no recommendation about — the
 	// comparison failed, the remote answered nothing usable, or the package's
@@ -304,7 +158,7 @@ type CompareRun struct {
 	// entry (ComparePkg.Reading) and a total is what an operator reads before
 	// deciding whether to trust the lists at all. "We checked and it matches"
 	// and "nobody checked" are the two answers this whole payload exists to
-	// keep apart (S047-R3.1); a report that stated the second only per row
+	// keep apart; a report that stated the second only per row
 	// would make an operator scanning 300 lines discover it by accident.
 	//
 	// It carries no omitempty for the reason the three counts above do not: a
@@ -316,34 +170,23 @@ type CompareRun struct {
 	// review's coverage, a review that reached no model at all, the advice to
 	// prune what is redundant.
 	//
-	// # Why they are DATA, and not something the command prints beside the report
+	// They are DATA rather than something the command prints beside the report
+	// because an export re-derives its blocks from this payload: attached to the
+	// terminal's sections only, every one of them reached the screen and none
+	// reached an export, so the file was silently shorter than the screen.
+	// Carried here, both paths read Sections and Sections reads this.
 	//
-	// They were exactly that until this field existed, and the cost was
-	// structural rather than cosmetic. The command attached them to the
-	// sections it had just built FOR THE TERMINAL, while an export re-derives
-	// its own blocks from this payload — so every one of these sentences
-	// reached the screen and not one of them reached any export, in any format.
-	// That inverts S047-R1.3 and S047-R6.3, which ask the exported document to
-	// be the COMPLETE report, and it inverts them silently: the file is shorter
-	// than the screen and nothing in it says what is missing. Carried here, the
-	// two paths are identical by construction, because both of them read
-	// Sections and Sections reads this.
+	// They are SENTENCES, as ComparePkg.Reason is: a run-level summary names no
+	// package to travel on, and no set of counts reconstitutes it. What this
+	// type forbids is a sentence about the DEVICE, and none here mentions one.
 	//
-	// They are SENTENCES, which is the choice ComparePkg.Reason already makes
-	// and for the same reason: a run-level summary names no package, so there
-	// is no atom for it to travel on, and no set of counts reconstitutes it —
-	// the producer's words are the fact. What this type forbids is a sentence
-	// about the DEVICE, and nothing in this list mentions one.
-	//
-	// A nil slice reaches the JSON export as null and an empty one as [], and
-	// the two say different things: null is a producer that never considered
-	// the question, [] a run that considered it and had nothing to add. The
-	// adapter fills it either way, and no omitempty drops it — a run with
-	// nothing to say still has to say so (S047-D8).
+	// Null is a producer that never considered the question, [] a run that had
+	// nothing to add; the adapter fills it either way, and no omitempty drops
+	// it — a run with nothing to say still has to say so.
 	Notes []string `json:"notes"`
 	// ReadingFailures splits the failed readings among Unread by why each
 	// review failed: one {cause, count} per cause, over the same population
-	// Unread counts (S057-R4.5). The cause is a word the adapter spells, as it
+	// Unread counts. The cause is a word the adapter spells, as it
 	// spells Reading. No omitempty: a run with no failed review publishes an
 	// empty list, which is the good case.
 	ReadingFailures []CauseCount `json:"reading_failures"`
@@ -356,7 +199,7 @@ type CompareRun struct {
 // # Six strings, and every one of them is already a word rather than a value
 //
 // Status, Reading and Diff are enums at the producer and strings here, and the
-// conversion is the adapter's (S047-D1). That is not a loss of type safety at
+// conversion is the adapter's. That is not a loss of type safety at
 // this seam: the exported document has no Go types in it, so the choice is only
 // between converting once at the adapter and converting in each renderer plus
 // the exporter. The closed vocabularies those three draw from are stated on the
@@ -399,30 +242,22 @@ type ComparePkg struct {
 	// change what the other means.
 	Status string `json:"status"`
 	// Reading is whether anybody read the difference between the two versions,
-	// as one of four words: not requested, not comparable, failed, read
-	// (S047-R3.1).
+	// as one of four words: not requested, not comparable, failed, read.
 	//
-	// # Four values, because "empty" already means four things at the producer
-	//
-	// A review note's zero value covers a run with reviews disabled, a run with
+	// Four values, because a review note's zero value covers reviews disabled,
 	// no reviewer available, a reviewer that errored, and a finding that was
-	// never a candidate for review. Asking "is the note empty?" therefore
-	// cannot answer "did anybody read this?", which is exactly the question an
-	// operator asks before acting on a recommendation to delete (S047-D3).
+	// never a candidate — so "is the note empty?" cannot answer "did anybody
+	// read this?", the question an operator asks before acting on a
+	// recommendation to delete.
 	//
-	// It is separate from Diff below for the same reason the producer keeps its
-	// content check separate from its review: one says whether the two files
-	// differ, the other says whether anyone explained the difference.
-	// Collapsing them reproduces the ambiguity this field exists to remove.
-	//
-	// The empty string is not one of the four. A blank here is a producer that
-	// said nothing, and the adapter maps every case to a word rather than
-	// leaving one unmapped — an unmapped combination is a defect, not a blank
-	// cell.
+	// It is separate from Diff: one says whether the files differ, the other
+	// whether anyone explained the difference. The empty string is not one of
+	// the four; the adapter maps every case to a word, and an unmapped
+	// combination is a defect, not a blank cell.
 	Reading string `json:"reading"`
 	// Diff is what the content check found, drawn from a CLOSED vocabulary:
 	// "+N/-M" for a measured difference, "identical", "not compared", or
-	// "unreadable" (S047-R3.2).
+	// "unreadable".
 	//
 	// The vocabulary is closed so that "no difference was found" can never be
 	// read as "no comparison was made". Those two are the same blank cell in
@@ -445,52 +280,40 @@ type ComparePkg struct {
 	// with an empty Reason carries no finding, and a package carrying no
 	// finding is one that grouping may absorb; a package with a finding is
 	// never absorbed into a group, because grouping compresses repetition and a
-	// finding is not repetition (S047-R2.2). Sub-task 2.3's rule reads this
-	// field for exactly that test.
+	// finding is not repetition. GroupKeep reads this field for exactly that
+	// test.
 	//
 	// It is ONE LINE by construction, folded by the adapter, because a raw
 	// newline in a row's detail corrupts both the plain writer and the Markdown
 	// pipe table. Anything that will not survive being shortened belongs in a
 	// section's lead or notes, which wrap, rather than in a row detail, which
-	// is cut (S047-R6.1, S047-R6.2). What travels here is the whole folded
-	// string at no width budget: the export carries every explanation in full,
-	// whatever the terminal it was rendered at was able to show (S047-R6.3).
+	// is cut. What travels here is the whole folded string at no width budget:
+	// the export carries every explanation in full, whatever the terminal it
+	// was rendered at was able to show.
 	Reason string `json:"reason"`
 	// FurtherFindings is everything ELSE the run established about this
 	// package: the second finding and every one after it, in the producer's own
 	// words and at full length.
 	//
-	// Reason holds the FIRST and this holds the rest, and the split is a
-	// property of the ROW rather than of the finding. A row detail is one line
-	// that a narrow device cuts, so a package the run has three things to say
-	// about would lose two of them to the table it is printed in. What does not
-	// fit a cell is said beside it, in prose that wraps (S047-R6.1), and
-	// `func (r CompareRun) Sections` puts each of these under the block holding
-	// this package's row.
+	// Reason holds the FIRST and this holds the rest, because a row detail is
+	// one line that a narrow device cuts; what does not fit a cell is said
+	// beside it, in prose that wraps, under the block holding this package's
+	// row. The package is NOT named in the text — the block names it — so no
+	// second spelling of Package can disagree with the row beside it.
 	//
-	// The package is NOT named in the text — the block names it when it writes
-	// the sentence, because it knows which entry it is reading. An atom stored
-	// in here would be a second spelling of ComparePkg.Package, free to
-	// disagree with the row printed beside it.
-	//
-	// Every entry is ONE LINE, folded by the adapter for the reason Reason's
-	// own doc gives, and nothing is shortened: the exported document carries
-	// every explanation in full (S047-R6.3).
-	//
-	// A nil slice reaches the export as null and an empty one as [], and only
-	// the second says "the run established nothing further". No omitempty: a
-	// package with a single finding is the common case, and the common case is
-	// the one that would lose its empty list (S047-D8).
+	// Every entry is ONE LINE, folded by the adapter, and nothing is shortened.
+	// Only an empty list says "the run established nothing further", and no
+	// omitempty drops it: a package with a single finding is the common case.
 	FurtherFindings []string `json:"further_findings"`
 	// Cause is why this row failed, in the adapter's closed vocabulary: the
 	// upstream lookup's cause on a row whose Status is "error", the review's
-	// cause on a row whose Reading is "failed", "" on a row with no failure
-	// (S057-R4.4). No omitempty, for the reason Error gives.
+	// cause on a row whose Reading is "failed", "" on a row with no failure.
+	// No omitempty, for the reason Error gives.
 	Cause string `json:"cause"`
 	// Error is the full text of that failure, folded to one line and scrubbed
 	// of the run's credentials by the producer, and "" on a row with no
 	// failure. It follows ManifestResult.Error (model.go): kept whole here,
-	// never shortened; only a table cell may cut it (S057-R4.6).
+	// never shortened; only a table cell may cut it.
 	Error string `json:"error"`
 }
 
@@ -506,13 +329,13 @@ type CauseCount struct {
 // It exists because a report that lists two hundred kept packages one per line
 // tells an operator less than one that says most of them are the same fact
 // repeated. The compression is a fact the run established, carried as data, so
-// the exported document states it too (S047-D2, S047-R2.1).
+// the exported document states it too.
 //
 // # A group never hides anything that needs action
 //
 // Only packages carrying no finding are collected here, and a package with a
-// finding stays its own row whether or not its version pair matches a group's
-// (S047-R2.2). Every member also remains in CompareRun.Keep, so the group is a
+// finding stays its own row whether or not its version pair matches a group's.
+// Every member also remains in CompareRun.Keep, so the group is a
 // view over the list rather than a replacement for it, and dropping the groups
 // costs a reader the summary and no data.
 type KeepGroup struct {
@@ -532,10 +355,10 @@ type KeepGroup struct {
 	// Members are the atoms in this group, in the order the run established
 	// them. The first one breaks ties when two groups have the same member
 	// count, so this order is part of what makes the report byte-identical
-	// across two runs over one overlay (S047-R2.4).
+	// across two runs over one overlay.
 	//
 	// A group always has at least two: a version pair with one member is an
-	// ordinary row and never a group of one (S047-R2.5).
+	// ordinary row and never a group of one.
 	Members []string `json:"members"`
 	// ByCategory is how the group's members break down across categories —
 	// "42 in dev-lang, 8 in app-editors" as values rather than as a sentence.
@@ -571,30 +394,18 @@ type CategoryCount struct {
 // remove, rebase, and no opinion. It mirrors the four counters the producer
 // maintains, one per verdict, and adds nothing to them.
 //
-// # Four columns, and that is why a tally is a payload's business
+// It is a payload's own count because each command counts in its own
+// vocabulary — four validation outcomes, two manifest columns, two snapshot
+// columns, four verdicts — and one universal tally on the envelope would lose
+// or invent columns.
 //
-// The autoupdate check counts four validation outcomes, a manifest run counts
-// two, a snapshot run counts two of its own, and this counts four verdicts that
-// are none of those. One universal tally on the envelope would have to lose a
-// column or invent columns another command has no answer for, which is the
-// asymmetry Run's doc comment states and the reason each payload keeps its own
-// count in its own vocabulary.
+// It is counted by the run, never summed from CompareRun's lists: a filter
+// flag narrows what an operator looks at and narrows no counter, and a second
+// answer to one question is the first place the two could disagree.
 //
-// # It is counted by the run, never summed from the lists
-//
-// The producer increments one of these per compared package, on the verdict
-// axis, independently of the status axis it also counts on. Re-deriving them
-// here from CompareRun's slices would be a second answer to one question, and
-// the two would part company the first time a list is narrowed for any reason —
-// a filter flag narrows what an operator looks at and narrows no counter
-// (S047-R5.3). NeedsRebase makes that concrete: the run counts it and no slice
-// on CompareRun lists it, so a sum taken over the lists would be short by
-// exactly the packages most in need of work.
-//
-// No field carries omitempty. A run that found nothing redundant reports a zero
-// in that column, and a zero dropped from the document reads as "the producer
-// never said" — which is the reading that would let an unexamined overlay look
-// like a clean one.
+// No field carries omitempty. A zero dropped from the document reads as "the
+// producer never said", which would let an unexamined overlay look like a
+// clean one.
 type VerdictTally struct {
 	// Keep is how many packages the run recommends keeping.
 	Keep int `json:"keep"`
@@ -614,70 +425,30 @@ type VerdictTally struct {
 
 // GroupKeep is the rule that fills CompareRun.KeepGroups: the kept packages
 // that share one version pair and carry no finding, collected into groups and
-// ordered so that two runs over one overlay produce the same list (S047-R2.1,
-// S047-R2.4).
+// ordered so that two runs over one overlay produce the same list.
 //
-// # It is EXPORTED because it runs when the payload is BUILT, not when it is drawn
+// It is exported because it runs when the payload is BUILT, not when it is
+// drawn: the adapter in cmd/bentoo calls it, and Sections only reads the field,
+// so the exported document carries the groups too. It returns the list rather
+// than filling the field, so the assignment is visible where the payload is
+// built — run.KeepGroups = report.GroupKeep(run.Keep) — and a correctly built
+// payload does not depend on somebody remembering a method call.
 //
-// The tempting place for this rule is inside Sections, where the rows are made,
-// and it is the wrong place for the reason CompareRun's own doc gives: a fact
-// the run established travels as a field, "because a program holding a file
-// cannot call a method". A JSON export is exactly that program. Grouped at
-// render time instead, the exported document would carry every keep entry flat,
-// with no trace that most of them move together, and the terminal and the file
-// would then disagree about what one run found (S047-D2).
-//
-// So its caller is the adapter in cmd/bentoo that builds the payload — a
-// different package, which is what exported is for here — and nothing in this
-// file calls it. Sections reads the FIELD.
-//
-// # A function, rather than a method that fills the field
-//
-// It takes the one list it reads and returns the one list it produces, so the
-// assignment is written where the payload is built and is visible there:
-//
-//	run.KeepGroups = report.GroupKeep(run.Keep)
-//
-// A method filling the receiver's own field would make a correctly built
-// payload depend on somebody having remembered to call it, and an empty
-// KeepGroups would then mean either "no version pair repeats" or "nobody ran
-// the rule" — the same conflation every count on this payload refuses omitempty
-// to avoid. It would also be the only pointer method in a package whose
-// payloads are values and whose Sections takes a value receiver.
-//
-// # What is left OUT of the groups, which is the point rather than a limit
-//
-//   - A package carrying a finding — a non-empty ComparePkg.Reason — is never
-//     absorbed, whether or not its version pair matches a group's. Grouping
-//     compresses repetition and a finding is not repetition (S047-R2.2).
-//   - A version pair with a single member is an ordinary row, never a group of
-//     one (S047-R2.5).
-//
-// Neither is dropped from the report. Both stay in CompareRun.Keep, which holds
-// every kept package whatever the groups say, and compareKeepTable lists every
-// entry no group claimed. Passing --all lists every member as its own row and
-// changes nothing about what was scanned or compared (S047-R2.3).
-//
-// # The order is total, and the map is never iterated
-//
-// Groups come back by member count descending, ties broken by the first
-// member's atom (S047-R2.4). Membership is accumulated in a map, so the emitted
-// order is taken from a slice recording each pair's first appearance and the
-// comparison is applied to that — iterating a Go map is randomised per run, and
-// a report built from one could not be byte-identical to the next.
-//
-// # The result is non-nil even when it is empty
-//
-// The rule RAN and collected nothing, which is a different answer from a
-// producer that never ran it — the distinction nil-versus-empty carries on
-// every slice of this payload (S047-D8).
+// A package carrying a finding (a non-empty Reason) is never absorbed, and a
+// version pair with a single member stays an ordinary row; both remain in
+// CompareRun.Keep and compareKeepTable lists them, as it lists every member
+// under --all. Groups come back by member count descending, ties broken by the
+// first member's atom; membership is accumulated in a map, but the order comes
+// from a slice of first appearances, because map iteration is randomised per
+// run. The result is non-nil even when empty: the rule RAN and collected
+// nothing.
 func GroupKeep(pkgs []ComparePkg) []KeepGroup {
 	order := make([]compareVersionPair, 0, len(pkgs))
 	members := make(map[compareVersionPair][]string, len(pkgs))
 
 	for _, p := range pkgs {
 		// The finding test, and the only one: a package with something of its
-		// own to say stays its own row (S047-R2.2).
+		// own to say stays its own row.
 		if p.Reason != "" {
 			continue
 		}
@@ -724,7 +495,7 @@ type compareVersionPair struct {
 }
 
 // compareGroupOrder is the total order over groups: member count descending,
-// ties broken by the first member's atom (S047-R2.4).
+// ties broken by the first member's atom.
 //
 // Total is the operative word. Two groups can tie on count, and without the
 // second key their order would be whatever the sort happened to do with them —
@@ -759,11 +530,10 @@ func compareFirstMember(g KeepGroup) string {
 // # Count descending, ties broken by the category name
 //
 // Largest first is what makes the breakdown useful when it is cut: a shortened
-// line still says what the group mostly is (S047-R6.2). The name breaks ties
-// because it is the only other fact in the entry and it cannot itself tie — a
-// category appears once in the list — so the order is total, which is what
-// S047-R2.4's byte-identical requirement needs from this list as much as from
-// the groups above it.
+// line still says what the group mostly is. The name breaks ties because it is
+// the only other fact in the entry and it cannot itself tie — a category
+// appears once in the list — so the order is total, which byte-identical
+// output needs from this list as much as from the groups above it.
 //
 // The counts are accumulated in a map and emitted from a slice of first
 // appearances, never by ranging over the map, for the reason GroupKeep does the
@@ -822,38 +592,18 @@ const compareLabelFloor = 2
 // actually have in common: the longest prefix their package names share, cut
 // back to where a token ends.
 //
-// # The agreed target's labels are NOT what this produces, and cannot be
+// It does not produce domain prose such as "gstreamer stack" or "rust
+// toolchain": a name-to-label map would put Gentoo knowledge inside the package
+// whose guards keep domain out, and would go stale. Over those groups it gives
+// "gst", "rust", "vulkan" and "mesa" — affordable because a label is prose, not
+// a key, so two groups may share one.
 //
-// The target rendering names its four groups "gstreamer stack", "rust
-// toolchain", "vulkan sdk" and "mesa". Those are domain prose and nothing in
-// this repository can derive them. A hand-maintained name-to-label map would
-// put Gentoo domain knowledge inside internal/common/report — the package whose
-// guards exist to keep domain out — and would go stale the first time somebody
-// added a stack nobody registered. What this produces over those same four
-// groups is "gst", "rust", "vulkan" and "mesa": the stem the members share,
-// measured against the target's own membership.
-//
-// That is a real difference in the words on screen, and it is affordable
-// because the label is prose rather than a key. KeepGroup.Label's own doc says
-// two groups may share one and that nothing matches on it, so a stem that
-// collides with another group's is legal and needs no disambiguation.
-//
-// # The category is not part of it
-//
-// Only the half after the slash is read, because a group may span categories —
-// the measured gstreamer group spans media-plugins, media-libs and dev-python —
-// and a label built from the category would name one third of its own members.
-// The spread is stated by ByCategory, which is where it belongs.
-//
-// # The floor and the fallback under it
-//
-// A stem shorter than compareLabelFloor names nothing: "g (82 packages)" is
-// noise. Under the floor — including the case where the members share no token
-// at all — the label is the FIRST MEMBER'S ATOM. It is deterministic, which
-// S047-R2.4 requires of every path and not only the good one; Members is in the
-// run's own order, so the same input gives the same fallback. And it names
-// something really in the group, with the member count printed beside it saying
-// that it stands for more than itself.
+// Only the half after the slash is read: a group may span categories, and the
+// spread is stated by ByCategory. A stem shorter than compareLabelFloor names
+// nothing ("g (82 packages)"), so under the floor — including members sharing
+// no token at all — the label is the FIRST MEMBER'S ATOM: deterministic,
+// because Members is in the run's own order, and naming something really in
+// the group, with the member count beside it.
 func compareGroupLabel(atoms []string) string {
 	names := make([]string, 0, len(atoms))
 	for _, atom := range atoms {
@@ -870,23 +620,6 @@ func compareGroupLabel(atoms []string) string {
 	return foldToOneLine(atoms[0])
 }
 
-// compareSharedStem is the longest prefix every name shares, cut back so that
-// it ends where a token ends.
-//
-// The cut is what keeps a label from reading as debris. gst-plugins-good and
-// gst-python share "gst-p", which is a prefix of a word rather than a word; cut
-// back to the last boundary it is "gst", which is the thing they are both named
-// after. The prefix is kept whole only when it already ends a token in every
-// name — rust and rust-bin share "rust", and there is nothing there to cut.
-//
-// # Both return paths land on a rune boundary, and that is not luck
-//
-// The prefix is taken byte by byte, so a name outside ASCII could in principle
-// be split mid-rune. It cannot be split here: the whole-prefix path is taken
-// only when every name either ends at that offset or continues with a separator
-// or a digit — all ASCII — and the cut path returns the prefix up to an ASCII
-// separator or digit. A Gentoo package name is ASCII by the package manager's
-// own grammar; this is the guarantee for the string that is not.
 // compareSeparatorAt reports whether name has an explicit token separator at i.
 //
 // It is compareTokenBoundary minus its two implicit openings — the end of the
@@ -899,6 +632,20 @@ func compareSeparatorAt(name string, i int) bool {
 	return name[i] == '-' || name[i] == '_' || name[i] == '.'
 }
 
+// compareSharedStem is the longest prefix every name shares, cut back so that
+// it ends where a token ends.
+//
+// The cut is what keeps a label from reading as debris. gst-plugins-good and
+// gst-python share "gst-p", which is a prefix of a word rather than a word; cut
+// back to the last boundary it is "gst", which is the thing they are both named
+// after. The prefix is kept whole only when it already ends a token in every
+// name — rust and rust-bin share "rust", and there is nothing there to cut.
+//
+// Both return paths land on a rune boundary, and that is not luck: the prefix
+// is taken byte by byte, but the whole-prefix path is taken only when every
+// name ends there or continues with a separator or a digit — all ASCII — and
+// the cut path returns the prefix up to an ASCII separator or digit. A Gentoo
+// package name is ASCII by the package manager's own grammar anyway.
 func compareSharedStem(names []string) string {
 	if len(names) == 0 {
 		return ""
@@ -929,25 +676,15 @@ func compareSharedStem(names []string) string {
 	}
 
 	// A stem is not debris if it is a whole token SOMEWHERE in the group, even
-	// where one member runs on past it. gst-python, gst-plugins-good and
-	// gstreamer share "gst": it ends a token in the first two and is a fragment
-	// of a word in the third, and cutting back inside it finds no boundary at
-	// all, so the whole group fell back to naming one member. "gst" is what they
-	// are named after, and one member spelling it without a separator does not
-	// make it less so.
+	// where one member runs on past it: gst-python, gst-plugins-good and
+	// gstreamer share "gst", which ends a token in the first two, so the group
+	// is named "gst" rather than falling back to one member.
 	//
-	// A SEPARATOR and not any boundary, which is the whole of the narrowing.
-	// compareTokenBoundary also opens on end-of-string and on the first digit of a
-	// run, and both would be wrong here: python3 and python311 share "python3",
-	// which ends the first name and continues the second's NUMBER, so the group
-	// is named after python and not after one member's version. Only an explicit
-	// separator says a human wrote a token break there.
-	//
-	// This does NOT weaken the rule above it. The case that doc names --
-	// gst-plugins-good and gst-python sharing "gst-p" -- is still refused here,
-	// because "gst-p" ends a token in neither, and still falls to the cut below
-	// which returns "gst". What changes is only the group that has no cut to
-	// make.
+	// Only an explicit SEPARATOR counts here, not every boundary: python3 and
+	// python311 share "python3", which ends the first name but continues the
+	// second's NUMBER, so the group is named after python, not one member's
+	// version. The rule above still holds — "gst-p" ends a token in no name and
+	// still falls to the cut below, which returns "gst".
 	for _, name := range names {
 		if compareSeparatorAt(name, len(prefix)) {
 			return prefix
@@ -1000,8 +737,8 @@ func compareTokenBoundary(s string, i int) bool {
 // recommendation is supported at all.
 //
 // They are constants rather than literals for one reason: the adapter that
-// produces these strings lives in cmd/bentoo (sub-task 3.1) and the sentences
-// that count them live here, so the vocabulary is spelled in two packages and
+// produces these strings lives in cmd/bentoo and the sentences that count
+// them live here, so the vocabulary is spelled in two packages and
 // a typo in either would show up as a count of zero rather than as a failure.
 // Naming them at least makes the half this package owns greppable from the
 // field that defines them.
@@ -1009,7 +746,7 @@ func compareTokenBoundary(s string, i int) bool {
 // Counting a Reading value is not the same thing as re-deriving it. Every cell
 // this file prints comes from the payload verbatim — Diff above all, whose
 // closed vocabulary is the adapter's to produce and this file's to render
-// as-is (S047-R3.2) — and the counts below feed a NOTE, never a cell.
+// as-is — and the counts below feed a NOTE, never a cell.
 const (
 	readingNotRequested  = "not requested"
 	readingNotComparable = "not comparable"
@@ -1027,8 +764,8 @@ const (
 // there.
 const compareReadingFailedMark = "[reading failed]"
 
-// compareReviewCauseOrder is the review-cause vocabulary in its stated order
-// (S057-R4.3). The scope note orders ReadingFailures by count, highest first,
+// compareReviewCauseOrder is the review-cause vocabulary in its stated order.
+// The scope note orders ReadingFailures by count, highest first,
 // and breaks ties by this order, so the note reads the same whatever order the
 // producer listed the entries in. A cause missing from it sorts last.
 var compareReviewCauseOrder = []string{
@@ -1037,7 +774,7 @@ var compareReviewCauseOrder = []string{
 }
 
 // compareFailureCounts renders ReadingFailures as "<n> <cause>" joined by ", ",
-// highest count first and ties in compareReviewCauseOrder (S057-R4.3).
+// highest count first and ties in compareReviewCauseOrder.
 func compareFailureCounts(failures []CauseCount) string {
 	rank := func(cause string) int {
 		for i, c := range compareReviewCauseOrder {
@@ -1068,72 +805,23 @@ func compareFailureCounts(failures []CauseCount) string {
 
 // Sections is the compare run as structure: what it says, in order, with every
 // value at full length and not one decision about how it will look. It is also
-// what makes CompareRun satisfy the Payload interface, for the first time
-// (S047-R1.1).
+// what makes CompareRun satisfy the Payload interface.
 //
-// # Six blocks, because the run answers six questions
-//
-// A manifest run answers one question and gets one section. This one answers
-// six, and each block is a question an operator asks in a different order: how
-// much was compared at all, what may be removed, what needs work re-applied,
-// what earns its place, what nothing is known about, and how the whole thing
-// tallies. Redundant comes first among the verdicts because it is the only one
-// asking for a destructive action, which is the order internal/overlay's own
-// verdictSections has always printed in; the summary comes last because a
+// Six blocks, because the run answers six questions: how much was compared at
+// all, what may be removed, what needs work re-applied, what earns its place,
+// what nothing is known about, and how it tallies. Redundant leads the verdicts
+// because it is the only destructive one; the summary comes last because a
 // tally read before its evidence is a number nobody can check.
 //
-// design.md describes four blocks. Two more are here, and both were decided
-// after it was written. NeedsRebase is a real list on this payload and
-// `overlay compare` prints that table today, so dropping it would have been a
-// regression story 047 never asked for — the field's own doc records the same
-// deviation from the other side. The summary exists because the agreed target
-// rendering ends in one and no renderer emits a summary of its own: a block
-// that no payload produces is a block that never prints.
+// Every block is returned on every path: "nothing is redundant" is an answer,
+// and a missing heading is indistinguishable from a report cut short. Guards
+// read the COUNTS the run established, never the length of a list. Counts go
+// in the Lead; omissions, causes and anything that must be read whole go in
+// the Notes, which wrap — a Row.Detail is cut at the device width, so it holds
+// only a line that still means something shortened.
 //
-// # A block with no rows is still a block
-//
-// Every section below is returned on every path, including the paths that
-// return no rows at all. "Nothing is redundant" is an answer, and an answer
-// that arrives as a missing heading is indistinguishable from a report that
-// was cut short. Section's own doc states the rule and manifest_run.go shows
-// the shape: the guard is on the COUNTS the run established, never on the
-// length of a list, so a payload that counted eleven redundant packages and
-// carries no row for any of them says exactly that rather than announcing that
-// nothing was found (S046-R2.3).
-//
-// # Counts go in the Lead, omissions and causes go in the Notes
-//
-// One rule, applied to all six blocks, because a reader who learns where to
-// look once should not have to learn it again per section. Section.Lead is
-// documented as "the counts that tell a reader what they are about to look
-// at"; Section.Notes as "what was left out and why, and what the run did not
-// do". So the count of a list sits above its table and the reason six of its
-// entries were never compared sits below it, with the caveats.
-//
-// Both fields WRAP in every renderer, and Row.Detail is CUT at the width the
-// device allows, which is the asymmetry S047-D7 turns into a placement rule:
-// anything an operator must read whole goes in a Lead or a Notes (S047-R6.1),
-// and a Row.Detail is one line that still means something once it is shortened
-// (S047-R6.2). Nothing here puts an explanation in a detail.
-//
-// The target rendering agreed for this story places the redundant section's
-// refusal sentence ABOVE its table rather than below it. This file puts it in
-// the Notes instead, which changes the sentence's position by one table and
-// nothing else about it: it wraps either way, so both satisfy S047-R6.1, and
-// Notes is where section.go says "what the run did not do" belongs. A refusal
-// to compare is precisely that.
-//
-// # ShowAll decides what is LISTED and never what is counted
-//
-// Only the keep section reads it, and it is the only thing in this file that
-// may change which rows are listed. Every count in every Lead and every Note
-// comes from a field of the payload — Scanned, OnlyLocal, Verdicts, or the
-// length of one of the payload's own lists — and never from the rows that were
-// built, so no number can move when the listing does (S047-D7, S044-R8.3).
-//
-// SectionOptions.SkipPlan is not read, and its absence is deliberate: none of
-// the six blocks below is a plan of what the run intended to do, so there is
-// nothing here for that flag to omit.
+// Only the keep section reads ShowAll, and it changes what is LISTED, never a
+// count. SectionOptions.SkipPlan is not read: none of the six blocks is a plan.
 func (r CompareRun) Sections(opts SectionOptions) []Section {
 	return []Section{
 		compareScopeSection(r),
@@ -1145,30 +833,6 @@ func (r CompareRun) Sections(opts SectionOptions) []Section {
 	}
 }
 
-// compareScopeSection is the first block: how much was scanned, how much of it
-// could be compared at all, and how much of the comparison nobody read.
-//
-// # It has no table, and that is the block
-//
-// The three counts are the whole content. A table would have one row in it and
-// the row would repeat the sentence above it, which is the padding that trains
-// a reader to skim.
-//
-// # The unread sentence is a NOTE, and it is conditional on the count
-//
-// It is three clauses long and an operator has to read all three before
-// trusting any list below, which is exactly what S047-R6.1 says belongs in
-// prose that wraps rather than in a detail that is cut. It is emitted only
-// when Unread is above zero: a run in which every comparison was read has
-// nothing to explain, and a note that appeared anyway would say "0
-// comparison(s) were never read" over a report where that is the good news.
-//
-// It names all three of Unread's causes rather than picking one. The payload
-// carries a single total, so the sentence cannot say which of the three
-// happened — and inventing a cause here would be this file answering a
-// question the run did not. Which cause applies to a LISTED package is
-// answerable, and the redundant block below answers it from the per-row
-// Reading values (S047-R3.3).
 // compareAgrees picks the form of a verb that agrees with n.
 //
 // The report's "package(s)" idiom sidesteps the NOUN and leaves the verb where
@@ -1185,6 +849,18 @@ func compareAgrees(n int, singular, plural string) string {
 	return plural
 }
 
+// compareScopeSection is the first block: how much was scanned, how much of it
+// could be compared at all, and how much of the comparison nobody read.
+//
+// It has no table: the three counts are the whole content, and a one-row table
+// would repeat the sentence above it.
+//
+// The unread sentence is a NOTE, prose that wraps, because an operator must
+// read all of it before trusting any list below. It appears only when Unread is
+// above zero, and it names all three of Unread's causes: the payload carries a
+// single total, so naming one would answer a question the run did not. Which
+// cause applies to a listed package is answered by the redundant block from
+// each row's Reading.
 func compareScopeSection(r CompareRun) Section {
 	s := Section{Title: "Overlay Comparison"}
 
@@ -1212,11 +888,11 @@ func compareScopeSection(r CompareRun) Section {
 //
 // It is the one section that carries the DIFF column, together with the
 // needs-rebase block below, because a recommendation to delete is only as good
-// as the evidence that somebody looked (S047-R3.1) and the diff cell is that
+// as the evidence that somebody looked and the diff cell is that
 // evidence. The cell is printed exactly as the payload carries it: the closed
 // vocabulary it is drawn from is what keeps "no difference was found" from
 // being read as "no comparison was made", and re-wording it here would reopen
-// the conflation (S047-R3.2).
+// the conflation.
 func compareRedundantSection(r CompareRun) Section {
 	s := Section{Title: "Redundant — " + compareRepository(r) + " ships the version, and nothing cleared the content check"}
 
@@ -1238,9 +914,8 @@ func compareRedundantSection(r CompareRun) Section {
 
 	// The advice is DERIVED, in compareRedundantLead, from what was read. An
 	// unconditional recommendation to remove would contradict this section's own
-	// title two lines above it, and it is the screen story 047 exists to remove:
-	// nobody should delete work of ours because a report showed an unread package
-	// as if it had been checked (S047-R3.1, S047-R3.3).
+	// title two lines above it, and nobody should delete work of ours because
+	// a report showed an unread package as if it had been checked.
 	s.Lead = []string{compareRedundantLead(r.Redundant)}
 	s.Rows = comparePkgTable(r, r.Redundant, true)
 
@@ -1265,54 +940,20 @@ func compareRedundantSection(r CompareRun) Section {
 // and the removal advice that FOLLOWS FROM those two — in that order, above the
 // table they describe.
 //
-// # The advice is derived, and that is the whole point of this function
+// The advice is derived from what was read, never unconditional: nothing read
+// gives no removal advice (the measured overlay's case), some read limits the
+// recommendation to those by count, and everything read covers the whole list.
+// A Reading this file does not know, the empty string included, counts as NOT
+// read — the fail-safe direction, which can cost a recommendation but never
+// earn one over evidence nobody has.
 //
-// A recommendation is exactly what must not cover a package the evidence does
-// not reach; internal/overlay's splitRedundantSection already divides today's
-// output on the same rule, and story 047 keeps every verdict answering as it
-// answers now. So the sentence is chosen from what was read:
-//
-//   - nothing read — no removal advice follows at all. This is the measured
-//     overlay's case: eleven packages, not one of them with a reading.
-//   - some read — the recommendation covers those, by count, and says in the
-//     same breath that it covers none of the rest. No measured run exercises
-//     this arm; the wording is written in the voice of the two that are.
-//   - everything read — the recommendation covers the whole list.
-//
-// A package whose Reading is a word this file does not know — including the
-// empty string, which ComparePkg.Reading's doc calls a producer that said
-// nothing — counts as NOT read. That is the fail-safe direction: an unmapped
-// value can cost a report a recommendation it could have made, and never earn
-// one over evidence nobody has.
-//
-// # This is S047-R3.3, and the version-pair clause is why it exists
-//
-// The producer's NotVerified collapses four causes: no local copy, no upstream
-// copy at that version, an unreadable file, and two versions that differ. A
-// report that printed the collapsed state would leave a reader unable to tell
-// "we compared them and they match" from "we refused to compare them at all",
-// which are opposite answers about whether the overlay's copy is redundant.
-// ComparePkg.Reading is the field that keeps them apart, and this is where the
-// run's own numbers are attached to the word.
-//
-// # Only ONE of those causes may be NAMED, and the rest are counted apart
-//
-// `func noteContentRefusal` writes readingNotComparable on every NotVerified, so
-// one sentence naming the version pair over the whole count asserts, for every
-// other cause, something the run never established. The pair is the one cause a
-// reader here can PROVE — resolvePackagePaths refuses a differing pair before
-// any other exit — so it is read off the ROW, and every other refusal gets a
-// clause that names no cause at all.
-//
-// Stating no cause is the honest answer. Stating the wrong one is worse than the
-// ambiguity S047-R3.3 set out to remove, because an operator cannot tell it from the
-// case the sentence is true of. This is the objection `func compareDiffCell` in
-// cmd/bentoo/overlay_compare_report.go already makes about printing "unreadable"
-// for a state it cannot observe, applied to the sentence beside the table.
-//
-// Every clause is conditional on its count, and that is not a stylistic choice:
-// a sentence claiming that six packages were never compared, in a run where all
-// of them were, is false in the direction that matters — it invites an operator
+// The producer's NotVerified collapses four causes into readingNotComparable:
+// no local copy, no upstream copy at that version, an unreadable file, and two
+// versions that differ. Only the version pair is provable from the row —
+// resolvePackagePaths refuses a differing pair before any other exit — so it
+// alone is named, and every other refusal gets a clause naming no cause:
+// stating the wrong cause is worse than stating none. Every clause is
+// conditional on its count, since a false "never compared" invites an operator
 // to distrust a list with nothing wrong with it.
 func compareRedundantLead(pkgs []ComparePkg) string {
 	var read, versionsDiffer, refusedUnstated, failed, notRequested int
@@ -1498,9 +1139,7 @@ func compareKeepSection(r CompareRun, listEvery bool) Section {
 // packages genuinely share no version pair — every pair with a single member,
 // or every repeat carrying a finding of its own. The first arm below is the
 // right answer for that run and for a payload nobody ran the rule over: list
-// every kept package, because there is nothing to collapse. It was written one
-// sub-task before the rule existed, which is why 2.3 supplied it with data
-// rather than with behaviour.
+// every kept package, because there is nothing to collapse.
 func compareKeepTable(r CompareRun, listEvery bool) Table {
 	t := Table{Headers: comparePkgHeaders(r, false)}
 
@@ -1568,7 +1207,7 @@ func compareKeepGroupRow(g KeepGroup, status map[string]string) Row {
 //
 // It is a Row.Detail rather than prose because it is one line per row and it
 // stays meaningful when it is cut — the first categories are the largest, so a
-// shortened breakdown still says what the group mostly is (S047-R6.2). It is
+// shortened breakdown still says what the group mostly is. It is
 // folded for the reason every detail in this package is: a raw newline
 // corrupts both the plain writer and the Markdown pipe table, and the category
 // names arrive from the producer.
@@ -1593,7 +1232,7 @@ func compareCategoryBreakdown(counts []CategoryCount) string {
 // which are fields of the run; the count of rows in the table is a consequence
 // of ShowAll and moves with it. Reading the latter would make the sentence
 // under the table disagree with the sentence above it exactly when an operator
-// passes the flag to check (S047-D7, S044-R8.3).
+// passes the flag to check.
 //
 // The wording keeps its shape in both directions and only the tail changes,
 // which is what manifest_run.go and snapshot_run.go already do for the same
@@ -1651,63 +1290,23 @@ func compareUnknownSection(r CompareRun) Section {
 
 // compareSummarySection is the tally, last, after the evidence it counts.
 //
-// # Three lines, and the third is the one that keeps the first two honest
+// The verdict counts cover every package scanned, while the tables hold only
+// what reached this report, so the third line states how many scanned packages
+// have no row above at all — otherwise a reader adding up rows lands on a
+// smaller number with nothing to say why.
 //
-// The verdict counts cover every package the run scanned, while the tables
-// above hold only what reached this report — the packages both trees carry,
-// less whatever a filter flag narrowed away. So a reader adding up the rows
-// lands on a smaller number than the tally and has nothing to tell them why.
-// The third line says it: how many scanned packages have no row above at all.
+// That line is the one number measured on the lists, and it does not break
+// the never-derive-a-counter-from-len rule: it asks about the SCREEN, and what
+// is on screen IS the lists. It used to read OnlyLocal, which agrees only on an
+// unfiltered run: under --only-redundant a 265-package overlay showed three
+// rows while OnlyLocal still read 101, telling an operator deciding a deletion
+// that they saw 161 packages they did not. A member collapsed into a group
+// counts as listed — its group's row stands for it — so the number does not
+// move with --all. A negative is floored at zero: lists outrunning the scan is
+// a malformed payload, and "-3 of 265" is arithmetic nobody can act on.
 //
-// # THE ONE NUMBER HERE THAT IS MEASURED ON THE LISTS, AND WHY THAT IS NOT THE
-// # field-not-len RULE BREAKING
-//
-// Every other number in this block is a producer field: Scanned, InBoth,
-// OnlyLocal and the four Verdicts. The rule those obey — never derive a COUNTER
-// from len(rows) — is a rule about what the RUN established. A counter must not
-// move when a listing does, or "11 are redundant" quietly becomes "11 are on
-// this screen" (S047-D7, S044-R8.3). This sentence asks a question about the
-// SCREEN — how many scanned packages have no row above — and there len is the
-// only honest answer: what is on screen IS the lists.
-//
-// It used to read OnlyLocal, and on an unfiltered run the two agree, because a
-// package has no row exactly when the compared repository carries no version of
-// it. Under a filter they part company, and OnlyLocal is then the wrong number
-// printed with a straight face. Measured on the maintainer's 265-package
-// overlay: unfiltered, "101 of 265 have no row above" and OnlyLocal reads 101;
-// under --only-redundant the run printed THREE rows, so 262 have no row while
-// OnlyLocal still read 101. The sentence told an operator deciding what to
-// delete that they were seeing 161 packages they were not — on the one flag
-// whose whole purpose is to decide a deletion (S047-R2.3, S047-R1.1).
-//
-// # A COLLAPSED GROUP MEMBER HAS A ROW ABOVE, AND IT IS ITS GROUP'S
-//
-// compareKeepTable prints one row per group unless --all, so a run without the
-// flag shows fewer keep ROWS than the payload has keep ENTRIES. This counts the
-// entries: a member folded into a group is above, inside the row that stands
-// for it, and the note under that table names how many were folded and how to
-// unfold them. Counting it as unlisted would report the same collapse twice and
-// — worse — would make this number move when only the presentation moved, so
-// the same scan rendered with --all would claim to cover packages the scan
-// without it did not. That is the confusion this line exists to remove, one
-// step to the left. SectionOptions.ShowAll is therefore not read here, and the
-// sentence is a property of the run's view of the overlay rather than of the
-// device it is printed on.
-//
-// # A NEGATIVE IS FLOORED AT ZERO RATHER THAN PRINTED
-//
-// Scanned is one field and the four lists are four others; nothing in the type
-// makes them agree, which is the reason every guard in this file reads a count
-// rather than a list. A payload whose lists outrun its scan is malformed, and
-// "-3 of 265 have no row above" would state that malformation as arithmetic
-// nobody can act on. Zero says the same thing in a sentence that parses.
-//
-// # The needs-rebase column is printed even when it is zero
-//
-// The agreed target rendering omits it, because the run it was built from had
-// none. Dropping a zero would make "no package needs a rebase" and "nobody
-// counted" the same line, which is the conflation every count on this payload
-// refuses omitempty to avoid.
+// The needs-rebase column prints even at zero: dropping a zero would make
+// "no package needs a rebase" and "nobody counted" the same line.
 func compareSummarySection(r CompareRun) Section {
 	listed := len(r.Redundant) + len(r.NeedsRebase) + len(r.Keep) + len(r.Unknown)
 
@@ -1816,7 +1415,7 @@ func comparePkgHeaders(r CompareRun, withDiff bool) []string {
 // Every cell is the payload's own string, printed as it was carried. Diff in
 // particular is drawn from a closed vocabulary the adapter produces, and
 // re-wording it here would be a second implementation of the one thing that
-// vocabulary exists to guarantee (S047-R3.2).
+// vocabulary exists to guarantee.
 func comparePkgRow(p ComparePkg, withDiff bool) Row {
 	cells := []string{p.Package, p.Local, p.Remote, p.Status}
 	if withDiff {
@@ -1831,27 +1430,23 @@ func comparePkgRow(p ComparePkg, withDiff bool) Row {
 // # The marker goes LAST, and that is a decision about what survives a cut
 //
 // A detail is shortened to the width the device allows and marked where it was
-// cut (S047-R6.2), so whatever sits at the end is the first thing to go. The
+// cut, so whatever sits at the end is the first thing to go. The
 // finding is what the operator needs; the marker repeats a fact the first
 // section already states for the whole run and that ComparePkg.Reading carries
 // in full in the exported document. Putting the marker first would spend the
 // visible width on the redundant half.
 //
-// # The reason is FOLDED, never shortened
-//
-// Every non-whitespace character survives; only the line structure collapses.
-// A raw newline corrupts both the plain writer and the Markdown pipe table,
-// which is why no detail in this package may contain one. The adapter folds
-// the reason too — ComparePkg.Reason's doc says so — and folding an already
-// folded string costs nothing, while trusting a producer to have done it is
-// how one unfolded string reaches a table.
+// The reason is FOLDED, never shortened: a raw newline corrupts both the plain
+// writer and the Markdown pipe table. The adapter folds it too, and folding an
+// already folded string costs nothing, while trusting the producer is how one
+// unfolded string reaches a table.
 func compareDetail(p ComparePkg) string {
 	reason := foldToOneLine(p.Reason)
 
 	if p.Reading != readingFailed {
 		return reason
 	}
-	// The marker names the review's cause when one was recorded (S057-R4.2),
+	// The marker names the review's cause when one was recorded,
 	// and stays the bare marker the scope note explains when none was.
 	mark := compareReadingFailedMark
 	if p.Cause != "" {

@@ -94,7 +94,7 @@ func emergeBashrcPath() string {
 	return filepath.Join(EmergeHookRoot, "etc", "portage", "bashrc")
 }
 
-// InstallEmergeHook installs the opt-in Portage emerge hook (R4.1): it writes
+// InstallEmergeHook installs the opt-in Portage emerge hook: it writes
 // the snapper pre/post hook script to /etc/portage/bashrc.d and ensures
 // /etc/portage/bashrc sources it via the managed block. Idempotent: re-running
 // rewrites the script and replaces the existing block in place — user bashrc
@@ -102,10 +102,10 @@ func emergeBashrcPath() string {
 // duplicated.
 //
 // It is called exclusively by the explicit `bentoo snapshot hook --install`
-// verb — never by apply (R4.3).
+// verb — never by apply.
 func InstallEmergeHook() error {
 	// The bashrc is checked first: a broken block refuses the install before
-	// any file is created or rewritten (053 R6.1).
+	// any file is created or rewritten.
 	stripped, err := checkEmergeBashrc()
 	if err != nil {
 		return err
@@ -122,14 +122,14 @@ func InstallEmergeHook() error {
 	return ensureEmergeBashrcBlock(stripped)
 }
 
-// UninstallEmergeHook removes the Portage emerge hook (R4.2): it deletes the
+// UninstallEmergeHook removes the Portage emerge hook: it deletes the
 // hook script and strips the managed block from /etc/portage/bashrc, leaving
 // user content intact. A bashrc left empty (or whitespace-only) is removed.
 // Absent files are a clean no-op so uninstall succeeds on a never-installed
 // system.
 func UninstallEmergeHook() error {
 	// The bashrc is checked first: a broken block refuses the uninstall before
-	// the hook script is removed or the bashrc rewritten (053 R6.2).
+	// the hook script is removed or the bashrc rewritten.
 	stripped, err := checkEmergeBashrc()
 	if err != nil {
 		return err
@@ -178,8 +178,8 @@ func ensureEmergeBashrcBlock(stripped []byte) error {
 
 // checkEmergeBashrc reads the bashrc and returns it with the managed block
 // stripped, or nil when there is no bashrc. A block with no end marker is
-// refused with an error naming the file, the line, and the manual fix
-// (053 R6.3), before the caller has touched anything.
+// refused with an error naming the file, the line, and the manual fix,
+// before the caller has touched anything.
 func checkEmergeBashrc() ([]byte, error) {
 	bashrc := emergeBashrcPath()
 	existing, err := os.ReadFile(bashrc) //nolint:gosec // G304: bashrc is the constant etc/portage/bashrc under EmergeHookRoot ("/" in production, a temp dir in tests)
@@ -201,7 +201,7 @@ func checkEmergeBashrc() ([]byte, error) {
 
 // ErrBrokenHookBlock marks a bashrc whose managed-block begin marker has no end
 // marker after it. Stripping such a block would drop every line to the end of
-// the file, so install and uninstall refuse it instead (053 R6).
+// the file, so install and uninstall refuse it instead.
 var ErrBrokenHookBlock = errors.New("bentoo snapshot hook block has no end marker")
 
 // stripEmergeHookBlock removes the managed block — the begin-marker line, the
@@ -210,7 +210,7 @@ var ErrBrokenHookBlock = errors.New("bentoo snapshot hook block has no end marke
 // content without a block is returned unchanged.
 //
 // A begin marker with no end marker after it returns ErrBrokenHookBlock naming
-// the 1-based line number and text of that begin marker (053 R6.3).
+// the 1-based line number and text of that begin marker.
 func stripEmergeHookBlock(content []byte) ([]byte, error) {
 	lines := strings.Split(string(content), "\n")
 	kept := make([]string, 0, len(lines))

@@ -19,11 +19,11 @@ type Options struct {
 // terminal status so Enabled's truth table is exercised without a real TTY.
 var isTerminal = output.IsTerminal
 
-// Enabled is the ONE place the live-TUI decision is made (AD7). The TUI is used
+// Enabled is the ONE place the live-TUI decision is made. The TUI is used
 // iff stdout is a terminal AND none of the opt-outs is set: the --no-tui flag,
 // the NO_COLOR convention, or BENTOO_NO_TUI. An UNSET env var is the empty
 // string; per the NO_COLOR convention an empty value means "not set", so only a
-// non-empty value counts as an opt-out (R2.1/R2.2). The TTY probe goes through
+// non-empty value counts as an opt-out. The TTY probe goes through
 // the isTerminal seam so the decision is testable.
 func Enabled(o Options) bool {
 	if o.NoTUI {

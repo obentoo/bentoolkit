@@ -49,7 +49,7 @@ type (
 
 	// TaskLineMsg carries one tail update for a task. Text is the full content
 	// of the line currently being assembled. EOL distinguishes the two terminal
-	// behaviors the StreamCapture emitter detects (AD4, R1.2):
+	// behaviors the StreamCapture emitter detects:
 	//   - EOL=false: an in-place update (the child emitted "\r" or the partial
 	//     line was flushed). The model REPLACES the task's live line.
 	//   - EOL=true: the line ended with "\n". The model COMMITS the live line
@@ -71,7 +71,7 @@ type (
 	}
 
 	// LogMsg routes a logger/output line into the TUI scrollback so stray
-	// writes do not corrupt a frame (AD6).
+	// writes do not corrupt a frame.
 	LogMsg struct{ Level, Text string }
 
 	// BatchDoneMsg closes the run with a final summary line.

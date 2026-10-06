@@ -1,6 +1,6 @@
 // Package state persists bentoo-tray's state: the feed ETag and serial, the
 // read state and source of every notice, the pause end, the backoff and the
-// earliest next fetch (S072-R10).
+// earliest next fetch.
 package state
 
 import (
@@ -18,11 +18,11 @@ import (
 // Format is the state file version this package writes.
 const Format = 2
 
-// formatV1 is the previous version, still loaded and migrated (R10.5): it has no
+// formatV1 is the previous version, still loaded and migrated: it has no
 // next fetch time and no record source.
 const formatV1 = 1
 
-// retention is how long a record absent from both sources is kept (R10.4).
+// retention is how long a record absent from both sources is kept.
 const retention = 90 * 24 * time.Hour
 
 // ErrCorrupt marks a state file that could not be parsed or carries an unknown
@@ -39,12 +39,12 @@ type State struct {
 	PauseUntil time.Time         `json:"pause_until"`
 	Failures   int               `json:"failures"`
 	// NextFetch is the earliest time the next fetch may run; zero means none is
-	// scheduled (R10.1, R2.14).
+	// scheduled.
 	NextFetch time.Time `json:"next_fetch"`
-	// Established reports that R6.9's first run is over: a check has accepted
+	// Established reports that the first run is over: a check has accepted
 	// a feed, or read the news when no feed is configured. A state without it
 	// is a first run even once saved, so a first run can persist its backoff
-	// and Retry-After (R2.13, R2.14) without ending. A format 1 file loads
+	// and Retry-After without ending. A format 1 file loads
 	// established: it was only ever written after the first run.
 	Established bool `json:"established"`
 	// Saved reports that a file was loaded or written; it is derived, never
@@ -68,7 +68,7 @@ type Record struct {
 	Updated  time.Time `json:"updated"`
 }
 
-// Prune drops the records not seen for more than 90 days (R10.4).
+// Prune drops the records not seen for more than 90 days.
 func (s *State) Prune(now time.Time) {
 	for id, r := range s.Notices {
 		if now.Sub(r.LastSeen) > retention {
@@ -91,10 +91,10 @@ func Open(path string) *Store {
 // Saved and Established false. A format 1 file is loaded with every record's
 // Source left "", Established set (a format 1 tray wrote no state before its
 // first run was over) and Format set to 2 in memory, so the next Save writes
-// format 2 (R10.5). A format 2 file without "established" is a first run. A
+// format 2. A format 2 file without "established" is a first run. A
 // file that cannot be parsed or carries a format other than 1 or 2 is moved to
 // <path>.corrupt-<unix time> and a fresh state is returned together with an
-// error wrapping ErrCorrupt (R10.3).
+// error wrapping ErrCorrupt.
 func (s *Store) Load() (State, error) {
 	fresh := State{Format: Format, Notices: map[string]Record{}}
 	data, err := os.ReadFile(s.path)
@@ -131,7 +131,7 @@ func (s *Store) moveAside(cause error) error {
 	return fmt.Errorf("%w: %s (%w); moved to %s", ErrCorrupt, s.path, cause, dst)
 }
 
-// Save writes st atomically with mode 0600 in a 0700 directory (R10.2), always
+// Save writes st atomically with mode 0600 in a 0700 directory, always
 // in the current format. A failed save leaves the previous file intact.
 func (s *Store) Save(st State) error {
 	st.Format = Format

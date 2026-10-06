@@ -173,7 +173,7 @@ type ManifestUpdate struct {
 	// the atom in here would be printed twice on every failure line.
 	Error string
 	// Err is that same failure as a VALUE — the cause wrapped with %w and with
-	// the category/package that produced it (S046-R5.1).
+	// the category/package that produced it.
 	//
 	// It exists beside Error rather than replacing it because a string is a
 	// dead end: it cannot be unwrapped, it cannot be matched with errors.Is,
@@ -190,8 +190,7 @@ type ManifestUpdate struct {
 	// Output is what the failing command printed — pkgdev's own diagnostic,
 	// verbatim, including the "[bentoo] reused N distfile(s)" line the run
 	// injects into the same stream. It is the text the operator acts on, and by
-	// the time a report is rendered the terminal that streamed it live is gone
-	// (S046-R5.2).
+	// the time a report is rendered the terminal that streamed it live is gone.
 	//
 	// It is populated ONLY on failure. The capture is a verbatim, unbounded copy
 	// of every byte the child wrote — a package fetching a large distfile can
