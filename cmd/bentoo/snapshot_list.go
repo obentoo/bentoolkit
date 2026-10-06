@@ -11,7 +11,7 @@ import (
 )
 
 // snapshotListRemote is --remote: additionally query and render remote
-// snapshots — btrbk target backups and restic repository snapshots (008 R5.2).
+// snapshots — btrbk target backups and restic repository snapshots.
 // Remote sources are strictly opt-in: without the flag no remote query runs.
 var snapshotListRemote bool
 
@@ -63,7 +63,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 		}
 	}
 
-	// Remote listing is opt-in (008 R5.2): without --remote, neither btrbk
+	// Remote listing is opt-in: without --remote, neither btrbk
 	// `list backups` nor any restic query runs at all.
 	if !snapshotListRemote {
 		return nil
@@ -71,7 +71,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 	for _, g := range mgr.ListRemote(ctx) {
 		if g.Err != nil {
 			// Lenient: a failing remote source is reported but does not abort
-			// the other sources (008 R5.2).
+			// the other sources.
 			output.PrintWarning("remote %s unavailable: %v", g.Label, g.Err)
 			continue
 		}
@@ -87,7 +87,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 	return nil
 }
 
-// remoteSnapshotLine renders one remote snapshot (008 R5.2): btrbk target
+// remoteSnapshotLine renders one remote snapshot: btrbk target
 // backups carry an absolute path; restic snapshots carry the short id, the
 // creation time, and the backed-up paths.
 func remoteSnapshotLine(s snapshot.Snapshot) string {

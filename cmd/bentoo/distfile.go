@@ -14,30 +14,18 @@ import (
 )
 
 // This file is `bentoo distfile fetch`: the user-facing half of the
-// authenticated download that internal/autoupdate has performed for the
-// maintainer since 0.28.
+// authenticated download internal/autoupdate performs for the maintainer.
 //
-// # Why a top-level command and not one more `overlay` subcommand
+// It is top-level, not an `overlay` subcommand, because it does not act ON the
+// overlay: it reads the registry and the ebuild, then writes into DISTDIR,
+// Portage's directory. Its user is installing a package whose distfile no
+// mirror may carry, after `emerge` stopped and said so.
 //
-// Everything under `overlay` acts ON the overlay — it adds, commits, compares,
-// manifests, prunes. This one reads two files out of the overlay (the registry
-// and the ebuild, to learn the version) and then writes into DISTDIR, which is
-// Portage's directory and not the overlay's. The person running it is not
-// maintaining anything: they are installing a package whose distfile no mirror
-// is allowed to carry, and `emerge` has just stopped and told them so.
-//
-// # Why it exists at all
-//
-// Before it, the download the overlay already knew how to perform was reachable
-// only from the sweep, so the ebuild's pkg_nofetch could offer nothing but the
-// manual route: open the vendor page, log in, save the file under exactly the
-// right name, move it into DISTDIR. Every step of that is a chance to land a
-// file whose name or content the Manifest will reject.
-//
-// The manual instructions do not go away, and must stay FIRST in any
-// pkg_nofetch that mentions this command: bentoolkit is not a dependency of the
-// packages it fetches for, and whoever does not have it installed may not be
-// left without a route.
+// It exists so pkg_nofetch can offer more than the manual route (open the
+// vendor page, log in, save under exactly the right name, move into DISTDIR),
+// where every step can land a file the Manifest rejects. The manual
+// instructions must still come FIRST in any pkg_nofetch that mentions this
+// command: bentoolkit is not a dependency of the packages it fetches for.
 
 // distfileFetchDistdir is --distdir: where the file is written. Empty means the
 // host's own DISTDIR, which is the answer this command wants in almost every

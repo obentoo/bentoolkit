@@ -19,17 +19,17 @@ var (
 	snapshotRestoreShip string
 	// snapshotRestoreSubvolume is --subvolume: which configured subvolume the
 	// restore reads its objects back from, since each subvolume has its own
-	// remote prefix (038 R3.2). Deliberately NOT MarkFlagRequired: with exactly
+	// remote prefix. Deliberately NOT MarkFlagRequired: with exactly
 	// one subvolume configured — the currently deployed shape — there is nothing
-	// to disambiguate and the flag stays unnecessary (R5.1). With two or more it
+	// to disambiguate and the flag stays unnecessary. With two or more it
 	// becomes mandatory in practice, enforced by ResolveRestoreSubvolume rather
 	// than by cobra, because "required" here depends on the config, not the
-	// command line (R5.2).
+	// command line.
 	snapshotRestoreSubvolume string
 	// snapshotRestoreYes is --yes/-y: skip the destructive-restore confirm prompt.
 	snapshotRestoreYes bool
 	// snapshotRestoreDryRun is --dry-run: print the destructive actions without
-	// performing them — no subprocess and no confirm prompt (008 R2.3).
+	// performing them — no subprocess and no confirm prompt.
 	snapshotRestoreDryRun bool
 )
 
@@ -75,7 +75,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 	id := args[0]
 
 	// Restore is destructive: load AND validate the config (drivers + deps) so an
-	// unknown driver or missing binary fails fast before any subprocess (R6.1, G3).
+	// unknown driver or missing binary fails fast before any subprocess.
 	cfg, _, err := loadSnapshotConfig(log)
 	if err != nil {
 		log.Error("snapshot restore: failed", "err", err)
@@ -90,13 +90,13 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 
 	// WHICH subvolume this restore reads back from is decided HERE — before the
 	// dry-run preview, before RestoreOptions is built, and therefore before any
-	// subprocess (038 R5.2, R5.3). Each subvolume owns a remote prefix, so on a
+	// subprocess. Each subvolume owns a remote prefix, so on a
 	// config with several of them there is no safe guess: guessing would replay
 	// another subvolume's objects over --target. The rule itself lives in the
 	// snapshot package (ResolveRestoreSubvolume) so it is provable as a pure
 	// function over (config, flag); this handler only calls it and maps a failure
 	// onto a non-zero exit. Its message already names the configured subvolumes
-	// (R5.2) or the rejected value (R5.3) and reads correctly after this prefix.
+	// or the rejected value and reads correctly after this prefix.
 	//
 	// BEFORE the dry-run return on purpose: a preview of a destructive command
 	// exists to show what the real run would do, and the real run refuses here.
@@ -114,7 +114,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	if snapshotRestoreDryRun {
-		// 008 R2.3: preview only — the ship is resolved (an unknown --ship still
+		// Preview only — the ship is resolved (an unknown --ship still
 		// failed above) and so is the subvolume, but nothing runs: no
 		// snapshot.Restore, no subprocess, and the confirm gate is never consulted.
 		output.PrintInfo("dry-run: would restore snapshot %s into %s via ship %q (%s)",
@@ -130,20 +130,20 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 
 		// archive driver: replay the object chain for id from the rclone remote.
 		// SCOPE NOTE — the multi-link full→target chain reconstruction is future
-		// work (T6.1); for this verb the chain is a SINGLE full link for the
+		// work; for this verb the chain is a SINGLE full link for the
 		// requested id. chainLink is unexported, which is WHY the chain is built
 		// INSIDE the snapshot package by snapshot.RestoreChainFor and assigned
 		// straight into the field here. The object key it derives is
 		// "<ArchivePrefix(subvolume)>/<id>.zst" for the subvolume RESOLVED above —
 		// not for the engine's first configured one, which is what used to send
-		// every restore on a multi-subvolume config to the wrong prefix (038 R3.2).
+		// every restore on a multi-subvolume config to the wrong prefix.
 		// A restic restore ignores Chain entirely (RestoreChainFor returns nil for
 		// it, and the resolved subvolume goes unused).
 		Remote:   ship.Remote,
 		Compress: ship.Compress,
 		Chain:    snapshot.RestoreChainFor(cfg, ship, id, subvolume),
 
-		// restic driver: non-secret locators only (R6.1) — repo URL + password FILE.
+		// restic driver: non-secret locators only — repo URL + password FILE.
 		Repo:         ship.Repo,
 		PasswordFile: ship.PasswordFile,
 	}
@@ -156,7 +156,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 		output.PrintSuccess("snapshot restored (%s → %s)", id, snapshotRestoreTarget)
 	case errors.Is(err, snapshot.ErrRestoreDeclined):
 		// Declining a destructive restore is a clean abort, not a failure: report
-		// it and return nil — no exit status — so the exit code stays 0 (R5.4).
+		// it and return nil — no exit status — so the exit code stays 0.
 		output.PrintInfo("restore declined")
 	default:
 		log.Error("snapshot restore: failed", "err", err)

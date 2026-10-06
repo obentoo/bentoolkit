@@ -183,13 +183,12 @@ func invocationContext(ctx context.Context, root *cobra.Command) context.Context
 
 // logFailWithCause reports failWith's cause on the invocation's logger, which
 // ctx (func invocationContext) carries: the call the handler made before it returned the
-// error instead, so the line reaches both stderr and the log file (story 060,
-// R7.1, R7.2; story 062).
+// error instead, so the line reaches both stderr and the log file.
 //
 // A tree whose pre-run never stored a logger — the run failed before the
 // root's PersistentPreRunE, or the tree has no such hook — would log into a
-// discarding logger. The cause is then printed as a bare line on stderr, as it
-// was before story 062, so a failure is never silent.
+// discarding logger. The cause is then printed as a bare line on stderr, so a
+// failure is never silent.
 func logFailWithCause(ctx context.Context, cause error) {
 	log := logging.FromContext(ctx)
 	if !log.Enabled(ctx, slog.LevelError) {

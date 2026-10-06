@@ -35,28 +35,20 @@ func llmConfigToAutoupdate(c config.LLMConfig) llm.LLMConfig {
 // Returns (nil, nil) when no provider is configured (Provider == "") — the caller
 // proceeds without an LLM. Returns (nil, err) when a provider IS configured but
 // construction fails (e.g. claude CLI absent → ErrClaudeCodeUnavailable, unknown
-// provider, missing API key) — the caller logs a Warn and falls back. Returns
-// (provider, nil) on success.
+// provider, missing API key) — the caller logs a Warn and falls back.
 //
-// This helper is shared by the analyze wiring (T4) and the --check wiring (T5),
-// so it stays general: the only policy it encodes is the empty-provider
-// short-circuit; every other decision (which provider, defaults) lives in
-// llm.NewLLMProvider via the existing llmConfigToAutoupdate mapper.
+// Shared by the analyze and --check wirings, it encodes only the empty-provider
+// short-circuit; every other decision lives in llm.NewLLMProvider.
 //
-// # Where the caller's context goes
+// It takes no context: no provider stores one. The `claude` CLI runs in its own
+// process group, out of reach of a terminal's Ctrl+C or hang-up, so the context
+// each ExtractVersion and AnalyzeContent call receives is the only way an
+// interrupt stops that child.
 //
-// The `claude` CLI runs in its own process group (story 054), so a Ctrl+C or a
-// hang-up at the terminal no longer reaches it: the kernel signals the
-// terminal's foreground group only. The command's context (func commandContext)
-// is then the only way an interrupt stops that child and everything it started
-// (R4.3). Since story 059 no provider stores a context: each ExtractVersion and
-// AnalyzeContent call takes its caller's, so this helper takes none.
-//
-// On a construction failure the claude-code branch returns a TRUE nil, never
-// the nil *ClaudeCodeClient boxed into the interface: every caller gates on the
-// error first, and a boxed nil would make a `p != nil` check lie (the same
-// discipline as newConfiguredBuildFixer below). The error travels unwrapped, as
-// it did through NewLLMProvider; each caller's Warn line names the provider.
+// On a construction failure the claude-code branch returns a TRUE nil, never a
+// boxed nil *ClaudeCodeClient that would make a `p != nil` check lie (as in
+// newConfiguredBuildFixer below). The error travels unwrapped; each caller's
+// Warn line names the provider.
 func newConfiguredLLMProvider(log *slog.Logger, c config.LLMConfig) (llm.LLMProvider, error) {
 	switch c.Provider {
 	case "":
@@ -93,7 +85,7 @@ func newConfiguredManifestFixer(log *slog.Logger, c config.LLMConfig) (fixer.Man
 // the failed package's packages.toml entry. Every other provider — including the
 // empty/unset one and the non-agentic HTTP "claude" — returns a TRUE nil interface
 // (nil, nil), never a boxed (*ClaudeCodeRegistryFixer)(nil), so runCheck's
-// `fixer != nil` gate stays honest and the repair prompt never appears (AD9 / R7.1).
+// `fixer != nil` gate stays honest and the repair prompt never appears.
 // A configured-but-unconstructable claude-code fixer (e.g. the `claude` CLI is
 // absent) returns (nil, err) so the caller can Warn and continue with no prompt.
 func newConfiguredRegistryFixer(log *slog.Logger, c config.LLMConfig) (fixer.RegistryFixer, error) {
@@ -103,29 +95,21 @@ func newConfiguredRegistryFixer(log *slog.Logger, c config.LLMConfig) (fixer.Reg
 	return fixer.NewClaudeCodeRegistryFixer(llmConfigToAutoupdate(c), fixer.WithRegistryFixerLogger(log))
 }
 
-// newConfiguredBuildFixer builds the LLM build fixer for the staged compile gate
-// (S033-R8.1, R8.2). Repairing a failed build means EDITING the staged ebuild and
-// re-running the gate, which only the local claude-code CLI agent can do — so, like
-// newConfiguredManifestFixer and newConfiguredRegistryFixer, it is wired ONLY for
-// provider == "claude-code". Every other provider — the empty/unset one and the
-// non-agentic HTTP "claude" alike — returns a TRUE nil interface (nil, nil) and the
-// bump keeps the original fail-fast behaviour.
+// newConfiguredBuildFixer builds the LLM build fixer for the staged compile gate.
+// Repairing a failed build means EDITING the staged ebuild and re-running the
+// gate, which only the local claude-code CLI agent can do — so it is wired ONLY
+// for provider == "claude-code". Every other provider returns a TRUE nil
+// interface (nil, nil) and the bump keeps the original fail-fast behaviour.
 //
-// # Why a true nil and not the pointer the constructor returns
+// The nil is bare on purpose: autoupdate.WithApplierBuildFixer gates on
+// `fixer != nil`, and a nil *ClaudeCodeBuildFixer boxed into the interface is
+// non-nil — it would pass the gate and the applier would call a nil receiver on
+// the first failed build.
 //
-// autoupdate.WithApplierBuildFixer gates on `fixer != nil`. A nil
-// *ClaudeCodeBuildFixer assigned to the BuildFixer interface is a NON-nil interface
-// holding a nil pointer, so it walks straight through that gate and the applier
-// calls a nil receiver on the first failed build — the capability looks enabled and
-// is not. Returning a bare `nil` on both the short-circuit and the error path is
-// what keeps the caller's gate honest (see the same note on
-// newConfiguredRegistryFixer above).
-//
-// A configured-but-unconstructable claude-code fixer (typically: no `claude` on
-// PATH) returns (nil, err) so the caller can Warn and continue — the precedent set
-// by applierFixerOption in overlay_autoupdate.go. The variadic options exist so
-// the caller can pass the operator's `autoupdate.validate.timeout` through
-// WithBuildFixerTimeout, which is that key's only consumer on the fixer side.
+// A configured-but-unconstructable fixer (typically: no `claude` on PATH)
+// returns (nil, err) so the caller can Warn and continue, as applierFixerOption
+// does. The options carry `autoupdate.validate.timeout` in through
+// WithBuildFixerTimeout, that key's only consumer on the fixer side.
 func newConfiguredBuildFixer(log *slog.Logger, c config.LLMConfig, opts ...fixer.BuildFixerOption) (fixer.BuildFixer, error) {
 	if c.Provider != "claude-code" {
 		return nil, nil
@@ -141,7 +125,7 @@ func newConfiguredBuildFixer(log *slog.Logger, c config.LLMConfig, opts ...fixer
 
 // newConfiguredBumpReviewer builds the LLM bump reviewer that reads the difference
 // between two versions' upstream build declarations and may ask for MORE validation
-// than the depth policy chose (S033-R7, R7.5).
+// than the depth policy chose.
 //
 // It repeats newConfiguredBuildFixer's discipline to the letter — claude-code only,
 // a true nil for everything else, a returned error rather than a fatal one — and is
@@ -165,7 +149,7 @@ func newConfiguredBumpReviewer(log *slog.Logger, c config.LLMConfig, opts ...fix
 // llmCapabilities answers which of the two LLM capabilities a run has asked for:
 // the bump reviewer and the build fixer, in that order.
 //
-// The rule is one flag and two subtractions (S033-R7.1, R7.2):
+// The rule is one flag and two subtractions:
 //
 //   - --llm enables BOTH. The operator should not have to learn two names to turn
 //     the feature on, and the flag is what records their consent to the cost.
@@ -188,7 +172,7 @@ func llmCapabilities(llm bool, v config.ValidateConfig) (review, fix bool) {
 }
 
 // applierLLMOptions turns the --llm flag and the two config switches into the
-// Applier options that actually enable the capabilities (S033-R7.1, R7.2). It is
+// Applier options that actually enable the capabilities. It is
 // the only place the flag is read into an Applier, so --apply and --apply all
 // cannot drift apart on what --llm meant.
 //

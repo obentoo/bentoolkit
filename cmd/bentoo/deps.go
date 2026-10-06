@@ -17,12 +17,12 @@ import (
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 )
 
-// deps holds the test seams of cmd/bentoo (story 060, design C6). defaultDeps
+// deps holds the test seams of cmd/bentoo. defaultDeps
 // builds the production wiring once per tree; newRootCmdWith hands it to every
 // constructor that reaches a seam, and the run functions read it through their
 // closures. A test substitutes a field on its own deps value, so the
 // substitution reaches only the tree built from it and never the defaults
-// another tree starts from (R6.1, R6.5).
+// another tree starts from.
 //
 // It holds functions (and the snapshot.Runner interface) only, never a
 // context.Context (containedctx): a context is per-invocation and travels as a
@@ -39,13 +39,13 @@ type deps struct {
 	confirmRegistryWrite func(prompt string) bool
 	// registryPromptIsInteractive reports whether this process may ASK before
 	// writing. It requires BOTH stdin and stdout to be terminals: stdout so the
-	// operator sees what they consent to (R3.4), stdin so a piped `yes` or a CI
+	// operator sees what they consent to, stdin so a piped `yes` or a CI
 	// heredoc cannot answer for a human. Staged, compare, lint --fix,
 	// --mark-auto-disabled, the check's validation prompt and the sweep share it.
 	registryPromptIsInteractive func() bool
 	// checkRegistryFixer builds the LLM registry fixer --check offers, and
 	// checkInteractive asks whether stdin is interactive. Without them the
-	// registry-fix loop, and the overlay lock it must run under (S056-R4.6),
+	// registry-fix loop, and the overlay lock it must run under,
 	// could only be reached from a terminal with a configured claude CLI.
 	checkRegistryFixer func(log *slog.Logger, llmCfg config.LLMConfig) (fixer.RegistryFixer, error)
 	checkInteractive   func() bool
@@ -54,11 +54,12 @@ type deps struct {
 	resolveGentooProvider func(ctx context.Context, log *slog.Logger, cfg *config.Config) (provider.Provider, error)
 	// setVersionsForCheck is the ONE way the check could publish. It is
 	// deliberately never called: a test keeps it wired, runs every path and
-	// reads the seam afterwards, so R9.2 is proved rather than asserted.
+	// reads the seam afterwards, so "the check never publishes" is proved
+	// rather than asserted.
 	setVersionsForCheck func(overlayPath string, pins map[string]string) error
 	// uiIsTerminal is the ONE point where this package asks "is stdout a
 	// terminal?". A `go test` binary writes to a pipe, so without it the
-	// on-a-terminal half of R3.7 could not be checked at all.
+	// on-a-terminal half of the --ui mode selection could not be checked at all.
 	uiIsTerminal func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
@@ -100,14 +101,14 @@ type deps struct {
 
 	// newClaudeAsker builds the `claude` client both compare reviews ask
 	// through, so tests can script the CLI without one being installed and
-	// prove `--no-review` reaches it ZERO times (R5.6 of story 025). The
+	// prove `--no-review` reaches it ZERO times. The
 	// budget enters here and nowhere else (see newClaudeCodeAsker).
 	newClaudeAsker func(log *slog.Logger, budget time.Duration) (claudeAsker, error)
 
 	// prunePlanner, pruneExecutor and confirmPrune drive `overlay prune`, on
 	// the sweep's shape: a test has to be able to prove the executor was NOT
 	// REACHED. pruneInteractive reports whether stdin is a terminal, which
-	// under `go test` is always no — without it R6.1's confirmation and R4.4's
+	// under `go test` is always no — without it the confirmation and the
 	// refusal to accept one from a script would be untestable.
 	prunePlanner     func(results []overlay.CompareResult, prov provider.Provider, opts overlay.PruneOptions) overlay.PruneBatch
 	pruneExecutor    func(batch overlay.PruneBatch, opts overlay.PruneOptions) []overlay.PruneResult
@@ -117,8 +118,8 @@ type deps struct {
 	// snapshotRunner is the subprocess seam every snapshot verb threads into
 	// the snapshot package; tests substitute a snapshottest.MockRunner. Its
 	// default is nil, which the snapshot package resolves to its production
-	// execRunner: the same resolution the package variable it replaced had
-	// (R6.2). It is the one field that is an interface rather than a function.
+	// execRunner: the same resolution the package variable it replaced had.
+	// It is the one field that is an interface rather than a function.
 	snapshotRunner snapshot.Runner
 	// snapshotRollbackConfirm is the y/N question of `snapshot rollback`. Its
 	// default is nil, which makes snapshot.Rollback ask through its own stdin
@@ -156,7 +157,7 @@ func defaultDeps() *deps {
 		confirmRealignPlan:          confirmAction,
 		realignPromote:              realign.Promote,
 		confirmRealignPublish:       confirmAction,
-		// The SAME function as registryPromptIsInteractive (design C6).
+		// The SAME function as registryPromptIsInteractive.
 		realignPublishIsInteractive: stdinAndStdoutAreTerminals,
 		newClaudeAsker:              newClaudeCodeAsker,
 		prunePlanner:                overlay.PlanPrune,

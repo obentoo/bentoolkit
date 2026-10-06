@@ -17,22 +17,17 @@ import (
 // runSweep is `bentoo overlay autoupdate --clean` with no `--apply`: it sweeps
 // the package directories holding an ebuild no registry entry claims.
 //
-// # Why this exists as its own mode
+// It is its own mode because a sweep run only inside an apply never reaches a
+// package already at its upstream version: no check produces a pending entry
+// for it, so no apply happens, so no sweep happens, and the residue of every
+// bump run without `--clean` accumulates.
 //
-// `--clean` was a modifier on an apply, and the sweep ran inside the apply's
-// success path — which Apply reaches only for a package with a pending update.
-// A package already at its upstream version could therefore never be swept: no
-// check produces a pending entry for it, so no apply happens, so no sweep
-// happens. The residue of every bump run without `--clean` accumulated in one
-// direction, removable only by a future bump of the same package.
-//
-// # The order of operations is the safety property
-//
-// Plan, print, confirm, execute — and the executor is not entered at all when
-// the confirmation is declined, so a declined sweep leaves the overlay
-// byte-identical by construction rather than by care. The overlay auto-commits
-// and pushes, so a wrong removal is a published removal within minutes; that is
-// why the non-interactive path refuses instead of assuming consent.
+// The order of operations is the safety property: plan, print, confirm,
+// execute — and the executor is not entered at all when the confirmation is
+// declined, so a declined sweep leaves the overlay byte-identical by
+// construction. The overlay auto-commits and pushes, so a wrong removal is a
+// published removal within minutes; that is why the non-interactive path
+// refuses instead of assuming consent.
 //
 // concurrency is resolved by the caller — see sweepConcurrency below for why it
 // is not read from the flag here.
@@ -59,14 +54,14 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 	displaySweepPlan(batch)
 
 	if batch.TotalRemove == 0 {
-		// R3.5: there is nothing to confirm. Asking "remove 0 files?" would
+		// There is nothing to confirm. Asking "remove 0 files?" would
 		// train the operator to say yes.
 		//
 		// The reason matters as much as the fact. "Every ebuild is claimed" is
 		// only true when nothing was found at all; saying it after finding
 		// unclaimed ebuilds and declining to touch them — because they are held,
 		// blocked, or the last non-live file of their directory — contradicts
-		// the very report that pointed the operator here (S027-R7.1). The groups
+		// the very report that pointed the operator here. The groups
 		// above already list each case; this line only names why the count is 0.
 		switch {
 		case len(batch.SkippedHeld) > 0 || len(batch.Dirs) > 0:
@@ -85,7 +80,7 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		autoupdate.WithSweepConcurrency(concurrency),
 		autoupdate.WithSweepPackagesConfig(cfg.Packages),
 		// The same two directories every other mode uses, resolved once in
-		// runAutoupdate (S030-R1.3). A standalone sweep regenerates Manifests
+		// runAutoupdate. A standalone sweep regenerates Manifests
 		// too, so it downloads distfiles too.
 		autoupdate.WithSweepDistdir(ar.dirs.Distdir, ar.dirs.ConfiguredDistdir),
 		autoupdate.WithSweepDistfilesCache(ar.dirs.Cache),
@@ -98,17 +93,15 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 // sweepConcurrency returns how many directories the sweep may process at once.
 //
 // It is 1 unless --concurrency was passed explicitly, and that is a deliberate
-// departure from the flag's default of DefaultConcurrency (10). Assumption A3 —
-// "confirm that N concurrent invocations do not collide on DISTDIR or on
-// pkgdev's locking BEFORE enabling R4.3's concurrency" — was never discharged:
-// nothing in this story measured concurrent `pkgdev manifest` runs against one
-// another. ExecuteOverlaySweep already defaults to 1 for that reason, but that
+// departure from the flag's default of DefaultConcurrency (10). Nobody has
+// confirmed that concurrent `pkgdev manifest` runs do not collide on DISTDIR or
+// on pkgdev's locking. ExecuteOverlaySweep already defaults to 1 for that reason, but that
 // default was unreachable in production, because runSweep is its only caller and
 // it forwarded a flag whose own help text describes "parallel checks/applies"
 // and says nothing about sweeps.
 //
 // Running the fan-out anyway would mean shipping ten concurrent processes that
-// delete files, on an assumption the story itself flagged and never checked. An
+// delete files, on an assumption that was flagged and never checked. An
 // operator who has verified it can still say so with --concurrency.
 //
 // flagWasSet is passed in rather than read off the command here: runAutoupdate
@@ -293,7 +286,7 @@ func displaySweepReport(report autoupdate.SweepReport) {
 		output.Warning.Printf("  %d director(ies) blocked — see the plan above for the entry to fix.\n", report.BlockedN)
 	}
 	if report.Failed > 0 {
-		// R6.3: reported, but the exit code still says the command ran. The
+		// Reported, but the exit code still says the command ran. The
 		// removals that succeeded really happened, and a non-zero exit would
 		// claim otherwise.
 		output.Warning.Printf("  %d director(ies) failed — nothing else was affected.\n", report.Failed)

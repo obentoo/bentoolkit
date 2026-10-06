@@ -25,60 +25,52 @@ import (
 // packages ::gentoo already ships, and — much more often — explains why it will
 // not.
 //
-// # Where the operator-facing text goes
-//
 // Everything the operator must read is printed on STDOUT, through fmt and the
-// output/* colours, and not through the logger. The invocation's logger (story
-// 062) writes to stderr, so a message sent there lands on a different stream
-// from the plan it belongs to — including the failures, which exist precisely to
-// explain the plan that is missing. Splitting one report across two streams
-// costs the operator the ordering between them the moment either is redirected.
-// The logger is still used for the one thing that is genuinely an aside: a registry key that is not a category/package atom, which
-// leaves the plan complete and merely leaves that key unattributed. A registry
-// that cannot be read AT ALL is the opposite of an aside — it decides the whole
-// run — so it is reported on stdout with everything else, by
-// reportPruneRegistryUnreadable.
+// output/* colours, and not through the logger. The invocation's logger writes
+// to stderr, so a message sent there lands on a different stream from the plan
+// it belongs to — including the failures, which exist precisely to explain the
+// plan that is missing — and the ordering between them is lost the moment
+// either is redirected. The logger is used only for a genuine aside: a registry
+// key that is not a category/package atom, which leaves the plan complete and
+// that key unattributed. A registry that cannot be read AT ALL decides the
+// whole run, so reportPruneRegistryUnreadable reports it on stdout.
 //
-// # Flags declared here, behaviour split across the story
-//
-// The four flag variables and the three seams below are the whole surface. The
-// plan-only path is complete; the --apply path (confirmation, execution,
-// registry edit, exit codes) is wired into runPrune's marked tail.
+// The four flag variables and the deps seams described below are the whole
+// surface.
 
 // The prunePlanner, pruneExecutor and confirmPrune fields of deps (deps.go)
-// are the seams the CLI tests drive, defaulting to the real implementations so a caller that supplies none
-// gets production behaviour. Same shape as the sweep's seam
-// (the `sweepPlanner` field of deps in deps.go), and for the same
-// reason: a test has to be
-// able to prove that the executor was NOT REACHED, which is only observable if
-// reaching it goes through a replaceable name.
+// are the seams the CLI tests drive, defaulting to the real implementations so
+// a caller that supplies none gets production behaviour. Same shape as the
+// sweep's seam (the `sweepPlanner` field of deps in deps.go), and for the same
+// reason: a test has to be able to prove that the executor was NOT REACHED,
+// which is only observable if reaching it goes through a replaceable name.
 // The pruneInteractive field is the fourth seam, and it exists because the thing it
 // reports cannot be faked from a test at all: stdinIsTerminal asks the operating
 // system whether stdin is a character device, and under `go test` the answer is
-// always no. Without a seam, every interactive requirement — R6.1's confirmation
-// and R4.4's refusal to accept one from a script — would be untestable in the
+// always no. Without a seam, every interactive requirement — the confirmation
+// and the refusal to accept one from a script — would be untestable in the
 // only direction that matters, since the non-interactive answer is the one the
 // runner hands out for free.
 
 var (
 	// pruneApply is --apply: without it the command plans and prints, and the
-	// executor is unreachable (R1.1).
+	// executor is unreachable.
 	pruneApply bool
 	// pruneIncludePatched is --include-patched: the operator saying out loud that
-	// they accept discarding local work (R4.1). It never moves a package between
+	// they accept discarding local work. It never moves a package between
 	// buckets — it only decides whether the diverging bucket may be acted on.
 	//
 	// Its name is wider than its reach, and the gap is worth stating once. The
 	// diverging bucket holds UNDECLARED divergence only: a registry entry declaring
 	// `patched` is one of the two axes deriveVerdict reads (compare.go:193-201), so
 	// a declared package's verdict is `keep` or `needs-rebase` and PlanPrune refuses
-	// it at the verdict gate before comparing any content (R2.5). R2.4's "refuse a
-	// declared package unless --include-patched" is therefore defence in depth
+	// it at the verdict gate before comparing any content. Refusing a declared
+	// package unless --include-patched is therefore defence in depth
 	// rather than a live path — it holds the line if the verdict ever stops
 	// disqualifying a declaration. Clearing a stale declaration is `overlay
 	// analyze`'s business, and doing it there leaves a record this flag would not.
 	//
-	// R6 narrowed the reach once more, and this half IS a live path: a divergence
+	// The reach narrows once more, and this half IS a live path: a divergence
 	// the planner proves originates in the overlay is refused outright, so it never
 	// reaches the bucket this flag acts on. Measured on 2026-08-07 that is 3 of the
 	// 8 undeclared divergences the overlay carries — net-libs/nodejs,
@@ -184,68 +176,44 @@ func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
 	return runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config, d)
 }
 
-// runPrune plans what may leave the overlay, prints it, and — with --apply —
-// carries it out.
+// runPrune plans what may leave the overlay, prints it, and with --apply does it.
 //
-// # The order is the safety property (design D4)
+// The order is the safety property: plan, print, confirm, execute, with the
+// executor UNREACHABLE without --apply or after a declined confirmation, so a
+// plan-only run has no path to a removal at all. The overlay auto-commits and
+// pushes, so a wrong removal is a published removal within minutes. Consent
+// does not return a boolean the executor is trusted to respect; it BUILDS THE
+// BATCH the executor is given, so a declined batch is not there to ignore.
 //
-// Plan, print, confirm, execute, with the executor UNREACHABLE when there is no
-// --apply or the confirmation is declined. R1.1 therefore holds by construction
-// rather than by a well-placed condition: a plan-only run has no path to a
-// removal at all. This is the sweep's own argument (overlay_autoupdate_sweep.go)
-// and it is here for the same reason — the overlay auto-commits and pushes, so a
-// wrong removal is a published removal within minutes.
+// The two confirmations are not symmetric. The identical batch loses nothing
+// that is ours, so one prompt covers it and --yes may answer it. The diverging
+// batch discards work that exists nowhere else, so it asks separately, names
+// every package, and refuses a session with no terminal even with --yes.
 //
-// R6.3 holds the same way, one step further in: consent does not return a
-// boolean the executor is then trusted to respect, it BUILDS THE BATCH the
-// executor is given. A declined batch is not in the struct that reaches it, so
-// there is no plan for it to ignore.
-//
-// # Two confirmations, and they are not symmetric (design D4)
-//
-// The identical batch loses nothing that is ours — every byte of it is in
-// ::gentoo — so one prompt covers it and --yes may answer that prompt (R6.1,
-// R6.2). The diverging batch discards work that exists nowhere else, so it asks
-// separately, names every package, and refuses a session with no terminal
-// whether or not --yes was given (R4.3, R4.4).
-//
-// # What the exit code means (design D7)
-//
-//	plan printed, nothing applied ........ 0
-//	every planned removal succeeded ...... 0
-//	no package qualified ................. 0
-//	a confirmation was declined .......... 0  — the operator was asked and answered
-//	one or more removals failed .......... 1
-//	no confirmation could be obtained .... 1  — non-interactive without --yes (R6.2),
-//	                                            or the diverging batch with no
-//	                                            terminal (R4.4)
-//
-// The last line is the one worth stating out loud: a refusal is not a decline. A
-// declined run did exactly what the operator told it to; a refused one did not do
-// what they asked, and a script reading 0 would record the removals as done.
-//
-// # Why the local checks come first
-//
-// The overlay scan and the target check run before the provider is resolved.
-// Resolving it can fetch the repository registry, and a typo in the target must
-// not cost a network round trip before it is reported. The scan is also the
-// authority the target is checked against: it is the set of packages that
-// actually exist here.
+// Exit 0: plan only, every removal succeeded, nothing qualified, or a
+// confirmation was declined (the operator was asked and answered). Exit 1: a
+// removal failed, no confirmation could be obtained, or the registry edit after
+// the removals failed — a refusal is not a decline, and a script reading 0
+// would record the removals as done.
 func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config, d *deps) error {
 	log := logging.FromContext(ctx)
 	fmt.Println()
 	output.Header.Println("Overlay Prune")
 	fmt.Println()
 
+	// The scan and the target check run before the provider is resolved:
+	// resolving it can fetch the repository registry, and a typo in the target
+	// must not cost a network round trip before it is reported. The scan is also
+	// the authority the target is checked against.
 	scan, err := repo.ScanOverlay(overlayPath)
 	if err != nil {
 		output.Error.Fprintf(os.Stderr, "  cannot scan the overlay at %s: %v\n", overlayPath, err)
 		return exitWith(1)
 	}
 	if len(scan.Errors) > 0 {
-		// An incomplete scan makes the plan incomplete, and a plan that silently
-		// understates its own coverage is the failure R1.5 is about one level up:
-		// a package absent from the report may simply never have been seen.
+		// An incomplete scan makes the plan incomplete, and a plan must not
+		// silently understate its own coverage: a package absent from the report
+		// may simply never have been seen.
 		output.Warning.Printf("  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n", len(scan.Errors))
 		for _, e := range scan.Errors {
 			output.Info.Printf("    %s: %s\n", e.Path, e.Message)
@@ -260,7 +228,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 
 	packages, err := selectPrunePackages(scan.Packages, target)
 	if err != nil {
-		// R1.3. The quiet failure this prevents: an unmatched restriction yields an
+		// The quiet failure this prevents: an unmatched restriction yields an
 		// empty plan, an empty plan reads as "the overlay is clean", and the operator
 		// walks away from a misspelled category believing they were told something.
 		output.Error.Fprintf(os.Stderr, "  %v\n", err)
@@ -270,8 +238,8 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 
 	if len(packages) == 0 {
 		// Reachable only without a target — with one, no match is the error above.
-		// It is the "nothing was EXAMINED" side of R1.5 and not the "nothing
-		// qualified" side: no package was compared, because there was none.
+		// It is the "nothing was EXAMINED" case and not the "nothing qualified"
+		// one: no package was compared, because there was none.
 		reportPruneNothingExamined("  Nothing was examined: this overlay holds no package to compare.")
 		return nil
 	}
@@ -283,11 +251,11 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	}
 	defer prov.Close() //nolint:errcheck // closing a read-only provider cannot invalidate a plan already printed
 
-	// D6/R2.6, and it is a GATE rather than a note printed afterwards: an API-only
-	// provider can authorise nothing, so comparing anyway would spend one
-	// rate-limited request per package — ~300 of them — to reach a refusal that was
-	// already certain here. Refusing before the first request is what makes
-	// "nothing was examined" literally true.
+	// An API-only provider is a GATE rather than a note printed afterwards: it
+	// can authorise nothing, so comparing anyway would spend one rate-limited
+	// request per package — ~300 of them — to reach a refusal that was already
+	// certain here. Refusing before the first request is what makes "nothing was
+	// examined" literally true.
 	//
 	// It is NOT an error. The operator asked a reasonable question with a provider
 	// that cannot answer it, so the command prints the plan it has and exits 0.
@@ -311,7 +279,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// misses on every atom, a miss reaches deriveVerdict as known == false, and
 		// that yields VerdictUnknown before any per-status rule runs
 		// (compare.go:185) — so every package is refused at the verdict gate with
-		// its content never compared (R2.5). The outcome is therefore already
+		// its content never compared. The outcome is therefore already
 		// decided here: comparing anyway would read ~300 package directories to
 		// print the same "verdict is unknown" line about each of them, and would
 		// then have to close with "nothing qualified", which is false. Nothing was
@@ -352,8 +320,9 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 
 	eligible := pruneEligibleCount(batch)
 	if eligible == 0 {
-		// R1.5's other side: packages WERE examined and none of them may be
-		// removed. That is "you are done", not "run it again differently".
+		// The other side of "nothing examined": packages WERE examined and none
+		// of them may be removed. That is "you are done", not "run it again
+		// differently".
 		reportPruneNothingQualified(len(report.Results), len(batch.Diverging), pruneIncludePatched)
 		return nil
 	}
@@ -369,7 +338,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 
 	// Consent produces a BATCH, not a permission slip: consent.authorised holds
 	// only the plans a confirmation covered, so a declined or unaskable batch has
-	// no representation on the path to the executor (R6.3).
+	// no representation on the path to the executor.
 	consent := gatherPruneConsent(batch, d)
 
 	// The executor is not called at all when consent covered nothing. That guard is
@@ -381,13 +350,13 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	}
 	removed, failed := reportPruneOutcome(results, consent)
 
-	// D7: the registry edit runs ONCE, after every removal, and only for the atoms
+	// The registry edit runs ONCE, after every removal, and only for the atoms
 	// whose directory actually went. A package that failed to delete keeps its
 	// entries, so the file never claims a removal that did not happen.
 	var registryErr error
 	if atoms := prunedRegistryAtoms(results); len(atoms) > 0 {
 		if pruneKeepRegistry {
-			// R5.3: untouched, not rewritten identically. The overlay auto-commits, so
+			// Untouched, not rewritten identically. The overlay auto-commits, so
 			// a rewrite that happens to produce the same bytes is still a file the next
 			// run has to explain.
 			output.Info.Printf("  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n", len(atoms))
@@ -403,8 +372,9 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		output.Info.Println("  Review the diff before it is published: 'bentoo overlay diff'")
 	}
 
-	// D7's exit table. All three causes are the same answer to a caller — "what you
-	// asked for did not all happen" — and each is reported above in its own words.
+	// The exit code runPrune documents. All three causes are the same answer to
+	// a caller — "what you asked for did not all happen" — and each is reported
+	// above in its own words.
 	if failed > 0 || consent.refused > 0 || registryErr != nil {
 		return exitWith(1)
 	}
@@ -414,7 +384,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 // pruneConsentAnswer is what one confirmation gate returned.
 //
 // Three values and not a bool, because "the operator said no" and "nobody could
-// be asked" mean different things to the exit code (design D7) and to the
+// be asked" mean different things to the exit code and to the
 // operator: the first is the command working, the second is the command unable
 // to do what it was told.
 type pruneConsentAnswer int
@@ -435,7 +405,7 @@ const (
 // pruneConsent is what this run may act on, and what it may not.
 type pruneConsent struct {
 	// authorised holds ONLY the plans a confirmation covered, in the buckets they
-	// were planned in. It is the whole of R6.3's structural guarantee: the executor
+	// were planned in. It is the whole of the structural guarantee: the executor
 	// is handed this batch, so a declined plan is not something it is trusted to
 	// skip — it is not there.
 	authorised overlay.PruneBatch
@@ -445,7 +415,7 @@ type pruneConsent struct {
 	// Not a failure: they were asked and they answered, and the run did exactly
 	// what they said.
 	declined int
-	// refused counts the eligible plans nobody could be asked about (R6.2, R4.4).
+	// refused counts the eligible plans nobody could be asked about.
 	// That IS a failure — the operator asked for a removal that did not happen —
 	// and it is what makes such a run exit non-zero.
 	refused int
@@ -476,7 +446,7 @@ func (c *pruneConsent) record(answer pruneConsentAnswer, plans []overlay.PrunePl
 }
 
 // gatherPruneConsent asks for each batch separately and returns what may be
-// removed (R6.1, R4.3).
+// removed.
 //
 // The two batches are two decisions and are asked as two, in the order the plan
 // printed them. Approving "delete 60 packages ::gentoo already ships" says
@@ -499,7 +469,7 @@ func gatherPruneConsent(batch overlay.PruneBatch, d *deps) pruneConsent {
 	}
 
 	// The refused bucket is never asked about and never authorised: no flag on this
-	// command reaches a package the verdict gate refused (R2.5). A plan filed there
+	// command reaches a package the verdict gate refused. A plan filed there
 	// still carrying Eligible is a planner bug, not a decision this run may act on —
 	// but the plan above already printed it as "would be removed", so it is named
 	// here rather than silently dropped, and counted as refused so the run exits
@@ -531,9 +501,9 @@ func eligiblePrunePlans(plans []overlay.PrunePlan) []overlay.PrunePlan {
 }
 
 // confirmIdenticalPrune takes the ONE confirmation covering the identical batch
-// (R6.1), through three gates ordered by how much they trust the caller: --yes
+// through three gates ordered by how much they trust the caller: --yes
 // proceeds unattended because the operator asked for that in so many words; a
-// terminal is asked; anything else is refused and the run exits non-zero (R6.2).
+// terminal is asked; anything else is refused and the run exits non-zero.
 //
 // --yes is allowed to answer for a human HERE, and only here, because this batch
 // loses nothing: every byte of every one of these packages is already in
@@ -549,10 +519,10 @@ func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 		return pruneConsentGiven
 	}
 	if !d.pruneInteractive() {
-		// R6.2, all three clauses: the plan is already on screen because it is
-		// printed before this runs, nothing is removed, and the caller returns
-		// non-zero. A prompt written to a terminal nobody is watching does not become
-		// consent by going unanswered, so none is written.
+		// The plan is already on screen because it is printed before this runs,
+		// nothing is removed, and the caller returns non-zero. A prompt written
+		// to a terminal nobody is watching does not become consent by going
+		// unanswered, so none is written.
 		output.Warning.Printf("  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n", n)
 		output.Info.Println("  Re-run with --yes to carry them out unattended.")
 		return pruneConsentUnavailable
@@ -567,10 +537,10 @@ func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 }
 
 // confirmDivergingPrune takes the SECOND confirmation, the one that covers
-// discarding local work (R4.3). It is deliberately not the same shape as the
+// discarding local work. It is deliberately not the same shape as the
 // first.
 //
-// # Why --yes cannot answer this one (R4.4)
+// # Why --yes cannot answer this one
 //
 // --yes exists so that a scripted run can proceed without a human. Discarding
 // local work is precisely the thing a scripted run must not decide on its own:
@@ -582,7 +552,7 @@ func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 //
 // # Why the prompt is a list and not a count
 //
-// R4.2. "Discard 8 packages?" and "discard the wayland patch in kwin?" are the
+// "Discard 8 packages?" and "discard the wayland patch in kwin?" are the
 // same sentence to an operator who cannot see the list, and only one of them can
 // be answered.
 func confirmDivergingPrune(plans []overlay.PrunePlan, d *deps) pruneConsentAnswer {
@@ -602,13 +572,13 @@ func confirmDivergingPrune(plans []overlay.PrunePlan, d *deps) pruneConsentAnswe
 }
 
 // divergingPrunePrompt writes the second confirmation's text: every package, the
-// reason it is in this batch, and what removing it takes (R4.2, R4.3).
+// reason it is in this batch, and what removing it takes.
 //
 // The reason is plan.Reason verbatim, whichever kind it is. A package whose
 // registry entry DECLARES `patched` never reaches this batch in practice — the
 // declaration makes deriveVerdict return keep or needs-rebase (compare.go:193),
 // and PlanPrune refuses at the verdict gate before any content is compared
-// (R2.5) — so what lands here is an undeclared divergence and the reason is what
+// — so what lands here is an undeclared divergence and the reason is what
 // the byte comparison found ("version 1.0 differs"). Reading the one field
 // covers both cases, so the prompt neither assumes a declared reason is present
 // nor goes stale if the pipeline ever lets a declared package through.
@@ -638,7 +608,7 @@ func divergingPrunePrompt(plans []overlay.PrunePlan) string {
 // this command shows it to an operator.
 //
 // Rebuilt from Category and Package rather than carried on the plan: those two
-// are the only names any path in this file is built from (R3.5), so a stored
+// are the only names any path in this file is built from, so a stored
 // atom would be a third copy of the same fact and could go stale against them.
 func prunePlanAtom(plan overlay.PrunePlan) string {
 	return plan.Category + "/" + plan.Package
@@ -659,10 +629,10 @@ func prunePlanAtoms(plans []overlay.PrunePlan) []string {
 }
 
 // reportPruneOutcome prints what actually happened, per package, and returns how
-// many removals went through and how many FAILED — the second is the number D7
-// turns into an exit code.
+// many removals went through and how many FAILED — the second is the number
+// runPrune turns into an exit code.
 //
-// Every result is printed and the loop never stops early (R5.5). The batch was
+// Every result is printed and the loop never stops early. The batch was
 // approved as a whole, so abandoning the report at the first failure would leave
 // the operator guessing which side of it each package fell on.
 func reportPruneOutcome(results []overlay.PruneResult, consent pruneConsent) (removed, failed int) {
@@ -676,27 +646,20 @@ func reportPruneOutcome(results []overlay.PruneResult, consent pruneConsent) (re
 	fmt.Println()
 
 	// The atom column is measured over every result this run will print, and
-	// measured ONCE for both line shapes below (R6.2, R6.1).
+	// measured ONCE for both line shapes below.
 	//
-	// Both lines used to open with a forty-five-cell column typed straight into
-	// the format string. Nobody measured forty-five, and it is wrong in both
-	// directions at once: `dev-libs/glib` is 13 cells and paid 32 cells of empty
-	// air on every row, while the longest atom this overlay actually holds,
-	// `media-plugins/gst-plugins-adaptivedemux2`, is 40 — five cells from the day
-	// one package name pushes the second field right on its row alone, which
-	// reads worse than no alignment at all. Neither error is visible where the
-	// number is typed, because the width that is correct depends on the packages
-	// THIS run removed, and that is knowable only once the run has removed them.
-	//
-	// The number is written out in words rather than as the format verb it was,
-	// so that this explanation cannot itself be read as the defect by any sweep
-	// that greps for one.
+	// A fixed column typed into the format string is wrong in both directions:
+	// `dev-libs/glib` (13 cells) would pay for empty air on every row, while the
+	// longest atom this overlay holds, `media-plugins/gst-plugins-adaptivedemux2`,
+	// is 40 — close enough to any guess that one package name pushes the second
+	// field right on its row alone. The correct width depends on the packages
+	// THIS run removed, knowable only once the run has removed them.
 	//
 	// One measurement across both, not one per branch: a removed package and a
 	// failed one are rows of the SAME table, printed interleaved in the order the
 	// executor returned them, and two independently measured columns would step
 	// left and right down the report. The width is in display cells rather than
-	// bytes because a cell is the unit the terminal aligns on (R6.1) — padColumn
+	// bytes because a cell is the unit the terminal aligns on — padColumn
 	// measures a value with the same function that measured the column, so the
 	// two cannot disagree.
 	atoms := make([]string, len(results))
@@ -709,7 +672,7 @@ func reportPruneOutcome(results []overlay.PruneResult, consent pruneConsent) (re
 		// The single space that follows in each format string is the gap
 		// BETWEEN two columns — air belonging to neither, which nothing in a
 		// run's data can widen — so it stays written down while the width is
-		// measured (R6.3).
+		// measured.
 		atom := padColumn(prunePlanAtom(res.Plan), atomWidth)
 		if prunePackageWentAway(res) {
 			removed++
@@ -790,7 +753,7 @@ func reportPruneNothingApplied(consent pruneConsent) {
 }
 
 // prunedRegistryAtoms returns the atoms whose registry records may now be
-// deleted: the packages whose DIRECTORY actually went (design D7), and that
+// deleted: the packages whose DIRECTORY actually went, and that
 // carry at least one entry.
 //
 // The registry-key filter is not an optimisation. The plan told the operator "no
@@ -815,7 +778,7 @@ func prunedRegistryAtoms(results []overlay.PruneResult) []string {
 }
 
 // removePruneRegistryEntries deletes the registry records of the atoms whose
-// directory went, in ONE edit after all the removals (design D7), and says what
+// directory went, in ONE edit after all the removals, and says what
 // it did.
 //
 // One call, not one per package: the file is read, verified and atomically
@@ -842,7 +805,7 @@ func removePruneRegistryEntries(overlayPath string, atoms []string) error {
 // ("app-editors") or one package ("app-editors/zed"). An empty target selects
 // everything.
 //
-// A target matching nothing is an ERROR rather than an empty selection (R1.3).
+// A target matching nothing is an ERROR rather than an empty selection.
 // The two are indistinguishable downstream — both produce an empty plan — and an
 // empty plan says "there is nothing to remove", which is a claim about the
 // overlay this run is in no position to make about a category that does not
@@ -882,7 +845,7 @@ func selectPrunePackages(packages []repo.PackageInfo, target string) ([]repo.Pac
 
 // buildPruneRegistryKeys groups the registry by atom: "category/package" -> every
 // key that tracks it, which is what PruneOptions.RegistryKeys wants and what
-// R1.4 asks the plan to print.
+// the plan prints.
 //
 // EVERY key, never just the first. 90 of the registry's 321 atoms carry more
 // than one entry — one per slot ("net-libs/webkit-gtk:4.1") or per release
@@ -956,8 +919,7 @@ func pruneEligibleCount(batch overlay.PruneBatch) int {
 	return n
 }
 
-// displayPrunePlan prints the whole batch, in full, before anything is removed
-// (R1.4).
+// displayPrunePlan prints the whole batch, in full, before anything is removed.
 //
 // The full list, never a sample: the operator approves one batch, and a
 // truncated list hides exactly the line that is wrong — the sweep's own argument
@@ -1039,9 +1001,9 @@ func printPrunePlanEntry(plan overlay.PrunePlan, keepRegistry bool) {
 //
 // One line per package, with no inventory — but for two different reasons, and
 // only one of them is a matter of not having the data. A package refused by its
-// VERDICT was never listed at all: R2.5 stops the planner before the directory
-// is read, which is also what keeps the scan cheap. A package refused as
-// UNVERIFIABLE (R2.3) did pass the verdict gate, so its Versions, Files and
+// VERDICT was never listed at all: the verdict gate stops the planner before
+// the directory is read, which is also what keeps the scan cheap. A package refused as
+// UNVERIFIABLE did pass the verdict gate, so its Versions, Files and
 // RegistryKeys are populated, and they are dropped here on purpose. An inventory
 // answers "what would this removal take", and no removal is on offer for either
 // kind; printing one invites a refusal to be read as a plan.
@@ -1059,7 +1021,7 @@ func printPruneRefusals(plans []overlay.PrunePlan) {
 	// Measured over the refusals, and over them alone. This is a table under its
 	// own heading; widening it to match the outcome table further up would size a
 	// column from values no reader is comparing these against, which is the same
-	// mistake as typing 45 with an extra step (R6.2, R6.1).
+	// mistake as typing a fixed width with an extra step.
 	atomWidth := render.ColumnWidth(prunePlanAtoms(plans))
 	for _, plan := range plans {
 		fmt.Printf("    %s %s\n", padColumn(prunePlanAtom(plan), atomWidth), plan.Reason)
@@ -1068,12 +1030,12 @@ func printPruneRefusals(plans []overlay.PrunePlan) {
 }
 
 // reportPruneNothingQualified says that packages WERE examined and none of them
-// may be removed (R1.5).
+// may be removed.
 //
-// This is the "you are done" half of R1.5's distinction: the overlay is doing
-// its job and there is nothing to act on. It must not be reachable from a run
-// where no comparison happened — see reportPruneAPIOnly for that half, which
-// sends the operator somewhere else entirely.
+// This is the "you are done" half of the examined/qualified distinction: the
+// overlay is doing its job and there is nothing to act on. It must not be
+// reachable from a run where no comparison happened — see reportPruneAPIOnly
+// for that half, which sends the operator somewhere else entirely.
 func reportPruneNothingQualified(examined, diverging int, includePatched bool) {
 	output.Success.Printf("  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n", examined)
 	if diverging > 0 && !includePatched {
@@ -1081,7 +1043,7 @@ func reportPruneNothingQualified(examined, diverging int, includePatched bool) {
 	}
 }
 
-// reportPruneAPIOnly says that NOTHING WAS EXAMINED, and why (R2.6, R1.5, D6).
+// reportPruneAPIOnly says that NOTHING WAS EXAMINED, and why.
 //
 // The wording is the point. "Nothing qualified" here would be a lie in the exact
 // direction that costs the operator their afternoon: they would read "the
@@ -1102,7 +1064,7 @@ func reportPruneAPIOnly(providerName string, inScope int) {
 }
 
 // reportPruneRegistryUnreadable says that nothing was examined because the
-// overlay's own registry could not be read (R1.5).
+// overlay's own registry could not be read.
 //
 // It belongs to the "nothing was EXAMINED" family and pointedly not to "nothing
 // qualified", and that difference is the whole of why the function exists.
@@ -1113,7 +1075,7 @@ func reportPruneAPIOnly(providerName string, inScope int) {
 // it as "clean" and stop looking.
 //
 // It exits 0, like the API-only gate: the command ran correctly and refused.
-// R5.5 ties a non-zero exit to a removal that FAILED, and none was attempted.
+// A non-zero exit is tied to a removal that FAILED, and none was attempted.
 func reportPruneRegistryUnreadable(err error, inScope int) {
 	output.Warning.Printf("  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n",
 		inScope)

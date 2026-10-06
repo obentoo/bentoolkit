@@ -37,7 +37,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 
 	ctx := commandContext(cmd)
 
-	// Last run, aggregate line plus the per-stage breakdown (008 R5.1): each
+	// Last run, aggregate line plus the per-stage breakdown: each
 	// stage of the persisted RunResult with its subvolume, ship target when
 	// set, outcome, and the error text when it failed.
 	if last, err := snapshot.LoadLastRun(); err != nil {
@@ -54,7 +54,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 		}
 	}
 
-	// Timer state and next scheduled run (008 R5.1). TimerNextRun is
+	// Timer state and next scheduled run. TimerNextRun is
 	// best-effort; an empty result maps to a clean "unknown".
 	output.PrintInfo("timer: %s", snapshot.TimerState(ctx, d.snapshotRunner))
 	next := snapshot.TimerNextRun(ctx, d.snapshotRunner)
@@ -63,7 +63,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 	}
 	output.PrintInfo("next run: %s", next)
 
-	// Free space on the snapshot filesystem (best-effort, 008 R5.1). The
+	// Free space on the snapshot filesystem (best-effort). The
 	// snapshot dir may not exist yet (apply never run), so report the nearest
 	// existing ancestor's filesystem — the one that would back it.
 	dir := cfg.Engine.SnapshotDir
@@ -74,7 +74,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 		output.PrintInfo("free space on %s: %s", dir, humanBytes(avail))
 	}
 
-	// Free space of local ship target paths (008 R5.1). A target containing
+	// Free space of local ship target paths. A target containing
 	// ":" is remote (ssh user@host:/path, rclone remote:path, restic URL) and
 	// is skipped silently, as is any path that cannot be statted.
 	for _, sh := range cfg.Ship {
@@ -89,7 +89,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 	return nil
 }
 
-// stageLine renders one stage of the last RunResult for `status` (008 R5.1):
+// stageLine renders one stage of the last RunResult for `status`:
 // stage name, subvolume, ship target when set, outcome, and the error when the
 // stage failed — e.g. "create /home: ok",
 // "ship /home → ssh: failed — connection refused".

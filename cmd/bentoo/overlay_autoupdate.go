@@ -43,7 +43,7 @@ import (
 // One is allocated per newAutoupdateCmd call, so two command trees never share
 // one: pflag writes a flag's default through its pointer when the flag is bound,
 // so a shared target would let building a second tree reset what the first
-// parsed (S060-R5.1).
+// parsed.
 //
 // --ui, --all and --export are not here: they are root persistent flags every
 // report-producing command honours, and stay package variables. --depth is not
@@ -59,10 +59,9 @@ type autoupdateOptions struct {
 	force bool
 	// compile runs compile test after apply
 	compile bool
-	// requireIsolation is --require-isolation. Story 031 kept the
-	// setting out of the registry because a registry key is expensive to move
-	// once written (story 031 Constraints); story 033 added the block that owns
-	// it instead — autoupdate.validate.require_isolation in config.yaml, where
+	// requireIsolation is --require-isolation. The setting stays out of the
+	// registry because a registry key is expensive to move once written; its
+	// home is autoupdate.validate.require_isolation in config.yaml, where
 	// an unknown key is a warning on stderr rather than a silently disabled
 	// record. That key defaults to false, so this flag stays the way the
 	// stricter behaviour is asked for on a run.
@@ -90,7 +89,7 @@ type autoupdateOptions struct {
 	revivable bool
 	// noTUI opts out of the live TUI during --apply, streaming plain
 	// rate-limited output instead. It is one of the gate's opt-outs (alongside
-	// NO_COLOR and BENTOO_NO_TUI); see tuiEnabledForApply (R2.1, R2.2).
+	// NO_COLOR and BENTOO_NO_TUI); see tuiEnabledForApply.
 	noTUI bool
 	// lint checks the overlay's packages.toml against the record model
 	// (every record closed by "# END", documented by a trailing comments field,
@@ -98,15 +97,15 @@ type autoupdateOptions struct {
 	lint bool
 	// fix, with --lint, repairs in place the violations the linter
 	// reports mechanically: the retired `binary` key, a redundant
-	// `enabled = true`, and the canonical field order (R7).
+	// `enabled = true`, and the canonical field order.
 	//
 	// It is a MODIFIER of --lint, never a mode of its own — what it repairs is
 	// defined by what the linter reports — and it writes only behind the same
-	// three gates story 021 built for the version pins (see confirmLintRepair).
+	// three gates that guard the version pins (see confirmLintRepair).
 	fix bool
-	// markAutoDisabled is the ONE-SHOT migration of story 043 R1.5: it
+	// markAutoDisabled is the ONE-SHOT disable-origin migration: it
 	// stamps disabled_by = "auto" on every entry the checker disabled before that
-	// field existed, so R1.3's fail-safe — an absent origin means a human decided
+	// field existed, so the fail-safe — an absent origin means a human decided
 	// — does not freeze them permanently.
 	//
 	// It is a MODE, not a modifier, and it writes packages.toml behind the same
@@ -115,12 +114,12 @@ type autoupdateOptions struct {
 	markAutoDisabled bool
 	// except, with --mark-auto-disabled, names the entries the
 	// migration must NOT stamp: the deliberate pins a maintainer disabled on
-	// purpose. Stamping one re-arms the exact defect story 043 removes, so an
+	// purpose. Stamping one re-arms the exact defect the migration removes, so an
 	// entry naming no record in the registry aborts the run rather than being
 	// ignored — a typo here protects nothing and says nothing.
 	except []string
 	// yes approves the post-check registry reconciliation without a
-	// prompt (S021-R3.4). It is REQUIRED for any non-interactive run: with it
+	// prompt. It is REQUIRED for any non-interactive run: with it
 	// absent and no terminal to prompt on, --check reports the divergences and
 	// writes nothing at all.
 	//
@@ -130,7 +129,7 @@ type autoupdateOptions struct {
 	yes bool
 	// distdir is --distdir: the directory `pkgdev manifest` is given
 	// as --distdir, under the same name and with the same meaning `overlay
-	// manifest` uses (S030-R1.3). Empty means "not named", which lets
+	// manifest` uses. Empty means "not named", which lets
 	// autoupdate.distdir and then the host's own DISTDIR answer instead.
 	distdir string
 	// distfilesCache is --distfiles-cache: the read-only cache
@@ -139,19 +138,18 @@ type autoupdateOptions struct {
 	// which is why the config key is only consulted when the flag was not
 	// passed at all (see resolveAutoupdateDistfileDirs).
 	distfilesCache string
-	// noFetchCache turns OFF the per-run sharing of upstream response
-	// 024 (S024-R7.1). It is an opt-OUT: the default is false, which leaves the
-	// deduplication ON (S024-R7.2). Its reason to exist is bisection — a
+	// noFetchCache turns OFF the per-run sharing of upstream responses. It is
+	// an opt-OUT: the default is false, which leaves the deduplication ON. Its reason to exist is bisection — a
 	// suspicious version can be re-checked against an un-deduplicated run to tell
 	// a real upstream change from a sharing bug.
 	noFetchCache bool
 	// llm is --llm: the operator's consent to spend an agent on this
 	// run. ONE flag enables BOTH staged-bump capabilities — the bump reviewer and
-	// the build fixer (S033-R7.1) — because two names to turn one feature on is a
+	// the build fixer — because two names to turn one feature on is a
 	// tax on the operator, not a choice they wanted.
 	//
 	// Configuration only ever SUBTRACTS from it: `autoupdate.validate.review` or
-	// `fix_on_failure` set to false switches that one back off (S033-R7.2), while
+	// `fix_on_failure` set to false switches that one back off, while
 	// neither key can enable anything on a run where this flag is absent. The
 	// direction matters — the flag is where the cost is consented to.
 	llm bool
@@ -164,7 +162,7 @@ type autoupdateOptions struct {
 type autoupdateRun struct {
 	opts *autoupdateOptions
 	// deps is the tree's dependencies: every seam a mode reaches is read
-	// through it, never through a package variable (story 060, C6).
+	// through it, never through a package variable.
 	deps        *deps
 	dirs        autoupdateDistfileDirs
 	validate    autoupdateValidatePolicy
@@ -172,7 +170,7 @@ type autoupdateRun struct {
 	// uiConfig is the configuration the apply path resolves its renderer
 	// against. nil is legal and reads as "nothing configured".
 	uiConfig *config.Config
-	// lg is the invocation's logger (story 062); read it through log().
+	// lg is the invocation's logger; read it through log().
 	lg *slog.Logger
 }
 
@@ -207,7 +205,7 @@ type autoupdateDistfileDirs struct {
 
 // autoupdateValidatePolicy is the staged-bump validation policy this run applies:
 // the depth table translated out of config, plus the two switches that decide
-// what an unproved bump means (S033-R2, R3.13).
+// what an unproved bump means.
 //
 // It is resolved ONCE, in runAutoupdate, where both the config and the
 // *cobra.Command are in scope — exactly as autoupdateRun.dirs is, and for the same
@@ -222,7 +220,7 @@ type autoupdateValidatePolicy struct {
 	// validation off in silence.
 	Depth *validate.Depth
 	// RequireIsolation and RequireProof are the config keys behind
-	// --require-isolation and R3.13's refusal.
+	// --require-isolation and the refusal to promote an unproved bump.
 	RequireIsolation bool
 	RequireProof     bool
 }
@@ -298,13 +296,13 @@ Examples:
 	cmd.Flags().BoolVar(&o.list, "list", false, "List pending updates")
 	cmd.Flags().StringVar(&o.apply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	cmd.Flags().BoolVar(&o.force, "force", false, "Ignore cache when checking")
-	cmd.Flags().BoolVar(&o.compile, "compile", false, "Run compile test after apply. This PRIVILEGED gate stops at src_compile and never runs src_install: extending it would mean a second prompt, a second privilege escalation and a second copy of the repair loop (S042-D7). --depth=install is the unprivileged path that goes further, and the two are mutually exclusive")
+	cmd.Flags().BoolVar(&o.compile, "compile", false, "Run compile test after apply. This PRIVILEGED gate stops at src_compile and never runs src_install: extending it would mean a second prompt, a second privilege escalation and a second copy of the repair loop. --depth=install is the unprivileged path that goes further, and the two are mutually exclusive")
 	// --depth is read OFF THE COMMAND rather than bound to a package variable
 	// (newValidateCmd's convention): the value is a rung of a ladder that has to
 	// be parsed and rejected by name, and a package variable would carry one
 	// invocation's depth into the next inside a single test binary.
 	//
-	// It is what gives S033-R2.7 a surface at all. Without it the resolver would
+	// It is what gives the depth override a surface at all. Without it the resolver would
 	// be answering a question nobody could ask, and `--compile` would be the only
 	// way to reach a build gate.
 	cmd.Flags().String("depth", "", "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time")
@@ -316,11 +314,11 @@ Examples:
 	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	cmd.Flags().StringVar(&o.revive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	cmd.Flags().BoolVar(&o.revivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
-	// --no-tui is DEPRECATED IN ITS HELP TEXT ONLY (S044-R3.5). Its behaviour is
+	// --no-tui is DEPRECATED IN ITS HELP TEXT ONLY. Its behaviour is
 	// untouched: it still disables the live TUI, it still answers to NO_COLOR
 	// and BENTOO_NO_TUI, and it still outranks --ui and BENTOO_UI, because it is
 	// applied as ModePlain at the flag layer rather than as a competing
-	// mechanism (S044-R3.4).
+	// mechanism.
 	//
 	// pflag's MarkDeprecated is deliberately NOT used. It hides the flag from
 	// --help and prints a notice on every use, and both are behaviour changes —
@@ -336,8 +334,8 @@ Examples:
 	cmd.Flags().BoolVar(&o.fix, "fix", false, "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human")
 	// The presentation flags. All three change what this run SHOWS and none of
 	// them changes what it does: the same packages are scanned, validated and
-	// acted upon, and the exit status is the same, whichever way they are set
-	// (S044-R8.4, S044-R9.6). Their variables live beside the plumbing that
+	// acted upon, and the exit status is the same, whichever way they are set.
+	// Their variables live beside the plumbing that
 	// consumes them, in overlay_autoupdate_ui.go.
 	//
 	// No back-quoted words in any of the three usage strings — see the --fix
@@ -359,8 +357,8 @@ Examples:
 	// this whole path was rewritten to remove: on the machine it was measured
 	// on, /tmp is a tmpfs, so every distfile a bump fetched went into RAM.
 	// Copying that command's help string verbatim would make this flag describe
-	// behaviour this command does not have (S030-R1.3 asks for one vocabulary,
-	// not one sentence).
+	// behaviour this command does not have (one vocabulary, not one
+	// sentence).
 	// No back-quoted words in either usage string — see the --fix note above:
 	// pflag reads the first one as the flag's value placeholder and strips the
 	// quotes, so "portageq distdir" in back-quotes would render this as
@@ -376,8 +374,6 @@ Examples:
 // works in: the --distdir flag and autoupdate.distdir, handed on as the two
 // rungs distfiles.Resolve consumes, plus the one effective read-only cache.
 //
-// # Why the cache needs cacheFlagWasSet and the distdir does not
-//
 // An unset --distdir is the empty string and so is an explicit --distdir "";
 // both mean "I am not naming one", so the config key can simply answer when the
 // flag is empty. The cache is the opposite: "" is a MEANING there — it disables
@@ -385,9 +381,8 @@ Examples:
 // empty" cannot be read as "the flag is absent". pflag's Changed is the only
 // thing that distinguishes them, and a flag that was passed always wins.
 //
-// # Why only the config values are validated
-//
-// A relative path typed at a shell is unambiguous: it resolves against the
+// Only the config values are validated. A relative path typed at a shell is
+// unambiguous: it resolves against the
 // directory the operator is standing in. The same string in a config file
 // resolves against whatever directory the process happened to start in, which
 // for a long-running sweep is arbitrary — so a relative autoupdate.distdir is
@@ -432,15 +427,15 @@ func sanitizeConfiguredDir(log *slog.Logger, key, path string) string {
 }
 
 // tuiEnabledForApply is the apply-path gate: the live region is on iff the mode
-// this run resolved to draws one (autoupdateUsesTUI, S046-R3.3).
+// this run resolved to draws one (autoupdateUsesTUI).
 //
 // It no longer calls tui.Enabled. The decision moved to report.ResolveMode so
 // that one ui.mode governs this command AND `overlay manifest` instead of each
 // deciding for itself. Nothing changes for an operator who configured nothing:
 // with no ui.mode and no flags the resolution is `auto`, which yields inline on
-// a terminal and plain off one — precisely the two answers tui.Enabled gave
-// (R3.7). All three opt-outs are still honoured, the --no-tui flag among them;
-// resolveUIMode folds it together with NO_COLOR and BENTOO_NO_TUI (R2.1, R2.2).
+// a terminal and plain off one — precisely the two answers tui.Enabled gave.
+// All three opt-outs are still honoured, the --no-tui flag among them;
+// resolveUIMode folds it together with NO_COLOR and BENTOO_NO_TUI.
 func (ar *autoupdateRun) tuiEnabledForApply() bool {
 	return ar.autoupdateUsesTUI()
 }
@@ -450,22 +445,20 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // Applier, and a finish func to run once the applies complete.
 //
 // Plain branch (non-TTY / opt-out): a rate-limited plainReporter streams the tail
-// to stderr with NO ANSI (R2.2/R2.3); finish closes the batch.
+// to stderr with NO ANSI; finish closes the batch.
 //
 // TUI branch: a Bubble Tea Program is started and bound to ctx so Ctrl-C invokes
 // cancel — cancelling the apply context, which kills the in-flight child
-// (Apply runs under it) and triggers the existing orphan rollback (R5.1/R5.2). The
-// extra options also route the in-UI y/n confirm (R4.2) and release the terminal
-// for the compile step's sudo/doas prompt while teeing the child's output to a
-// capture buffer the failure path still logs (R4.1). finish closes the batch,
-// stops the program, and waits for it to exit so the terminal is restored before
-// the summary is printed.
+// (Apply runs under it) and triggers the existing orphan rollback. The extra
+// options also route the in-UI y/n confirm and release the terminal for the
+// compile step's sudo/doas prompt while teeing the child's output to a capture
+// buffer the failure path still logs. finish stops the program and waits for
+// it to exit, so the terminal is restored before the summary is printed.
 //
-// finish is idempotent in both branches (sync.Once): the caller defers it, so
-// every early return closes the batch and restores the terminal, and also calls
-// it once explicitly before the summary, which must print after the TUI is gone.
-// It returns nothing and writes no state, so its order relative to the overlay
-// lock's release does not matter.
+// finish is idempotent (sync.Once): the caller defers it, so every early return
+// closes the batch and restores the terminal, and also calls it before the
+// summary, which must print after the TUI is gone. It writes no state, so its
+// order relative to the overlay lock's release does not matter.
 func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) (tui.Reporter, []autoupdate.ApplierOption, func()) {
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
@@ -479,10 +472,10 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 	extra := []autoupdate.ApplierOption{
 		autoupdate.WithApplierReporter(r),
 		// In-UI y/n confirmation rendered by the model instead of reading stdin
-		// behind the program (R4.2).
+		// behind the program.
 		autoupdate.WithConfirmFunc(prog.Confirm),
 		// Hand the real terminal to the compile child so a sudo/doas password
-		// prompt is visible (R4.1), while teeing its stdout+stderr to a capture
+		// prompt is visible, while teeing its stdout+stderr to a capture
 		// buffer the failure path still saves (the applier's Output: %s contract).
 		autoupdate.WithApplierRunAttached(func(cmd *exec.Cmd) ([]byte, error) {
 			var buf bytes.Buffer
@@ -491,8 +484,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 			// Only a Stdin the caller left nil gets the terminal. The privileged
 			// compile leaves it nil so sudo/doas can prompt; the build gates'
 			// `ebuild` sets an empty one, because it runs in its own process
-			// group and reading the terminal from there stops it on SIGTTIN
-			// (S054-R3.2).
+			// group and reading the terminal from there stops it on SIGTTIN.
 			if cmd.Stdin == nil {
 				cmd.Stdin = os.Stdin
 			}
@@ -506,7 +498,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		// Wait for the program goroutine to exit so the terminal is restored
 		// before the summary prints. A context-cancel (Ctrl-C) outcome surfaces as
 		// tea.ErrProgramKilled here — the EXPECTED cancellation result, not a
-		// failure — so it is intentionally not escalated (R2.4); the manual TTY
+		// failure — so it is intentionally not escalated; the manual TTY
 		// gate covers a program that never started cleanly.
 		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 			ar.log().Debug("apply: live TUI program exited with error", "err", err)
@@ -525,7 +517,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	)
 
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
-	// with a clear message and a non-zero exit (R4.2). The accepted range
+	// with a clear message and a non-zero exit. The accepted range
 	// mirrors autoupdate.WithConcurrency's [1, 100] bound.
 	if ar.opts.concurrency < minConcurrency || ar.opts.concurrency > maxConcurrency {
 		return failWith(1, fmt.Errorf("--concurrency must be in range [%d, %d], got %d", minConcurrency, maxConcurrency, ar.opts.concurrency))
@@ -592,26 +584,25 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// The process-wide context (func commandContext): overlay autoupdate is
 	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels
 	// the run. The Checker threads it through every outbound HTTP/LLM call, so
-	// the run aborts within ~2 s of a signal (R3.1), and every child the modes
+	// the run aborts within ~2 s of a signal, and every child the modes
 	// spawn in their own process group (git, pkgdev, the `claude` CLI, the
-	// unprivileged ebuild) receives it, since no terminal signal reaches them
-	// (story 054, R4.4).
+	// unprivileged ebuild) receives it, since no terminal signal reaches them.
 	runCtx := commandContext(cmd)
 
-	// Compute the autoupdate cache TTL from config (R2.1, R2.2). GetCacheTTL
+	// Compute the autoupdate cache TTL from config. GetCacheTTL
 	// returns the user-configured value when positive, otherwise the
 	// 3600-second default — so the duration here is always positive and safe
 	// to pass to WithCacheTTL inside runCheck.
 	cacheTTL := time.Duration(appCtx.Config.Autoupdate.GetCacheTTL()) * time.Second
 
 	// Resolve the two distfile directories once, here, where both the config and
-	// the *cobra.Command are in scope (S030-R1.3). Every mode that regenerates a
+	// the *cobra.Command are in scope. Every mode that regenerates a
 	// Manifest reads the result; a mode that does not (--check, --list, --lint)
 	// simply never looks at it.
 	ar.dirs = o.resolveAutoupdateDistfileDirs(ar.log(), appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
 
 	// The staged-bump validation policy, resolved here for the same reason and in
-	// the same place as the distfile directories above (S033-R2). A --depth that
+	// the same place as the distfile directories above. A --depth that
 	// does not name a rung is fatal BEFORE any package work: it is a typo the
 	// operator must fix, and silently validating at the class depth instead would
 	// be the run they did not ask for.
@@ -620,62 +611,37 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		return failWith(1, err)
 	}
 	// The same block, unresolved, for the two --llm capabilities: their keys are
-	// tri-state and only mean something next to the flag (S033-R7.2).
+	// tri-state and only mean something next to the flag.
 	ar.validateCfg = appCtx.Config.Autoupdate.Validate
 
 	// The renderer, resolved here for the same reason and in the same place as
 	// the two above: --ui, --no-tui and the ui.mode key are only all in scope
-	// once the config is parsed (S044-D4).
+	// once the config is parsed. The ANSWER is not kept — resolveAutoupdateUIMode
+	// is a pure function, so whoever needs the mode asks where it is used — but
+	// the config it resolves against is parked here for the apply path's gate,
+	// two call frames below runApply.
 	//
-	// The ANSWER is deliberately not kept. resolveAutoupdateUIMode is a pure
-	// function of the flags, the config and the terminal, so whoever needs the
-	// mode asks for it where it is used and gets the same value; see its doc
-	// comment for why a package variable holding it would be worse than the
-	// three os.Getenv calls it saves.
-	//
-	// The apply path's gate is two call frames below runApply and carries no
-	// config of its own, so the value it resolves against is parked here — the
-	// same once-per-run hand-down the three decisions above use.
-	//
-	// # This call had two jobs and now has one
-	//
-	// It used to end the run on any error, citing S044-R3.9: "IF --ui is given a
-	// value outside the accepted set … SHALL NOT run the check" — the flag, and
-	// nothing else. resolveAutoupdateUIMode resolves the whole precedence chain,
-	// so the gate fired on all four sources while claiming the authority of one.
-	// Story 046's Task 4 made that gap total: root.go's PersistentPreRunE now
-	// validates --ui for all 30 commands before any run function, so by the time
-	// this line runs the flag has already been judged, and every rejection left
-	// here is an AMBIENT one — a BENTOO_UI or a ui.mode, inherited from a shell
-	// profile or a config file rather than typed for this run, which S046-R3.7
-	// answers the opposite way: the report renders in plain and says so, and the
-	// run keeps the status it would have had.
-	//
-	// Two things went wrong while the exit stood here, both measured: an
-	// unusable BENTOO_UI cost this command its entire report, and on a run that
-	// was going to fail for a reason of its own it replaced the operator's real
-	// diagnostic — "packages.toml not found in overlay" — with one about a
-	// display key that could not have caused it.
-	//
-	// What survives is the job the citation never covered, and it is why the
-	// call is not simply deleted: S044-R3.6's downgrade sentence reaches stderr
-	// HERE, before any package work, because resolving is what routes it — and
-	// warnUIDowngrade keeps it to one line however many times the mode is
-	// resolved after this.
+	// This call no longer ends the run: the root already rejects an unusable
+	// --ui, so every error left here is an AMBIENT one (BENTOO_UI or ui.mode),
+	// which renders in plain and keeps the run's status. Exiting here once cost
+	// the command its whole report, and replaced a real diagnostic with one
+	// about a display key. It stays because resolving is what routes the
+	// downgrade sentence to stderr BEFORE any package work; warnUIDowngrade keeps
+	// it to one line however often the mode is resolved after this.
 	ar.uiConfig = appCtx.Config
 
 	if _, err := resolveAutoupdateUIMode(ar.log(), appCtx.Config, o.noTUI, ar.deps.uiIsTerminal); err != nil {
-		// Debug, not Error, and that is R3.6 rather than indifference. The
+		// Debug, not Error, and that is deliberate rather than indifference. The
 		// refusal is stated once per run, at Warn, by whoever produces a report
 		// — presentCheckReport, through reportModeOrPlain — naming the source,
-		// the value and the mode used instead. One typo answered in two voices
-		// is the duplication 11.1 already paid for once at the root. The line is
+		// the value and the mode used instead. One typo must not be
+		// answered in two voices. The line is
 		// kept so a --verbose run can still see where the resolution first
 		// failed, which is several frames earlier than where it is announced.
 		ar.log().Debug("the ambient UI mode did not resolve before the package work", "err", err)
 	}
 
-	// One run per overlay (S056-R4.1): every mode that writes the overlay or
+	// One run per overlay: every mode that writes the overlay or
 	// the registry holds <overlay>/.autoupdate.bentoo-lock until it returns, so
 	// a cron run and a manual run never edit packages.toml and the ebuilds at
 	// once. It is taken here, after the config resolved and before the mode
@@ -689,7 +655,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 			return failWith(1, fmt.Errorf("cannot take the overlay lock: %w", err))
 		}
 		// Released by the defer on every return, including after a signal
-		// cancelled the mode's context (S056-R4.7): every mode returns its
+		// cancelled the mode's context: every mode returns its
 		// outcome and func main ends the process only after this function has
 		// returned. The registration with exitProcess stays as a second net;
 		// Release is idempotent, so the two never conflict.
@@ -727,7 +693,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	case ar.opts.revive != "":
 		return ar.runRevive(runCtx, overlayPath, configDir, ar.opts.revive, cacheTTL, appCtx.Config, appCtx.Config.Autoupdate.LLM)
 	case ar.opts.clean:
-		// MUST stay below both --apply cases (S027-G6): above them it would
+		// MUST stay below both --apply cases: above them it would
 		// convert every existing `--apply … --clean` invocation into an
 		// overlay-wide sweep. With --apply present those cases match first and
 		// --clean keeps meaning "sweep the directory this apply touched".
@@ -756,7 +722,7 @@ func (ar *autoupdateRun) resolveHTTPTimeout(cfg *config.Config) time.Duration {
 
 // runCheck handles the --check flag. cacheTTL must be a positive duration —
 // the caller resolves it from AutoupdateConfig.GetCacheTTL, which guarantees a
-// positive value (R2.1, R2.2). A non-positive cacheTTL is treated as "use the
+// positive value. A non-positive cacheTTL is treated as "use the
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
 func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
@@ -777,9 +743,9 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// the ~220 GitHub/GitLab packages, making a large --concurrency pointless.
 		autoupdate.WithRateLimiter(fetch.NewRateLimiter(fetch.WithTunedHostPolicies())),
 		// Share one response across every record that declares the same URL — on
-		// by default (S024-R7.2). --no-fetch-cache turns it off, restoring one
-		// request per read exactly as before story 024, so a suspicious result can
-		// be compared against an un-deduplicated run (S024-R7.1).
+		// by default. --no-fetch-cache turns it off, restoring one request per
+		// read, so a suspicious result can be compared against an
+		// un-deduplicated run.
 		autoupdate.WithFetchCache(!ar.opts.noFetchCache),
 		autoupdate.WithLogger(ar.log()),
 	}
@@ -787,7 +753,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
 	}
 
-	// Wire an LLM provider into the check path (R5.2). newConfiguredLLMProvider
+	// Wire an LLM provider into the check path. newConfiguredLLMProvider
 	// returns (nil, nil) when no provider is configured, (provider, nil) on
 	// success, and (typed-nil, err) on a construction failure. The error must be
 	// the PRIMARY guard: a failed constructor boxes a nil concrete pointer into a
@@ -796,7 +762,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// receiver). On failure we Warn and continue; --check still runs, skipping LLM
 	// extraction. WithLLMProviderConfigured records that a provider WAS requested
 	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
-	// (R5.3) and we avoid a double-warn with the failure line just below.
+	// and we avoid a double-warn with the failure line just below.
 	if p, err := newConfiguredLLMProvider(ar.log(), llmCfg); err != nil {
 		ar.log().Warn("LLM provider unavailable; --check will skip LLM version extraction", "provider", llmCfg.Provider, "err", err)
 	} else if p != nil {
@@ -854,13 +820,13 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			ar.log().Info("package skipped in packages.toml", "package", pkg, "skipped", result.Skipped)
 			return nil
 		}
-		// S045-R1.2: the one package this run scanned, as the same report the
+		// The one package this run scanned, as the same report the
 		// batch path builds and through the same render — one element, joined
 		// with the zero validation half because nothing validates here. This
 		// path prices nothing, so no plan has been put in front of the operator
 		// and the report states its own.
 		//
-		// D6 keeps the return below: only the batch path may reconcile the
+		// The return below stays: only the batch path may reconcile the
 		// registry, and moving the render past this point must not move the
 		// return with it.
 		//
@@ -888,7 +854,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// only after CheckAll has fully completed, so the output is deterministic.
 	//
 	// It stays HERE, where it has always been, even though the scan it
-	// qualifies is now drawn at the end of the run (S045-D1): these lines
+	// qualifies is now drawn at the end of the run: these lines
 	// therefore reach stderr BEFORE the report reaches stdout, where they used
 	// to follow it. That is the lesser change. Moving them down beside the
 	// report would put per-package failures AFTER the interactive registry-fix
@@ -900,12 +866,12 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	}
 
 	// Offer an interactive LLM registry repair for the packages that failed
-	// upstream-version extraction (story 014). Gated to a usable claude-code fixer
+	// upstream-version extraction. Gated to a usable claude-code fixer
 	// AND an interactive stdin. newConfiguredRegistryFixer returns a TRUE nil
 	// interface for a non-claude provider; a construction error Warns and is
-	// treated as absent — never box a nil pointer (AD9). When the gate is false
+	// treated as absent — never box a nil pointer. When the gate is false
 	// (non-claude provider, no claude CLI, or non-TTY stdin) the output and exit
-	// code below are exactly as before this story (R7.x / R10.1).
+	// code below are exactly as they are without the fixer.
 	fixer, ferr := ar.deps.checkRegistryFixer(ar.log(), llmCfg)
 	if ferr != nil {
 		ar.log().Warn("LLM registry fixer unavailable; --check will not offer registry repair", "err", ferr)
@@ -925,14 +891,14 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		ar.reportRevivableOrphans(ctx, checker, cfg)
 	}
 
-	// S033-R9.1: put every pending update through the gates at its resolved
+	// Put every pending update through the gates at its resolved
 	// depth, and publish none of it. It runs BEFORE the reconciliation below for
 	// the same reason that one runs last: the reconciliation is the only prompt in
 	// this command that can write to the overlay, and it must be the last thing on
 	// screen rather than scrolled off by a validation report.
 	validated, planPrinted := ar.runPendingValidation(ctx, overlayPath, configDir, result.Items, llmCfg)
 
-	// S045-R1.1/R1.3, D1: the run's one report, built where both of its halves
+	// The run's one report, built where both of its halves
 	// are finally in hand — the scan above, and whatever the validation just
 	// contributed — and drawn exactly once.
 	//
@@ -941,16 +907,16 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// everything that can contribute to this report has contributed by this
 	// line. planPrinted travels into render.Options.SkipPlan so the plan the
 	// operator read before the confirmation prompt is not drawn to them a
-	// second time (S045-R2.3).
+	// second time.
 	//
 	// "The run reached the end of its plan" needs no parameter of its own: it
 	// is the envelope's fact, established by buildReport above and carried
 	// inside the very value being joined here — so the screen and the export
-	// state it once, from one place (D1).
+	// state it once, from one place.
 	joined := checkReport(ar.log(), result.Items, validated)
 	ar.presentCheckReport(joined, planPrinted)
 
-	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
+	// Compare the registry against the overlay and, behind
 	// ONE confirmation, write the pins back. It runs here, at the very end of the
 	// batch path, for three reasons:
 	//
@@ -960,7 +926,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	//   - the one prompt in this command that can PUBLISH must be the last thing
 	//     on screen, not scrolled off by the revivable-orphan report;
 	//   - it is best-effort, exactly like that report: it never changes the exit
-	//     code, so a non-TTY run that writes nothing still exits 0 (R3.4).
+	//     code, so a non-TTY run that writes nothing still exits 0.
 	//
 	// Only this batch path reconciles. The single-package path above returns
 	// before reaching here on purpose — see reconcileRegistryAfterCheck.
@@ -998,7 +964,7 @@ func acquireOverlayLock(overlayPath string) (*filelock.Lock, error) {
 
 // sweepStaleTemps removes the temporary files killed runs left under the
 // overlay (skipping .git) and directly in the autoupdate config dir, one Warn
-// line per removed path (S056-R6.1). It runs with the overlay lock held, and
+// line per removed path. It runs with the overlay lock held, and
 // only files whose writer's PID is dead are removed, so no live writer loses
 // its file. A sweep failure is logged and the run proceeds: debris is a
 // nuisance, not a reason to refuse the run.
@@ -1019,41 +985,32 @@ func sweepStaleTemps(log *slog.Logger, overlayPath, configDir string) {
 
 // stdinIsTerminal reports whether standard input is an interactive terminal (a
 // character device) rather than a pipe, regular file, or /dev/null. The
-// story-014 registry-fix prompt is shown only when this is true, so a piped or
-// CI run of --check keeps its existing non-interactive output and exit code
-// (R7.3, AD8). output.IsTerminal probes stdout; this probes stdin specifically.
+// registry-fix prompt is shown only when this is true, so a piped or
+// CI run of --check keeps its existing non-interactive output and exit code.
+// output.IsTerminal probes stdout; this probes stdin specifically.
 func stdinIsTerminal() bool {
 	fi, err := os.Stdin.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // ---------------------------------------------------------------------------
-// Post-check registry reconciliation (S021-R3.2, R3.3, R3.4)
+// Post-check registry reconciliation
 // ---------------------------------------------------------------------------
 
 // reconcileRegistryAfterCheck is the post-check reconciliation: it compares the
 // whole registry against the overlay, prints the three classes of disagreement,
-// and — behind exactly one confirmation covering all of them (R3.2) — writes the
-// repairable ones back in a single batch (design D4).
+// and — behind exactly one confirmation covering all of them — writes the
+// repairable ones back in a single batch.
 //
-// # Why a confirmation at all
+// A confirmation, because packages.toml is a published artifact: the overlay
+// auto-commits and pushes, so a wrong pin is a released mistake. --yes writes
+// unattended, an interactive terminal is asked, anything else prints the
+// divergences and writes nothing.
 //
-// packages.toml is a published artifact. The overlay it lives in auto-commits
-// and pushes, so a write here reaches origin within minutes: a wrong pin is not
-// a local mistake to fix before anyone notices, it is a released one. Hence the
-// three gates, in order of how much they trust the caller: --yes writes
-// unattended because the operator asked for that in so many words; an
-// interactive terminal is asked; anything else prints the divergences and
-// writes nothing (R3.4).
-//
-// # Why only the batch path calls this
-//
-// Reconcile walks the ENTIRE registry, not the packages named on the command
-// line — it has no notion of a subset. Calling it from `--check <one-package>`
-// would answer a question about one package with a prompt to write a few hundred
-// pins, and would pay the whole registry's directory-read cost for a command
-// meant to be quick. design.md's check sequence starts at CheckAll for the same
-// reason. A maintainer who wants the reconciliation runs a full --check.
+// Only the batch path calls this: Reconcile walks the ENTIRE registry, so
+// calling it from `--check <one-package>` would answer a question about one
+// package with a prompt to write a few hundred pins, at the whole registry's
+// directory-read cost.
 //
 // Every failure here is best-effort and non-fatal: an unreadable registry, a
 // declined prompt and a failed write all leave the check's exit code alone. The
@@ -1070,7 +1027,7 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 
 	divs := autoupdate.Reconcile(ar.log(), overlayPath, cfg.Packages)
 	if len(divs) == 0 {
-		// R3.2 is conditional on divergences existing: with none, print nothing
+		// The report is conditional on divergences existing: with none, print nothing
 		// at all and let the check's own output stand.
 		return
 	}
@@ -1087,13 +1044,13 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 	}
 
 	if !ar.confirmRegistryWrite(divs, len(pins)) {
-		// R3.3: return WITHOUT calling the writer. Not "call it with an empty
+		// Return WITHOUT calling the writer. Not "call it with an empty
 		// map", not "call it and roll back" — the file is never opened, so it is
 		// byte-identical by construction rather than by care.
 		return
 	}
 
-	// D4: one call, the whole batch. SetPackageVersions does one read and one
+	// One call, the whole batch. SetPackageVersions does one read and one
 	// atomic rename, so a partially-written registry is never reachable.
 	if err := ar.deps.registryWriter(overlayPath, pins); err != nil {
 		// Reported, never swallowed — but not fatal: the check itself succeeded
@@ -1111,8 +1068,8 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 // written — the stale-pin count, never len(divs), because the other two classes
 // are reported and left alone.
 //
-// The full list is printed, not a sample: the operator is approving one diff
-// (D4), and a truncated list hides exactly the line that is wrong.
+// The full list is printed, not a sample: the operator is approving one diff,
+// and a truncated list hides exactly the line that is wrong.
 func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	fmt.Println()
 	output.Header.Println("Registry Reconciliation")
@@ -1137,33 +1094,15 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	// then by class, then in Gentoo version order) so two runs over an unchanged
 	// overlay print the identical list.
 	// Returns how many lines the group printed, so a caller can append a
-	// follow-up line only to a group that actually appeared (R7.1).
+	// follow-up line only to a group that actually appeared.
 	//
-	// # The key column is measured here, which is why `line` is handed its key
-	//
-	// All three line formats below used to open with %-45s. Nobody measured 45,
-	// and it is wrong in both directions at once. Too wide: a group of registry
-	// keys shaped like `net-libs/webkit-gtk:4.1` — 23 cells — pays 22 cells of
-	// empty air on every row. Too narrow: the longest atom this overlay
-	// actually holds, `media-plugins/gst-plugins-adaptivedemux2`, is 40 cells,
-	// so the guess is five cells from the day a key overruns the column and
-	// pushes the second field right on that row alone, which is worse than no
-	// alignment at all. Neither error is visible where the number is typed,
-	// because the width that is correct depends on the keys THIS run produced
-	// (R6.2).
-	//
-	// The width a group needs is the widest key IN THAT GROUP, which is knowable
-	// only once the group's members have been collected. This closure already
-	// collected them; it just threw the keys away by formatting each line as it
-	// went. So it now collects the divergences rather than their finished lines,
-	// measures the column over them, and hands each `line` its key already laid
-	// into it — the loop-that-prints-as-it-goes being exactly how a typed width
-	// survives.
-	//
-	// Per group, not across all three: a group is a table under its own heading,
-	// and "Pins to write" should not be widened by one long key from a list
-	// printed further down that no reader is comparing it against column by
-	// column.
+	// The key column is measured per group, as the widest key IN THAT GROUP: a
+	// typed width is wrong in both directions at once (too wide for short
+	// registry keys, a few cells from overflowing on the longest atom), and the
+	// right width depends on the keys THIS run produced. So the closure collects
+	// the divergences rather than finished lines, measures, and hands each `line`
+	// its key already padded. Per group rather than across all three, because
+	// each group is a table under its own heading.
 	printGroup := func(kind autoupdate.DivergenceKind, heading string, line func(d autoupdate.Divergence, key string) string) int {
 		var members []autoupdate.Divergence
 		var keys []string
@@ -1176,11 +1115,11 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 		if len(members) == 0 {
 			return 0
 		}
-		// Display cells, never bytes (R6.1): the width and the padding are the
+		// Display cells, never bytes: the width and the padding are the
 		// same measurement, so a key and the column holding it cannot disagree
 		// about how wide it is. The space that separates the key from what
 		// follows stays in each format string below, where it is a gap between
-		// two columns and not part of either (R6.3).
+		// two columns and not part of either.
 		width := render.ColumnWidth(keys)
 
 		fmt.Printf("  %s (%d):\n", heading, len(members))
@@ -1201,10 +1140,9 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 		return fmt.Sprintf("%s %s", key, d.Disk)
 	})
 	if unclaimed > 0 {
-		// R7.1: this report used to end at the finding. Naming the command that
-		// acts on it closes the loop — an unclaimed ebuild is removed by a
-		// sweep, and until story 027 the only sweep ran inside an apply, so a
-		// package already at its upstream version could never reach one.
+		// Naming the command that acts on the finding closes the loop: an
+		// unclaimed ebuild is removed by a standalone sweep, which also reaches
+		// a package already at its upstream version.
 		output.Info.Println("  Remove them with: bentoo overlay autoupdate --clean")
 		fmt.Println()
 	}
@@ -1235,24 +1173,24 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
 }
 
-// confirmRegistryWrite is the write gate (R3.2, R3.4). It reports whether the
+// confirmRegistryWrite is the write gate. It reports whether the
 // batch of `writable` pins may be written, and prints why whenever the answer is
 // no — a run that silently declines to write is indistinguishable from one that
 // wrote and failed to say so.
 func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writable int) bool {
 	if ar.opts.yes {
-		// R3.4: an explicit, in-so-many-words approval. Stdin is never read on
+		// An explicit, in-so-many-words approval. Stdin is never read on
 		// this path, so it works from a pipe, a cron job or a CI step.
 		output.Warning.Printf("  --yes given: writing %d version pin(s) without a prompt.\n", writable)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
-		// R3.4: the divergences above ARE the report; this run writes nothing.
+		// The divergences above ARE the report; this run writes nothing.
 		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
 		output.Info.Printf("  Re-run with --yes to write these %d version pin(s) unattended.\n", writable)
 		return false
 	}
-	// R3.2: ONE question covering every divergence above, not one per entry.
+	// ONE question covering every divergence above, not one per entry.
 	fmt.Println()
 	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
 		"Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)", writable, len(divs)))
@@ -1348,7 +1286,7 @@ func printLintTally(issues []registry.LintIssue) {
 	sort.Strings(rules)
 
 	// The rule column is as wide as the widest rule name THIS run reported, in
-	// display cells (R6.2). The 26 that used to be typed here was a guess about
+	// display cells. The 26 that used to be typed here was a guess about
 	// a vocabulary that belongs to internal/autoupdate's lint rules and not to
 	// this printer: two cells past `bracket-line-in-comments`, the longest of
 	// the thirteen, which makes it 15 cells of empty air on a tally that
@@ -1359,7 +1297,7 @@ func printLintTally(issues []registry.LintIssue) {
 	//
 	// The single space in the format is the gap to the count beside it — the
 	// air BETWEEN two columns, which nothing in a run's data can make wider, so
-	// it is written down where a width is measured (R6.3).
+	// it is written down where a width is measured.
 	width := render.ColumnWidth(rules)
 
 	fmt.Println()
@@ -1487,7 +1425,7 @@ func gentooRepoPath() string {
 
 // applierDistfileOptions carries the resolved distfile directories into every
 // Applier this command builds, so --apply, --apply all and --revive all reach
-// the Manifest step with the same two directories (S030-R1.3). One helper rather
+// the Manifest step with the same two directories. One helper rather
 // than three copies of the same two lines: a mode that silently missed them
 // would fall back to the host's DISTDIR with no cache, which looks like working
 // software.
@@ -1499,20 +1437,17 @@ func (ar *autoupdateRun) applierDistfileOptions() []autoupdate.ApplierOption {
 }
 
 // resolveAutoupdateValidatePolicy translates `autoupdate.validate` and the
-// --depth flag into what the Applier reads (S033-R2, R2.2, R2.4, R2.7, R6.6,
-// R3.13).
+// --depth flag into what the Applier reads.
 //
-// # Why the translation lives here and not in validate
-//
+// The translation lives here and not in validate because
 // internal/autoupdate/validate deliberately knows nothing about the config
 // package — the import already runs the other way — so the depth table crosses
 // as validate's own types and the STRINGS are turned into rungs here, by
 // validate.ParseDepth, which rejects a typo by name. Doing it anywhere else would
 // put the ladder's vocabulary in two places and the copy would be the stale one.
 //
-// # An unusable override is reported, never fatal
-//
-// A per-package override with no reason, or with a depth that names no rung, is
+// An unusable override is reported, never fatal. A per-package override with
+// no reason, or with a depth that names no rung, is
 // logged and DROPPED, which leaves that package at its class depth — the safe
 // direction, since an override is the one input that can quietly reduce how much
 // a bump is checked. One bad entry must not cost the operator the rest of the
@@ -1529,9 +1464,8 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 			ByClass:   map[validate.Class]validate.Depth{},
 			Overrides: map[string]validate.DepthOverride{},
 		},
-		// --require-isolation stays a flag OR the key: story 031's flag was the
-		// only way in until story 033 gave the setting a home, and neither
-		// supersedes the other.
+		// --require-isolation stays a flag OR the key: the flag came first, the
+		// key gave the setting a home, and neither supersedes the other.
 		RequireIsolation: o.requireIsolation || validateCfg.GetRequireIsolation(),
 		RequireProof:     validateCfg.GetRequireProof(),
 	}
@@ -1587,13 +1521,13 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 // applierValidateOptions carries the resolved validation policy into every
 // Applier this command builds, so --apply, --apply all and --revive all reach the
 // gates with the same depth table, the same staging root and the same two
-// switches (S033-12.1).
+// switches.
 //
 // One helper rather than three copies of the same six lines: a mode that silently
 // missed them would apply bumps with no gate at all, which — unlike a missing
 // distdir — looks exactly like success.
 //
-// The staging root is <configDir>/staging (S033-D1). It is what turns the whole
+// The staging root is <configDir>/staging. It is what turns the whole
 // staged pipeline on: without it the candidate is written straight into the
 // published overlay and no gate runs, which is every release before this one.
 func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.ApplierOption {
@@ -1611,11 +1545,11 @@ func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.A
 }
 
 // stagingDirName is the ONE spelling of the staged-tree directory under the
-// autoupdate config dir (S033-D1).
+// autoupdate config dir.
 //
 // Both entry points join it — `--apply` through applierValidateOptions and
 // `overlay validate --depth` through autoupdateStagingRoot — because the path is
-// where the retention and reuse rules are recorded (R3.7, R10.1). Two spellings
+// where the retention and reuse rules are recorded. Two spellings
 // would put the two commands' staged trees in different places, and a tree
 // proved by one would silently never be found by the other.
 const stagingDirName = "staging"
@@ -1636,10 +1570,10 @@ func autoupdateConfigDir() (string, error) {
 
 // autoupdateStagingRoot is the directory staged trees are prepared under.
 //
-// It is deliberately NOT under the overlay and NOT under os.TempDir() (S033-D1):
+// It is deliberately NOT under the overlay and NOT under os.TempDir():
 // a tree under the overlay is an unclaimed ebuild that `--clean` deletes and
 // `overlay validate` reports, and a tree under /tmp does not survive the run,
-// which R3.6 and R3.7 require so a failure can still be inspected afterwards.
+// which a failure needs so it can still be inspected afterwards.
 func autoupdateStagingRoot() (string, error) {
 	dir, err := autoupdateConfigDir()
 	if err != nil {
@@ -1650,12 +1584,12 @@ func autoupdateStagingRoot() (string, error) {
 
 // runApply handles the --apply flag. ctx is passed to Apply so a SIGINT/SIGTERM
 // cancels the in-flight `pkgdev manifest`
-// or compile child process within ~2 s (R1.1, R1.2). The existing orphan
-// rollback path then removes the half-applied .ebuild (R1.3).
+// or compile child process within ~2 s. The existing orphan
+// rollback path then removes the half-applied .ebuild.
 func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, pkg string, llmCfg config.LLMConfig) error {
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
 	// Ctrl-C (which invokes cancel) cancels the in-flight child Apply runs
-	// under it and triggers the existing orphan rollback (R5.1/R5.2).
+	// under it and triggers the existing orphan rollback.
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1705,7 +1639,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 // runApplyAll handles `--apply all`: it applies every pending update, reusing a
 // single Applier so the pending list and logs directory are loaded once. ctx
 // bounds every Apply so a SIGINT/SIGTERM cancels the in-flight `pkgdev manifest`
-// or compile child process (R1.1, R1.2).
+// or compile child process.
 //
 // The package list is snapshotted up front: Apply mutates the underlying
 // pending list (a successful apply deletes its entry), so iterating over the
@@ -1736,7 +1670,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 
 	// Derive a cancelable apply context from the signal-aware ctx so the TUI's
 	// Ctrl-C (which invokes cancel) cancels the in-flight child Apply runs
-	// under it and triggers the existing orphan rollback (R5.1/R5.2).
+	// under it and triggers the existing orphan rollback.
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -1877,7 +1811,7 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		}
 		displayCleanReport(result)
 		if result.CleanWarning != "" {
-			// R6.2's blocked-entry line arrives here and nowhere else: a plan
+			// The blocked-entry line arrives here and nowhere else: a plan
 			// blocked by a pinless entry is returned as an error naming that
 			// entry, which Apply stores in CleanWarning. ApplyResult carries no
 			// sweepPlan and therefore no Blocked field, so this IS the line —
@@ -1905,7 +1839,7 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
 		}
 		if result.StagedPath != "" {
-			// S033-R3.6's second half, at the operator's end of it: the bump was
+			// The operator's end of staged-tree retention: the bump was
 			// validated in a tree of its own outside the overlay, that tree is kept
 			// when the bump is not promoted, and this line is what makes it findable.
 			// Without it the tree still survives, but the only way to see the ebuild
@@ -1924,16 +1858,16 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 //
 // It prints nothing when no compile ran — there is no fidelity to report about
 // a step that did not happen — and nothing extra when the namespace was
-// verified, since a plain "Success" already means what it says (R7.2).
+// verified, since a plain "Success" already means what it says.
 //
 // The two lines it does print exist because the gate used to claim more than it
 // had. Portage reports network-sandbox in FEATURES whether or not the namespace
 // was created, creating one needs privilege an ordinary user does not have, and
 // Portage warns about neither. So a green could mean "built with the network
-// cut off" or "built with full network access", and nothing distinguished them
-// (R7.3). The skip line is the same honesty one step further: with
+// cut off" or "built with full network access", and nothing distinguished them.
+// The skip line is the same honesty one step further: with
 // --require-isolation the compile did not run, and saying "Success" without
-// saying that would be the same lie in a new place (R7.4).
+// saying that would be the same lie in a new place.
 func (ar *autoupdateRun) displayCompileIsolation(result *autoupdate.ApplyResult) {
 	if !ar.opts.compile || result.IsolationVerified || result.IsolationReason == "" {
 		return
@@ -1948,14 +1882,14 @@ func (ar *autoupdateRun) displayCompileIsolation(result *autoupdate.ApplyResult)
 
 // displayCleanReport prints what the --clean sweep did to the package
 // directory: every version it removed, and every version it kept together with
-// the registry entry that claims it (R6.1).
+// the registry entry that claims it.
 //
 // Naming the claiming entry is the point. "Kept 1.28.5" invites the question
 // the report exists to answer — kept by whom, and may I delete it? — while
 // "kept 1.28.5, claimed by media-plugins/gst-plugins-vpx@stable" says which
 // record to edit if that is wrong. An empty claimant is not an omission: it
 // means a RULE kept the file rather than an entry (a live -9999 ebuild, which no
-// pin can ever name, or the R4.3 floor that refuses to leave a directory with no
+// pin can ever name, or the floor that refuses to leave a directory with no
 // release at all), and saying which rule is what stops it reading as a bug.
 //
 // It prints nothing when --clean did not run, since every field is then empty.
@@ -2020,7 +1954,7 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 		autoupdate.WithTypeFilter(ar.opts.only),
 		autoupdate.WithHTTPRequestTimeout(httpTimeout),
 		autoupdate.WithRateLimiter(fetch.NewRateLimiter(fetch.WithTunedHostPolicies())),
-		// Same escape hatch as runCheck (S024-R7.1, R7.2). Setting it HERE is what
+		// Same escape hatch as runCheck. Setting it HERE is what
 		// covers all three revive Checkers at once — both listing paths and the
 		// apply path build their options through this helper — so the flag cannot
 		// be honoured on --check and silently ignored on a revive.

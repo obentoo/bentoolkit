@@ -10,11 +10,11 @@ import (
 var (
 	// snapshotPruneDryRun is --dry-run: print the retention actions that would
 	// run — the engine prune per subvolume plus the remote GFS per archive
-	// ship — with zero subprocesses and zero writes (008 R3.2, G3).
+	// ship — with zero subprocesses and zero writes.
 	snapshotPruneDryRun bool
 	// snapshotPruneShip is --ship: scope the prune to the named [[ship]] entry
 	// only — the engine-local prune is skipped and just that ship's remote is
-	// pruned (008 R3.2).
+	// pruned.
 	snapshotPruneShip string
 )
 
@@ -42,13 +42,13 @@ are never deleted — each is the base of its subvolume's next incremental send.
 	return cmd
 }
 
-// runSnapshotPrune applies the [engine.retention] policy on demand (008 R3.1):
+// runSnapshotPrune applies the [engine.retention] policy on demand:
 // the engine-native prune per subvolume plus the remote GFS per archive ship,
-// honoring --dry-run and --ship scoping (008 R3.2).
+// honoring --dry-run and --ship scoping.
 func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 	log := logging.FromContext(commandContext(cmd))
 	// Prune is destructive: load AND validate the config (drivers + deps) so an
-	// unknown driver or missing binary fails fast before any subprocess (G3).
+	// unknown driver or missing binary fails fast before any subprocess.
 	cfg, path, err := loadSnapshotConfig(log)
 	if err != nil {
 		log.Error("snapshot prune: failed", "err", err)
@@ -65,9 +65,9 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 	}
 
 	if snapshotPruneDryRun {
-		// 008 R3.2: preview only — print the retention plan and return BEFORE
+		// Preview only — print the retention plan and return BEFORE
 		// the engine-config render and the Manager build: zero subprocesses,
-		// zero writes (G3).
+		// zero writes.
 		printDryRunPlan(snapshot.PlanPrune(cfg, snapshotPruneShip))
 		return nil
 	}

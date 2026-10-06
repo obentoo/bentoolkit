@@ -8,8 +8,7 @@ import (
 )
 
 // snapshotApplyDryRun is --dry-run: print the apply plan (engine configs +
-// systemd units) without writing anything and without calling systemctl
-// (008 R2.1).
+// systemd units) without writing anything and without calling systemctl.
 var snapshotApplyDryRun bool
 
 // newSnapshotApplyCmd builds `snapshot apply`.
@@ -38,7 +37,7 @@ func runSnapshotApply(cmd *cobra.Command, _ []string, d *deps) error {
 	}
 
 	if snapshotApplyDryRun {
-		// 008 R2.1: preview only — print the engine config(s) and systemd units
+		// Preview only — print the engine config(s) and systemd units
 		// the apply would write, with zero writes and zero subprocesses.
 		printDryRunPlan(snapshot.PlanApply(cfg, path))
 		return nil

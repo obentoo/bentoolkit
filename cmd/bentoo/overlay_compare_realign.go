@@ -21,24 +21,21 @@ import (
 // This file is the whole of what `--realign` adds to a shipped command, and it
 // is a separate file so that the promise underneath it stays checkable: WITHOUT
 // `--realign` nothing here runs, so `overlay compare` prints exactly what it
-// printed yesterday and exits exactly as it did (R7.2).
+// printed yesterday and exits exactly as it did.
 //
-// That promise needs a mechanism rather than a good intention, and the mechanism
-// is not in this file — it is in internal/overlay, where every field the review
-// writes renders nothing at its zero value. FormatReport takes a *CompareReport
-// and never learns which flags were passed (overlay_compare.go says so outright,
-// beside the call that runs the review pass), so a gate in the renderer was never
-// available. What this file owns
-// is the other half: the passes that FILL those fields are called from exactly
-// one place, behind exactly one condition, and `IncludeNotInRemote` is switched
-// on there and nowhere else — unconditionally it would give the 84 Bentoo-only
-// packages rows they do not have today and change `counted - len(report.Results)`
-// under everyone (D1).
+// The mechanism behind that promise is in internal/overlay, where every field
+// the review writes renders nothing at its zero value: FormatReport never
+// learns which flags were passed, so a gate in the renderer was never
+// available. What this file owns is the other half: the passes that FILL those
+// fields are called from exactly one place, behind exactly one condition, and
+// `IncludeNotInRemote` is switched on there and nowhere else — unconditionally
+// it would give the 84 Bentoo-only packages rows they do not have today and
+// change `counted - len(report.Results)` under everyone.
 //
 // NOTHING HERE WRITES A FILE. The candidate declarations and the baseline text a
 // model proposes are printed for a maintainer to paste: the overlay repository
 // auto-commits and pushes within minutes, so a declaration this program wrote
-// would be a PUBLISHED one before anyone had read it (R3.6, R4.2).
+// would be a PUBLISHED one before anyone had read it.
 
 // realignBaselineRepo is the ONE repository a baseline review may read from.
 //
@@ -51,34 +48,24 @@ import (
 const realignBaselineRepo = "gentoo"
 
 // realignPreflight reports why THIS INVOCATION cannot carry a baseline review,
-// or nil when it can (R7.4).
+// or nil when it can.
 //
-// # It is a returned value, not a log line, and that is the point
+// The reason is a returned value, not a log line, so it can be asserted by a
+// test, wrapped, or logged by the caller: runCompare logs it once, through the
+// invocation's logger, and the check itself stays free of output.
 //
-// R7.4 requires the reason to be NAMED, and a returned error is the shape in
-// which the reason can be asserted by a test, wrapped, or logged by the caller:
-// runCompare logs it once, through the invocation's logger (story 062), and the
-// check itself stays free of output.
+// Both refusals are usage errors, not a SKIPPED run: a skipped run says "we
+// looked and could not see"; these say "the request itself was impossible":
 //
-// # Both refusals are usage errors, and neither is a SKIPPED run
-//
-// A SKIPPED run says "we looked and could not see"; these say "the request itself
-// was impossible". Nothing has been examined at the point this is called, and the
-// operator asked for something this invocation cannot do:
-//
-//   - ANOTHER REPOSITORY. `compare guru --realign` would run the comparison
-//     against GURU while every baseline was read from ::gentoo (R6.2 keeps
-//     other repositories informative precisely because they have not been through
-//     the same review).
+//   - ANOTHER REPOSITORY. `compare guru --realign` would compare against GURU
+//     while every baseline was read from ::gentoo; other repositories stay
+//     informative precisely because they have not been through the same review.
 //   - AN API-ONLY PROVIDER. Reading ebuild TEXT needs the tree on this machine,
-//     which is the capability provider.PackageDirProvider names and the API
-//     providers deliberately do not satisfy. `compare` itself still works
-//     perfectly well over the API; only the review cannot.
+//     the capability provider.PackageDirProvider names and the API providers
+//     deliberately do not satisfy. `compare` itself still works over the API.
 //
-// It reads nothing and touches no disk: it is two questions about the arguments
-// it was handed, which is what lets the caller refuse before spending the run.
-//
-// _Requirements: R7, R7.4_
+// It reads nothing and touches no disk, which lets the caller refuse before
+// spending the run.
 func realignPreflight(repoName string, prov provider.Provider) error {
 	if !strings.EqualFold(strings.TrimSpace(repoName), realignBaselineRepo) {
 		return fmt.Errorf(
@@ -114,7 +101,7 @@ func realignProviderName(prov provider.Provider) string {
 // The two sources are the two ways a local tree reaches this command, and they
 // are asked in the order of how explicit they are. An operator who configured
 // `provider: local` NAMED the tree, and that is the path the report must speak
-// about — R1.5 asks the review to say what it looked for, and a path the operator
+// about — the review must say what it looked for, and a path the operator
 // recognises is the only kind that can be acted on. A `--clone` run named no
 // path, so the clone's own cache directory is the honest answer, taken from the
 // provider that owns it rather than spelled a second time here.
@@ -134,11 +121,11 @@ func realignBaselineTreeCandidate(repoInfo *provider.RepositoryInfo, prov provid
 	return ""
 }
 
-// realignBaselineIsLocatable answers the run-level question R1.5 asks — is there
-// a ::gentoo repository to read at all — and records the answer on the report
+// realignBaselineIsLocatable answers the run-level question — is there a
+// ::gentoo repository to read at all — and records the answer on the report
 // when there is not.
 //
-// It is the ONE condition the command exits non-zero for (D9). Everything else
+// It is the ONE condition the command exits non-zero for. Everything else
 // the review can fail at is a per-package value: a package ::gentoo does not
 // carry is Baseline.Found false, a baseline that will not read is
 // Baseline.Unexamined, and an unreachable model leaves an empty verdict. None of
@@ -146,16 +133,12 @@ func realignBaselineTreeCandidate(repoInfo *provider.RepositoryInfo, prov provid
 // divergences by definition and an exit code that counted them would be non-zero
 // forever and ignored within a week.
 //
-// The path LocateBaselineTree resolves is deliberately DROPPED. AnnotateBaseline
-// reaches the tree through the provider (baselineTreeOf) rather than through a
-// path of its own, and a second way to name it would be a second thing to
-// disagree with the first. What this call adds is the question the provider
-// cannot answer: LocalPackagePath is happy with any directory, while
-// /var/db/repos/gentoo on a machine that has never synced it would report all 321
-// packages as absent from ::gentoo — 321 packages presented as Bentoo's own work,
-// by a run that exited 0 and said nothing.
-//
-// _Requirements: R1, R1.5, R7, R7.5_
+// The path LocateBaselineTree resolves is deliberately DROPPED: AnnotateBaseline
+// reaches the tree through the provider (baselineTreeOf), and a second way to
+// name it would be a second thing to disagree with the first. What this call
+// adds is the question the provider cannot answer: LocalPackagePath accepts any
+// directory, while an unsynced /var/db/repos/gentoo would report all 321
+// packages as Bentoo's own work, by a run that exited 0 and said nothing.
 func realignBaselineIsLocatable(log *slog.Logger, report *overlay.CompareReport, candidate string) bool {
 	_, err := overlay.LocateBaselineTree(candidate)
 	switch {
@@ -176,10 +159,10 @@ func realignBaselineIsLocatable(log *slog.Logger, report *overlay.CompareReport,
 }
 
 // annotateOtherRepositories fills in, for every package ::gentoo carries no
-// version of, which other repositories carry it (R6.1).
+// version of, which other repositories carry it.
 //
 // AnnotateBaseline is deliberately not given the repository list and does not go
-// looking for one, so this is the caller's half of task 6.2: internal/overlay
+// looking for one, so this is the caller's half: internal/overlay
 // answers "does this repository carry it", and the command decides which
 // repositories the report may speak about at all.
 //
@@ -187,10 +170,8 @@ func realignBaselineIsLocatable(log *slog.Logger, report *overlay.CompareReport,
 // an optimisation. A row saying another repository also carries a package we
 // already measured against ::gentoo answers a question nobody asked, and it would
 // sit directly beneath the baseline line contradicting its own "never a baseline"
-// caveat. R6.1 is scoped to WHERE no ::gentoo baseline exists — 84 of the
-// overlay's 321 packages.
-//
-// _Requirements: R6, R6.1_
+// caveat. Other repositories are reported only WHERE no ::gentoo baseline exists
+// — 84 of the overlay's 321 packages.
 func annotateOtherRepositories(report *overlay.CompareReport, repos []overlay.LocalRepo) {
 	if report == nil || len(repos) == 0 {
 		return
@@ -214,15 +195,12 @@ func annotateOtherRepositories(report *overlay.CompareReport, repos []overlay.Lo
 // repositories of the Gentoo ecosystem are resolvable by name, and passing all of
 // them would print one "NOT checked" row per repository per package — some 35,000
 // lines over the 84 packages with no baseline — while resolving their contents
-// would be thousands of network lookups in a stage this story promises makes
-// none (R6.1). What the operator wrote in config.yaml is the set they meant the
-// tool to know about.
+// would be thousands of network lookups in a pass that must make none. What the
+// operator wrote in config.yaml is the set they meant the tool to know about.
 //
 // The order is SORTED rather than map order, so two runs over one configuration
 // print the same report. Map iteration would reorder the rows of every package on
 // every run and make the output undiffable.
-//
-// _Requirements: R6, R6.1_
 func realignLocalRepos(cfg *config.Config) []overlay.LocalRepo {
 	if cfg == nil || len(cfg.Repositories) == 0 {
 		return nil
@@ -312,14 +290,12 @@ func realignIsTree(path string) bool {
 // compareRealignReviewer answers "what realignment reviewer should this run use?"
 // with the one value AnnotateRealignVerdicts needs: a RealignReviewer, or nil.
 //
-// The two ways of having none — `--no-review` (R5.6) and a machine with no
-// `claude` on PATH (R5.5) — both end here as a nil INTERFACE, which is why that
+// The two ways of having none — `--no-review` and a machine with no
+// `claude` on PATH — both end here as a nil INTERFACE, which is why that
 // pass needs no second parameter and this command needs no second condition that
 // could disagree with it. It mirrors compareDivergenceReviewer exactly, including
 // the reason `--no-review` returns BEFORE the seam: "contact no model" means
 // nothing is constructed, no PATH is consulted and no process is spawned.
-//
-// _Requirements: R4, R4.1_
 func compareRealignReviewer(log *slog.Logger, noReview bool, budget time.Duration, d *deps) overlay.RealignReviewer {
 	if noReview {
 		return nil
@@ -348,7 +324,7 @@ func compareRealignReviewer(log *slog.Logger, noReview bool, budget time.Duratio
 // so `--no-review` reaching it zero times stays ONE assertable property rather
 // than two that could disagree — and so the operator's configured budget bounds
 // this review and the divergence review as the same number, carried through here
-// and read from nothing local (S048-R4.1).
+// and read from nothing local.
 func newRealignReviewer(log *slog.Logger, budget time.Duration, d *deps) (overlay.RealignReviewer, error) {
 	asker, err := d.newClaudeAsker(log, budget)
 	if err != nil {
@@ -375,12 +351,12 @@ type claudeRealignReviewer struct {
 var _ overlay.RealignReviewer = (*claudeRealignReviewer)(nil)
 
 // ReviewRealignment asks whether one divergence is still justified, and for the
-// ::gentoo text that would replace it when it is not (R4.1, R4.2).
+// ::gentoo text that would replace it when it is not.
 //
 // IT NEVER WARNS and it never writes. Every failure is RETURNED, and
 // AnnotateRealignVerdicts turns the first of each kind into one warning and
 // counts the rest — which is the half this side cannot know. It grants the model
-// no capability that can modify a file (R4.5): AskJSON pins `--allowedTools ""`
+// no capability that can modify a file: AskJSON pins `--allowedTools ""`
 // on every invocation, so the CLI answers from what is on stdin and has no tool
 // to reach a file with at all.
 //
@@ -407,7 +383,7 @@ func (r *claudeRealignReviewer) ReviewRealignment(ctx context.Context, req overl
 		// the CLI's stdin. So it names its own operation and passes the
 		// classified cause through unaltered, leaving the difference between a
 		// budget that elapsed, a process that never started and a non-zero exit
-		// to the one classifier that decides it (S048-R1.4, S048-R1.3).
+		// to the one classifier that decides it.
 		return overlay.RealignNote{}, fmt.Errorf("the realignment review failed: %w", withReviewOutcome(err))
 	}
 
@@ -449,22 +425,17 @@ const realignReviewSchema = `{
 //
 // IT CARRIES NO EBUILD CONTENT. The two files are piped on stdin because argv is
 // world-readable through /proc/<pid>/cmdline and an ebuild is arbitrary shell —
-// the same rule autoupdate applies to page content (AD8).
+// the same rule autoupdate applies to page content.
 //
 // IT CARRIES NOTHING DERIVED FROM THE SIZE OF THE DIFFERENCE, on the fence
-// compare_diff_counts_fence_test.go holds: a prompt built from the line counts
-// would be a computation on the size of a diff wearing a different hat.
-//
-// IT ALSO CARRIES NO DISTANCE. How far the baseline is from our version is a
-// deterministic answer this program already has and already prints beside the
-// verdict (baselineDistanceProse), so the operator reads it from the report
-// rather than from a model that was told it.
+// compare_diff_counts_fence_test.go holds, and NO DISTANCE: how far the
+// baseline is from our version is a deterministic answer this program already
+// prints beside the verdict (baselineDistanceProse).
 //
 // The question is deliberately narrow: is the divergence still justified, and
 // what would replace it. Whether to keep, remove or rebase the package is the
-// report's decision and stays the report's (R4.3) — a model asked for that too
-// would produce an opinion the operator has to argue with rather than an input
-// they can check.
+// report's decision — a model asked for that too would produce an opinion the
+// operator has to argue with rather than an input they can check.
 func realignReviewInstruction(req overlay.RealignRequest) string {
 	var sb strings.Builder
 
@@ -519,9 +490,9 @@ func realignReviewPayload(req overlay.RealignRequest) []byte {
 }
 
 // realignCandidateSection renders the candidate declarations, or "" when there
-// are none to propose (R3.5).
+// are none to propose.
 //
-// It is text and it is only text (R3.6). The overlay repository auto-commits and
+// It is text and it is only text. The overlay repository auto-commits and
 // pushes within minutes, so a declaration this program wrote into an ebuild would
 // be a published one with nobody having read it; what a candidate saves is the
 // transcription, and that is enough.
@@ -530,8 +501,6 @@ func realignReviewPayload(req overlay.RealignRequest) []byte {
 // CandidateDeclarations because it degrades to exactly that when no verdict
 // exists — every `--no-review` run, and every run on a machine with no model —
 // so one call site serves both and there is no condition here to get wrong.
-//
-// _Requirements: R3, R3.5, R3.6, R4.1_
 func realignCandidateSection(results []overlay.CompareResult) string {
 	var body strings.Builder
 	for _, r := range results {
@@ -570,8 +539,8 @@ func realignIndentedBlock(block string) string {
 	return sb.String()
 }
 
-// exitOnSkippedBaseline is R7.5 and D9 in one place: the command's exit code
-// reports the REVIEW's own outcome and nothing about the overlay's shape. It
+// exitOnSkippedBaseline decides the command's exit code, which reports the
+// REVIEW's own outcome and nothing about the overlay's shape. It
 // returns that status (func exitWith) for func runCompare to return: exit 1
 // when the baseline was skipped, nil otherwise.
 //
@@ -585,8 +554,6 @@ func realignIndentedBlock(block string) string {
 // (AnnotateRealignVerdicts returns nothing to exit on), a baseline ebuild that
 // will not read (a per-package Unexamined state), and a review that found every
 // divergence justified are all successful runs that have something to say.
-//
-// _Requirements: R7, R7.5_
 func exitOnSkippedBaseline(report *overlay.CompareReport) error {
 	if report == nil || report.BaselineSkipped == "" {
 		return nil

@@ -69,9 +69,9 @@ func applySignalPolicy(cmd *cobra.Command) {
 // action and returns a function that restores the command's own policy. A
 // prompt blocked on stdin does not watch the context, so on a cancellable
 // command the first Ctrl+C would only cancel a context nobody is reading and
-// the prompt would keep waiting. Before story 058 one Ctrl+C at `overlay
-// commit`'s and `overlay analyze`'s prompts ended the command, and this keeps
-// it so. A command running without a policy (a direct handler call in a test)
+// the prompt would keep waiting. One Ctrl+C at `overlay commit`'s and
+// `overlay analyze`'s prompts ended the command before this handler existed,
+// and this keeps it so. A command running without a policy (a direct handler call in a test)
 // gets a no-op.
 func yieldSignalsToPrompt(cmd *cobra.Command) (restore func()) {
 	policy, ok := commandContext(cmd).Value(signalPolicyKey{}).(*signalPolicy)
@@ -84,33 +84,22 @@ func yieldSignalsToPrompt(cmd *cobra.Command) (restore func()) {
 
 // processContext registers the process's one signal handler. It returns a
 // context the first signal cancels while a cancellable command runs, a stop
-// function that unregisters the handler, and the policy the root's
-// PersistentPreRunE sets from the selected command.
+// function, and the policy the root's PersistentPreRunE sets.
 //
-// On the first SIGINT, SIGTERM or SIGHUP the handler first calls signal.Reset
-// of the three: while signal.Notify holds a signal its default action is
-// disabled, so without the reset a command that never looks at its context
-// could not be stopped at all, and a second Ctrl+C could not get the operator
-// out. Then, when the policy says the running command is cancellable, it
-// cancels the context and the command ends on its own cancelled path.
-// Otherwise it re-raises the same signal to the process, which now takes its
-// default action — exactly what a command that registered no handler got. If
-// the re-raise fails, it falls back to cancelling the context rather than
-// dropping the signal. signal.NotifyContext cannot express this policy: it
-// always cancels and never re-raises.
+// On the first SIGINT, SIGTERM or SIGHUP the handler calls signal.Reset of the
+// three (signal.Notify disables a held signal's default action, so a second
+// Ctrl+C must still get the operator out). A cancellable command then gets its
+// context cancelled; any other command gets the signal re-raised, taking its
+// default action, or a cancel if the re-raise fails. signal.NotifyContext
+// cannot express this: it always cancels and never re-raises.
 //
-// SIGHUP is here because of process groups (story 054, R4.4). The kernel sends
-// a terminal's Ctrl+C and its hang-up — an SSH session dropping, a terminal
-// window closed — to the terminal's FOREGROUND group only, and the children
-// bentoo runs in their own group (the `claude` CLI, pkgdev, the unprivileged
-// ebuild) are outside it. They receive neither signal, so this context is what
-// stops them: without SIGHUP in the list a hang-up killed bentoo by its default
-// action and left those children running, orphaned. Catching it turns the
-// hang-up into the same clean cancel as a Ctrl+C.
+// SIGHUP is caught because the kernel sends a terminal's Ctrl+C and hang-up to
+// its FOREGROUND group only, and the children bentoo runs in their own group
+// (`claude`, pkgdev, the unprivileged ebuild) receive neither: without it a
+// hang-up killed bentoo and left them orphaned.
 //
 // stop unregisters the handler, cancels the context and waits for the
-// handler's goroutine to return, so no goroutine outlives the caller. Calling
-// it more than once is harmless.
+// handler's goroutine, so none outlives the caller. It is safe to call twice.
 func processContext() (context.Context, context.CancelFunc, *signalPolicy) {
 	policy := &signalPolicy{}
 	ctx, cancel := context.WithCancel(context.Background())
@@ -172,40 +161,21 @@ func commandContext(cmd *cobra.Command) context.Context {
 }
 
 // padColumn lays value into a column that is cells display columns wide, so the
-// column after it starts in the same place on every row.
+// column after it starts in the same place on every row. It is the other half
+// of render.ColumnWidth: that one sizes the column from THIS run's values, this
+// one fills it.
 //
-// It is the other half of render.ColumnWidth, and the two are always used
-// together: the first says how wide a column has to be to hold the values THIS
-// run produced, this one puts one value into that column. A caller that
-// measured a width and then padded by some other rule would have measured
-// nothing.
+// It does not use %-*s because fmt pads to a RUNE count and a terminal aligns
+// on display CELLS: "日" is one rune and two cells. The units agree on ASCII and
+// part company on the first value that is not. Measuring the value with
+// render.ColumnWidth([]string{value}), the function that sized the column,
+// leaves one unit only. internal/common/report/render keeps its own unexported
+// pad for the same reason; this is its twin for commands that print their own
+// text.
 //
-// # Why not %-*s, which fmt already offers
-//
-// Because the two would be counting different things. fmt pads to a RUNE count
-// (fmt/format.go pads with utf8.RuneCount), and a column here is measured in
-// display CELLS — the only unit a terminal aligns on. "→" is three bytes, one
-// rune and one cell; "日" is three bytes, one rune and TWO cells. The two units
-// agree on every ASCII value and part company on the first one that is not,
-// which is a misalignment that appears in someone's package list and in no test
-// that was written before it. Measuring the value with the same function that
-// measured the column removes the second unit entirely (R6.1).
-//
-// A column holding a single value is exactly as wide as that value, so
-// render.ColumnWidth([]string{value}) IS its cell width — computed by the code
-// that sized the column it is being laid into, so the two cannot disagree.
-// internal/common/report/render keeps its own unexported pad for this reason
-// and states it the same way; this is that function on the command side of the
-// boundary, where the report's renderers cannot be called because these
-// commands print their own text.
-//
-// # It pads and never cuts
-//
-// A value at or over the width comes back byte for byte. Cutting is
-// render.Shorten's job and a separate decision: it needs a budget to cut
-// AGAINST — the width of the terminal — and a column measured from its own
-// values has no opinion about that. A caller that acquires such a budget calls
-// Shorten before this, not instead of it.
+// It pads and never cuts: a value at or over the width comes back byte for
+// byte. Cutting needs a terminal-width budget and is render.Shorten's job,
+// called before this, not instead of it.
 func padColumn(value string, cells int) string {
 	if missing := cells - render.ColumnWidth([]string{value}); missing > 0 {
 		return value + strings.Repeat(" ", missing)

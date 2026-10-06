@@ -14,17 +14,17 @@ import (
 )
 
 // logLevelEnv names the environment variable that sets the terminal level when
-// neither --verbose nor --quiet is given (story 062, R3.1).
+// neither --verbose nor --quiet is given.
 const logLevelEnv = "BENTOO_LOG_LEVEL"
 
-// Values of the startup record's log_level_source attribute (R3.7).
+// Values of the startup record's log_level_source attribute.
 const (
 	logLevelSourceFlag    = "flag"
 	logLevelSourceEnv     = "env"
 	logLevelSourceDefault = "default"
 )
 
-// setUpInvocationLogger builds the invocation's one logger (R5.1) and stores it
+// setUpInvocationLogger builds the invocation's one logger and stores it
 // in the context of cmd — the command about to run — and of the root, so that
 // func execute can reach it after ExecuteContext returns. It returns the func
 // that closes the log file; that func is also registered with
@@ -32,7 +32,7 @@ const (
 // cancels the registration.
 //
 // Problems with the level or the file are reported on the logger itself, as one
-// WARN each, and never fail the command (R2.5, R3.3).
+// WARN each, and never fail the command.
 //
 // os.Stderr is read here, at call time, never captured at package init: the
 // test harness swaps it per run, and a logger holding the first run's stream
@@ -66,7 +66,7 @@ func setUpInvocationLogger(cmd *cobra.Command, verboseFlag, quietFlag bool) (clo
 		"log_file", logFile,
 	)
 
-	// A close failure has no exit status to change (R2.5): it is reported on
+	// A close failure has no exit status to change: it is reported on
 	// stderr, which the logger still reaches once its file is gone.
 	closeOnce := sync.OnceFunc(func() {
 		if err := closeFile(); err != nil {

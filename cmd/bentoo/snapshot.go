@@ -50,7 +50,7 @@ Examples:
 
 // loadSnapshotConfig resolves, loads, and validates the snapshot config. Used by
 // the side-effecting verbs (apply/run) so an unknown driver or missing dependency
-// fails fast before anything is written (R1.3, R6.1, G3).
+// fails fast before anything is written.
 func loadSnapshotConfig(log *slog.Logger) (*snapshot.Config, string, error) {
 	cfg, path, err := loadSnapshotConfigLenient(log)
 	if err != nil {
@@ -63,7 +63,7 @@ func loadSnapshotConfig(log *slog.Logger) (*snapshot.Config, string, error) {
 }
 
 // printDryRunPlan prints a dry-run plan, one "dry-run: would ..." info line per
-// plan entry (008 R2). The plan lines come from the snapshot package's pure
+// plan entry. The plan lines come from the snapshot package's pure
 // helpers (PlanApply/PlanRun/PlanPrune); this is the single place the cmd layer
 // frames them as a dry-run preview, so the wording stays consistent across verbs.
 func printDryRunPlan(lines []string) {
@@ -74,7 +74,7 @@ func printDryRunPlan(lines []string) {
 
 // loadSnapshotConfigLenient resolves and loads the config without validation, for
 // read-only inspection verbs (list/status) that should report even when a driver
-// binary is absent (A3).
+// binary is absent.
 func loadSnapshotConfigLenient(log *slog.Logger) (*snapshot.Config, string, error) {
 	path := snapshotConfigPath
 	if path == "" {

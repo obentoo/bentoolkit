@@ -1,13 +1,12 @@
 package main
 
-// Interactive LLM registry-fix loop for `bentoo overlay autoupdate` (story 014,
-// sub-tasks 3.1 + 3.2). After a check run, the packages that failed with a
-// fetch/extraction error (ErrFetchFailed) can be repaired one at a time by an
-// agentic RegistryFixer that edits packages.toml in place. The snapshot → fix →
-// fresh re-check → revert transaction is autoupdate.AttemptRegistryFix (story
-// 060, R3.7); this file keeps only the y/N/a/q prompt, the printing and the
-// tally. A kept edit is left in the working tree only; committing it is out of
-// scope here (R6.1).
+// Interactive LLM registry-fix loop for `bentoo overlay autoupdate`. After a
+// check run, the packages that failed with a fetch/extraction error
+// (ErrFetchFailed) can be repaired one at a time by an agentic RegistryFixer
+// that edits packages.toml in place. The snapshot → fix → fresh re-check →
+// revert transaction is autoupdate.AttemptRegistryFix; this file keeps only the
+// y/N/a/q prompt, the printing and the tally. A kept edit is left in the
+// working tree only; committing it is out of scope here.
 
 import (
 	"bufio"
@@ -24,21 +23,19 @@ import (
 // promptRegistryFixes drives the interactive per-package LLM registry-fix loop.
 //
 // It offers a fix only for packages whose failure wraps autoupdate.ErrFetchFailed
-// and not autoupdate.ErrUpstreamUnreachable (R3.5), in deterministic lexical
-// order (R3.4) — autoupdate.RepairableFetchFailures. A transport failure is
-// a fetch failure the record did not cause — a timeout or a TLS EOF — so
-// offering to rewrite the record would invite a distracted "y" to break an
-// entry that was correct.
-// For each such package it prompts y/N/a/q (R3.1-R3.3): `y` attempts a fix, `a`
-// attempts this and all remaining without further per-package prompts,
-// `n`/empty skips, `q` stops the loop.
+// and not autoupdate.ErrUpstreamUnreachable, in deterministic lexical order
+// (autoupdate.RepairableFetchFailures). A transport failure — a timeout, a TLS
+// EOF — is one the record did not cause, so offering to rewrite the record would
+// invite a distracted "y" to break an entry that was correct.
+// Prompts are y/N/a/q: `y` fixes, `a` fixes this and all remaining without
+// asking, `n`/empty skips, `q` stops the loop.
 //
-// Each attempt is one autoupdate.AttemptRegistryFix: snapshot-guarded (R5.1),
-// re-checked through a FRESH Checker (R4.1), decided by the re-check rather than
-// the agent summary (R4.2). A pass keeps the edit (R5.2); a still-failing
-// re-check prompts keep/revert (R5.3) and reverts atomically on N (R5.4). A fixer
-// error has already been reverted by the transaction and is NON-FATAL (R5.5):
-// the function returns nil even though an individual FixRegistry call errored.
+// Each attempt is one autoupdate.AttemptRegistryFix: snapshot-guarded,
+// re-checked through a FRESH Checker and decided by the re-check rather than
+// the agent summary. A pass keeps the edit; a still-failing re-check prompts
+// keep/revert and reverts atomically on N. A fixer error has already been
+// reverted by the transaction and is NON-FATAL: the function returns nil even
+// though an individual FixRegistry call errored.
 //
 // in is the prompt source (os.Stdin in production, a strings.Reader in tests);
 // newChecker constructs a fresh Checker over the same overlay on each call.
@@ -84,7 +81,7 @@ loop:
 
 		case autoupdate.RegistryFixReverted:
 			// The transaction has already restored the snapshot; only a failed
-			// restore is left to report (R3.6).
+			// restore is left to report.
 			fmt.Printf("  %s: %s: %v\n", pkg, registryFixStageLine(a.Stage), a.Err)
 			warnIfNotRestored(pkg, a.RestoreErr)
 			reverted++
@@ -92,7 +89,7 @@ loop:
 		case autoupdate.RegistryFixPassed:
 			// Name the model that made the edit; FormatModelUsed says "model
 			// alias ..." when the configured model was an alias, because an
-			// alias resolves to a different model over time (S030-R4.1/R4.2).
+			// alias resolves to a different model over time.
 			fmt.Printf("✔ %s fixed using %s: %s (resolved upstream %s)\n",
 				pkg, fixer.FormatModelUsed(a.Result.Model), a.Result.Summary, a.Recheck.UpstreamVersion)
 			if a.Recheck.NotComparable {
@@ -103,16 +100,16 @@ loop:
 		case autoupdate.RegistryFixStillFailing:
 			// The still-failing line carries the model record too: an edit the
 			// operator may choose to KEEP is exactly the one an audit will come
-			// back to (S030-R4.1). It also names the tools the agent was refused,
-			// the likeliest reason its fix fell short, never their input (S051-R5.2).
+			// back to. It also names the tools the agent was refused, the
+			// likeliest reason its fix fell short, never their input.
 			fmt.Printf("  %s still failing after fix using %s: %s%s\n  error: %v\n",
 				pkg, fixer.FormatModelUsed(a.Result.Model), a.Result.Summary, llm.RefusedToolsNote(a.Result.DeniedTools), a.RecheckErr)
 			fmt.Print("Keep the edit anyway? [y/N] ")
 			if readAnswer(reader) == "y" {
-				// User chose to keep a still-failing edit (R5.3).
+				// User chose to keep a still-failing edit.
 				fixed++
 			} else {
-				// Revert byte-for-byte to the pre-edit snapshot (R5.4).
+				// Revert byte-for-byte to the pre-edit snapshot.
 				warnIfNotRestored(pkg, a.Revert())
 				reverted++
 			}
@@ -154,7 +151,7 @@ func readAnswer(reader *bufio.Reader) string {
 // warnIfNotRestored prints a warning when restoring packages.toml failed (rare,
 // e.g. the directory became unwritable). The error is not propagated: a
 // per-package revert failure must not abort the whole loop, and the warning
-// gives the user the information to recover manually (R3.6).
+// gives the user the information to recover manually.
 func warnIfNotRestored(pkg string, err error) {
 	if err != nil {
 		fmt.Printf("  warning: could not restore packages.toml for %s: %v\n", pkg, err)

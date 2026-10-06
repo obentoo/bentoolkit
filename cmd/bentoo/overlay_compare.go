@@ -32,47 +32,41 @@ var (
 	compareOnlyOutdated bool
 	// compareOnlyRedundant and compareOnlyPatched narrow the REPORT, not the
 	// comparison: they are applied to the finished results by
-	// filterCompareResults (D7), unlike compareOnlyOutdated which selects on
+	// filterCompareResults, unlike compareOnlyOutdated which selects on
 	// Status inside CompareOptions.
 	compareOnlyRedundant bool
 	compareOnlyPatched   bool
 	compareSync          bool
 	// compareConcurrency bounds parallel upstream comparisons (range [1,100])
 	compareConcurrency int
-	// compareNoReview turns the model off (R5.6). It is the ONLY flag here that
+	// compareNoReview turns the model off. It is the ONLY flag here that
 	// suppresses work rather than narrowing a view, and it suppresses the only
 	// work that leaves this machine to something other than a package registry.
 	compareNoReview bool
 	// compareRealign turns the description into a JUDGEMENT: every package is
 	// measured against the ::gentoo ebuild it should be compared with, and what
-	// the two carry differently is reported by axis, by declaration and by class
-	// (R7.1).
+	// the two carry differently is reported by axis, by declaration and by class.
 	//
 	// It DEFAULTS TO FALSE and everything it adds is gated on it, because
 	// `overlay compare` is shipped and in daily use: without this flag the
 	// rendered output and the exit code are the ones the command produced
-	// yesterday (R7.2). The gate is mechanical rather than careful — the renderer
+	// yesterday. The gate is mechanical rather than careful — the renderer
 	// never learns which flags were passed, so every field the review writes
 	// renders nothing at its zero value and the passes that fill them are called
 	// only from behind this flag (overlay_compare_realign.go).
 	compareRealign bool
-	// compareDepth is the rung of story 033's build ladder each proposed
-	// realignment is PROVED at, and it is the switch that turns proving on at all
-	// (R7.3). Empty — the default, and every invocation that does not name it — is
-	// report-only: `--realign` alone stays exactly what Stage 1 shipped, with no
-	// staging, no plan, no prompt and no build.
-	//
-	// It is registered on THIS command rather than in group 6 because registering
-	// it means importing validate.ParseDepth, and Stage 1 of this story claims to
-	// be free of story 033 — a claim that is otherwise true of every task in
-	// groups 1-6.
+	// compareDepth is the rung of the build ladder each proposed realignment is
+	// PROVED at, and it is the switch that turns proving on at all. Empty — the
+	// default, and every invocation that does not name it — is report-only:
+	// `--realign` alone stays report-only, with no staging, no plan, no prompt
+	// and no build.
 	compareDepth string
 	// compareYes proves the plan unattended, and it exists here for the reason it
 	// exists on the sweep: the refusal on a non-interactive terminal has to be able
 	// to NAME the way forward, and "pass --yes" is not a thing it can say about a
 	// flag the command does not have. It buys past the PROMPT and never past the
-	// PLAN — the plan is printed either way, because R7.3's whole point is that the
-	// operator sees the cost.
+	// PLAN — the plan is printed either way, because the point of the plan is
+	// that the operator sees the cost.
 	compareYes bool
 )
 
@@ -158,7 +152,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	log := logging.FromContext(commandContext(cmd))
 
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
-	// with a clear message and a non-zero exit (R4.2).
+	// with a clear message and a non-zero exit.
 	if compareConcurrency < 1 || compareConcurrency > 100 {
 		log.Error("--concurrency must be in range [1, 100]", "concurrency", compareConcurrency)
 		return exitWith(1)
@@ -167,10 +161,10 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// Refuse a --depth this invocation has nothing to prove with, in the same
 	// position and for the same reason as the check above: it depends on neither
 	// the config, the repository nor the overlay, so answering it first costs
-	// nothing and reaches no work (R7.3).
+	// nothing and reaches no work.
 	//
 	// It exits 1 like every other usage error here. That is NOT the review's own
-	// non-zero condition — D9 keeps that for "no baseline tree at all" — and the
+	// non-zero condition — that one is kept for "no baseline tree at all" — and the
 	// two cannot be confused, because this one returns before a single package has
 	// been looked at and prints no report to attach a verdict to.
 	if err := compareDepthPreflight(compareDepth, compareRealign); err != nil {
@@ -182,7 +176,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels it.
 	// CompareWithProvider threads it through every upstream lookup, and the
 	// review passes and the realignment builds hand it to the children they
-	// start (R3.1).
+	// start.
 	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext(cmd)
@@ -244,7 +238,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		return exitWith(1)
 	}
 
-	// Token precedence (D3) lives in resolveRepoToken. An unreadable secrets file
+	// Token precedence lives in resolveRepoToken. An unreadable secrets file
 	// warns and degrades to anonymous access rather than aborting the comparison.
 	resolvedToken, err := resolveRepoToken(compareToken, repoInfo.Token)
 	if err != nil {
@@ -260,7 +254,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
-	// Refuse what THIS INVOCATION cannot do, before it costs anything (R7.4).
+	// Refuse what THIS INVOCATION cannot do, before it costs anything.
 	//
 	// It sits here, immediately after the provider exists and before the rate
 	// limit is consulted, because that is the first moment both halves of the
@@ -350,7 +344,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// What the overlay declares about itself, resolved once before the comparison
 	// starts so the per-package goroutines only ever read it. An unreadable
 	// registry warns exactly once here and leaves divergence nil, which the
-	// comparator reads as "nothing is known about any package" (R2.5): compare
+	// comparator reads as "nothing is known about any package": compare
 	// has never depended on packages.toml and must not start now.
 	divergence, err := buildDivergenceMap(log, overlayPath)
 	if err != nil {
@@ -369,14 +363,14 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		// A REVIEW RUN AND ONLY A REVIEW RUN sees the packages ::gentoo does not
 		// carry. They are the review's own subject — 84 of the overlay's 321
 		// packages have no ::gentoo counterpart, which is a fact about the overlay
-		// that only the baseline review can report (R6.1, R6.4).
+		// that only the baseline review can report.
 		//
 		// Switched on unconditionally it would be a regression rather than a
 		// feature: those packages would gain rows they do not have today, and
 		// the summary's "N of M have no row above" — Scanned minus what the
 		// report lists, in `func compareSummarySection` in
 		// internal/common/report — would move for every operator who never
-		// asked for a review (D1).
+		// asked for a review.
 		IncludeNotInRemote: compareRealign,
 		Concurrency:        compareConcurrency,
 		Divergence:         divergence,
@@ -391,7 +385,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 	// A failure's text is recorded on the result and exported, and a transport
 	// error can echo the request, so the token this run resolved is scrubbed
-	// from it before anything reads it (S057-R4.7).
+	// from it before anything reads it.
 	if resolvedToken != "" {
 		opts.Redact = []string{resolvedToken}
 	}
@@ -430,20 +424,20 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	overlay.AnnotateAuthorship(report, prov, opts)
 
 	// What our ebuild was MEASURED AGAINST, and what that measurement found: the
-	// ::gentoo baseline and how far it is (R1.1, R1.2), the structural axes that
-	// differ (R2.4), what the ebuild declares about them (R3.1), how much of the
-	// diff the three-way reduction could attribute (R2.5), and — for a package
-	// ::gentoo carries no version of — which other repository does (R6.1).
+	// ::gentoo baseline and how far it is, the structural axes that differ, what
+	// the ebuild declares about them, how much of the diff the three-way
+	// reduction could attribute, and — for a package ::gentoo carries no version
+	// of — which other repository does.
 	//
 	// IT RUNS ONLY FOR A REVIEW RUN, and that single condition is the whole of
-	// R7.2's byte-identical promise. Every field it writes renders nothing at its
-	// zero value, so a run that never reaches this line prints exactly what
-	// `overlay compare` printed yesterday — the tables and every line of the
-	// summary block untouched, the sentence counting what the report left out
-	// among them.
+	// the promise that a run without --realign is byte-identical to before. Every
+	// field it writes renders nothing at its zero value, so a run that never
+	// reaches this line prints exactly what `overlay compare` printed yesterday —
+	// the tables and every line of the summary block untouched, the sentence
+	// counting what the report left out among them.
 	//
 	// Locating the tree comes FIRST because it is the one condition the command
-	// exits non-zero for (D9): a review with no ::gentoo repository to read
+	// exits non-zero for: a review with no ::gentoo repository to read
 	// examined nothing, which is a different sentence from having looked and found
 	// nothing, and the report has to say so instead of printing a coverage line
 	// over a comparison that never happened.
@@ -455,8 +449,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	// The budget every review invocation on this run is bounded by, read ONCE
-	// from the operator's configuration and handed to both passes below
-	// (S048-R3.1, S048-R4.1).
+	// from the operator's configuration and handed to both passes below.
 	//
 	// ONCE, because one read is what keeps them the same number. Two calls could
 	// not disagree today, but two call sites are two places for a later edit to
@@ -471,36 +464,33 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	// What a MODEL makes of the differences the report cannot settle: where each
 	// one came from, what it does, and — where it is ours — the `patched` text
-	// that would declare it (R5.2-R5.4). It is commentary and nothing else: the
-	// grouping, the Verdicts and the removal recommendations are the same whether
-	// it ran or not (R5.8).
+	// that would declare it. It is commentary and nothing else: the grouping, the
+	// Verdicts and the removal recommendations are the same whether it ran or not.
 	//
-	// It runs HERE, beside AnnotateAuthorship and on the SAME opts value, for two
-	// reasons. The same opts is what lets it re-read the same two files the
-	// comparison read — it resolves them through the same resolvePackagePaths —
-	// and running before the filter keeps the annotation part of PRODUCING the
-	// report rather than of presenting it, so a --only-redundant run cannot reach
-	// a different conclusion about a package than a full one. It runs after
-	// authorship because a proof from the overlay's own content outranks a guess,
-	// and the report prints them in that order.
+	// It runs HERE, beside AnnotateAuthorship and on the SAME opts value: the same
+	// opts lets it re-read the two files the comparison read (through the same
+	// resolvePackagePaths), and running before the filter keeps annotation part of
+	// PRODUCING the report, so a --only-redundant run cannot reach a different
+	// conclusion about a package than a full one. It runs after authorship because
+	// a proof from the overlay's own content outranks a guess, and the report
+	// prints them in that order.
 	//
-	// A nil reviewer makes the whole pass a no-op, which is how `--no-review`
-	// (R5.6) and a machine with no `claude` installed (R5.5) reach ONE path
-	// instead of two conditions that could disagree. Nothing here can fail the
-	// run: every way of not getting a reading costs one warning and the report is
-	// printed unchanged.
+	// A nil reviewer makes the whole pass a no-op, which is how `--no-review` and a
+	// machine with no `claude` installed reach ONE path instead of two conditions
+	// that could disagree. Nothing here can fail the run: every way of not getting
+	// a reading costs one warning and the report is printed unchanged.
 	overlay.AnnotateReviews(ctx, report, compareDivergenceReviewer(log, compareNoReview, reviewBudget, d), prov, opts)
 
 	// A model's JUDGEMENT of what the baseline review found: is each undeclared
-	// divergence still justified, and what would replace it if not (R4.1, R4.2).
+	// divergence still justified, and what would replace it if not.
 	//
 	// It runs after the two passes above and on the same opts for their reasons,
-	// and it can no more fail the run than they can: a nil reviewer — `--no-review`
-	// (R5.6), or a machine with no `claude` on PATH (R5.5) — makes it a no-op, and
+	// and it can no more fail the run than they can: a nil reviewer — `--no-review`,
+	// or a machine with no `claude` on PATH — makes it a no-op, and
 	// every other way of not getting an answer leaves an EMPTY verdict and is
 	// counted, never invented. It returns nothing precisely so there is nothing to
 	// exit on: an unreachable model is exit 0, because the deterministic half of
-	// the report above is complete and useful without one (R4.4, D9).
+	// the report above is complete and useful without one.
 	//
 	// realignJudged records whether a model was reachable at all, which is the one
 	// thing the report itself cannot say: with no reviewer nothing is asked, both
@@ -513,55 +503,48 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		overlay.AnnotateRealignVerdicts(ctx, report, reviewer, prov, opts)
 	}
 
-	// Whether each proposed realignment still BUILDS, proved the way a bump is
-	// proved: staged outside the published overlay and put up story 033's ladder to
-	// the depth the operator named, behind one plan and one confirmation covering
-	// the whole run (R7.3).
+	// Whether each proposed realignment still BUILDS, proved the way a bump is:
+	// staged outside the published overlay and taken up the build ladder to the
+	// depth the operator named, behind one plan and one confirmation for the run.
 	//
-	// IT RUNS ONLY WHEN --depth WAS GIVEN, and that is the second gate on top of
-	// --realign rather than a redundant one: R7.3 speaks of "a depth above
-	// report-only", and `--realign` alone is report-only by definition — it is what
-	// Stage 1 shipped, and every group-6 test asserts exactly that run.
+	// IT RUNS ONLY WHEN --depth WAS GIVEN, a second gate on top of --realign
+	// rather than a redundant one: `--realign` alone is report-only by definition.
 	//
-	// It sits HERE, after the three annotation passes and before the view is
-	// narrowed, for two reasons that pull the same way. After the passes, because
-	// the candidate rule reads the baseline they filled in and a proposal is only
-	// as good as the review behind it. Before the narrowing, because the plan is
-	// about the OVERLAY and not about the rows the operator asked to see (D7): a
-	// --only-redundant run and a full one must not prove different sets, and the
-	// plan names every atom, so nothing is proved that was not first shown.
+	// It sits after the three annotation passes, because the candidate rule reads
+	// the baseline they filled in and a proposal is only as good as the review
+	// behind it; and before the view is narrowed, because the plan is about the
+	// OVERLAY and not the rows the operator asked to see: a --only-redundant run
+	// and a full one must not prove different sets, and the plan names every
+	// atom, so nothing is proved that was not first shown.
 	//
-	// It cannot change the exit code (D9). Declining is not a failure, a gate that
-	// says no is an answer, and the one non-zero condition is decided below by
+	// It cannot change the exit code. Declining is not a failure, a gate that says
+	// no is an answer, and the one non-zero condition is decided below by
 	// exitOnSkippedBaseline over a field nothing here writes.
 	if realignRan && compareDepth != "" {
 		proveRealignments(ctx, report, overlayPath, d)
 	}
 
 	// The report's FINDINGS, re-established now that every annotation pass has
-	// written back onto it (S046-R5.1).
+	// written back onto it.
 	//
 	// The comparison establishes them once, at the end of CompareWithProvider,
 	// from what was known then — the versions, the registry declaration and the
-	// content check. The four passes above run afterwards and each writes facts a
-	// finding built before them could not have known: whether the overlay's own
-	// content PROVED the difference is ours, what a model read the difference as
-	// doing, what it proposed be declared. A list left un-refreshed would report
-	// an undeclared divergence as unproved after the files had proved it, which is
-	// the one direction that matters — it is the reading that authorises deleting
-	// work of our own.
+	// content check. The four passes above each write facts a finding built
+	// before them could not have known: whether the overlay's own content PROVED
+	// the difference is ours, what a model read it as doing, what it proposed be
+	// declared. Un-refreshed, the list would report an undeclared divergence as
+	// unproved after the files had proved it — the one reading that authorises
+	// deleting work of our own.
 	//
-	// It is one call rather than a refresh inside each pass, because four refresh
-	// points are four things to keep in step and this is one. The findings are a
-	// pure function of report.Results, so this simply asks the question again.
-	//
-	// It runs BEFORE the narrowing below for the reason the passes do: the
-	// findings are what the run established about the OVERLAY, not the rows the
-	// operator asked to look at, exactly as none of the counters on the report are
-	// narrowed either (D7).
+	// One call rather than a refresh inside each pass, because four refresh
+	// points are four things to keep in step. The findings are a pure function of
+	// report.Results, so this simply asks the question again. It runs BEFORE the
+	// narrowing below for the reason the passes do: the findings describe the
+	// OVERLAY, not the rows the operator asked to look at, just as no counter on
+	// the report is narrowed.
 	overlay.EstablishFindings(report)
 
-	// Narrow the VIEW, never the computation (D7). The comparison above already
+	// Narrow the VIEW, never the computation. The comparison above already
 	// produced the whole picture; only report.Results — the rows the table
 	// prints — is narrowed here, and every counter on report keeps the value the
 	// unfiltered run produced. That is what makes a filtered run and a full run
@@ -570,56 +553,35 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	//
 	// --only-outdated is deliberately NOT a parameter: it selects on Status
 	// inside CompareOptions above and has already removed its rows, so the
-	// filters compose by intersection without anyone arranging it — each stage
-	// only ever removes.
+	// filters compose by intersection — each stage only ever removes.
 	//
-	// The WHOLE run's rows are KEPT before the narrowing replaces them
-	// (S047-R5.2). Every counter on the report survives the filter because it is
-	// a field; the two answers taken by walking the rows do not, so
-	// `func buildCompareReport` in overlay_compare_report.go is handed this
-	// slice and takes them over the whole run. Without it a --only-patched run
-	// that removed a row whose reading failed would report a smaller gap than
-	// the same run unfiltered, and narrowing the view would have made a holed
-	// run look whole.
+	// The WHOLE run's rows are KEPT before the narrowing replaces them. Every
+	// counter survives the filter because it is a field; the two answers taken
+	// by walking the rows do not, so `func buildCompareReport` in
+	// overlay_compare_report.go takes them over this slice. Without it a
+	// --only-patched run that removed a row whose reading failed would report a
+	// smaller gap than the same run unfiltered.
 	unfiltered := report.Results
 	report.Results = filterCompareResults(report.Results, compareOnlyRedundant, compareOnlyPatched)
 
 	// Present the comparison as the report every other command presents: the
-	// terminal first, then the export (S047-R1.5, S047-R7.2).
+	// terminal first, then the export. One tail serves the full run and the
+	// empty one: the report states its own scope in its first section and its
+	// counts in its last, so an empty run says it in the same words a full one
+	// uses. It runs AFTER the progress region is down — the cleared line above —
+	// because both write to stdout, and a report drawn into a live region is a
+	// report the UI redraws over.
 	//
-	// ONE tail now serves the full run and the empty one. The branch that stood
-	// here announced an empty result set BEFORE the renderer, because the
-	// renderer could not explain an emptiness it could not see the cause of; the
-	// report states its own scope in its first section and its own counts in its
-	// last, so an empty run says it in the same words a full one uses, and the
-	// two paths can no longer disagree about what a run reports.
-	//
-	// It runs AFTER the progress region is down — the cleared line above is that
-	// teardown — because both write to stdout, and a report drawn into a live
-	// region is a report the UI redraws over.
-	//
-	// The candidate declarations a review proposes, PRINTED and deliberately not
-	// carried as notes (R3.5).
-	//
-	// Every other fact this command has left the terminal for the report, and
-	// this one must not: a candidate is a multi-line declaration block a
-	// maintainer COPIES back into an ebuild or a registry, and a note is wrapped
-	// to the device by the renderer. Wrapping a declaration re-flows it into
-	// something that no longer pastes back as one well-formed entry, which is the
-	// only thing `--realign` exists to produce. It is not a sentence about the
-	// run, so it does not belong where sentences about the run go.
-	//
-	// It is called DIRECTLY rather than through `func realignAddendum` in
-	// overlay_compare_realign.go, whose other half — the "no verdict was
-	// produced" notice — now crosses as a run note; going through the wrapper
-	// would print that fact twice.
-	//
-	// It follows the VIEW, as it did before the report: it is per-package output
-	// standing beside rows the operator asked to see, so proposing a declaration
-	// for a package `--only-redundant` removed would put a paste block under a
-	// package with no row. That is the opposite direction from the counters
-	// above, and for the opposite reason — a count answers what the run did,
-	// a proposal answers what is on screen.
+	// The candidate declarations a review proposes are PRINTED, deliberately not
+	// carried as notes: a candidate is a multi-line block a maintainer COPIES back
+	// into an ebuild or a registry, and the renderer wraps a note to the device,
+	// which would re-flow it into something that no longer pastes back as one
+	// well-formed entry. It is called DIRECTLY rather than through `func
+	// realignAddendum`, whose other half — the "no verdict was produced" notice —
+	// crosses as a run note; the wrapper would print that fact twice. It follows
+	// the VIEW: a proposal answers what is on screen, so a package
+	// `--only-redundant` removed gets no paste block, unlike the counters, which
+	// answer what the run did.
 	if realignRan {
 		fmt.Print(realignCandidateSection(report.Results))
 	}
@@ -630,13 +592,13 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// they are derived in part from flags the adapter never sees, and handed to
 	// `func buildCompareReport` as CompareRun.Notes. Every finding beyond the
 	// first a package has, which a one-line reason cell has no room for, travels
-	// on that package's own entry (S047-R6.1). Both reach the terminal and every
+	// on that package's own entry. Both reach the terminal and every
 	// export through one code path, which is what they did not do while they were
 	// appended to the sections after the fact.
 	presentCompareReport(log, d, cfg, buildCompareReport(report, repoInfo.Name, unfiltered,
 		compareRunNotes(report, realignRan, realignJudged, compareNoReview)...))
 
-	// The ONE non-zero condition (R7.5, D9): the review could not locate a
+	// The ONE non-zero condition: the review could not locate a
 	// ::gentoo tree, so nothing was examined. It is LAST — after the render and
 	// after the export — because the report is still worth printing and worth
 	// exporting, `compare` did its job, and the status is returned only now.
@@ -645,27 +607,21 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 // filterCompareResults narrows a report to the rows the operator asked for.
 // Both flags false returns the input unchanged, order preserved; both true
-// intersects (R5.3). It is a pure function over the finished results rather
-// than a condition inside CompareOptions, so the comparison always computes
-// the whole picture and only the presentation narrows — a filtered run and a
-// full run can therefore never disagree about a package (D7).
+// intersects. It is a pure function over the finished results rather than a
+// condition inside CompareOptions, so the comparison always computes the whole
+// picture and only the presentation narrows — a filtered run and a full run can
+// therefore never disagree about a package.
 //
-// The two flags select on two different fields, and that difference is the
-// point. --only-redundant reads the Verdict, which is derived: it asks "should
-// this package leave the overlay?". --only-patched reads Patched, which is
-// declared: it asks "did we say we changed something here?". A package can be
-// patched under any verdict, so neither is a rename of the other.
-//
-// --only-outdated is absent by construction: it selects on Status inside
-// CompareWithProvider (UB2), so this function runs on the set that filter
-// already left behind. Every stage only removes rows, which is why combining
-// them is an intersection with nothing to arrange.
+// The two flags select on two different fields. --only-redundant reads the
+// Verdict, which is derived: "should this package leave the overlay?".
+// --only-patched reads Patched, which is declared: "did we say we changed
+// something here?". A package can be patched under any verdict, so neither is
+// a rename of the other. --only-outdated is absent by construction: it selects
+// on Status inside CompareWithProvider, so this runs on what it left behind.
 //
 // A matching slice is BUILT rather than compacted in place: filtering with
-// results[:0] would rewrite the caller's backing array, which is the sort of
-// aliasing a "pure narrowing" must not do. There is no error path — a filter
-// that matches nothing is an answer, not a failure, and the caller says so in
-// words.
+// results[:0] would rewrite the caller's backing array. A filter that matches
+// nothing is an answer, not a failure, and the caller says so in words.
 func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPatched bool) []overlay.CompareResult {
 	if !onlyRedundant && !onlyPatched {
 		return results
@@ -686,47 +642,23 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 
 // buildDivergenceMap turns the registry into the per-atom view compare needs:
 // one entry per bare "category/package" atom, saying whether any registry entry
-// for that atom declares a divergence from ::gentoo and which entry said so
-// (R2.1, R2.2). It lives here, in cmd/, because this is the only package that
-// already imports both halves — internal/overlay must never learn what TOML is,
-// and internal/autoupdate must never learn what a comparison is (R2.4).
+// for that atom declares a divergence from ::gentoo and which entry said so. It
+// lives in cmd/ because this is the only package that imports both halves —
+// internal/overlay must never learn what TOML is, and internal/autoupdate must
+// never learn what a comparison is.
 //
-// An unreadable registry yields (nil, err). The caller warns once and compares
-// with every package unknown (R2.5): refusing to run would make packages.toml a
-// hard dependency of a command that never had one. Absence from the map IS the
-// unknown state, so a nil map needs no special case downstream.
+// An unreadable registry yields (nil, err); the caller warns and compares with
+// every package unknown, because packages.toml must not become a hard
+// dependency of compare. Absence from the map IS the unknown state.
 //
-// Keys are split with ebuilds.SplitPackageKey, never by hand: its own doc
-// comment names "a second, slot-blind copy of the split" as exactly the bug the
-// ":slot" suffix invites, and the path is hot — 90 of 321 registry atoms carry
-// more than one entry. So "net-libs/webkit-gtk:4.1" and
-// "media-libs/gstreamer@stable" both land on their bare atom. A key the split
-// rejects is skipped with a warning naming it; one bad key must not blank the
-// whole map.
-//
-// Keys are visited in sorted order, so when several entries of one atom declare
-// a divergence the entry recorded is the same on every run instead of whatever
-// map iteration happened to yield. For an atom carrying both suffix forms this
-// makes a ":slot" entry win over an "@label" sibling, because ':' (0x3A) sorts
-// before '@' (0x40). That precedence is arbitrary but defined, and it is written
-// down here so the first reader of a mixed atom need not rediscover it.
-//
-// Any patched entry marks the atom, even when its siblings are silent. Failing
-// toward "patched" is the safe direction: it can only ever suppress a removal
-// recommendation, never produce one.
-//
-// The divergence test is strings.TrimSpace(...) != "", not != "". `patched` is a
-// reason rather than a flag, and LoadPackagesConfig never calls
-// ValidatePackageConfig, so the whitespace-only rule that rejects such a value
-// at lint time does not run on this path; without the trim, a value describing
-// nothing would mark an atom.
-//
-// One thing this function deliberately does NOT do is sanitise the key.
-// SplitPackageKey refuses a "." or ".." half, and no other validation runs
-// here.
-// What keeps traversal out is that the key is used only as a map key and never
-// to build a filesystem path: the verification step builds its path from the
-// scanned directory names instead. Keep it that way.
+// Keys are split with ebuilds.SplitPackageKey, never by hand, so ":slot" and
+// "@label" keys land on their bare atom; a key it rejects is skipped with a
+// warning, so one bad key cannot blank the map. Keys are visited sorted, so the
+// entry recorded for an atom is stable across runs (":slot" beats "@label"
+// because ':' sorts before '@'). Any patched entry marks the atom — failing
+// toward "patched" can only suppress a removal recommendation, never produce
+// one. The key is only a map key, never a filesystem path (verification uses
+// the scanned directory names), and nothing here sanitises it: keep it so.
 func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overlay.Divergence, error) {
 	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
@@ -756,10 +688,10 @@ func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overla
 		// what a silent entry must record — that is not the same as absent.
 		div := divs[atom]
 		// Trimmed because only a trimmed value distinguishes a stated reason
-		// from a whitespace-only one — R1.3 rejects the latter at validation
-		// time, but LoadPackagesConfig never calls ValidatePackageConfig, so
-		// this path is not protected by it. The report caps this text when it
-		// prints it; what is printed verbatim is the entry key, not the reason.
+		// from a whitespace-only one — ValidatePackageConfig rejects the latter,
+		// but LoadPackagesConfig never calls it, so this path is not protected
+		// by it. The report caps this text when it prints it; what is printed
+		// verbatim is the entry key, not the reason.
 		if reason := strings.TrimSpace(cfg.Packages[key].Patched); reason != "" && !div.Patched {
 			div.Patched = true
 			div.Reason = reason
@@ -785,7 +717,7 @@ func truncatePkgName(name string, maxLen int) string {
 // The normalization is lossy, so distinct names can collide: "my-repo" and
 // "my.repo" both map to BENTOO_REPO_MY_REPO_TOKEN. This is intentional and
 // documented — an actual key clash is resolved by the secrets file's
-// first-occurrence-wins rule (D6), so the first matching entry supplies the token
+// first-occurrence-wins rule, so the first matching entry supplies the token
 // for every colliding name.
 func repoTokenName(name string) string {
 	var b strings.Builder
@@ -799,14 +731,14 @@ func repoTokenName(name string) string {
 	return "BENTOO_REPO_" + b.String() + "_TOKEN"
 }
 
-// resolveRepoToken applies the D3 token precedence for a single repository:
+// resolveRepoToken applies the token precedence for a single repository:
 //
 //	--token flag (flagToken)
 //	  > per-repo token (repoToken, resolved from BENTOO_REPO_<NAME>_TOKEN into
 //	    RepositoryInfo.Token by convertConfigRepos)
 //	  > global token (GITHUB_TOKEN/GH_TOKEN via env or the secrets file).
 //
-// config.yaml is no longer a token source. Before D3 the per-repo token beat
+// config.yaml is no longer a token source. Previously the per-repo token beat
 // everything, including an explicit --token: defensible while that token lived
 // in the config file the user was editing, indefensible once it lives in a
 // secrets file the flag cannot override.

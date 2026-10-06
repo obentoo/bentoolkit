@@ -89,7 +89,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// It reaches the analyzer (its HTTP and LLM calls) and the LLM provider. The
 	// `claude` CLI runs in its own process group, so a Ctrl+C at the terminal
 	// never reaches it: without this context an interrupt ended bentoo and left
-	// `claude` running (story 054, R4.3).
+	// `claude` running.
 	//
 	// runCtx is the ANALYSIS context, derived from it so that release can end
 	// the analysis before either confirmation prompt (func confirmAfterRelease)
@@ -107,7 +107,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 	// Build analyzer options, conditionally injecting an LLM provider. When a
 	// provider is configured but cannot be constructed (e.g. the `claude` CLI is
 	// absent or not authenticated), we log a Warn and fall back to the heuristic
-	// analyzer rather than failing — analysis still proceeds (R4.2, R6.1, R6.2).
+	// analyzer rather than failing — analysis still proceeds.
 	analyzerOpts := []autoupdate.AnalyzerOption{
 		autoupdate.WithAnalyzerConfigDir(configDir),
 		autoupdate.WithAnalyzerLogger(log),
@@ -323,7 +323,7 @@ func displayBatchResults(results []autoupdate.AnalyzeResult) {
 
 // displaySchema prints the record `overlay analyze` suggests for a package, in
 // the shape packages.toml expects: the fields in canonical order, a comments
-// field, and the `# END` marker that closes a record (R8.1, R8.2).
+// field, and the `# END` marker that closes a record.
 //
 // It renders through registry.RenderRecord — the same function that writes the
 // registry — instead of assembling a map and handing it to the TOML encoder. The
