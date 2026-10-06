@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -12,7 +13,6 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -55,11 +55,10 @@ const realignBaselineRepo = "gentoo"
 //
 // # It is a returned value, not a log line, and that is the point
 //
-// logger binds its io.Writer at first use and exposes no setter — `func Default`
-// in logger.go does it once, under a sync.Once — so a refusal written there cannot
-// be read by anything but a human watching a terminal. R7.4 requires the reason to be NAMED, and a returned
-// error is the only shape in which the reason can be asserted, wrapped, or
-// printed by a caller that knows where its output goes.
+// R7.4 requires the reason to be NAMED, and a returned error is the shape in
+// which the reason can be asserted by a test, wrapped, or logged by the caller:
+// runCompare logs it once, through the invocation's logger (story 062), and the
+// check itself stays free of output.
 //
 // # Both refusals are usage errors, and neither is a SKIPPED run
 //
@@ -157,7 +156,7 @@ func realignBaselineTreeCandidate(repoInfo *provider.RepositoryInfo, prov provid
 // by a run that exited 0 and said nothing.
 //
 // _Requirements: R1, R1.5, R7, R7.5_
-func realignBaselineIsLocatable(report *overlay.CompareReport, candidate string) bool {
+func realignBaselineIsLocatable(log *slog.Logger, report *overlay.CompareReport, candidate string) bool {
 	_, err := overlay.LocateBaselineTree(candidate)
 	switch {
 	case err == nil:
@@ -170,7 +169,7 @@ func realignBaselineIsLocatable(report *overlay.CompareReport, candidate string)
 		// refusal it has. Reported rather than dropped, and treated as the same
 		// outcome, because it is the same outcome — no tree was located, whatever
 		// the reason, and the report must not claim otherwise.
-		logger.Warn("locating the ::%s tree at %s: %v", realignBaselineRepo, candidate, err)
+		log.Warn("locating the ::"+realignBaselineRepo+" tree: failed", "path", candidate, "err", err)
 		overlay.MarkBaselineSkipped(report, candidate)
 		return false
 	}
@@ -321,16 +320,16 @@ func realignIsTree(path string) bool {
 // nothing is constructed, no PATH is consulted and no process is spawned.
 //
 // _Requirements: R4, R4.1_
-func compareRealignReviewer(noReview bool, budget time.Duration, d *deps) overlay.RealignReviewer {
+func compareRealignReviewer(log *slog.Logger, noReview bool, budget time.Duration, d *deps) overlay.RealignReviewer {
 	if noReview {
 		return nil
 	}
 
-	reviewer, err := newRealignReviewer(budget, d)
+	reviewer, err := newRealignReviewer(log, budget, d)
 	if err != nil {
 		// The error is an ARGUMENT and never a format string: it may carry the
 		// CLI's own text.
-		d.reviewWarnf("the realignment review could not be started (%v); every divergence is reported without a verdict and the rest of the report is unchanged", err)
+		log.Warn("the realignment review could not be started; every divergence is reported without a verdict and the rest of the report is unchanged", "err", err)
 		return nil
 	}
 	return reviewer
@@ -350,8 +349,8 @@ func compareRealignReviewer(noReview bool, budget time.Duration, d *deps) overla
 // than two that could disagree — and so the operator's configured budget bounds
 // this review and the divergence review as the same number, carried through here
 // and read from nothing local (S048-R4.1).
-func newRealignReviewer(budget time.Duration, d *deps) (overlay.RealignReviewer, error) {
-	asker, err := d.newClaudeAsker(budget)
+func newRealignReviewer(log *slog.Logger, budget time.Duration, d *deps) (overlay.RealignReviewer, error) {
+	asker, err := d.newClaudeAsker(log, budget)
 	if err != nil {
 		if errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
 			return nil, nil

@@ -149,7 +149,7 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	// The same lifetime and the same hand-off the apply path gets, on the runner
 	// that publishes nothing (R3.1). --check's failure mode is quieter, not
 	// smaller: a plan that reports "proved" for a bump nothing read.
-	defer removeStagedDistdir(fetchedDistdir)
+	defer removeStagedDistdir(a.logger(), fetchedDistdir)
 	cand.fetchedDistdir = fetchedDistdir
 	if err != nil {
 		// DeclineCandidate on both halves (S040-R1.2), for the reason the staging

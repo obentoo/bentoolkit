@@ -10,13 +10,14 @@ package main
 //
 // exitStatus gains an Unwrap that returns the cause; exitWith leaves it nil.
 // execute keeps its identity test on the returned value and, for a bare status
-// WITH a cause, prints the cause once through logger.Error. A cause that
+// WITH a cause, prints the cause once through the logger. A cause that
 // already carries an exit status is returned unchanged, so the inner code wins.
 //
-// The cause is printed by the package logger, which writes to the stderr file
-// it captured once. These tests therefore redirect file descriptor 2 (the
-// testCLI captureStream helper) and bind the logger before doing so, exactly as
-// s058Execute does; a bytes.Buffer passed to execute would not see the line.
+// The one-command tree here has no root pre-run, so no invocation logger is
+// stored (story 062) and execute prints the cause as the bare line it always
+// was, on os.Stderr. These tests therefore redirect file descriptor 2 (the
+// testCLI captureStream helper), exactly as s058Execute does; a bytes.Buffer
+// passed to execute would not see the line.
 // The cause field itself is never named: the tests reach it through Unwrap,
 // errors.Is and errors.As, which is the contract R7.6 states.
 //
@@ -30,7 +31,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/spf13/cobra"
 )
 
@@ -47,7 +47,6 @@ func s060Execute(t *testing.T, ret error) (fd2, writer string, code int) {
 	}
 	root.SetArgs([]string{})
 
-	logger.Default() // bind the logger to the real stderr before fd 2 moves
 	readErr := captureStream(t, 2, &os.Stderr)
 	var buf bytes.Buffer
 	code = execute(context.Background(), root, &buf)

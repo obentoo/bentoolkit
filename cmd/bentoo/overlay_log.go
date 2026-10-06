@@ -5,7 +5,7 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -29,9 +29,10 @@ func newLogCmd() *cobra.Command {
 }
 
 func runLog(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	ctx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -55,7 +56,7 @@ func runLog(cmd *cobra.Command, args []string) error {
 	gitCmd.Stderr = os.Stderr
 
 	if err := gitCmd.Run(); err != nil {
-		logger.Error("running git log: %v", err)
+		log.Error("running git log: failed", "err", err)
 		return exitWith(1)
 	}
 	return nil

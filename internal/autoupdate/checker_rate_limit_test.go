@@ -141,6 +141,7 @@ func TestFetchContent_ParseHostFailure_FailsOpen(t *testing.T) {
 	// ":bad-url:" fails url.Parse with "missing protocol scheme".
 	const malformedURL = ":bad-url:"
 	checker := newRateLimitTestChecker(t, malformedURL, WithRateLimiter(mock))
+	checker.log = logs.logger()
 
 	_, err := checker.fetchContent(t.Context(), malformedURL, nil, credentialScope{}, checker.operationTimeout(nil))
 

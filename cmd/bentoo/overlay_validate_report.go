@@ -34,11 +34,11 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -245,10 +245,10 @@ func renderValidateJSON(run report.Run, diag io.Writer) {
 // leaves --ui, the environment and the terminal deciding — exactly what this
 // command did before ui.mode existed — and the miss is logged at debug because
 // on a host with no bentoo config it is the normal case, not a fault.
-func validateReportConfig() *config.Config {
+func validateReportConfig(log *slog.Logger) *config.Config {
 	cfg, err := config.Load()
 	if err != nil {
-		logger.Debug("overlay validate: no bentoo configuration was read, so ui.mode is not consulted: %v", err)
+		log.Debug("overlay validate: no bentoo configuration was read, so ui.mode is not consulted", "err", err)
 		return nil
 	}
 	return cfg
@@ -295,7 +295,7 @@ func validateReportConfig() *config.Config {
 // asks for the document twice, in two places, and answering only the first would
 // be this command re-deciding what --export means for itself — which is the
 // arrangement D8 exists to end.
-func presentValidateReport(d *deps, rep validate.Report, complete, asJSON bool, diag io.Writer) {
+func presentValidateReport(log *slog.Logger, d *deps, rep validate.Report, complete, asJSON bool, diag io.Writer) {
 	run := validateEnvelope(rep, complete)
 
 	// R3.7, stated for BOTH branches below and drawn by neither.
@@ -351,12 +351,12 @@ func presentValidateReport(d *deps, rep validate.Report, complete, asJSON bool, 
 	//
 	// # On stderr, which is not an exception to this file's stream rule
 	//
-	// reportModeOrPlain states it through logger.Warn, so it is on stderr on
+	// reportModeOrPlain states it through the invocation logger's Warn, so it is on stderr on
 	// both paths. overlay_validate.go's rule that the default mode's text goes
 	// to stdout is about THE REPORT — a SKIPPED line and the reason beside it
 	// have to be read together — and this is not the report. It is a fact about
 	// the display, which is why the design puts it on stderr for every producer.
-	_ = reportModeOrPlain(validateReportConfig(), false, d.uiIsTerminal)
+	_ = reportModeOrPlain(log, validateReportConfig(log), false, d.uiIsTerminal)
 
 	if asJSON {
 		renderValidateJSON(run, diag)
@@ -369,5 +369,5 @@ func presentValidateReport(d *deps, rep validate.Report, complete, asJSON bool, 
 	// rather than fails when the path cannot be written, and it returns nothing
 	// so this run's exit status cannot be altered by a copy of an answer already
 	// delivered above.
-	exportReport(run)
+	exportReport(log, run)
 }

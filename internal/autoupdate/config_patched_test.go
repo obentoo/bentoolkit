@@ -37,7 +37,7 @@ func TestValidatePatched(t *testing.T) {
 		cfg := validBase()
 		cfg.Patched = "keeps our wayland-by-default patch and the extra USE flag"
 
-		if err := ValidatePackageConfig("app-editors/zed", cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "app-editors/zed", cfg); err != nil {
 			t.Fatalf("ValidatePackageConfig with a stated reason returned %v, want nil", err)
 		}
 		if cfg.Patched != "keeps our wayland-by-default patch and the extra USE flag" {
@@ -48,7 +48,7 @@ func TestValidatePatched(t *testing.T) {
 	t.Run("an absent field is not a divergence and validates (R1.2)", func(t *testing.T) {
 		cfg := validBase()
 
-		if err := ValidatePackageConfig("app-editors/vscode", cfg); err != nil {
+		if err := ValidatePackageConfig(nil, "app-editors/vscode", cfg); err != nil {
 			t.Fatalf("ValidatePackageConfig without patched returned %v, want nil", err)
 		}
 		if cfg.Patched != "" {
@@ -61,7 +61,7 @@ func TestValidatePatched(t *testing.T) {
 			cfg := validBase()
 			cfg.Patched = blank
 
-			err := ValidatePackageConfig("app-editors/zed", cfg)
+			err := ValidatePackageConfig(nil, "app-editors/zed", cfg)
 			if err == nil {
 				t.Errorf("ValidatePackageConfig with patched = %q returned nil; a divergence that describes nothing must be rejected", blank)
 				continue

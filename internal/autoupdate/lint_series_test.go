@@ -64,7 +64,7 @@ func TestLintMissingSeries_TwoReleaseLines(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.28.5.ebuild", "gstreamer-1.29.2_pre.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestLintMissingSeries_SameLineIsQuiet(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.28.4.ebuild", "gstreamer-1.28.5-r1.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestLintMissingSeries_SnapshotSuffixesAreOneLine(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.29.2.ebuild", "gstreamer-1.29.2_pre20260731.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestLintMissingSeries_SeriesSilencesIt(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.28.5.ebuild", "gstreamer-1.29.2_pre.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestLintMissingSeries_SuccessiveVersionsAreQuiet(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-0.15.3.ebuild", "gstreamer-0.16.0.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestLintMissingSeries_TwoSnapshotLinesAreQuiet(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.4.357_p20260722.ebuild", "gstreamer-1.5.358_p20260731.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestLintMissingSeries_DisabledEntryIsQuiet(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.28.5.ebuild", "gstreamer-1.29.2.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestLintMissingSeries_SingleEbuildIsQuiet(t *testing.T) {
 		"media-libs/gstreamer": {"gstreamer-1.29.2.ebuild"},
 	})
 
-	issues, err := LintPackagesConfig(root)
+	issues, err := LintPackagesConfig(nil, root)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}

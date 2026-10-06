@@ -335,7 +335,7 @@ func TestRunStagedManifest_HostDistdirSurvivesAFETCHINGRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("runStagedManifest: %v", err)
 	}
-	t.Cleanup(func() { removeStagedDistdir(distdir) })
+	t.Cleanup(func() { removeStagedDistdir(nil, distdir) })
 
 	// Anti-vacuity: a run that fetched nothing cannot disturb anything, and this
 	// case would then assert only that `true` is harmless.
@@ -451,7 +451,7 @@ func TestRunStagedManifest_HandsTheDistdirToTheCaller(t *testing.T) {
 			// The caller's discharge, demonstrated at this level rather than
 			// assumed: what is returned is removable, and removing it leaves the
 			// sandbox root as it was found.
-			removeStagedDistdir(distdir)
+			removeStagedDistdir(nil, distdir)
 			entries, readErr := os.ReadDir(env.sandboxRoot)
 			if readErr != nil {
 				t.Fatalf("reading the sandbox root: %v", readErr)

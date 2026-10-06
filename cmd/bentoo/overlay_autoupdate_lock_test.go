@@ -6,8 +6,10 @@ package main
 // the test does not agree with the code under test by sharing it.
 
 import (
+	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -19,7 +21,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 const (
@@ -152,13 +154,16 @@ func s056RunCapturingFDs(t *testing.T, auOpts *autoupdateOptions) (code int, out
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
+		// The invocation's logger (story 062), on the redirected fd 2, as the
+		// root's PersistentPreRunE would install it.
+		auCmd.SetContext(logging.NewContext(context.Background(), slog.New(slog.NewTextHandler(os.Stderr, nil))))
 		err := runAutoupdate(auCmd, nil, auOpts, defaultDeps())
 		// Since story 060 a single-line failure is returned (func failWith)
 		// and func execute prints it. This harness bypasses execute, so it
 		// prints the cause the way execute does: inside the redirect, after
 		// the handler's deferred calls have run.
 		if st, bare := err.(*exitStatus); bare && st.cause != nil { //nolint:errorlint // the same identity test as func execute
-			logger.Error("%v", st.cause)
+			logging.FromContext(auCmd.Context()).Error("command failed", "err", st.cause)
 		}
 		code = exitCodeFor(err)
 	}()

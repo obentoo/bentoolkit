@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // This file is R10: do not spend the same hours twice.
@@ -292,7 +291,8 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 		// R10.5. Both spellings revalidate; only the unreadable one is worth a
 		// line in the log, because it says something about the machine.
 		if !errors.Is(err, validate.ErrNoStageRecord) {
-			logger.Warn("the validation record beside %s could not be read (%v); %s-%s is validated again", root, err, pkg, newVersion)
+			a.logger().Warn("the validation record beside the retained tree could not be read; the bump is validated again",
+				"root", root, "err", err, "package", pkg, "version", newVersion)
 		}
 		return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree %s carries no readable validation record, and absence of a claim is not a passing claim (R10.5)", root)}
 	}
@@ -397,9 +397,9 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 	// not a passing claim. The tree itself still stays on disk as the failure's
 	// evidence (R3.6).
 	if ctxErr := ctx.Err(); ctxErr != nil {
-		logger.Warn("the run was interrupted, so what the gates of %s-%s reported is NOT recorded beside %s: "+
+		a.logger().Warn("the run was interrupted, so what the gates reported is NOT recorded beside the retained tree: "+
 			"they were stopped rather than answered, and the next run validates this bump again instead of "+
-			"promoting it on their silence (%v)", pkg, version, root, ctxErr)
+			"promoting it on their silence", "package", pkg, "version", version, "root", root, "err", ctxErr)
 		return
 	}
 
@@ -420,8 +420,8 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		DistfileDigest:     inputs.distfile,
 	})
 	if err != nil {
-		logger.Warn("could not record what the gates said about %s-%s beside %s: %v "+
+		a.logger().Warn("could not record what the gates said beside the retained tree "+
 			"(the bump itself is unaffected; the next run validates it again instead of promoting the retained tree)",
-			pkg, version, root, err)
+			"package", pkg, "version", version, "root", root, "err", err)
 	}
 }

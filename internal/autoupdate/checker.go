@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/url"
@@ -24,7 +25,7 @@ import (
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/sony/gobreaker"
 )
@@ -326,10 +327,30 @@ type Checker struct {
 	// gentooPath is the ::gentoo tree a requirement may be satisfied by. Empty
 	// means the overlay alone is consulted.
 	gentooPath string
+
+	// log receives the checker's diagnostics. Set via WithLogger; NewChecker
+	// leaves it discarding when the option is absent. Read it through logger().
+	log *slog.Logger
+}
+
+// logger returns the checker's logger, or a discarding one for a checker that
+// was not built by NewChecker.
+func (c *Checker) logger() *slog.Logger {
+	return logging.OrDiscard(c.log)
 }
 
 // CheckerOption is a functional option for configuring Checker
 type CheckerOption func(*Checker) error
+
+// WithLogger sets the logger the checker reports its diagnostics to, and hands
+// it to the HTTP client the checker uses. Nil keeps the default, which discards
+// them (and leaves an injected client's own logger alone).
+func WithLogger(l *slog.Logger) CheckerOption {
+	return func(c *Checker) error {
+		c.log = l
+		return nil
+	}
+}
 
 // WithCache sets a custom cache for the checker
 func WithCache(cache *Cache) CheckerOption {
@@ -627,6 +648,13 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	if checker.httpClient == nil {
 		checker.httpClient = NewRetryableHTTPClient()
 	}
+	// The client reports through the checker's logger — an injected client
+	// too, since there is one logger per invocation. Without WithLogger the
+	// client keeps its own logger, and a client the checker built discards.
+	if checker.log != nil {
+		checker.httpClient.SetLogger(checker.log)
+	}
+	checker.log = logging.OrDiscard(checker.log)
 
 	// Apply the configured per-request HTTP timeout to the client and size the
 	// per-operation budget from it. Without this, the default per-request timeout
@@ -649,7 +677,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	if checker.httpClient.GetGitHubToken() == "" {
 		token, err := github.ResolveToken()
 		if err != nil {
-			warnLogf("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
+			checker.log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
 		}
 		if token != "" {
 			checker.httpClient.SetGitHubToken(token)
@@ -684,9 +712,9 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			warnLogf("package %q sets llm_prompt but no LLM is wired into "+
+			checker.log.Warn("package sets llm_prompt but no LLM is wired into "+
 				"the check path; this field is consumed only by "+
-				"'bentoo overlay analyze' (see README)", name)
+				"'bentoo overlay analyze' (see README)", "package", name)
 		}
 	}
 
@@ -829,7 +857,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 		// upstream's 1.4.357. Suppressing on the SHA alone would have frozen
 		// that package at the wrong version for good.
 		if result.HasUpdate && extractSnapshotBase(currentVersion) == base {
-			if cur := currentEbuildCommit(c.overlayPath, pkg, c.seriesFor(pkg)); cur != "" &&
+			if cur := currentEbuildCommit(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg)); cur != "" &&
 				strings.EqualFold(cur, info.SHA) {
 				result.HasUpdate = false
 			}
@@ -932,7 +960,7 @@ func (c *Checker) seriesFor(pkg string) string {
 // version, restricted to the slot when pkg's key carries a ":slot" suffix and to
 // the release line when the entry declares a `series`.
 func (c *Checker) getCurrentVersion(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.overlayPath, pkg, c.seriesFor(pkg))
+	best, err := selectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1041,42 +1069,28 @@ func reconcilesAutomatically(pkg PackageConfig) bool {
 	return !pkg.IsEnabled() && !pkg.IsHeld() && pkg.DisabledBy == disabledByAuto
 }
 
-// frozenDisableNotice builds the single line naming every entry the
-// reconciliation left disabled although its ebuild is present, because the
-// record states no origin (R1.4). It is a pure builder — the convention
-// validate/build.go's passReason and notReachedReason already follow — so the
-// wording is asserted directly rather than through the logger.
+// frozenDisableMessage is the notice logFrozenDisables writes. The entries it
+// is about travel as attributes.
 //
 // It names the missing KEY as well as the entries, because "left disabled" on
 // its own reads as a fault in the package: the entry is repairable, and
 // stamping it with the automatic origin is the repair. Without that sentence
 // the fail-safe would introduce a silent regression of its own — every record
 // disabled before the field existed quietly stops reconciling.
-//
-// An empty set yields an empty string, so a run with nothing to report says
-// nothing instead of printing an empty list.
-func frozenDisableNotice(pkgs []string) string {
-	if len(pkgs) == 0 {
-		return ""
-	}
-	return fmt.Sprintf("left %d package(s) disabled: %s — the reconciliation clears only a disable it recorded itself, "+
-		"and these state no origin, so each reads as a deliberate decision; add disabled_by = %q to any entry the "+
-		"checker should be free to re-enable when its ebuild returns",
-		len(pkgs), strings.Join(pkgs, ", "), disabledByAuto)
-}
+const frozenDisableMessage = "left package(s) disabled — the reconciliation clears only a disable it recorded itself, " +
+	"and these state no origin, so each reads as a deliberate decision; add disabled_by = \"" + disabledByAuto +
+	"\" to any entry the checker should be free to re-enable when its ebuild returns"
 
-// reportFrozenDisables delivers the R1.4 notice built above. It is a var for
-// the same reason `var fixSandboxRoot` in applier.go is one: the destination is
-// unreachable from a test. logger.Logger.output is unexported and has no
-// setter, so a test cannot capture the run's stderr, and without a seam here
-// only the message BUILDER is pinned — never the wiring that calls it.
-//
-// That gap was measured, not guessed. Deleting the call site during the
-// sub-task's mutation proof turned NOTHING red: frozenDisableNotice kept its
-// wording test and CheckAll kept its behaviour test, and R1.4 — the requirement
-// that a frozen entry is NAMED — quietly stopped being covered by either. The
-// seam is what makes "the run actually reported it" an assertion.
-var reportFrozenDisables = func(notice string) { logger.Info("%s", notice) }
+// logFrozenDisables writes the single line naming every entry the
+// reconciliation left disabled although its ebuild is present, because the
+// record states no origin (R1.4). An empty set writes nothing, so a run with
+// nothing to report says nothing instead of printing an empty list.
+func logFrozenDisables(log *slog.Logger, pkgs []string) {
+	if len(pkgs) == 0 {
+		return
+	}
+	logging.OrDiscard(log).Info(frozenDisableMessage, "count", len(pkgs), "packages", strings.Join(pkgs, ", "))
+}
 
 // ReviveCandidate describes a disabled (orphaned) packages.toml entry whose
 // upstream release is strictly newer than the highest version ::gentoo still
@@ -1246,7 +1260,7 @@ func maxGentooVersion(versions []string) string {
 // ebuild for pkg. It shares getCurrentVersion's selection but yields the file
 // path so callers can read the ebuild's contents (e.g. to auto-detect type).
 func (c *Checker) currentEbuildPath(pkg string) (string, error) {
-	best, err := selectCurrentEbuild(c.overlayPath, pkg, c.seriesFor(pkg))
+	best, err := selectCurrentEbuild(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
 	if err != nil {
 		return "", err
 	}
@@ -1512,8 +1526,8 @@ var ebuildCommitRegex = regexp.MustCompile(
 // Returning "" on every failure is the safe direction: the only caller uses a
 // match to SUPPRESS an update, so an unreadable ebuild leaves the normal version
 // comparison in charge rather than silently freezing the package.
-func currentEbuildCommit(overlayPath, pkg, series string) string {
-	best, err := selectCurrentEbuild(overlayPath, pkg, series)
+func currentEbuildCommit(log *slog.Logger, overlayPath, pkg, series string) string {
+	best, err := selectCurrentEbuild(log, overlayPath, pkg, series)
 	if err != nil || best.Path == "" {
 		return ""
 	}
@@ -1665,7 +1679,7 @@ func (c *Checker) fetchCommitInfo(ctx context.Context, cfg *PackageConfig) (*com
 	if err != nil {
 		return nil, fmt.Errorf("commit date: %w", err)
 	}
-	date := applyTransforms(raw, cfg.Transform)
+	date := applyTransforms(c.logger(), raw, cfg.Transform)
 	if date == "" {
 		return nil, fmt.Errorf("commit date: empty after transform (raw: %q)", raw)
 	}
@@ -1834,7 +1848,7 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *Pac
 	// working on a bare version, and the strip is idempotent for entries whose
 	// transform already removed the prefix.
 	version = NormalizeUpstreamVersion(version)
-	version = applySuffix(version, cfg)
+	version = applySuffix(c.logger(), version, cfg)
 
 	// An entry restricted to a release line must never report a version from
 	// another one: it would be compared against — and could bump — the ebuild of
@@ -1842,7 +1856,7 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *Pac
 	// per candidate; this covers the paths that yield a single value (first
 	// match, script, fallback, LLM). Failing loudly is the point: the entry's
 	// source moved, or its series is wrong, and both need a human.
-	if m := newSeriesMatcher(cfg.Series); m.active() && !m.matches(stripVersionPrefix(version)) {
+	if m := newSeriesMatcher(c.logger(), cfg.Series); m.active() && !m.matches(stripVersionPrefix(version)) {
 		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
 			ErrNoVersionFound, version, cfg.Series)
 	}
@@ -1946,7 +1960,8 @@ func (c *Checker) probeWithMirrors(cfg *PackageConfig, probe func(*PackageConfig
 		mc.Mirrors = nil
 		v, merr := probe(&mc)
 		if merr == nil {
-			warnLogf("%s unavailable (%v); version read from mirror %s", hostForError(cfg.URL), err, hostForError(mirror))
+			c.logger().Warn("upstream unavailable; version read from a mirror",
+				"host", hostForError(cfg.URL), "err", err, "mirror", hostForError(mirror))
 			return v, nil
 		}
 		errs = append(errs, fmt.Errorf("mirror %s: %w", hostForError(mirror), merr))
@@ -2029,7 +2044,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 			if cErr != nil {
 				return "", fmt.Errorf("failed to extract version candidates: %w", cErr)
 			}
-			best := selectVersion(cands, cfg)
+			best := selectVersion(c.logger(), cands, cfg)
 			if best == "" {
 				return "", fmt.Errorf("%w: no comparable version among %d candidate(s) for select=%q",
 					ErrNoVersionFound, len(cands), cfg.Select)
@@ -2037,8 +2052,8 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 			return best, nil
 		}
 		// Not list-capable (e.g. parser="script"): warn and use first match.
-		warnLogf("select=%q requested but parser %q cannot extract a list; using first match",
-			cfg.Select, cfg.Parser)
+		c.logger().Warn("select requested but the parser cannot extract a list; using first match",
+			"select", cfg.Select, "parser", cfg.Parser)
 	}
 
 	// Create parser. NewParserFromConfig handles json/regex/html uniformly.
@@ -2052,7 +2067,7 @@ func (c *Checker) fetchAndParse(ctx context.Context, rawURL string, cfg *Package
 	if err != nil {
 		return "", fmt.Errorf("failed to parse version: %w", err)
 	}
-	version = applyTransforms(version, cfg.Transform)
+	version = applyTransforms(c.logger(), version, cfg.Transform)
 
 	return version, nil
 }
@@ -2101,8 +2116,8 @@ func (c *Checker) evaluateLive(ctx context.Context, cfg *PackageConfig, body str
 	// the parent context so the wait is signal-cancellable and not charged to the
 	// per-operation timeout. Fail open on an unparseable URL.
 	if parsed, perr := url.Parse(cfg.URL); perr != nil {
-		warnLogf("rate limiter: could not parse URL %q for host extraction (%v); "+
-			"proceeding without a rate-limit wait", cfg.URL, perr)
+		c.logger().Warn("rate limiter: could not parse URL for host extraction; proceeding without a rate-limit wait",
+			"url", cfg.URL, "err", perr)
 	} else if werr := c.rateLimiter.WaitHTTP(ctx, parsed.Host); werr != nil {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return "", fmt.Errorf("rate limiter wait cancelled: %w", ctxErr)
@@ -2247,8 +2262,8 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	// Fail open on a parse error: an unparseable URL still gets a
 	// (rate-limit-free) attempt rather than silently dropping the fetch.
 	if parsed, err := url.Parse(rawURL); err != nil {
-		warnLogf("rate limiter: could not parse URL %q for host extraction (%v); "+
-			"proceeding without a rate-limit wait", rawURL, err)
+		c.logger().Warn("rate limiter: could not parse URL for host extraction; proceeding without a rate-limit wait",
+			"url", rawURL, "err", err)
 	} else if waitErr := c.rateLimiter.WaitHTTP(ctx, parsed.Host); waitErr != nil {
 		// The wait did not yield a token. If the parent context is done the wait
 		// was cancelled (parent cancelled or deadline exceeded): return the
@@ -2391,10 +2406,11 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	if len(revived) > 0 {
 		sort.Strings(revived)
 		if err := c.ReviveDisabled(revived); err != nil {
-			warnLogf("failed to re-enable %d package(s) whose ebuild reappeared in the overlay: %v", len(revived), err)
+			c.logger().Warn("failed to re-enable package(s) whose ebuild reappeared in the overlay",
+				"count", len(revived), "err", err)
 		} else {
 			for _, p := range revived {
-				logger.Info("re-enabled %q: its ebuild is present in the overlay again", p)
+				c.logger().Info("re-enabled package: its ebuild is present in the overlay again", "package", p)
 			}
 		}
 	}
@@ -2405,7 +2421,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	// scan's actual output.
 	if len(frozen) > 0 {
 		sort.Strings(frozen)
-		reportFrozenDisables(frozenDisableNotice(frozen))
+		logFrozenDisables(c.logger(), frozen)
 	}
 
 	// Narrow the package set up front so excluded packages incur no network
@@ -2504,7 +2520,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	// is simply retried (and re-reported) next time.
 	if len(orphaned) > 0 {
 		if err := c.DisableOrphans(orphaned); err != nil {
-			warnLogf("failed to auto-disable %d orphaned package(s) in packages.toml: %v", len(orphaned), err)
+			c.logger().Warn("failed to auto-disable orphaned package(s) in packages.toml", "count", len(orphaned), "err", err)
 		}
 	}
 
@@ -2560,10 +2576,9 @@ func (c *Checker) logFetchCacheStats() {
 	}
 
 	stats := c.bodies.snapshot()
-	logger.Debug("fetch cache: hits=%d joins=%d misses=%d refetches=%d "+
-		"not_retained_oversize=%d not_retained_budget_full=%d",
-		stats.Hits, stats.Joins, stats.Misses, stats.Refetches,
-		stats.Oversize, stats.BudgetFull)
+	c.logger().Debug("fetch cache",
+		"hits", stats.Hits, "joins", stats.Joins, "misses", stats.Misses, "refetches", stats.Refetches,
+		"not_retained_oversize", stats.Oversize, "not_retained_budget_full", stats.BudgetFull)
 }
 
 // Config returns the packages configuration.

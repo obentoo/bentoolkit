@@ -3,6 +3,7 @@ package snapshot
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"slices"
 	"strings"
 	"testing"
@@ -26,10 +27,12 @@ func s053BtrbkListMock(out string, listErr error) *MockRunner {
 	}}
 }
 
-func s053BtrbkCreate(t *testing.T, mock *MockRunner) Snapshot {
+// s053BtrbkCreate runs Create on a btrbk engine logging to log (nil discards).
+func s053BtrbkCreate(t *testing.T, mock *MockRunner, log *slog.Logger) Snapshot {
 	t.Helper()
 	e := newBtrbkEngine(EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}, nil, mock)
 	e.confPath = "/etc/bentoo/btrbk.conf"
+	e.log = log
 	snap, err := e.Create(t.Context(), "/home")
 	if err != nil {
 		t.Fatalf("Create: %v, want nil (btrbk run succeeded)", err)
@@ -40,10 +43,9 @@ func s053BtrbkCreate(t *testing.T, mock *MockRunner) Snapshot {
 // TestBtrbkEngine_CreateResolvesLatest pins R1.2's command: exactly one
 // `btrbk -c <conf> --format=raw list latest S` after `btrbk run S`.
 func TestBtrbkEngine_CreateResolvesLatest(t *testing.T) {
-	_ = captureWarn(t)
 	path := "/mnt/pool/_btrbk_snap/home.20260923T0400"
 	mock := s053BtrbkListMock(s053LatestRow("snapshot", path)+"\n", nil)
-	snap := s053BtrbkCreate(t, mock)
+	snap := s053BtrbkCreate(t, mock, nil)
 
 	want := [][]string{
 		{"-c", "/etc/bentoo/btrbk.conf", "run", "/home"},
@@ -83,8 +85,9 @@ func TestParseBtrbkLatestRaw(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			warns := captureWarn(t)
-			snap := s053BtrbkCreate(t, s053BtrbkListMock(tc.out, nil))
+			lc := &logCapture{}
+			warns := lc.all
+			snap := s053BtrbkCreate(t, s053BtrbkListMock(tc.out, nil), lc.logger())
 			if snap.Path != tc.wantPath || snap.ID != tc.wantID {
 				t.Errorf("got {ID:%q Path:%q}, want {ID:%q Path:%q}", snap.ID, snap.Path, tc.wantID, tc.wantPath)
 			}
@@ -112,8 +115,9 @@ func TestBtrbkEngine_CreateUnidentifiedWarns(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			warns := captureWarn(t)
-			snap := s053BtrbkCreate(t, s053BtrbkListMock(tc.out, tc.listErr))
+			lc := &logCapture{}
+			warns := lc.all
+			snap := s053BtrbkCreate(t, s053BtrbkListMock(tc.out, tc.listErr), lc.logger())
 			if snap.ID != "" || snap.Path != "" {
 				t.Errorf("got {ID:%q Path:%q}, want both empty (nothing picked)", snap.ID, snap.Path)
 			}

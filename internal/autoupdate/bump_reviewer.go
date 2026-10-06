@@ -47,6 +47,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"sort"
@@ -55,6 +56,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -266,6 +268,14 @@ type ClaudeCodeBumpReviewer struct {
 	// execCommand creates the *exec.Cmd bound to a context. Defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// log receives the bump reviewer's diagnostics; read it through logger().
+	log *slog.Logger
+}
+
+// logger returns the bump reviewer's logger, or a discarding one when none
+// was set.
+func (r *ClaudeCodeBumpReviewer) logger() *slog.Logger {
+	return logging.OrDiscard(r.log)
 }
 
 // Compile-time assertion that ClaudeCodeBumpReviewer satisfies the capability.
@@ -273,6 +283,14 @@ var _ BumpReviewer = (*ClaudeCodeBumpReviewer)(nil)
 
 // BumpReviewerOption configures a ClaudeCodeBumpReviewer.
 type BumpReviewerOption func(*ClaudeCodeBumpReviewer)
+
+// WithBumpReviewerLogger sets the logger the bump reviewer reports its diagnostics
+// to. Nil keeps the default, which discards them.
+func WithBumpReviewerLogger(l *slog.Logger) BumpReviewerOption {
+	return func(r *ClaudeCodeBumpReviewer) {
+		r.log = logging.OrDiscard(l)
+	}
+}
 
 // WithBumpReviewerExecCommand overrides the context-aware exec.Command factory
 // used to spawn `claude`. Mirrors exec.CommandContext so injected commands also
@@ -383,7 +401,7 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	}
 	defer func() {
 		if err := os.RemoveAll(dir); err != nil {
-			warnLogf("bump review for %s: remove private working directory %s: %v", req.Package, dir, err)
+			r.logger().Warn("bump review: remove private working directory failed", "package", req.Package, "dir", dir, "err", err)
 		}
 	}()
 

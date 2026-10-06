@@ -3,11 +3,13 @@ package autoupdate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"sort"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // claim is one registry entry's hold on an ebuild in a package directory.
@@ -55,7 +57,7 @@ type claim struct {
 //
 // Keys are visited in sorted order so the result — and every verdict derived
 // from it — is stable across runs.
-func resolveClaims(overlayPath string, cfgs map[string]PackageConfig, atom string) []claim {
+func resolveClaims(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, atom string) []claim {
 	// Normalise the target: a caller holding a registry key must get the same
 	// answer as one holding a bare atom, and neither may reach a path with its
 	// ":slot" or "@label" still attached.
@@ -76,7 +78,7 @@ func resolveClaims(overlayPath string, cfgs map[string]PackageConfig, atom strin
 		// The single selection authority: it splits the key itself, applies the
 		// ":slot" filter by reading SLOT= and the `series` filter by regex, and
 		// skips live ebuilds (UB2).
-		if cand, err := selectCurrentEbuild(overlayPath, key, cfg.Series); err == nil {
+		if cand, err := selectCurrentEbuild(log, overlayPath, key, cfg.Series); err == nil {
 			c.Version = cand.Version
 		}
 		claims = append(claims, c)
@@ -207,7 +209,7 @@ type sweepPlan struct {
 // a directory that stays dirty one more run, keeping one too few costs a
 // maintained release line — and 90 directories in the overlay have one to lose.
 // Do not "simplify" it back to the pin alone.
-func planSweep(overlayPath string, cfgs map[string]PackageConfig, atom string) (sweepPlan, error) {
+func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, atom string) (sweepPlan, error) {
 	category, pkgName, ok := splitPkgAtom(atom)
 	if !ok {
 		return sweepPlan{}, fmt.Errorf("cannot plan sweep: %q is not a category/package atom", atom)
@@ -226,7 +228,7 @@ func planSweep(overlayPath string, cfgs map[string]PackageConfig, atom string) (
 
 	// Rule 1: collect what each entry holds, and the first entry that can say
 	// nothing about what it holds.
-	claims := resolveClaims(overlayPath, cfgs, atom)
+	claims := resolveClaims(log, overlayPath, cfgs, atom)
 	// heldBy maps a version to the entry holding it — by pin OR by resolution,
 	// see rule 4. It is deliberately NOT named pinnedBy: the pin is only half of
 	// what an entry holds, and treating it as the whole is the bug that deleted
@@ -474,7 +476,10 @@ type Divergence struct {
 // takes no results — and which would not remove the scan anyway: CheckResult
 // carries a resolved CurrentVersion but never the directory listing that
 // UnclaimedEbuild is computed from.
-func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
+//
+// What it skips is warned about to log; nil discards the warnings.
+func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig) []Divergence {
+	log = logging.OrDiscard(log)
 	var divs []Divergence
 	// Directories already scanned for unclaimed ebuilds, keyed by atom: several
 	// entries routinely share one, and the finding belongs to the file, not to
@@ -502,11 +507,11 @@ func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
 		}
 		category, pkgName, ok := splitPkgAtom(key)
 		if !ok {
-			warnLogf("reconcile: skipping registry key %q: it is not a category/package atom", key)
+			log.Warn("reconcile: skipping registry key: it is not a category/package atom", "key", key)
 			continue
 		}
 
-		cand, err := selectCurrentEbuild(overlayPath, key, cfg.Series)
+		cand, err := selectCurrentEbuild(log, overlayPath, key, cfg.Series)
 		switch {
 		case err == nil:
 			if cand.Version != cfg.Version {
@@ -522,7 +527,7 @@ func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
 			// An unreadable directory, and nothing else: every "this entry holds
 			// nothing" case is a sentinel above. Say which entry and why, and
 			// report nothing about it.
-			warnLogf("reconcile: skipping %s: %v", key, err)
+			log.Warn("reconcile: skipping registry key", "key", key, "err", err)
 			continue
 		}
 
@@ -540,7 +545,7 @@ func Reconcile(overlayPath string, cfgs map[string]PackageConfig) []Divergence {
 			continue
 		}
 		scanned[atom] = true
-		divs = append(divs, unclaimedIn(overlayPath, cfgs, atom)...)
+		divs = append(divs, unclaimedIn(log, overlayPath, cfgs, atom)...)
 	}
 
 	// Sorted by key, then by class, so the order is total and no map iteration
@@ -619,7 +624,7 @@ func StalePinBatch(divs []Divergence) map[string]string {
 //
 // An unreadable directory yields a warning and no divergences at all, never a
 // guess about what is in it.
-func unclaimedIn(overlayPath string, cfgs map[string]PackageConfig, atom string) []Divergence {
+func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, atom string) []Divergence {
 	category, pkgName, ok := splitPkgAtom(atom)
 	if !ok {
 		return nil
@@ -628,7 +633,7 @@ func unclaimedIn(overlayPath string, cfgs map[string]PackageConfig, atom string)
 	pkgDir := filepath.Join(overlayPath, category, pkgName)
 	paths, err := findEbuilds(pkgDir)
 	if err != nil {
-		warnLogf("reconcile: skipping the unclaimed-ebuild scan of %s/%s: %v", category, pkgName, err)
+		logging.OrDiscard(log).Warn("reconcile: skipping the unclaimed-ebuild scan", "atom", category+"/"+pkgName, "err", err)
 		return nil
 	}
 
@@ -638,7 +643,7 @@ func unclaimedIn(overlayPath string, cfgs map[string]PackageConfig, atom string)
 	// knows who holds what; re-deriving it here would give the report a second,
 	// drifting answer to that question.
 	claimed := make(map[string]bool)
-	for _, c := range resolveClaims(overlayPath, cfgs, atom) {
+	for _, c := range resolveClaims(log, overlayPath, cfgs, atom) {
 		if c.Pin != "" {
 			claimed[c.Pin] = true
 		}

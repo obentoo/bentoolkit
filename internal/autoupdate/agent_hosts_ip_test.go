@@ -55,7 +55,7 @@ func TestUpstreamHosts_RejectsIPLiterals(t *testing.T) {
 		for _, raw := range []string{"http://" + host + "/x", "https://" + host + ":8443/latest/meta-data/"} {
 			t.Run(raw, func(t *testing.T) {
 				lc := captureWarnLogs(t)
-				hosts := upstreamHosts(pkg, "https://good.example.org/x", raw)
+				hosts := upstreamHosts(lc.logger(), pkg, "https://good.example.org/x", raw)
 				set := hostSet(hosts)
 				if set[host] != 0 {
 					t.Errorf("IPv4 literal %q from %q was kept as a WebFetch host (R3.9); hosts = %q", host, raw, hosts)
@@ -131,7 +131,7 @@ func TestUpstreamHosts_KeepsDigitLabelDNSNames(t *testing.T) {
 	for _, h := range digitLabelDNSNames {
 		urls = append(urls, "https://"+h+"/dist/x.tar.gz")
 	}
-	hosts := upstreamHosts(pkg, urls...)
+	hosts := upstreamHosts(lc.logger(), pkg, urls...)
 	set := hostSet(hosts)
 	for _, h := range digitLabelDNSNames {
 		if set[h] != 1 {

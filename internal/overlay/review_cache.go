@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sync"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // reviewCacheFileName is the file the notes live in, inside the directory
@@ -18,23 +19,6 @@ import (
 // replaced atomically — follows autoupdate/analysis_cache.go, which is this
 // repository's existing shape for a cache of model output.
 const reviewCacheFileName = "divergence_reviews.json"
-
-// warnLogf emits the non-fatal warnings this package is allowed to print for
-// itself. It defaults to logger.Warn and is a package var — the same seam
-// internal/autoupdate and internal/snapshot already use — so tests can capture
-// the warn-but-continue paths without reading stderr.
-//
-// It is a deliberate EXCEPTION to "a library returns errors, it does not log",
-// and the exception is narrow. Everywhere else, internal/overlay hands its
-// diagnostics back to the caller: Matcher collects them into
-// MatchResult.Warnings, and the compare findings are rendered into the report.
-// That works because those diagnostics are ABOUT the caller's subject. A cache
-// failure is not: design.md's error table answers every one of them with "carry
-// on without the cache", so by the time the run continues there is no error left
-// to return and no result it belongs to. The alternative — threading a warning
-// list out of a lookup that is otherwise a plain (note, ok) — would put a cache's
-// bookkeeping in the signature of every caller for a line printed at most once.
-var warnLogf = logger.Warn
 
 // reviewCache stores one model classification per pair of compared ebuilds,
 // indexed by their content (R5.7), so a repeated run prints the same commentary
@@ -63,6 +47,15 @@ type reviewCache struct {
 	// cannot be resolved, and the caller that could not name a directory is the
 	// one holding the reason to state.
 	path string
+
+	// log receives the cache's warnings; newReviewCache never leaves it nil.
+	//
+	// Warning here is a deliberate, narrow exception to "a library returns
+	// errors, it does not log". A cache failure is not about the caller's
+	// subject: design.md's error table answers every one of them with "carry on
+	// without the cache", so by the time the run continues there is no error
+	// left to return and no result it belongs to.
+	log *slog.Logger
 
 	// mu guards notes and serialises the file replacement in save. The annotate
 	// pass runs after CompareWithProvider returns, outside its goroutines, so
@@ -119,10 +112,15 @@ type reviewCacheFile struct {
 // on. A missing file is an ordinary first run, an unreadable or corrupt one is a
 // warning and an empty cache, and dir == "" is a cache that answers from memory
 // and persists nothing.
-func newReviewCache(dir string) *reviewCache {
+//
+// Its warnings go to log, and log == nil discards them. The cache returns no
+// error by design, so the warning is the only trace a broken file leaves: a
+// caller that wants it seen hands in the invocation's logger.
+func newReviewCache(dir string, log *slog.Logger) *reviewCache {
 	c := &reviewCache{
 		notes:   make(map[string]ReviewNote),
 		realign: make(map[string]RealignNote),
+		log:     logging.OrDiscard(log),
 	}
 	if dir == "" {
 		return c
@@ -197,8 +195,8 @@ func (c *reviewCache) persist() {
 
 	if err := c.save(); err != nil {
 		c.storeWarnOnce.Do(func() {
-			warnLogf("overlay: review notes cannot be cached in %s (%v); this run is unaffected, but the next one will ask again",
-				filepath.Dir(c.path), err)
+			c.log.Warn("overlay: review notes cannot be cached; this run is unaffected, but the next one will ask again",
+				"dir", filepath.Dir(c.path), "err", err)
 		})
 	}
 }
@@ -266,7 +264,7 @@ func (c *reviewCache) load() {
 	data, err := os.ReadFile(c.path)
 	if err != nil {
 		if !errors.Is(err, os.ErrNotExist) {
-			warnLogf("overlay: review cache %s could not be read (%v); every note will be recomputed this run", c.path, err)
+			c.log.Warn("overlay: review cache could not be read; every note will be recomputed this run", "path", c.path, "err", err)
 		}
 		return
 	}
@@ -277,7 +275,7 @@ func (c *reviewCache) load() {
 		// corrupted by an interrupted write or an older format heals itself rather
 		// than needing to be deleted by hand. Nothing recoverable is lost: what
 		// could not be parsed could not have been used.
-		warnLogf("overlay: review cache %s could not be parsed (%v); every note will be recomputed this run and the file replaced", c.path, err)
+		c.log.Warn("overlay: review cache could not be parsed; every note will be recomputed this run and the file replaced", "path", c.path, "err", err)
 		return
 	}
 	if stored.Notes != nil {

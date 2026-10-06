@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -72,7 +73,7 @@ func TestAutoupdateOverlayLock_HeldAcrossRegistryFixer(t *testing.T) {
 
 	fixer := &lockProbingFixer{lockPath: filepath.Join(overlayDir, ".autoupdate.bentoo-lock")}
 	td := defaultDeps()
-	td.checkRegistryFixer = func(config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
+	td.checkRegistryFixer = func(*slog.Logger, config.LLMConfig) (autoupdate.RegistryFixer, error) { return fixer, nil }
 	td.checkInteractive = func() bool { return true }
 
 	// The prompt reads os.Stdin: answer "y" to the one package offered.

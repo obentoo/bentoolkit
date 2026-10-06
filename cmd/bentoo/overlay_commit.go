@@ -8,7 +8,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/git"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -39,9 +39,10 @@ Use -y to skip the confirmation prompt and commit automatically.`,
 }
 
 func runCommit(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -50,7 +51,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	// Get git user info
 	user, email, err := cfg.GetGitUser()
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("reading the git user: failed", "err", err)
 		return exitWith(1)
 	}
 	// Store in config for commit function
@@ -60,10 +61,10 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	// If custom message provided, use it directly
 	if commitMessage != "" {
 		if err := commitOverlay(cmd, cfg, commitMessage); err != nil {
-			logger.Error("%v", err)
+			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		logger.Info("Changes committed successfully.")
+		uiInfo("Changes committed successfully.")
 		return nil
 	}
 
@@ -74,7 +75,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	// cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels this git call.
 	entries, err := runner.Status(commandContext(cmd))
 	if err != nil {
-		logger.Error("getting status: %v", err)
+		log.Error("getting status: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -88,7 +89,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(stagedEntries) == 0 {
-		logger.Warn("No staged changes to commit.")
+		uiWarn("No staged changes to commit.")
 		return nil
 	}
 
@@ -100,9 +101,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 
 	// Dry-run mode: just show what would be committed
 	if commitDryRun {
-		logger.Info("Dry-run mode - would commit with message:")
+		uiInfo("Dry-run mode - would commit with message:")
 		fmt.Printf("  %s\n\n", output.Sprint(output.Info, generatedMessage))
-		logger.Info("Staged files:")
+		uiInfo("Staged files:")
 		for _, e := range stagedEntries {
 			fmt.Printf("  %s %s\n", output.FormatStatus(overlay.StatusLabel(e.Status)), e.FilePath)
 		}
@@ -110,16 +111,16 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show preview and prompt
-	logger.Info("Generated commit message:")
+	uiInfo("Generated commit message:")
 	fmt.Printf("  %s\n\n", output.Sprint(output.Info, generatedMessage))
 
 	// Skip confirmation if -y flag is set
 	if commitYes {
 		if err := commitOverlay(cmd, cfg, generatedMessage); err != nil {
-			logger.Error("%v", err)
+			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		logger.Info("Changes committed successfully.")
+		uiInfo("Changes committed successfully.")
 		return nil
 	}
 
@@ -132,7 +133,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	input, err := reader.ReadString('\n')
 	restoreSignals()
 	if err != nil {
-		logger.Error("reading input: %v", err)
+		log.Error("reading input: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -142,10 +143,10 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	case "y", "yes", "":
 		// Proceed with generated message
 		if err := commitOverlay(cmd, cfg, generatedMessage); err != nil {
-			logger.Error("%v", err)
+			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		logger.Info("Changes committed successfully.")
+		uiInfo("Changes committed successfully.")
 
 	case "e", "edit":
 		// Allow user to enter custom message
@@ -154,26 +155,26 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		customMessage, err := reader.ReadString('\n')
 		restoreSignals()
 		if err != nil {
-			logger.Error("reading input: %v", err)
+			log.Error("reading input: failed", "err", err)
 			return exitWith(1)
 		}
 		customMessage = strings.TrimSpace(customMessage)
 		if customMessage == "" {
-			logger.Warn("Commit cancelled (empty message).")
+			uiWarn("Commit cancelled (empty message).")
 			return exitWith(1)
 		}
 		if err := commitOverlay(cmd, cfg, customMessage); err != nil {
-			logger.Error("%v", err)
+			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		logger.Info("Changes committed successfully.")
+		uiInfo("Changes committed successfully.")
 
 	case "c", "cancel":
-		logger.Info("Commit cancelled.")
+		uiInfo("Commit cancelled.")
 		return exitWith(1)
 
 	default:
-		logger.Error("Invalid option. Commit cancelled.")
+		log.Error("Invalid option. Commit cancelled.")
 		return exitWith(1)
 	}
 	return nil

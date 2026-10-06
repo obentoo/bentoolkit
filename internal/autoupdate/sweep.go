@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,7 +14,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
@@ -77,10 +78,18 @@ type sweeper struct {
 	// /var/cache/distfiles default, so a sweeper built inside a test reads no
 	// directory that test did not name.
 	distfilesCache string
+	// log receives the sweeper's diagnostics. newSweeper makes it discarding
+	// when withSweeperLogger is absent.
+	log *slog.Logger
 }
 
 // sweeperOption configures a sweeper at construction.
 type sweeperOption func(*sweeper)
+
+// withSweeperLogger sets the logger the sweeper reports to; nil discards.
+func withSweeperLogger(l *slog.Logger) sweeperOption {
+	return func(s *sweeper) { s.log = l }
+}
 
 func withSweeperExec(fn func(ctx context.Context, name string, arg ...string) *exec.Cmd) sweeperOption {
 	return func(s *sweeper) { s.execCommand = fn }
@@ -136,6 +145,7 @@ func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 	if s.reporter == nil {
 		s.reporter = tui.Noop()
 	}
+	s.log = logging.OrDiscard(s.log)
 	return s
 }
 
@@ -392,7 +402,9 @@ func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
 // precisely the failure story 021 exists to prevent (S027-D1).
 //
 // Nothing here touches the filesystem beyond reading directories.
-func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target string) (SweepBatch, error) {
+//
+// The registry's reconciliation reports what it skips to log; nil discards it.
+func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, target string) (SweepBatch, error) {
 	atom, category, err := normaliseSweepTarget(overlayPath, target)
 	if err != nil {
 		return SweepBatch{}, err
@@ -404,7 +416,7 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 	// directory, so reduce to unique atoms before planning.
 	seen := make(map[string]bool)
 	var atoms, skippedHeld []string
-	for _, d := range Reconcile(overlayPath, scoped) {
+	for _, d := range Reconcile(log, overlayPath, scoped) {
 		if d.Kind != UnclaimedEbuild || seen[d.Key] {
 			continue
 		}
@@ -440,7 +452,7 @@ func PlanOverlaySweep(overlayPath string, cfgs map[string]PackageConfig, target 
 
 	batch := SweepBatch{SkippedHeld: skippedHeld}
 	for _, a := range atoms {
-		plan, err := planSweep(overlayPath, scoped, a)
+		plan, err := planSweep(log, overlayPath, scoped, a)
 		if err != nil {
 			// An unreadable directory is a fact about that directory. Report it
 			// and keep planning the rest: refusing the whole batch because one
@@ -708,7 +720,8 @@ func (e *manifestRunError) Unwrap() error {
 func (s *sweeper) reportQuarantined(pkg, distdir string, moved []string) {
 	for _, name := range moved {
 		msg := fmt.Sprintf("quarantined an unverifiable distfile before manifesting %s: %s (in %s)", pkg, name, distdir)
-		logger.Warn("%s", msg)
+		s.log.Warn("quarantined an unverifiable distfile before manifesting",
+			"package", pkg, "distfile", name, "distdir", distdir)
 		s.reporter.Log("warn", msg)
 	}
 }
@@ -725,7 +738,8 @@ func (s *sweeper) reportPrepopulated(pkg, cacheDir string, reused int) {
 		return
 	}
 	msg := fmt.Sprintf("reused %d distfile(s) from %s while manifesting %s", reused, cacheDir, pkg)
-	logger.Info("%s", msg)
+	s.log.Info("reused distfile(s) from the cache while manifesting",
+		"count", reused, "cache_dir", cacheDir, "package", pkg)
 	s.reporter.Log("info", msg)
 }
 
@@ -744,12 +758,14 @@ func (s *sweeper) cleanupFailedFetch(pkg, distdir string, scope distfiles.FetchS
 	removed, err := scope.CleanupFailedFetch()
 	for _, name := range removed {
 		msg := fmt.Sprintf("removed the incomplete distfile %s the failed manifest step for %s left in %s", name, pkg, distdir)
-		logger.Warn("%s", msg)
+		s.log.Warn("removed the incomplete distfile the failed manifest step left",
+			"distfile", name, "package", pkg, "distdir", distdir)
 		s.reporter.Log("warn", msg)
 	}
 	if err != nil {
 		msg := fmt.Sprintf("could not remove every distfile the failed manifest step for %s left in %s: %v", pkg, distdir, err)
-		logger.Warn("%s", msg)
+		s.log.Warn("could not remove every distfile the failed manifest step left",
+			"package", pkg, "distdir", distdir, "err", err)
 		s.reporter.Log("warn", msg)
 	}
 }
@@ -779,14 +795,14 @@ func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdi
 	if spec.usesSerial() {
 		provenance = "serial via $" + spec.serialEnv
 	}
-	logger.Info("authenticated fetch: downloading %s distfile for %s (%s)",
-		pkg, version, provenance)
+	s.log.Info("authenticated fetch: downloading distfile",
+		"package", pkg, "version", version, "provenance", provenance)
 
 	dest, err := spec.fetchDistfile(ctx, version, distdir)
 	if err != nil {
 		return err
 	}
-	logger.Info("authenticated fetch: wrote %s", filepath.Base(dest))
+	s.log.Info("authenticated fetch: wrote distfile", "file", filepath.Base(dest))
 	return nil
 }
 
@@ -1034,10 +1050,17 @@ type sweepOptions struct {
 	distdir           string
 	configuredDistdir string
 	distfilesCache    string
+	log               *slog.Logger
 }
 
 // SweepOption configures ExecuteOverlaySweep.
 type SweepOption func(*sweepOptions)
+
+// WithSweepLogger sets the logger the sweep reports its diagnostics to. Nil
+// keeps the default, which discards them.
+func WithSweepLogger(l *slog.Logger) SweepOption {
+	return func(o *sweepOptions) { o.log = l }
+}
 
 // WithSweepConcurrency bounds how many directories are swept at once.
 func WithSweepConcurrency(n int) SweepOption {
@@ -1110,6 +1133,7 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 		withSweeperConfigs(o.configs),
 		withSweeperDistdir(o.distdir, o.configuredDistdir),
 		withSweeperDistfilesCache(o.distfilesCache),
+		withSweeperLogger(o.log),
 	)
 
 	results := make([]SweepDirResult, len(batch.Dirs))

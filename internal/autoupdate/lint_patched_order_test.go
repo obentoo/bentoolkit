@@ -99,7 +99,7 @@ zed — carries a local patch that must survive every bump.
 # END
 `)
 
-		issues, err := LintPackagesConfig(wellOrdered)
+		issues, err := LintPackagesConfig(nil, wellOrdered)
 		if err != nil {
 			t.Fatalf("LintPackagesConfig on a canonically ordered record returned %v; patched must be a key the registry claims", err)
 		}
@@ -121,7 +121,7 @@ zed — carries a local patch that must survive every bump.
 # END
 `)
 
-		issues, err = LintPackagesConfig(misordered)
+		issues, err = LintPackagesConfig(nil, misordered)
 		if err != nil {
 			t.Fatalf("LintPackagesConfig on a misordered record returned %v, want nil (the file still loads)", err)
 		}

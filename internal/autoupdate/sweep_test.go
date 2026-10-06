@@ -386,7 +386,7 @@ func TestPlanOverlaySweepMatchesReconcileUnclaimedSet(t *testing.T) {
 
 	var want []string
 	seen := map[string]bool{}
-	for _, d := range Reconcile(overlayDir, cfgs) {
+	for _, d := range Reconcile(nil, overlayDir, cfgs) {
 		if d.Kind == UnclaimedEbuild && !seen[d.Key] {
 			seen[d.Key] = true
 			want = append(want, d.Key)
@@ -400,7 +400,7 @@ func TestPlanOverlaySweepMatchesReconcileUnclaimedSet(t *testing.T) {
 	want = slices.DeleteFunc(want, func(a string) bool { return a == heldAtom })
 	sort.Strings(want)
 
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -413,7 +413,7 @@ func TestPlanOverlaySweepMatchesReconcileUnclaimedSet(t *testing.T) {
 // existing status reconciliation, and a held entry is a maintainer decision.
 func TestPlanOverlaySweepSkipsDisabledAndHeld(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestSweepLeavesHeldFallbackOnDisk(t *testing.T) {
 		"test-cat/residue": regEntry("2.0.0", ""),
 	}
 
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestSweepLeavesHeldFallbackOnDisk(t *testing.T) {
 // never appear as removable, and must not inflate TotalRemove.
 func TestPlanOverlaySweepCarriesBlockedDirectories(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestPlanOverlaySweepCarriesBlockedDirectories(t *testing.T) {
 // file an overlay cannot restore by re-fetching a release.
 func TestPlanOverlaySweepNeverRemovesLiveEbuild(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -537,11 +537,11 @@ func TestPlanOverlaySweepNeverRemovesLiveEbuild(t *testing.T) {
 // between them has to mean the overlay changed.
 func TestPlanOverlaySweepIsDeterministic(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	first, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	first, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
-	second, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	second, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestPlanOverlaySweepIsDeterministic(t *testing.T) {
 func TestPlanOverlaySweepScopesToTarget(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
 
-	atomBatch, err := PlanOverlaySweep(overlayDir, cfgs, "test-cat/residue")
+	atomBatch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "test-cat/residue")
 	if err != nil {
 		t.Fatalf("atom target: %v", err)
 	}
@@ -563,7 +563,7 @@ func TestPlanOverlaySweepScopesToTarget(t *testing.T) {
 		t.Errorf("atom target planned %v, want [test-cat/residue]", atomsOf(atomBatch))
 	}
 
-	catBatch, err := PlanOverlaySweep(overlayDir, cfgs, "other-cat")
+	catBatch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "other-cat")
 	if err != nil {
 		t.Fatalf("category target: %v", err)
 	}
@@ -579,7 +579,7 @@ func TestPlanOverlaySweepRejectsInvalidTarget(t *testing.T) {
 
 	for _, target := range []string{"no-such-category", "test-cat/no-such-pkg", "cat/pkg/extra", "/", "kde-plasma@dev"} {
 		t.Run(target, func(t *testing.T) {
-			if _, err := PlanOverlaySweep(overlayDir, cfgs, target); err == nil {
+			if _, err := PlanOverlaySweep(nil, overlayDir, cfgs, target); err == nil {
 				t.Errorf("target %q was accepted", target)
 			} else if !errors.Is(err, ErrInvalidSweepTarget) {
 				t.Errorf("error = %v, want ErrInvalidSweepTarget", err)
@@ -593,7 +593,7 @@ func TestPlanOverlaySweepRejectsInvalidTarget(t *testing.T) {
 // from the atom either way (S027-G4).
 func TestPlanOverlaySweepAcceptsARegistryKey(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "test-cat/residue:0")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "test-cat/residue:0")
 	if err != nil {
 		t.Fatalf("registry key as target: %v", err)
 	}
@@ -614,7 +614,7 @@ func TestExecuteOverlaySweepIsolatesFailures(t *testing.T) {
 		t.Skip("running as root: a read-only directory does not block removal")
 	}
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestExecuteOverlaySweepIsolatesFailures(t *testing.T) {
 // directory is carried into the report untouched, and its files stay on disk.
 func TestExecuteOverlaySweepLeavesBlockedDirectoriesAlone(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -707,7 +707,7 @@ func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
 		createTestEbuildFile(t, overlayDir, pkg, "2.0.0")
 		cfgs[pkg] = regEntry("2.0.0", "")
 	}
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -756,7 +756,7 @@ func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
 // rather than continuing to delete.
 func TestExecuteOverlaySweepStopsOnCancelledContext(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -828,7 +828,7 @@ func TestSweepManifestVersionIsAKeptVersion(t *testing.T) {
 // after it — and the operator approves a batch they cannot check.
 func TestSweepContractHoldsAcrossPlanAndReport(t *testing.T) {
 	overlayDir, cfgs := sweepFixture(t)
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}
@@ -932,7 +932,7 @@ func TestOverlaySweepIntegration(t *testing.T) {
 		t.Fatalf("read registry: %v", err)
 	}
 
-	batch, err := PlanOverlaySweep(overlayDir, cfgs, "")
+	batch, err := PlanOverlaySweep(nil, overlayDir, cfgs, "")
 	if err != nil {
 		t.Fatalf("PlanOverlaySweep: %v", err)
 	}

@@ -18,11 +18,14 @@ func TestSnapperEngine_CreateDerivesPath(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.sv, func(t *testing.T) {
-			warns := captureWarn(t)
+			lc := &logCapture{}
+			warns := lc.all
 			mock := &MockRunner{RunFunc: func(context.Context, string, []string, []byte) ([]byte, error) {
 				return []byte(tc.out), nil
 			}}
-			snap, err := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock).Create(t.Context(), tc.sv)
+			e := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock)
+			e.log = lc.logger()
+			snap, err := e.Create(t.Context(), tc.sv)
 			if err != nil {
 				t.Fatalf("Create(%q): %v", tc.sv, err)
 			}
@@ -30,7 +33,7 @@ func TestSnapperEngine_CreateDerivesPath(t *testing.T) {
 				t.Errorf("Create(%q) = {ID:%q Path:%q Subvolume:%q}, want {ID:%q Path:%q Subvolume:%q}",
 					tc.sv, snap.ID, snap.Path, snap.Subvolume, tc.wantID, tc.wantPath, tc.sv)
 			}
-			listed := parseSnapperListJSON([]byte(`{"cfg":[{"number":`+tc.wantID+`}]}`), tc.sv)
+			listed := parseSnapperListJSON([]byte(`{"cfg":[{"number":`+tc.wantID+`}]}`), tc.sv, lc.logger())
 			if len(listed) != 1 || listed[0].Path != snap.Path || listed[0].ID != snap.ID {
 				t.Errorf("Create and List disagree for %q: Create {%q %q}, List %+v", tc.sv, snap.ID, snap.Path, listed)
 			}
@@ -47,11 +50,14 @@ func TestSnapperEngine_CreateDerivesPath(t *testing.T) {
 func TestSnapperEngine_CreateUnparseableNumberWarns(t *testing.T) {
 	for _, out := range []string{"", "\n", "0\n", "-3\n", "abc\n", "42 43\n", "4.2\n", "42\n43\n"} {
 		t.Run(strings.TrimSpace(out), func(t *testing.T) {
-			warns := captureWarn(t)
+			lc := &logCapture{}
+			warns := lc.all
 			mock := &MockRunner{RunFunc: func(context.Context, string, []string, []byte) ([]byte, error) {
 				return []byte(out), nil
 			}}
-			snap, err := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock).Create(t.Context(), "/home")
+			e := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock)
+			e.log = lc.logger()
+			snap, err := e.Create(t.Context(), "/home")
 			if err != nil {
 				t.Fatalf("Create: %v, want nil (snapper create succeeded)", err)
 			}

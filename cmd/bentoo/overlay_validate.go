@@ -13,6 +13,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 	"github.com/spf13/cobra"
@@ -35,10 +36,11 @@ import (
 //
 // # Where the operator-facing text goes
 //
-// In the default mode, on STDOUT through fmt and output/*, never through logger
-// — the same rule overlay_prune.go states and for the same reason: logger binds
-// os.Stderr once at first use, so splitting one report across two streams costs
-// the reader the ordering between them the moment either is redirected. Here
+// In the default mode, on STDOUT through fmt and output/*, never through the
+// logger — the same rule overlay_prune.go states and for the same reason: the
+// invocation's logger (story 062) writes to stderr, so splitting one report
+// across two streams costs the reader the ordering between them the moment
+// either is redirected. Here
 // that matters more than usual, because a SKIPPED line and the reason beside it
 // have to be read together.
 //
@@ -161,6 +163,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 	// The process-wide context (func commandContext): overlay validate is
 	// cancellable, so the first SIGINT, SIGTERM or SIGHUP cancels the run.
 	ctx := commandContext(cmd)
+	log := logging.FromContext(ctx)
 
 	_ = cmd.ParseFlags(args)
 	asJSON, _ := cmd.Flags().GetBool("json")
@@ -263,6 +266,9 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	report, err := d.validateRunner(ctx, validate.Options{
+		// The invocation's logger, so the gate's diagnostics land where every
+		// other line of this run goes (story 062, R5.2).
+		Logger:   log,
 		Overlay:  overlayPath,
 		Distdir:  distdir,
 		Selector: selector,
@@ -291,7 +297,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 			// and this branch is reached precisely because it did not — so the
 			// exported document says so in the key every kind of run answers,
 			// beside the diagnostic below that only a human reads.
-			presentValidateReport(d, report, false, asJSON, diag)
+			presentValidateReport(log, d, report, false, asJSON, diag)
 			_, _ = fmt.Fprintf(diag, "  %v\n", err)
 			// 128 + SIGINT, the shell's own convention — and deliberately NOT 2.
 			// Report.ExitCode documents 2 as "the selector matched nothing", and
@@ -304,7 +310,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 		return exitWith(2)
 	}
 
-	presentValidateReport(d, report, true, asJSON, diag)
+	presentValidateReport(log, d, report, true, asJSON, diag)
 	// The status is the RUN's, computed from what the gates said. It is read
 	// after the export deliberately and is unaffected by it: exportReport
 	// returns nothing, so a path that could not be written has no value to

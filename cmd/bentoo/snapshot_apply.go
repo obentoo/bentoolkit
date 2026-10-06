@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -30,9 +30,10 @@ enable the systemd service/timer. Idempotent: re-running reconciles the units.`,
 }
 
 func runSnapshotApply(cmd *cobra.Command, _ []string, d *deps) error {
-	cfg, path, err := loadSnapshotConfig()
+	log := logging.FromContext(commandContext(cmd))
+	cfg, path, err := loadSnapshotConfig(log)
 	if err != nil {
-		logger.Error("snapshot apply: %v", err)
+		log.Error("snapshot apply: failed", "err", err)
 		return exitWith(1)
 	}
 
@@ -46,7 +47,7 @@ func runSnapshotApply(cmd *cobra.Command, _ []string, d *deps) error {
 	ctx := commandContext(cmd)
 
 	if err := snapshot.Apply(ctx, cfg, path, d.snapshotRunner); err != nil {
-		logger.Error("snapshot apply: %v", err)
+		log.Error("snapshot apply: failed", "err", err)
 		return exitWith(1)
 	}
 

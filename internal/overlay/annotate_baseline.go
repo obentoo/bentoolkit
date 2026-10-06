@@ -170,7 +170,7 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 	// looked".
 	axes, err := CompareAxes(ourEbuild, baseline.Path)
 	if err != nil {
-		warnLogf("overlay: the structural axes of %s could not be compared (%v); its baseline review carries no findings, and the report is otherwise complete", atom, err)
+		opts.logger().Warn("overlay: the structural axes of a package could not be compared; its baseline review carries no findings, and the report is otherwise complete", "atom", atom, "err", err)
 		return
 	}
 	r.Axes = axes
@@ -186,7 +186,7 @@ func annotateOneBaseline(r *CompareResult, gentooTree string, opts CompareOption
 	// again on every run, forever.
 	declared, err := ParseDivergences(ourEbuild)
 	if err != nil {
-		warnLogf("overlay: %s declares a divergence this reader could not parse (%v); the well-formed declarations beside it are still reported", atom, err)
+		opts.logger().Warn("overlay: a package declares a divergence this reader could not parse; the well-formed declarations beside it are still reported", "atom", atom, "err", err)
 	}
 	if len(declared) > 0 {
 		r.Declarations = EvaluateDeclarations(declared, gentooTree, atom)

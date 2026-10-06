@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -24,31 +24,32 @@ func newPushCmd() *cobra.Command {
 }
 
 func runPush(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
 	if pushDryRun {
 		result, err := overlay.PushDryRun(ctx, appCtx.Config)
 		if err != nil {
-			logger.Error("%v", err)
+			log.Error("push dry-run: failed", "err", err)
 			return exitWith(1)
 		}
-		logger.Info("Dry-run mode - would push:")
-		logger.Info("%s", result)
+		uiInfo("Dry-run mode - would push:")
+		uiInfo(result)
 		return nil
 	}
 
 	result, err := overlay.Push(ctx, appCtx.Config)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("pushing: failed", "err", err)
 		return exitWith(1)
 	}
 
-	logger.Info("%s", result.Message)
+	uiInfo(result.Message)
 	return nil
 }

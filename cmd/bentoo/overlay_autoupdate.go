@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +28,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/github"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
@@ -168,7 +169,13 @@ type autoupdateRun struct {
 	// uiConfig is the configuration the apply path resolves its renderer
 	// against. nil is legal and reads as "nothing configured".
 	uiConfig *config.Config
+	// lg is the invocation's logger (story 062); read it through log().
+	lg *slog.Logger
 }
+
+// log returns the invocation's logger, or a discarding one when the run was
+// built without it (unit tests that construct an autoupdateRun directly).
+func (ar *autoupdateRun) log() *slog.Logger { return logging.OrDiscard(ar.lg) }
 
 // autoupdateDistfileDirs is the answer to "which directories does the Manifest
 // step work in", resolved ONCE in runAutoupdate and read by every mode that can
@@ -384,13 +391,13 @@ Examples:
 // rejected with a warning naming the key, rather than silently creating a
 // download directory somewhere unpredictable. "~" is fine; it is expanded
 // downstream.
-func (o *autoupdateOptions) resolveAutoupdateDistfileDirs(cfg *config.Config, cacheFlagWasSet bool) autoupdateDistfileDirs {
+func (o *autoupdateOptions) resolveAutoupdateDistfileDirs(log *slog.Logger, cfg *config.Config, cacheFlagWasSet bool) autoupdateDistfileDirs {
 	dirs := autoupdateDistfileDirs{Distdir: o.distdir}
 
 	var configuredCache string
 	if cfg != nil {
-		dirs.ConfiguredDistdir = sanitizeConfiguredDir("autoupdate.distdir", cfg.Autoupdate.GetDistdir())
-		configuredCache = sanitizeConfiguredDir("autoupdate.distfiles_cache", cfg.Autoupdate.GetDistfilesCache())
+		dirs.ConfiguredDistdir = sanitizeConfiguredDir(log, "autoupdate.distdir", cfg.Autoupdate.GetDistdir())
+		configuredCache = sanitizeConfiguredDir(log, "autoupdate.distfiles_cache", cfg.Autoupdate.GetDistfilesCache())
 	}
 
 	switch {
@@ -410,14 +417,14 @@ func (o *autoupdateOptions) resolveAutoupdateDistfileDirs(cfg *config.Config, ca
 // ignored and why. Silence would be the wrong outcome twice over: the operator
 // would believe the key took effect, and the run would use a different directory
 // from the one the file names.
-func sanitizeConfiguredDir(key, path string) string {
+func sanitizeConfiguredDir(log *slog.Logger, key, path string) string {
 	if path == "" {
 		return ""
 	}
 	if strings.HasPrefix(path, "~") || filepath.IsAbs(path) {
 		return path
 	}
-	logger.Warn("ignoring %s = %q: a directory in the config file must be an absolute path (or start with ~), because a relative one resolves against whatever directory this process was started in", key, path)
+	log.Warn("ignoring a configured directory: a directory in the config file must be an absolute path (or start with ~), because a relative one resolves against whatever directory this process was started in", "key", key, "path", path)
 	return ""
 }
 
@@ -499,7 +506,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		// failure — so it is intentionally not escalated (R2.4); the manual TTY
 		// gate covers a program that never started cleanly.
 		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
-			logger.Debug("apply: live TUI program exited with error: %v", err)
+			ar.log().Debug("apply: live TUI program exited with error", "err", err)
 		}
 	})
 	return r, extra, finish
@@ -508,7 +515,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 // runAutoupdate is the RunE of `overlay autoupdate`: o holds the flags of the
 // tree that allocated it, and d that tree's dependencies.
 func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *deps) error {
-	ar := &autoupdateRun{opts: o, deps: d}
+	ar := &autoupdateRun{opts: o, deps: d, lg: logging.FromContext(commandContext(cmd))}
 	const (
 		minConcurrency = 1
 		maxConcurrency = 100
@@ -598,7 +605,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// the *cobra.Command are in scope (S030-R1.3). Every mode that regenerates a
 	// Manifest reads the result; a mode that does not (--check, --list, --lint)
 	// simply never looks at it.
-	ar.dirs = o.resolveAutoupdateDistfileDirs(appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
+	ar.dirs = o.resolveAutoupdateDistfileDirs(ar.log(), appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
 
 	// The staged-bump validation policy, resolved here for the same reason and in
 	// the same place as the distfile directories above (S033-R2). A --depth that
@@ -654,7 +661,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// resolved after this.
 	ar.uiConfig = appCtx.Config
 
-	if _, err := resolveAutoupdateUIMode(appCtx.Config, o.noTUI, ar.deps.uiIsTerminal); err != nil {
+	if _, err := resolveAutoupdateUIMode(ar.log(), appCtx.Config, o.noTUI, ar.deps.uiIsTerminal); err != nil {
 		// Debug, not Error, and that is R3.6 rather than indifference. The
 		// refusal is stated once per run, at Warn, by whoever produces a report
 		// — presentCheckReport, through reportModeOrPlain — naming the source,
@@ -662,7 +669,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		// is the duplication 11.1 already paid for once at the root. The line is
 		// kept so a --verbose run can still see where the resolution first
 		// failed, which is several frames earlier than where it is announced.
-		logger.Debug("the ambient UI mode did not resolve before the package work: %v", err)
+		ar.log().Debug("the ambient UI mode did not resolve before the package work", "err", err)
 	}
 
 	// One run per overlay (S056-R4.1): every mode that writes the overlay or
@@ -688,7 +695,7 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 			unregister()
 			lock.Release()
 		}()
-		sweepStaleTemps(overlayPath, configDir)
+		sweepStaleTemps(ar.log(), overlayPath, configDir)
 	}
 
 	// Handle different modes. Each returns its outcome (func exitWith), which
@@ -771,6 +778,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// request per read exactly as before story 024, so a suspicious result can
 		// be compared against an un-deduplicated run (S024-R7.1).
 		autoupdate.WithFetchCache(!ar.opts.noFetchCache),
+		autoupdate.WithLogger(ar.log()),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
@@ -786,8 +794,8 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// extraction. WithLLMProviderConfigured records that a provider WAS requested
 	// (provider != "") so the Checker suppresses its "unused llm_prompt" Warn
 	// (R5.3) and we avoid a double-warn with the failure line just below.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
-		logger.Warn("LLM provider %q unavailable; --check will skip LLM version extraction: %v", llmCfg.Provider, err)
+	if p, err := newConfiguredLLMProvider(ar.log(), llmCfg); err != nil {
+		ar.log().Warn("LLM provider unavailable; --check will skip LLM version extraction", "provider", llmCfg.Provider, "err", err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
 	}
@@ -832,15 +840,15 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			// entry and report it as info so repeated runs stay quiet.
 			if errors.Is(err, autoupdate.ErrNoEbuildFound) {
 				if derr := checker.DisableOrphans([]string{pkg}); derr != nil {
-					logger.Warn("failed to disable orphaned package %s: %v", pkg, derr)
+					ar.log().Warn("failed to disable orphaned package", "package", pkg, "err", derr)
 				}
-				logger.Info("%s has no ebuild in the overlay — disabled in packages.toml", pkg)
+				ar.log().Info("package has no ebuild in the overlay — disabled in packages.toml", "package", pkg)
 				return nil
 			}
 			return failWith(1, fmt.Errorf("failed to check package %s: %w", pkg, err))
 		}
 		if result.Skipped != "" {
-			logger.Info("%s skipped: %s in packages.toml", pkg, result.Skipped)
+			ar.log().Info("package skipped in packages.toml", "package", pkg, "skipped", result.Skipped)
 			return nil
 		}
 		// S045-R1.2: the one package this run scanned, as the same report the
@@ -858,7 +866,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// checkReport answers for an empty plan on a batch run whose plan came
 		// out empty too.
 		const noPlanWasPrinted = false
-		single := checkReport([]autoupdate.CheckResult{*result}, nothingValidated())
+		single := checkReport(ar.log(), []autoupdate.CheckResult{*result}, nothingValidated())
 		ar.presentCheckReport(single, noPlanWasPrinted)
 		return nil
 	}
@@ -895,14 +903,14 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// treated as absent — never box a nil pointer (AD9). When the gate is false
 	// (non-claude provider, no claude CLI, or non-TTY stdin) the output and exit
 	// code below are exactly as before this story (R7.x / R10.1).
-	fixer, ferr := ar.deps.checkRegistryFixer(llmCfg)
+	fixer, ferr := ar.deps.checkRegistryFixer(ar.log(), llmCfg)
 	if ferr != nil {
-		logger.Warn("LLM registry fixer unavailable; --check will not offer registry repair: %v", ferr)
+		ar.log().Warn("LLM registry fixer unavailable; --check will not offer registry repair", "err", ferr)
 		fixer = nil
 	}
 	if fixer != nil && ar.deps.checkInteractive() {
 		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
-			logger.Warn("registry-fix prompt ended with an error: %v", perr)
+			ar.log().Warn("registry-fix prompt ended with an error", "err", perr)
 		}
 	}
 
@@ -936,7 +944,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// is the envelope's fact, established by buildReport above and carried
 	// inside the very value being joined here — so the screen and the export
 	// state it once, from one place (D1).
-	joined := checkReport(result.Items, validated)
+	joined := checkReport(ar.log(), result.Items, validated)
 	ar.presentCheckReport(joined, planPrinted)
 
 	// S021-R3.2/R3.3/R3.4: compare the registry against the overlay and, behind
@@ -991,17 +999,17 @@ func acquireOverlayLock(overlayPath string) (*filelock.Lock, error) {
 // only files whose writer's PID is dead are removed, so no live writer loses
 // its file. A sweep failure is logged and the run proceeds: debris is a
 // nuisance, not a reason to refuse the run.
-func sweepStaleTemps(overlayPath, configDir string) {
+func sweepStaleTemps(log *slog.Logger, overlayPath, configDir string) {
 	for _, target := range []struct {
 		root      string
 		recursive bool
 	}{{overlayPath, true}, {configDir, false}} {
 		removed, err := fileutil.RemoveStaleTemps(target.root, target.recursive)
 		for _, path := range removed {
-			logger.Warn("removed a temporary file left by a killed run: %s", path)
+			log.Warn("removed a temporary file left by a killed run", "path", path)
 		}
 		if err != nil && !errors.Is(err, fs.ErrNotExist) {
-			logger.Warn("sweeping temporary files left by killed runs under %s: %v", target.root, err)
+			log.Warn("sweeping temporary files left by killed runs: failed", "root", target.root, "err", err)
 		}
 	}
 }
@@ -1053,11 +1061,11 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 		// Nothing to reconcile against. The check has already reported whatever
 		// this meant for the packages themselves, so this is a debug note, not a
 		// second error line about the same file.
-		logger.Debug("reconcile: skipped, no usable packages.toml: %v", err)
+		ar.log().Debug("reconcile: skipped, no usable packages.toml", "err", err)
 		return
 	}
 
-	divs := autoupdate.Reconcile(overlayPath, cfg.Packages)
+	divs := autoupdate.Reconcile(ar.log(), overlayPath, cfg.Packages)
 	if len(divs) == 0 {
 		// R3.2 is conditional on divergences existing: with none, print nothing
 		// at all and let the check's own output stand.
@@ -1087,7 +1095,7 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 	if err := ar.deps.registryWriter(overlayPath, pins); err != nil {
 		// Reported, never swallowed — but not fatal: the check itself succeeded
 		// and its exit code says so. The next run proposes the same batch again.
-		logger.Error("reconcile: failed to write %d version pin(s) to packages.toml: %v", len(pins), err)
+		ar.log().Error("reconcile: failed to write version pins to packages.toml", "pins", len(pins), "err", err)
 		output.Error.Fprintf(os.Stderr, "  The registry was NOT updated: %v\n", err)
 		return
 	}
@@ -1253,21 +1261,21 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 // without affecting the check's exit code. checker is the one --check already
 // built, so its loaded packages.toml and token wiring are reused.
 func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *autoupdate.Checker, cfg *config.Config) {
-	prov, err := ar.deps.resolveGentooProvider(ctx, cfg)
+	prov, err := ar.deps.resolveGentooProvider(ctx, ar.log(), cfg)
 	if err != nil {
 		// Interrupted: the --check run reports its own interruption, and a
 		// "skipped" warning here would only repeat it under another name.
 		if errors.Is(err, context.Canceled) {
 			return
 		}
-		logger.Warn("revivable-orphan scan skipped: %v", err)
+		ar.log().Warn("revivable-orphan scan skipped", "err", err)
 		return
 	}
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
 	if ferr != nil {
-		logger.Warn("revivable-orphan scan completed with soft errors: %v", ferr)
+		ar.log().Warn("revivable-orphan scan completed with soft errors", "err", ferr)
 	}
 	displayReviveCandidates(candidates)
 }
@@ -1280,7 +1288,7 @@ func (ar *autoupdateRun) runList(configDir string) error {
 	}
 
 	updates := pending.List()
-	displayPendingUpdates(updates)
+	displayPendingUpdates(ar.log(), updates)
 	return nil
 }
 
@@ -1292,7 +1300,7 @@ func (ar *autoupdateRun) runList(configDir string) error {
 // With --fix it hands over to runLintFix after the report, which repairs what
 // the rules above can repair and then owns the exit code — see there.
 func (ar *autoupdateRun) runLint(overlayPath string) error {
-	issues, err := autoupdate.LintPackagesConfig(overlayPath)
+	issues, err := autoupdate.LintPackagesConfig(ar.log(), overlayPath)
 	// Issues found by the text scan are printed even when the file then fails to
 	// parse — a missing marker is worth reporting alongside the syntax error.
 	for _, issue := range issues {
@@ -1371,9 +1379,9 @@ func displayPendingField(s string) string {
 }
 
 // displayPendingUpdates formats and displays pending updates
-func displayPendingUpdates(updates []autoupdate.PendingUpdate) {
+func displayPendingUpdates(log *slog.Logger, updates []autoupdate.PendingUpdate) {
 	if len(updates) == 0 {
-		logger.Info("No pending updates")
+		log.Info("No pending updates")
 		return
 	}
 
@@ -1421,10 +1429,10 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 // missing or unparseable config is not fatal to --apply (only serial-gated
 // packages need it), so it logs a debug note and returns nil, leaving the
 // normal pkgdev-from-SRC_URI path intact for every package.
-func loadPackagesConfigForApply(overlayPath string) *autoupdate.PackagesConfig {
+func loadPackagesConfigForApply(log *slog.Logger, overlayPath string) *autoupdate.PackagesConfig {
 	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
 	if err != nil {
-		logger.Debug("apply: no usable packages.toml (%v); authenticated fetch disabled", err)
+		log.Debug("apply: no usable packages.toml; authenticated fetch disabled", "err", err)
 		return nil
 	}
 	return cfg
@@ -1440,10 +1448,10 @@ func loadPackagesConfigForApply(overlayPath string) *autoupdate.PackagesConfig {
 // The fixer needs no context of its own here: Apply threads the context it is
 // given into FixManifest, so a SIGINT/SIGTERM already cancels an in-flight agent
 // process.
-func applierFixerOption(llmCfg config.LLMConfig) autoupdate.ApplierOption {
-	fixer, err := newConfiguredManifestFixer(llmCfg)
+func applierFixerOption(log *slog.Logger, llmCfg config.LLMConfig) autoupdate.ApplierOption {
+	fixer, err := newConfiguredManifestFixer(log, llmCfg)
 	if err != nil {
-		logger.Warn("LLM manifest fixer unavailable; --apply will not auto-fix failed manifests: %v", err)
+		log.Warn("LLM manifest fixer unavailable; --apply will not auto-fix failed manifests", "err", err)
 		return autoupdate.WithApplierFixer(nil)
 	}
 	return autoupdate.WithApplierFixer(fixer)
@@ -1510,6 +1518,7 @@ func (ar *autoupdateRun) applierDistfileOptions() []autoupdate.ApplierOption {
 // Only --depth is fatal: it is this invocation's explicit instruction, and
 // running at some other depth than the one that was typed is a different run.
 func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, cmd *cobra.Command) (autoupdateValidatePolicy, error) {
+	log := logging.FromContext(commandContext(cmd))
 	validateCfg := &cfg.Autoupdate.Validate
 
 	policy := autoupdateValidatePolicy{
@@ -1536,14 +1545,14 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		spelled := validateCfg.GetDepthForClass(name)
 		depth, err := validate.ParseDepth(spelled)
 		if err != nil {
-			logger.Warn("autoupdate.validate.depths.%s: %v; that class keeps its shipped default instead", name, err)
+			log.Warn("autoupdate.validate.depths entry is invalid; that class keeps its shipped default instead", "class", name, "err", err)
 			continue
 		}
 		policy.Policy.ByClass[class] = depth
 	}
 
 	for _, err := range validateCfg.OverrideErrors() {
-		logger.Warn("%v", err)
+		log.Warn("autoupdate.validate.packages override is unusable", "err", err)
 	}
 	for pkg, override := range validateCfg.Packages {
 		if strings.TrimSpace(override.Reason) == "" {
@@ -1551,7 +1560,7 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		}
 		depth, err := validate.ParseDepth(override.Depth)
 		if err != nil {
-			logger.Warn("autoupdate.validate.packages.%s: %v; the override is ignored and %s keeps its class depth", pkg, err, pkg)
+			log.Warn("autoupdate.validate.packages override is invalid; the override is ignored and the package keeps its class depth", "package", pkg, "err", err)
 			continue
 		}
 		policy.Policy.Overrides[pkg] = validate.DepthOverride{Depth: depth, Reason: override.Reason}
@@ -1587,6 +1596,7 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.ApplierOption {
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierStagingRoot(filepath.Join(configDir, stagingDirName)),
+		autoupdate.WithApplierLogger(ar.log()),
 		autoupdate.WithApplierValidatePolicy(ar.validate.Policy),
 		autoupdate.WithApplierRequireIsolation(ar.validate.RequireIsolation),
 		autoupdate.WithApplierRequireProof(ar.validate.RequireProof),
@@ -1656,13 +1666,13 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierClean(ar.opts.clean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
-		applierFixerOption(llmCfg),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
+		applierFixerOption(ar.log(), llmCfg),
 	}
 	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, ar.applierDistfileOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
-	opts = append(opts, applierLLMOptions(ar.opts.llm, llmCfg, ar.validateCfg)...)
+	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -1717,7 +1727,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	}
 	updates := pending.List()
 	if len(updates) == 0 {
-		logger.Info("No pending updates to apply")
+		ar.log().Info("No pending updates to apply")
 		return nil
 	}
 
@@ -1735,11 +1745,11 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierClean(ar.opts.clean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
 		// Reuse the pending list already loaded so the applier and this snapshot
 		// share one in-memory source of truth.
 		autoupdate.WithApplierPendingList(pending),
-		applierFixerOption(llmCfg),
+		applierFixerOption(ar.log(), llmCfg),
 	}
 	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, ar.applierDistfileOptions()...)
@@ -1747,7 +1757,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	// One Applier serves the whole batch, so the two agents are constructed ONCE
 	// here — a per-package construction would warn once per package on a host with
 	// no claude CLI, and pay the PATH lookup as many times.
-	opts = append(opts, applierLLMOptions(ar.opts.llm, llmCfg, ar.validateCfg)...)
+	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 
 	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
@@ -2012,6 +2022,7 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 		// apply path build their options through this helper — so the flag cannot
 		// be honoured on --check and silently ignored on a revive.
 		autoupdate.WithFetchCache(!ar.opts.noFetchCache),
+		autoupdate.WithLogger(ar.log()),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
@@ -2022,8 +2033,8 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 	// err==nil AND p!=nil. On failure Warn and continue (revive still runs,
 	// skipping LLM extraction). WithLLMProviderConfigured suppresses the Checker's
 	// "unused llm_prompt" Warn when a provider was requested.
-	if p, err := newConfiguredLLMProvider(llmCfg); err != nil {
-		logger.Warn("LLM provider %q unavailable; revive will skip LLM version extraction: %v", llmCfg.Provider, err)
+	if p, err := newConfiguredLLMProvider(ar.log(), llmCfg); err != nil {
+		ar.log().Warn("LLM provider unavailable; revive will skip LLM version extraction", "provider", llmCfg.Provider, "err", err)
 	} else if p != nil {
 		opts = append(opts, autoupdate.WithLLMClient(p))
 	}
@@ -2041,8 +2052,8 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 // owns prov.Close() and decides whether a resolution error is fatal
 // (runRevive/runReviveList exit non-zero; the --revivable add-on to --check only
 // warns and skips the report).
-func resolveGentooProvider(ctx context.Context, cfg *config.Config) (provider.Provider, error) {
-	configRepos := convertConfigRepos(cfg)
+func resolveGentooProvider(ctx context.Context, log *slog.Logger, cfg *config.Config) (provider.Provider, error) {
+	configRepos := convertConfigRepos(log, cfg)
 
 	registry, err := provider.NewRepositoryRegistry()
 	if err != nil {
@@ -2065,7 +2076,7 @@ func resolveGentooProvider(ctx context.Context, cfg *config.Config) (provider.Pr
 	// (BENTOO_REPO_<NAME>_TOKEN, resolved by convertConfigRepos) still wins.
 	token, err := github.ResolveToken()
 	if err != nil {
-		logger.Warn("resolving GitHub token: %v; continuing with unauthenticated GitHub API access", err)
+		log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
 	}
 	if token != "" && repoInfo.Token == "" {
 		repoInfo.Token = token
@@ -2091,7 +2102,7 @@ func (ar *autoupdateRun) runReviveList(ctx context.Context, overlayPath, configD
 		return failWith(1, fmt.Errorf("failed to initialize checker: %w", err))
 	}
 
-	prov, err := ar.deps.resolveGentooProvider(ctx, cfg)
+	prov, err := ar.deps.resolveGentooProvider(ctx, ar.log(), cfg)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -2101,7 +2112,7 @@ func (ar *autoupdateRun) runReviveList(ctx context.Context, overlayPath, configD
 	// alongside the candidates, so a partial scan still reports what it found.
 	candidates, err := checker.FindRevivableOrphans(ctx, prov)
 	if err != nil {
-		logger.Warn("revive scan completed with soft errors: %v", err)
+		ar.log().Warn("revive scan completed with soft errors", "err", err)
 	}
 
 	displayReviveCandidates(candidates)
@@ -2139,7 +2150,7 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 func (ar *autoupdateRun) reviveApplierOptions(overlayPath, configDir string, pending *autoupdate.PendingList) []autoupdate.ApplierOption {
 	reviveOpts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierClean(ar.opts.clean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(overlayPath)),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
 		autoupdate.WithApplierPendingList(pending),
 	}
 	reviveOpts = append(reviveOpts, ar.applierDistfileOptions()...)
@@ -2164,7 +2175,7 @@ func (ar *autoupdateRun) reviveApplierOptions(overlayPath, configDir string, pen
 // independent: a failure on one never aborts the others; outcomes are accumulated
 // and the process exits non-zero when any package failed.
 func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, target string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
-	prov, err := ar.deps.resolveGentooProvider(ctx, cfg)
+	prov, err := ar.deps.resolveGentooProvider(ctx, ar.log(), cfg)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -2176,13 +2187,10 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 	// compare`'s local-repo guidance). Kept ahead of `--revive all`'s orphan scan
 	// so its "Nothing to revive" exit 0 can never mask the hint and exit 1.
 	if err := autoupdate.CanRevive(prov); err != nil {
-		logger.Error("the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.")
-		logger.Info("Configure a local gentoo repository in ~/.config/bentoo/config.yaml:")
-		logger.Info("  repositories:")
-		logger.Info("    gentoo:")
-		logger.Info("      provider: local")
-		logger.Info("      path: /var/db/repos/gentoo")
-		logger.Info("(or force a clone-backed provider so the package tree is available on disk)")
+		// One record: a multi-line YAML snippet split over several records
+		// would reach stderr quoted line by line and could not be pasted.
+		ar.log().Error("the resolved gentoo provider has no local package directory; revive needs an on-disk ::gentoo tree.",
+			"hint", reviveLocalTreeHint)
 		return exitWith(1)
 	}
 
@@ -2199,7 +2207,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 	if target == "all" {
 		candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
 		if ferr != nil {
-			logger.Warn("revive scan completed with soft errors: %v", ferr)
+			ar.log().Warn("revive scan completed with soft errors", "err", ferr)
 		}
 		if len(candidates) == 0 {
 			output.Success.Println("Nothing to revive — no orphaned package has an upstream newer than ::gentoo")
@@ -2297,3 +2305,9 @@ func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 
 	return failed
 }
+
+// reviveLocalTreeHint tells the operator how to give revive an on-disk
+// ::gentoo tree.
+const reviveLocalTreeHint = "configure a local gentoo repository in ~/.config/bentoo/config.yaml " +
+	"(repositories.gentoo.provider: local, repositories.gentoo.path: /var/db/repos/gentoo), " +
+	"or force a clone-backed provider so the package tree is available on disk"

@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -952,7 +954,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 			// Test substitution
 			template := "Bearer ${" + varName + "}"
-			result := SubstituteEnvVars(template, "Authorization")
+			result := SubstituteEnvVars(nil, template, "Authorization")
 			expected := "Bearer " + varValue
 
 			if result != expected {
@@ -990,7 +992,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 			// Test substitution with multiple variables
 			template := "${" + var1Name + "}-${" + var2Name + "}"
-			result := SubstituteEnvVars(template, "Authorization")
+			result := SubstituteEnvVars(nil, template, "Authorization")
 			expected := var1Value + "-" + var2Value
 
 			if result != expected {
@@ -1024,7 +1026,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 
 			// Test substitution: unset allow-listed var -> literal passthrough.
 			template := "prefix-${" + varName + "}-suffix"
-			result := SubstituteEnvVars(template, "Authorization")
+			result := SubstituteEnvVars(nil, template, "Authorization")
 			expected := "prefix-${" + varName + "}-suffix"
 
 			if result != expected {
@@ -1045,7 +1047,7 @@ func TestHeaderTemplateSubstitution(t *testing.T) {
 				return true
 			}
 
-			result := SubstituteEnvVars(text, "Authorization")
+			result := SubstituteEnvVars(nil, text, "Authorization")
 			if result != text {
 				t.Logf("Expected unchanged text %s, got %s", text, result)
 				return false
@@ -1377,17 +1379,56 @@ func newBreakerWithTimeout(timeout time.Duration) *gobreaker.CircuitBreaker {
 // Header Env-Var Expansion Allow-List Tests (Task T5 / R1)
 // =============================================================================
 
-// logCapture records Warn-level lines emitted via the package-private warnLogf
-// sink. It is safe for concurrent use by the -race detector.
+// logCapture records the lines one level of a component's logger receives,
+// each rendered as the message followed by " key=value" per attribute. It is a
+// slog.Handler, so a test injects lc.logger() into the component under test. It
+// is safe for concurrent use by the -race detector.
 type logCapture struct {
 	mu    sync.Mutex
+	level slog.Level
 	lines []string
 }
 
-func (lc *logCapture) record(format string, args ...interface{}) {
-	lc.mu.Lock()
-	defer lc.mu.Unlock()
-	lc.lines = append(lc.lines, fmt.Sprintf(format, args...))
+// captureHandler is the slog.Handler view of a logCapture, carrying the
+// attributes a With call added.
+type captureHandler struct {
+	lc    *logCapture
+	attrs []slog.Attr
+}
+
+func (h captureHandler) Enabled(_ context.Context, l slog.Level) bool { return l == h.lc.level }
+
+func (h captureHandler) Handle(_ context.Context, r slog.Record) error {
+	var b strings.Builder
+	b.WriteString(r.Message)
+	write := func(a slog.Attr) bool {
+		// Strings are quoted, as the pre-slog lines quoted the values they named.
+		if v := a.Value.Resolve(); v.Kind() == slog.KindString {
+			fmt.Fprintf(&b, " %s=%q", a.Key, v.String())
+		} else {
+			fmt.Fprintf(&b, " %s=%s", a.Key, v.String())
+		}
+		return true
+	}
+	for _, a := range h.attrs {
+		write(a)
+	}
+	r.Attrs(write)
+	h.lc.mu.Lock()
+	defer h.lc.mu.Unlock()
+	h.lc.lines = append(h.lc.lines, b.String())
+	return nil
+}
+
+func (h captureHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return captureHandler{lc: h.lc, attrs: append(slices.Clone(h.attrs), attrs...)}
+}
+
+func (h captureHandler) WithGroup(string) slog.Handler { return h }
+
+// logger returns a logger whose records at the capture's level land in lc.
+func (lc *logCapture) logger() *slog.Logger {
+	return slog.New(captureHandler{lc: lc})
 }
 
 func (lc *logCapture) count() int {
@@ -1404,15 +1445,11 @@ func (lc *logCapture) all() []string {
 	return out
 }
 
-// captureWarnLogs swaps the package-private warnLogf sink with a recorder for
-// the duration of the test and restores it on cleanup.
+// captureWarnLogs returns a capture of Warn-level records; the test injects
+// lc.logger() into the component it exercises.
 func captureWarnLogs(t *testing.T) *logCapture {
 	t.Helper()
-	lc := &logCapture{}
-	orig := warnLogf
-	warnLogf = lc.record
-	t.Cleanup(func() { warnLogf = orig })
-	return lc
+	return &logCapture{level: slog.LevelWarn}
 }
 
 // TestAllowedExpansionHeaders_HasExpectedSet enumerates the header allow-list.
@@ -1533,7 +1570,7 @@ func TestSubstituteEnvVars_NoRecursiveExpansion(t *testing.T) {
 	// EVIL is set to a secret-like value; it must never be reached.
 	t.Setenv("EVIL", "super-secret-leaked")
 
-	result := SubstituteEnvVars("${BENTOO_TOKEN}", "Authorization")
+	result := SubstituteEnvVars(nil, "${BENTOO_TOKEN}", "Authorization")
 
 	if result != "${EVIL}" {
 		t.Errorf("expected literal %q (single-pass), got %q", "${EVIL}", result)
@@ -1550,7 +1587,7 @@ func TestSubstituteEnvVars_DeniedHeaderWarn(t *testing.T) {
 	lc := captureWarnLogs(t)
 	t.Setenv("BENTOO_TOKEN", "value")
 
-	result := SubstituteEnvVars("${BENTOO_TOKEN}", "X-Custom-Header")
+	result := SubstituteEnvVars(lc.logger(), "${BENTOO_TOKEN}", "X-Custom-Header")
 
 	if result != "${BENTOO_TOKEN}" {
 		t.Errorf("expected literal passthrough %q, got %q", "${BENTOO_TOKEN}", result)
@@ -1573,7 +1610,7 @@ func TestSubstituteEnvVars_DeniedEnvVarWarn(t *testing.T) {
 
 	// Neither EVIL_VAR nor (since S052-R3.1) ANTHROPIC_API_KEY is allow-listed;
 	// the set secret proves the denial path never reads the environment.
-	result := SubstituteEnvVars("${EVIL_VAR}", "Authorization")
+	result := SubstituteEnvVars(lc.logger(), "${EVIL_VAR}", "Authorization")
 
 	if result != "${EVIL_VAR}" {
 		t.Errorf("expected literal passthrough %q, got %q", "${EVIL_VAR}", result)
@@ -1595,7 +1632,7 @@ func TestSubstituteEnvVars_EmptyVarWarn(t *testing.T) {
 	// Allow-listed variable, set to the empty string.
 	t.Setenv("BENTOO_TOKEN", "")
 
-	result := SubstituteEnvVars("${BENTOO_TOKEN}", "Authorization")
+	result := SubstituteEnvVars(lc.logger(), "${BENTOO_TOKEN}", "Authorization")
 
 	if result != "${BENTOO_TOKEN}" {
 		t.Errorf("expected literal passthrough %q, got %q", "${BENTOO_TOKEN}", result)
@@ -1615,7 +1652,7 @@ func TestSubstituteEnvVars_AllowedNoWarn(t *testing.T) {
 	lc := captureWarnLogs(t)
 	t.Setenv("BENTOO_TOKEN", "resolved-value")
 
-	result := SubstituteEnvVars("Bearer ${BENTOO_TOKEN}", "Authorization")
+	result := SubstituteEnvVars(lc.logger(), "Bearer ${BENTOO_TOKEN}", "Authorization")
 
 	if result != "Bearer resolved-value" {
 		t.Errorf("expected %q, got %q", "Bearer resolved-value", result)
@@ -1636,6 +1673,7 @@ func TestApplyHeaders_RejectsCRLFHeader(t *testing.T) {
 	}
 
 	client := NewRetryableHTTPClient()
+	client.SetLogger(lc.logger())
 	if err := client.applyHeaders(req, "https://example.com/", map[string]string{
 		"X-Evil\r\nInjected": "value",
 	}, credentialScope{}); err != nil {
@@ -1677,7 +1715,7 @@ func FuzzSubstituteEnvVars(f *testing.F) {
 
 	f.Fuzz(func(t *testing.T, value, headerName string) {
 		// Must never panic on arbitrary input.
-		result := SubstituteEnvVars(value, headerName)
+		result := SubstituteEnvVars(nil, value, headerName)
 
 		// If the header is not allow-listed, the value must be returned
 		// verbatim (no expansion can happen at all).

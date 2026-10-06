@@ -150,14 +150,14 @@ func TestNewConfiguredLLMProvider(t *testing.T) {
 				t.Setenv(claudeKeyEnv, "")
 			}
 
-			p, err := newConfiguredLLMProvider(tt.cfg)
+			p, err := newConfiguredLLMProvider(discardLog(), tt.cfg)
 
 			if tt.wantErr {
 				if err == nil {
-					t.Fatalf("newConfiguredLLMProvider(%+v): want error, got nil", tt.cfg)
+					t.Fatalf("newConfiguredLLMProvider(discardLog(), %+v): want error, got nil", tt.cfg)
 				}
 				if tt.wantErrIs != nil && !errors.Is(err, tt.wantErrIs) {
-					t.Errorf("newConfiguredLLMProvider(%+v): error %v does not wrap %v", tt.cfg, err, tt.wantErrIs)
+					t.Errorf("newConfiguredLLMProvider(discardLog(), %+v): error %v does not wrap %v", tt.cfg, err, tt.wantErrIs)
 				}
 				// NOTE: on the error path we deliberately do NOT assert anything
 				// about p. autoupdate.NewLLMProvider routes "claude" through
@@ -172,12 +172,12 @@ func TestNewConfiguredLLMProvider(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("newConfiguredLLMProvider(%+v): want no error, got %v", tt.cfg, err)
+				t.Fatalf("newConfiguredLLMProvider(discardLog(), %+v): want no error, got %v", tt.cfg, err)
 			}
 			// Success path. For the empty-provider short-circuit the provider must
 			// be exactly nil (the caller proceeds without an LLM).
 			if tt.wantNilProv && p != nil {
-				t.Errorf("newConfiguredLLMProvider(%+v): want nil provider, got %T", tt.cfg, p)
+				t.Errorf("newConfiguredLLMProvider(discardLog(), %+v): want nil provider, got %T", tt.cfg, p)
 			}
 		})
 	}
@@ -206,18 +206,18 @@ func isTrueNil(v any) bool {
 func TestNewConfiguredBuildFixer_NonAgenticProviderYieldsATrueNil(t *testing.T) {
 	for _, provider := range []string{"", "claude", "openai", "ollama", "bogus"} {
 		t.Run("provider="+provider, func(t *testing.T) {
-			got, err := newConfiguredBuildFixer(config.LLMConfig{Provider: provider})
+			got, err := newConfiguredBuildFixer(discardLog(), config.LLMConfig{Provider: provider})
 
 			if err != nil {
-				t.Fatalf("newConfiguredBuildFixer(%q): unexpected error %v — a provider that simply cannot fix builds is not an error",
+				t.Fatalf("newConfiguredBuildFixer(discardLog(), %q): unexpected error %v — a provider that simply cannot fix builds is not an error",
 					provider, err)
 			}
 			if got != nil && !isTrueNil(got) {
-				t.Fatalf("newConfiguredBuildFixer(%q) returned a non-nil %T; a real capability was wired for a provider that has none",
+				t.Fatalf("newConfiguredBuildFixer(discardLog(), %q) returned a non-nil %T; a real capability was wired for a provider that has none",
 					provider, got)
 			}
 			if !isTrueNil(got) {
-				t.Errorf("newConfiguredBuildFixer(%q) returned a BOXED nil (%T); the caller's `fixer != nil` gate is then true "+
+				t.Errorf("newConfiguredBuildFixer(discardLog(), %q) returned a BOXED nil (%T); the caller's `fixer != nil` gate is then true "+
 					"and the build fixer is silently enabled (llm_wiring.go:66-68)", provider, got)
 			}
 		})
@@ -230,13 +230,13 @@ func TestNewConfiguredBuildFixer_NonAgenticProviderYieldsATrueNil(t *testing.T) 
 func TestNewConfiguredBumpReviewer_NonAgenticProviderYieldsATrueNil(t *testing.T) {
 	for _, provider := range []string{"", "claude", "openai", "ollama", "bogus"} {
 		t.Run("provider="+provider, func(t *testing.T) {
-			got, err := newConfiguredBumpReviewer(config.LLMConfig{Provider: provider})
+			got, err := newConfiguredBumpReviewer(discardLog(), config.LLMConfig{Provider: provider})
 
 			if err != nil {
-				t.Fatalf("newConfiguredBumpReviewer(%q): unexpected error %v", provider, err)
+				t.Fatalf("newConfiguredBumpReviewer(discardLog(), %q): unexpected error %v", provider, err)
 			}
 			if !isTrueNil(got) {
-				t.Errorf("newConfiguredBumpReviewer(%q) returned %T rather than a true nil; a boxed nil silently enables the reviewer",
+				t.Errorf("newConfiguredBumpReviewer(discardLog(), %q) returned %T rather than a true nil; a boxed nil silently enables the reviewer",
 					provider, got)
 			}
 		})
@@ -336,8 +336,8 @@ func TestConfiguredCapabilities_ConstructionFailureIsAWarningNotAnAbort(t *testi
 	// the property that must hold either way.
 	cfg := config.LLMConfig{Provider: "claude-code"}
 
-	fixer, fixErr := newConfiguredBuildFixer(cfg)
-	reviewer, revErr := newConfiguredBumpReviewer(cfg)
+	fixer, fixErr := newConfiguredBuildFixer(discardLog(), cfg)
+	reviewer, revErr := newConfiguredBumpReviewer(discardLog(), cfg)
 
 	if fixErr != nil && !isTrueNil(fixer) {
 		t.Errorf("newConfiguredBuildFixer returned %T alongside its error %v; a failed construction must not hand back a usable-looking capability",
@@ -374,7 +374,7 @@ func TestConfiguredCapabilities_NilIsStrictlyNilAtTheApplierGate(t *testing.T) {
 		// construction is attempted.
 		cfg := config.LLMConfig{Provider: "openai"}
 
-		fixer, err := newConfiguredBuildFixer(cfg)
+		fixer, err := newConfiguredBuildFixer(discardLog(), cfg)
 		if err != nil {
 			t.Fatalf("newConfiguredBuildFixer: %v", err)
 		}
@@ -383,7 +383,7 @@ func TestConfiguredCapabilities_NilIsStrictlyNilAtTheApplierGate(t *testing.T) {
 				"WithApplierBuildFixer gates on `!= nil` and would wire it", fixer)
 		}
 
-		reviewer, err := newConfiguredBumpReviewer(cfg)
+		reviewer, err := newConfiguredBumpReviewer(discardLog(), cfg)
 		if err != nil {
 			t.Fatalf("newConfiguredBumpReviewer: %v", err)
 		}
@@ -398,11 +398,11 @@ func TestConfiguredCapabilities_NilIsStrictlyNilAtTheApplierGate(t *testing.T) {
 		// either way, which is the whole point.
 		cfg := config.LLMConfig{Provider: "claude-code"}
 
-		if fixer, err := newConfiguredBuildFixer(cfg); err != nil && fixer != nil {
+		if fixer, err := newConfiguredBuildFixer(discardLog(), cfg); err != nil && fixer != nil {
 			t.Errorf("newConfiguredBuildFixer returned a non-nil interface (%T) alongside its error %v; "+
 				"the applier would wire a capability whose construction failed", fixer, err)
 		}
-		if reviewer, err := newConfiguredBumpReviewer(cfg); err != nil && reviewer != nil {
+		if reviewer, err := newConfiguredBumpReviewer(discardLog(), cfg); err != nil && reviewer != nil {
 			t.Errorf("newConfiguredBumpReviewer returned a non-nil interface (%T) alongside its error %v", reviewer, err)
 		}
 	})

@@ -237,7 +237,7 @@ comments = "x — npm dist-tags.latest."
 func TestLintPackagesConfig(t *testing.T) {
 	t.Run("clean registry", func(t *testing.T) {
 		dir := writeRegistry(t, cleanRecord)
-		issues, err := LintPackagesConfig(dir)
+		issues, err := LintPackagesConfig(nil, dir)
 		if err != nil {
 			t.Fatalf("lint failed: %v", err)
 		}
@@ -256,7 +256,7 @@ suffix_when = '^1\.'
 comments = "x — doc."
 # END
 `)
-		issues, err := LintPackagesConfig(dir)
+		issues, err := LintPackagesConfig(nil, dir)
 		if err != nil {
 			t.Fatalf("lint failed: %v", err)
 		}
@@ -266,7 +266,7 @@ comments = "x — doc."
 	})
 
 	t.Run("missing registry", func(t *testing.T) {
-		if _, err := LintPackagesConfig(t.TempDir()); !errors.Is(err, ErrPackagesConfigNotFound) {
+		if _, err := LintPackagesConfig(nil, t.TempDir()); !errors.Is(err, ErrPackagesConfigNotFound) {
 			t.Fatalf("got %v, want ErrPackagesConfigNotFound", err)
 		}
 	})
@@ -280,7 +280,7 @@ serie = '^1\.'
 comments = "x — doc."
 # END
 `)
-		issues, err := LintPackagesConfig(dir)
+		issues, err := LintPackagesConfig(nil, dir)
 		// The error stays: the config could not be built, so the semantic checks
 		// below it never ran and the caller must not read a short list as clean.
 		if err == nil {
@@ -314,7 +314,7 @@ binary = true
 comments = "postman-bin — doc."
 # END
 `)
-		issues, err := LintPackagesConfig(dir)
+		issues, err := LintPackagesConfig(nil, dir)
 		if err != nil {
 			t.Fatalf("a retired key broke the lint: %v", err)
 		}
@@ -328,7 +328,7 @@ comments = "postman-bin — doc."
 url = "https://example.com
 comments = "x — doc."
 `)
-		issues, err := LintPackagesConfig(dir)
+		issues, err := LintPackagesConfig(nil, dir)
 		if err == nil {
 			t.Fatal("broken TOML accepted")
 		}

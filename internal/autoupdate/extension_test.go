@@ -212,10 +212,10 @@ func TestScriptParser_ParseLive_PropagatesError(t *testing.T) {
 // --- ValidatePackageConfig: new fields --------------------------------------
 
 func TestValidatePackageConfig_Script(t *testing.T) {
-	if err := ValidatePackageConfig("a/b", &PackageConfig{URL: "u", Parser: "script"}); !errors.Is(err, ErrMissingScript) {
+	if err := ValidatePackageConfig(nil, "a/b", &PackageConfig{URL: "u", Parser: "script"}); !errors.Is(err, ErrMissingScript) {
 		t.Fatalf("missing script: want ErrMissingScript, got %v", err)
 	}
-	if err := ValidatePackageConfig("a/b", &PackageConfig{URL: "u", Parser: "script", Script: "@lo.js"}); err != nil {
+	if err := ValidatePackageConfig(nil, "a/b", &PackageConfig{URL: "u", Parser: "script", Script: "@lo.js"}); err != nil {
 		t.Fatalf("valid script config: unexpected error %v", err)
 	}
 }
@@ -225,11 +225,11 @@ func TestValidatePackageConfig_Select(t *testing.T) {
 		return &PackageConfig{URL: "u", Parser: "regex", Pattern: `(\d+)`, Select: sel}
 	}
 	for _, ok := range []string{"", "first", "max", "last"} {
-		if err := ValidatePackageConfig("a/b", base(ok)); err != nil {
+		if err := ValidatePackageConfig(nil, "a/b", base(ok)); err != nil {
 			t.Fatalf("select=%q should be valid, got %v", ok, err)
 		}
 	}
-	if err := ValidatePackageConfig("a/b", base("highest")); !errors.Is(err, ErrInvalidSelect) {
+	if err := ValidatePackageConfig(nil, "a/b", base("highest")); !errors.Is(err, ErrInvalidSelect) {
 		t.Fatalf("select=highest: want ErrInvalidSelect, got %v", err)
 	}
 }
@@ -240,7 +240,7 @@ func TestValidatePackageConfig_ScriptIgnoresTransformSelectWithWarn(t *testing.T
 		URL: "u", Parser: "script", Script: "@lo.js",
 		Transform: [][]string{{"-", "."}}, Select: "max",
 	}
-	if err := ValidatePackageConfig("a/b", cfg); err != nil {
+	if err := ValidatePackageConfig(lc.logger(), "a/b", cfg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(lc.all()) < 2 {

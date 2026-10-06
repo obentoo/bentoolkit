@@ -4,6 +4,7 @@ package autoupdate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // Error variables for configuration errors
@@ -1304,7 +1306,8 @@ func commentsBodyMask(lines []string) []bool {
 
 // ValidatePackageConfig validates a single package configuration.
 // It checks for required fields and valid parser types.
-func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
+func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) error {
+	log = logging.OrDiscard(log)
 	// Check required fields
 	if cfg.URL == "" {
 		return fmt.Errorf("package %s: %w", pkg, ErrMissingURL)
@@ -1395,11 +1398,11 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	// so we warn here rather than fail — a bad rule must not block the whole run.
 	for i, r := range cfg.Transform {
 		if len(r) != 2 {
-			warnLogf("package %s: transform rule #%d has %d elements, want 2 ([regex, repl]); it will be ignored", pkg, i, len(r))
+			log.Warn("package transform rule has the wrong number of elements, want 2 ([regex, repl]); it will be ignored", "package", pkg, "rule", i, "elements", len(r))
 			continue
 		}
 		if _, err := regexp.Compile(r[0]); err != nil {
-			warnLogf("package %s: transform rule #%d has bad regex %q (%v); it will be ignored", pkg, i, r[0], err)
+			log.Warn("package transform rule has bad regex; it will be ignored", "package", pkg, "rule", i, "regex", r[0], "err", err)
 		}
 	}
 
@@ -1436,7 +1439,7 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		if !ebuild.IsValidVersion(cfg.Version) {
 			return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidVersion, cfg.Version)
 		}
-		if cfg.Series != "" && !newSeriesMatcher(cfg.Series).matches(cfg.Version) {
+		if cfg.Series != "" && !newSeriesMatcher(log, cfg.Series).matches(cfg.Version) {
 			return fmt.Errorf("package %s: %w: got %q (series %q)", pkg, ErrVersionOutsideSeries, cfg.Version, cfg.Series)
 		}
 	}
@@ -1453,10 +1456,10 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	// config author is not misled into thinking they take effect.
 	if cfg.Parser == "script" {
 		if len(cfg.Transform) > 0 {
-			warnLogf("package %s: transform is ignored for parser=\"script\" (the script must normalize the version itself)", pkg)
+			log.Warn("package transform is ignored for parser=\"script\" (the script must normalize the version itself)", "package", pkg)
 		}
 		if cfg.Select != "" && cfg.Select != "first" {
-			warnLogf("package %s: select=%q is ignored for parser=\"script\" (the script must select the version itself)", pkg, cfg.Select)
+			log.Warn("package select is ignored for parser=\"script\" (the script must select the version itself)", "package", pkg, "select", cfg.Select)
 		}
 	}
 
@@ -1486,7 +1489,7 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 	}
 	if cfg.CommitVersionPattern != "" {
 		if cfg.Track != "commit" {
-			warnLogf("package %s: commit_version_pattern is set but track!=\"commit\"; it will be ignored", pkg)
+			log.Warn("package commit_version_pattern is set but track!=\"commit\"; it will be ignored", "package", pkg)
 		} else if cfg.CommitMessagePath == "" {
 			return fmt.Errorf("package %s: commit_version_pattern requires commit_message_path", pkg)
 		} else if _, err := regexp.Compile(cfg.CommitVersionPattern); err != nil {
@@ -1494,7 +1497,7 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 		}
 	}
 	if cfg.CommitMessagePath != "" && cfg.Track != "commit" {
-		warnLogf("package %s: commit_message_path is set but track!=\"commit\"; it will be ignored", pkg)
+		log.Warn("package commit_message_path is set but track!=\"commit\"; it will be ignored", "package", pkg)
 	}
 
 	// Validate the declared base-version source. Every failure here is fatal
@@ -1643,10 +1646,10 @@ func ValidatePackageConfig(pkg string, cfg *PackageConfig) error {
 
 // ValidateAll validates all package configurations in the PackagesConfig.
 // Returns the first validation error encountered, or nil if all are valid.
-func (c *PackagesConfig) ValidateAll() error {
+func (c *PackagesConfig) ValidateAll(log *slog.Logger) error {
 	for _, pkg := range sortedKeys(c.Packages) {
 		cfgCopy := c.Packages[pkg] // Create a copy to get a pointer
-		if err := ValidatePackageConfig(pkg, &cfgCopy); err != nil {
+		if err := ValidatePackageConfig(log, pkg, &cfgCopy); err != nil {
 			return err
 		}
 	}

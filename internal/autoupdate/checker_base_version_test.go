@@ -171,7 +171,7 @@ func TestBaseFromNone_ValidatesAlone(t *testing.T) {
 	cfg.CommitMessagePath = ""
 	cfg.URL = "https://example.invalid/commits"
 
-	if err := ValidatePackageConfig("sci-ml/ik_llama-cpp", &cfg); err != nil {
+	if err := ValidatePackageConfig(nil, "sci-ml/ik_llama-cpp", &cfg); err != nil {
 		t.Errorf("a bare base_from=\"none\" must validate, got: %v", err)
 	}
 }
@@ -555,7 +555,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := base()
 			tt.mutate(&cfg)
-			err := ValidatePackageConfig("cat/pkg", &cfg)
+			err := ValidatePackageConfig(nil, "cat/pkg", &cfg)
 			if err == nil {
 				t.Fatalf("expected an error containing %q, got nil", tt.wantErr)
 			}
@@ -606,7 +606,7 @@ func TestValidateBaseFrom_ValidConfigs(t *testing.T) {
 	for _, tt := range valid {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := tt.cfg()
-			if err := ValidatePackageConfig("cat/pkg", &cfg); err != nil {
+			if err := ValidatePackageConfig(nil, "cat/pkg", &cfg); err != nil {
 				t.Errorf("ValidatePackageConfig: unexpected error %v", err)
 			}
 		})

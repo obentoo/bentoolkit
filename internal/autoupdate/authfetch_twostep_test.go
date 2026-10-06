@@ -474,7 +474,7 @@ func TestREADMEExampleIsAConfigThisParserAccepts(t *testing.T) {
 		t.Fatalf("the README example does not load: %v", err)
 	}
 	pkg := cfg.Packages["app-misc/example"]
-	if err := ValidatePackageConfig("app-misc/example", &pkg); err != nil {
+	if err := ValidatePackageConfig(nil, "app-misc/example", &pkg); err != nil {
 		t.Fatalf("the README example does not pass --lint's validation: %v", err)
 	}
 

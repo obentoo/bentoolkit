@@ -4,8 +4,6 @@ import (
 	"context"
 	"sync"
 	"sync/atomic"
-
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // ApplyAll applies every pending update through the shared Applier and
@@ -49,7 +47,8 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 	pins := func(pkg, atom string) string {
 		pin, ok := a.RequirePin(pkg, atom)
 		if !ok {
-			logger.Warn("%s no longer requires %s in packages.toml; not ordering it after that package", pkg, atom)
+			a.logger().Warn("package no longer requires the atom in packages.toml; not ordering it after that package",
+				"package", pkg, "atom", atom)
 		}
 		return pin
 	}

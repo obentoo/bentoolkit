@@ -61,39 +61,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 )
 
-// init pins the default logger to the real stderr before any test has moved it.
-//
-// # Without it these tests read an empty stream and would stay red after the fix
-//
-// logger.Default builds its logger once, under a sync.Once, and keeps whatever
-// os.Stderr WAS at that moment. captureStream does two things per run: it
-// redirects file descriptor 2 into a pipe, and it swaps the os.Stderr variable
-// to that pipe's writer. Both are undone when the run ends, and the pipe is
-// closed.
-//
-// So the once firing inside a captured run is a trap: the logger keeps that
-// run's writer, whose descriptor is closed moments later, and every subsequent
-// run's logger output is written to a closed pipe and dropped without an error
-// anyone sees. Measured before this line existed — two identical runs in one
-// test, the second one silent:
-//
-//	run1 stderr="Regenerating Manifest for 2 package(s)\n"
-//	run2 stderr=""
-//
-// Firing it here leaves the logger holding descriptor 2, which captureStream
-// redirects per run — the arrangement testcli_test.go's own comment describes,
-// and the only one under which logger output is observable from more than the
-// first captured run in the binary.
-//
-// It is init() and not a line in each test on purpose: the once is process-wide,
-// so a test that pins it after some other file's captured run has already fired
-// it is pinning nothing. Package initialisation is the only point that is
-// guaranteed to come first.
-func init() { logger.Default() }
+// No logger pin is needed here any more. Until story 062 the package logger
+// kept whatever os.Stderr was when its sync.Once first fired, so a run captured
+// after that wrote into a closed pipe and this file pinned it from init(). The
+// invocation's slog logger is built by the root on every run and reads
+// os.Stderr at that moment (invocation_logger.go), so captureStream's
+// per-run redirect is the stream it writes to.
 
 // fallbackMarkers are the ways a sentence can say "and so I used this one
 // instead". The set is generous on wording and strict on substance: naming the
@@ -164,9 +140,11 @@ func TestAmbientModeRefusalKeepsTheRunAndStatesItself(t *testing.T) {
 	controlOut, controlErr, controlCode := manifestUnderAmbientMode(t, "")
 
 	// The harness must be able to SEE a logger write before the absence of one
-	// means anything. logger.Info goes to the same stream by the same route as
-	// the logger.Warn this test is waiting for, so if this line is missing the
-	// failure below would be the capture and not the code.
+	// means anything. The bare "Regenerating Manifest for 2 package(s)" line
+	// (ui_notes.go) goes to the same stream as the Warn record this test is
+	// waiting for — the os.Stderr of the moment, which captureStream swaps per
+	// run — so if this line is missing the failure below would be the capture
+	// and not the code.
 	if !strings.Contains(controlErr, "Regenerating Manifest") {
 		t.Fatalf("the harness captured no logger output at all on the control run — a missing sentence here would prove nothing about the code.\n    stderr: %q", controlErr)
 	}
@@ -185,8 +163,8 @@ func TestAmbientModeRefusalKeepsTheRunAndStatesItself(t *testing.T) {
 
 	if !strings.Contains(stderr, "BENTOO_UI") {
 		t.Errorf("stderr does not name the SOURCE the refused value came from (R3.7).\n"+
-			"    Remedy: parseMode already names it; presentManifestReport hands its error to\n"+
-			"    logger.Debug, which is below the default LevelInfo and therefore invisible.\n"+
+			"    Remedy: parseMode already names it; a presenter that hands its error to a\n"+
+			"    Debug record leaves it below the default info level and therefore invisible.\n"+
 			"    Observed stderr: %q", stderr)
 	}
 	if !strings.Contains(stderr, "bogus") {

@@ -48,12 +48,12 @@ func testClaudeProviderCancelStopsGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	p, err := newConfiguredLLMProvider(config.LLMConfig{Provider: "claude-code"})
+	p, err := newConfiguredLLMProvider(discardLog(), config.LLMConfig{Provider: "claude-code"})
 	if err != nil {
-		t.Fatalf("newConfiguredLLMProvider(claude-code) with a stub claude on PATH: %v", err)
+		t.Fatalf("newConfiguredLLMProvider(discardLog(), claude-code) with a stub claude on PATH: %v", err)
 	}
 	if p == nil {
-		t.Fatal("newConfiguredLLMProvider(claude-code) returned no provider and no error")
+		t.Fatal("newConfiguredLLMProvider(discardLog(), claude-code) returned no provider and no error")
 	}
 
 	finished := make(chan struct{})
@@ -121,12 +121,12 @@ func testClaudeProviderLiveContextAnswers(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	p, err := newConfiguredLLMProvider(config.LLMConfig{Provider: "claude-code"})
+	p, err := newConfiguredLLMProvider(discardLog(), config.LLMConfig{Provider: "claude-code"})
 	if err != nil {
-		t.Fatalf("newConfiguredLLMProvider(claude-code) with a stub claude on PATH: %v", err)
+		t.Fatalf("newConfiguredLLMProvider(discardLog(), claude-code) with a stub claude on PATH: %v", err)
 	}
 	if p == nil {
-		t.Fatal("newConfiguredLLMProvider(claude-code) returned no provider and no error")
+		t.Fatal("newConfiguredLLMProvider(discardLog(), claude-code) returned no provider and no error")
 	}
 
 	got, err := p.ExtractVersion(ctx, []byte("<html>foo-1.2.3.tar.gz</html>"), "")
@@ -145,9 +145,9 @@ func testClaudeProviderLiveContextAnswers(t *testing.T) {
 func testClaudeProviderAbsentIsATrueNil(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 
-	p, err := newConfiguredLLMProvider(config.LLMConfig{Provider: "claude-code"})
+	p, err := newConfiguredLLMProvider(discardLog(), config.LLMConfig{Provider: "claude-code"})
 	if !errors.Is(err, autoupdate.ErrClaudeCodeUnavailable) {
-		t.Fatalf("newConfiguredLLMProvider(claude-code) with no claude on PATH: error = %v, want %v",
+		t.Fatalf("newConfiguredLLMProvider(discardLog(), claude-code) with no claude on PATH: error = %v, want %v",
 			err, autoupdate.ErrClaudeCodeUnavailable)
 	}
 	if !isTrueNil(p) {

@@ -133,12 +133,12 @@ func TestFetchContent_RetryRecoversAfterTimeout(t *testing.T) {
 // timeout is rejected, while zero (the "use global" sentinel) is accepted.
 func TestValidatePackageConfig_NegativeTimeout(t *testing.T) {
 	bad := &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: "v(.+)", Timeout: -5}
-	if err := ValidatePackageConfig("cat/pkg", bad); err == nil {
+	if err := ValidatePackageConfig(nil, "cat/pkg", bad); err == nil {
 		t.Error("expected an error for a negative timeout, got nil")
 	}
 
 	ok := &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: "v(.+)", Timeout: 0}
-	if err := ValidatePackageConfig("cat/pkg", ok); err != nil {
+	if err := ValidatePackageConfig(nil, "cat/pkg", ok); err != nil {
 		t.Errorf("zero timeout should be valid (use global), got: %v", err)
 	}
 }

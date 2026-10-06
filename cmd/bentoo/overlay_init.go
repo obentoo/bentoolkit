@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -25,16 +25,17 @@ Creates a config file with overlay path and git settings.`,
 }
 
 func runInit(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	reader := bufio.NewReader(os.Stdin)
 
 	// Check if config already exists
 	existingPath, _ := config.FindConfigPath()
 	if _, err := os.Stat(existingPath); err == nil {
-		logger.Warn("Config already exists at: %s", existingPath)
+		uiWarn(fmt.Sprintf("Config already exists at: %s", existingPath))
 		fmt.Print("Overwrite? [y/N]: ")
 		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) != "y" {
-			logger.Info("Aborted.")
+			uiInfo("Aborted.")
 			return nil
 		}
 	}
@@ -43,7 +44,7 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Get overlay path
 	fmt.Println()
-	logger.Info("Bentoo Overlay Configuration")
+	uiInfo("Bentoo Overlay Configuration")
 	fmt.Println()
 
 	defaultOverlayPath := "/var/db/repos/bentoo"
@@ -62,15 +63,15 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Validate path exists
 	if _, err := os.Stat(overlayPath); os.IsNotExist(err) {
-		logger.Warn("Path does not exist: %s", overlayPath)
+		uiWarn(fmt.Sprintf("Path does not exist: %s", overlayPath))
 		fmt.Print("Create it? [y/N]: ")
 		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
 			if err := os.MkdirAll(overlayPath, 0o750); err != nil {
-				logger.Error("Failed to create directory: %v", err)
+				log.Error("Failed to create directory", "path", overlayPath, "err", err)
 				return exitWith(1)
 			}
-			logger.Info("Created directory: %s", overlayPath)
+			uiInfo(fmt.Sprintf("Created directory: %s", overlayPath))
 		}
 	}
 
@@ -89,10 +90,10 @@ func runInit(cmd *cobra.Command, args []string) error {
 	user, email, err := cfg.GetGitUser()
 	if err != nil {
 		fmt.Println()
-		logger.Warn("Git user not configured in ~/.gitconfig")
-		logger.Info("You can configure it in bentoo or run:")
-		logger.Info("  git config --global user.name \"Your Name\"")
-		logger.Info("  git config --global user.email \"your@email.com\"")
+		uiWarn("Git user not configured in ~/.gitconfig")
+		uiInfo("You can configure it in bentoo or run:")
+		uiInfo("  git config --global user.name \"Your Name\"")
+		uiInfo("  git config --global user.email \"your@email.com\"")
 		fmt.Println()
 
 		fmt.Print("Git user name: ")
@@ -103,23 +104,23 @@ func runInit(cmd *cobra.Command, args []string) error {
 		email, _ = reader.ReadString('\n')
 		cfg.Git.Email = strings.TrimSpace(email)
 	} else {
-		logger.Info("Using git config: %s <%s>", user, email)
+		uiInfo(fmt.Sprintf("Using git config: %s <%s>", user, email))
 	}
 
 	// Save config
 	configPath, _ := config.DefaultConfigPath()
 	if err := cfg.SaveTo(configPath); err != nil {
-		logger.Error("Failed to save config: %v", err)
+		log.Error("Failed to save config", "err", err)
 		return exitWith(1)
 	}
 
 	fmt.Println()
-	logger.Info("Configuration saved to: %s", configPath)
+	uiInfo(fmt.Sprintf("Configuration saved to: %s", configPath))
 	fmt.Println()
-	logger.Info("You can now use:")
-	logger.Info("  bentoo overlay status  - View pending changes")
-	logger.Info("  bentoo overlay add     - Stage changes")
-	logger.Info("  bentoo overlay commit  - Commit with auto-generated message")
-	logger.Info("  bentoo overlay push    - Push to remote")
+	uiInfo("You can now use:")
+	uiInfo("  bentoo overlay status  - View pending changes")
+	uiInfo("  bentoo overlay add     - Stage changes")
+	uiInfo("  bentoo overlay commit  - Commit with auto-generated message")
+	uiInfo("  bentoo overlay push    - Push to remote")
 	return nil
 }

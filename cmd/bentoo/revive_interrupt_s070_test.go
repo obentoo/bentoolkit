@@ -27,6 +27,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -98,10 +99,12 @@ func TestS070ReviveHelperChild(t *testing.T) {
 			resolveErr = fmt.Errorf("repository 'gentoo' not found: %w", provider.ErrRepositoryNotFound)
 		}
 		d := defaultDeps()
-		d.resolveGentooProvider = func(ctx context.Context, cfg *config.Config) (provider.Provider, error) {
+		d.resolveGentooProvider = func(ctx context.Context, _ *slog.Logger, cfg *config.Config) (provider.Provider, error) {
 			return nil, resolveErr
 		}
-		ar := &autoupdateRun{opts: testAutoupdateOptions(), deps: d}
+		// The warning under test goes through the run's logger, so the child
+		// needs one that writes where the parent reads.
+		ar := &autoupdateRun{opts: testAutoupdateOptions(), deps: d, lg: slog.New(slog.NewTextHandler(os.Stdout, nil))}
 		ar.reportRevivableOrphans(context.Background(), nil, &config.Config{})
 		fmt.Println("S070-REPORT-RETURNED")
 	case "resolve-interrupted":
@@ -157,7 +160,7 @@ func s070ResolveInterrupted(t *testing.T) {
 	}
 	res := make(chan result, 1)
 	go func() {
-		prov, err := resolveGentooProvider(ctx, &config.Config{})
+		prov, err := resolveGentooProvider(ctx, discardLog(), &config.Config{})
 		res <- result{prov, err}
 	}()
 	select {
@@ -216,7 +219,7 @@ func s070ResolveMissing(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	prov, err := resolveGentooProvider(ctx, &config.Config{})
+	prov, err := resolveGentooProvider(ctx, discardLog(), &config.Config{})
 	if err == nil {
 		t.Fatalf("resolveGentooProvider found a gentoo the registry does not list (prov=%v)", prov)
 	}

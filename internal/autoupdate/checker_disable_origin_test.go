@@ -80,7 +80,7 @@ comments = "libjxl-compat — pinned by hand, no origin recorded."
 # END
 `)
 
-	issues, err := LintPackagesConfig(dir)
+	issues, err := LintPackagesConfig(nil, dir)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -343,12 +343,12 @@ func TestReconcilesOnlyWhatTheCheckerDisabled(t *testing.T) {
 // R1.4 — a frozen legacy entry that nobody is told about is the silent
 // regression this fail-safe would otherwise introduce. The run must name it.
 //
-// The notice is asserted on the builder rather than on stderr because
-// logger.Logger.output is unexported with no setter, and because this is the
-// convention the codebase already uses for message text (validate/build.go's
-// passReason, skipReason, notReachedReason are pure builders tested directly).
+// The notice is asserted on the line logFrozenDisables writes to an injected
+// logger: the message with its attributes rendered after it.
 func TestLegacyDisableIsNamedInTheOutput(t *testing.T) {
-	notice := frozenDisableNotice([]string{"dev-libs/icu-compat", "media-libs/libjxl-compat"})
+	lc := captureInfoLogs(t)
+	logFrozenDisables(lc.logger(), []string{"dev-libs/icu-compat", "media-libs/libjxl-compat"})
+	notice := strings.Join(lc.all(), "\n")
 
 	for _, atom := range []string{"dev-libs/icu-compat", "media-libs/libjxl-compat"} {
 		if !strings.Contains(notice, atom) {
@@ -360,8 +360,10 @@ func TestLegacyDisableIsNamedInTheOutput(t *testing.T) {
 	if !strings.Contains(notice, "disabled_by") {
 		t.Errorf("the notice does not say what is missing, so nobody can act on it:\n%s", notice)
 	}
-	if frozenDisableNotice(nil) != "" {
-		t.Errorf("an empty frozen set produced a notice: %q — a run with nothing to report must say nothing", frozenDisableNotice(nil))
+	empty := captureInfoLogs(t)
+	logFrozenDisables(empty.logger(), nil)
+	if empty.count() != 0 {
+		t.Errorf("an empty frozen set produced a notice: %q — a run with nothing to report must say nothing", empty.all())
 	}
 }
 
@@ -474,17 +476,14 @@ path = "version"
 // Output pins the notice's wording and TestCheckAllLeavesALegacyDisableAlone pins
 // the behaviour, and neither pins that the run joins the two.
 //
-// Recorded in .draft/deviations.yaml. The seam it asserts through
-// (reportFrozenDisables) exists for this test and says so at its definition.
+// Recorded in .draft/deviations.yaml. Since story 062 it asserts through the
+// logger injected with WithLogger, which receives the notice's record.
 
 // R1.4 — the run must NAME the entry it froze. Asserting the call happened, with
 // the atom in it, is the only formulation that fails when the reporting is
 // dropped while the notice builder survives.
 func TestCheckAllReportsTheEntryItFroze(t *testing.T) {
-	var reported []string
-	original := reportFrozenDisables
-	reportFrozenDisables = func(notice string) { reported = append(reported, notice) }
-	t.Cleanup(func() { reportFrozenDisables = original })
+	frozenLog := captureInfoLogs(t)
 
 	pkg := "sci-ml/reappeared"
 	srv := jsonVersionServer(t, "1.0.0")
@@ -500,11 +499,18 @@ path = "version"
 	checker, err := NewChecker(overlay,
 		WithConfigDir(t.TempDir()),
 		WithRateLimiter(unlimitedRateLimiter()),
+		WithLogger(frozenLog.logger()),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
 	checker.CheckAll(t.Context(), false)
+	var reported []string
+	for _, line := range frozenLog.all() {
+		if strings.HasPrefix(line, frozenDisableMessage) {
+			reported = append(reported, line)
+		}
+	}
 
 	if len(reported) != 1 {
 		t.Fatalf("the run reported %d times, want exactly 1 — R1.4 asks for one line per run: %v", len(reported), reported)
@@ -519,10 +525,7 @@ path = "version"
 // which on a healthy registry would print a line about an empty list on every
 // single scan.
 func TestCheckAllReportsNothingWhenNothingIsFrozen(t *testing.T) {
-	var reported []string
-	original := reportFrozenDisables
-	reportFrozenDisables = func(notice string) { reported = append(reported, notice) }
-	t.Cleanup(func() { reportFrozenDisables = original })
+	frozenLog := captureInfoLogs(t)
 
 	pkg := "sci-ml/reappeared"
 	srv := jsonVersionServer(t, "1.0.0")
@@ -539,11 +542,18 @@ path = "version"
 	checker, err := NewChecker(overlay,
 		WithConfigDir(t.TempDir()),
 		WithRateLimiter(unlimitedRateLimiter()),
+		WithLogger(frozenLog.logger()),
 	)
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
 	}
 	checker.CheckAll(t.Context(), false)
+	var reported []string
+	for _, line := range frozenLog.all() {
+		if strings.HasPrefix(line, frozenDisableMessage) {
+			reported = append(reported, line)
+		}
+	}
 
 	if len(reported) != 0 {
 		t.Errorf("a run that froze nothing still reported: %v", reported)

@@ -50,8 +50,6 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
-
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // buildPhaseReport matches Portage's own "which phase died" line, e.g.
@@ -256,7 +254,8 @@ func usableAsPrecondition(candidate string) bool {
 func (a *Applier) recordUnmetPrecondition(pkg, transcript string) {
 	required := extractUnmetPrecondition(transcript)
 	if required == "" {
-		logger.Debug("%s: the build failed on the environment but the transcript did not name a path; nothing recorded, so the package will be retried", pkg)
+		a.logger().Debug("the build failed on the environment but the transcript did not name a path; nothing recorded, so the package will be retried",
+			"package", pkg)
 		return
 	}
 
@@ -269,16 +268,17 @@ func (a *Applier) recordUnmetPrecondition(pkg, transcript string) {
 
 	cache, err := NewCache(a.configDir)
 	if err != nil {
-		warnLogf("%s: could not open the cache to record the unmet precondition %s: %v", pkg, required, err)
+		a.logger().Warn("could not open the cache to record the unmet precondition", "package", pkg, "precondition", required, "err", err)
 		return
 	}
 
 	if err := cache.SetPrecondition(pkg, required); err != nil {
-		warnLogf("%s: could not record the unmet precondition %s: %v", pkg, required, err)
+		a.logger().Warn("could not record the unmet precondition", "package", pkg, "precondition", required, "err", err)
 		return
 	}
 
-	logger.Info("%s: recorded the unmet precondition %s — the build needs it and this host does not give it to the portage user", pkg, required)
+	a.logger().Info("recorded the unmet precondition — the build needs it and this host does not give it to the portage user",
+		"package", pkg, "precondition", required)
 }
 
 // --- the RE-CHECKING half (S043-R3.2, R3.3, R3.4) ---------------------------
@@ -431,7 +431,7 @@ func (a *Applier) unmetPrecondition(pkg string) (string, bool) {
 
 	cache, err := NewCache(a.configDir)
 	if err != nil {
-		logger.Debug("%s: could not open the cache to check for a recorded precondition, so the build gate runs: %v", pkg, err)
+		a.logger().Debug("could not open the cache to check for a recorded precondition, so the build gate runs", "package", pkg, "err", err)
 		return "", false
 	}
 
@@ -448,10 +448,12 @@ func (a *Applier) unmetPrecondition(pkg string) (string, bool) {
 		// package back because a cache file could not be rewritten would be the
 		// suppression this whole file is written to avoid. The stale record is
 		// re-examined, and cleared again, on the next run.
-		warnLogf("%s: the precondition %s is satisfied again but the record could not be cleared: %v", pkg, rec.Path, err)
+		a.logger().Warn("the precondition is satisfied again but the record could not be cleared",
+			"package", pkg, "precondition", rec.Path, "err", err)
 		return "", false
 	}
 
-	logger.Info("%s: the precondition %s is readable by the build user again; the record is cleared and the build gate runs", pkg, rec.Path)
+	a.logger().Info("the precondition is readable by the build user again; the record is cleared and the build gate runs",
+		"package", pkg, "precondition", rec.Path)
 	return "", false
 }

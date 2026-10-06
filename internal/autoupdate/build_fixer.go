@@ -29,12 +29,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -235,6 +237,9 @@ type ClaudeCodeBuildFixer struct {
 	// execCommand creates the *exec.Cmd bound to a context. Defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
+	// log receives the build fixer's diagnostics. The fixer emits none of its
+	// own today; the field keeps its option in line with the other agents'.
+	log *slog.Logger
 }
 
 // Compile-time assertion that ClaudeCodeBuildFixer satisfies the capability.
@@ -242,6 +247,14 @@ var _ BuildFixer = (*ClaudeCodeBuildFixer)(nil)
 
 // BuildFixerOption configures a ClaudeCodeBuildFixer.
 type BuildFixerOption func(*ClaudeCodeBuildFixer)
+
+// WithBuildFixerLogger sets the logger the build fixer reports its diagnostics
+// to. Nil keeps the default, which discards them.
+func WithBuildFixerLogger(l *slog.Logger) BuildFixerOption {
+	return func(f *ClaudeCodeBuildFixer) {
+		f.log = logging.OrDiscard(l)
+	}
+}
 
 // WithBuildFixerExecCommand overrides the context-aware exec.Command factory used
 // to spawn `claude`. Mirrors exec.CommandContext so injected commands also

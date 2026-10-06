@@ -20,7 +20,6 @@ func TestManagerRun_BtrbkSSHDelegatedWhenUnidentified(t *testing.T) {
 	orig := StateDir
 	StateDir = func() string { return dir }
 	t.Cleanup(func() { StateDir = orig })
-	_ = captureWarn(t)
 	mr := &MockRunner{}
 	ship := ShipConfig{Name: "offsite", Type: "ssh", Target: "u@h:/b"}
 	m, err := NewManager(Config{Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}, Ship: []ShipConfig{ship}},
@@ -32,7 +31,7 @@ func TestManagerRun_BtrbkSSHDelegatedWhenUnidentified(t *testing.T) {
 	if err != nil || res.Failed() {
 		t.Fatalf("Run = (%+v, %v), want success", res, err)
 	}
-	sh, err := newShipper(ship, mr, Retention{})
+	sh, err := newShipper(ship, mr, Retention{}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

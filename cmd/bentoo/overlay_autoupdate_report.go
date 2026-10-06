@@ -2,11 +2,11 @@ package main
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -108,11 +108,11 @@ func nothingValidated() report.Run {
 // the thing an operator gets INSTEAD of a crash (R1.4), so reading one must not
 // be the moment the crash arrives. report.Run.Sections tolerates a nil payload
 // for the same reason.
-func checkPayload(run report.Run) report.AutoupdateCheck {
+func checkPayload(log *slog.Logger, run report.Run) report.AutoupdateCheck {
 	payload, ok := run.Payload.(report.AutoupdateCheck)
 	if !ok {
-		logger.Debug("check: the run carries kind %q with a %T payload, want %q and report.AutoupdateCheck — reporting it as empty",
-			run.Kind, run.Payload, report.KindAutoupdateCheck)
+		log.Debug("check: the run carries an unexpected kind or payload — reporting it as empty",
+			"kind", run.Kind, "payload_type", fmt.Sprintf("%T", run.Payload), "want_kind", report.KindAutoupdateCheck)
 	}
 	return payload
 }
@@ -304,10 +304,10 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 // omitting its heading. Nothing here should ever start deciding that — a
 // producer that pruned sections to suit one screen would be the second place
 // the run's contents are decided.
-func checkReport(scanned []autoupdate.CheckResult, validated report.Run) report.Run {
+func checkReport(log *slog.Logger, scanned []autoupdate.CheckResult, validated report.Run) report.Run {
 	joined := validated
 
-	facts := checkPayload(validated)
+	facts := checkPayload(log, validated)
 	facts.Scanned = scannedFacts(scanned)
 	joined.Payload = facts
 

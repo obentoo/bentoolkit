@@ -1,12 +1,13 @@
 package main
 
 import (
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
 
@@ -43,7 +44,7 @@ func loadAppContext(cmd *cobra.Command) (*appContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	selectOverlay(cfg, overlayFlagValue(cmd))
+	selectOverlayLogged(logging.FromContext(commandContext(cmd)), cfg, overlayFlagValue(cmd))
 	overlayPath, err := cfg.GetOverlayPath()
 	if err != nil {
 		return nil, err
@@ -59,7 +60,7 @@ func loadAppContextNoValidation(cmd *cobra.Command) (*appContext, error) {
 	if err != nil {
 		return nil, err
 	}
-	selectOverlay(cfg, overlayFlagValue(cmd))
+	selectOverlayLogged(logging.FromContext(commandContext(cmd)), cfg, overlayFlagValue(cmd))
 	overlayPath, err := cfg.GetOverlayPathNoValidation()
 	if err != nil {
 		return nil, err
@@ -79,14 +80,28 @@ func loadAppContextNoValidation(cmd *cobra.Command) (*appContext, error) {
 // checkout and reporting green on code it never read. It only ever moves to a
 // checkout of the configured overlay, never to an unrelated repository, and it
 // says so at INFO, because the run is then not acting where the config says.
-func selectOverlay(cfg *config.Config, flag string) {
+//
+// It returns the configured path it moved away from when rule 2 applied, so
+// that func selectOverlayLogged can say so; it logs nothing itself.
+func selectOverlay(cfg *config.Config, flag string) (configured string, moved bool) {
 	if flag != "" {
 		cfg.Overlay.Path = flag
-		return
+		return "", false
 	}
 	if p, ok := overlayCheckoutAtCwd(cfg.Overlay.Path); ok {
-		logger.Info("using the overlay checkout at %s (current directory) instead of overlay.path %s; pass --overlay to choose explicitly", p, cfg.Overlay.Path)
+		configured = cfg.Overlay.Path
 		cfg.Overlay.Path = p
+		return configured, true
+	}
+	return "", false
+}
+
+// selectOverlayLogged is selectOverlay reporting a move to the current
+// directory's checkout on log, at INFO (story 062, R6.2).
+func selectOverlayLogged(log *slog.Logger, cfg *config.Config, flag string) {
+	if configured, moved := selectOverlay(cfg, flag); moved {
+		log.Info("using the overlay checkout at the current directory instead of overlay.path; pass --overlay to choose explicitly",
+			"path", cfg.Overlay.Path, "overlay_path", configured)
 	}
 }
 

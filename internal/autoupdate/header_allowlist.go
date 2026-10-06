@@ -8,8 +8,6 @@ import (
 	"net/url"
 	"slices"
 	"strings"
-
-	"github.com/obentoo/bentoolkit/internal/common/logger"
 )
 
 // Header env-var expansion allow-list (S001-R1, AD-8).
@@ -53,12 +51,6 @@ var allowedHeaderEnvAllowList = map[string]struct{}{
 // allowedHeaderEnvPrefix is the prefix that opts an environment variable into
 // header expansion regardless of allowedHeaderEnvAllowList membership.
 const allowedHeaderEnvPrefix = "BENTOO_"
-
-// warnLogf is the sink used to emit Warn-level diagnostics from the env-var
-// substitution path. It defaults to the shared logger and is a package-private
-// variable so tests can capture the emitted lines. Its signature mirrors
-// logger.Warn exactly.
-var warnLogf = logger.Warn
 
 // containsCRLF reports whether s contains a carriage return or line feed.
 // Such characters in a header name are a header/CRLF-injection vector and are

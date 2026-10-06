@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
 
 // DefaultBtrbkConfPath is where `apply` writes the rendered btrbk.conf and where
@@ -22,7 +25,11 @@ type btrbkEngine struct {
 	targets  []string // ssh remote targets contributed by shippers (AD5)
 	run      Runner
 	confPath string
+	log      *slog.Logger // nil discards; set by newEngine
 }
+
+// logger returns the engine's logger, or a discarding one for a zero value.
+func (e *btrbkEngine) logger() *slog.Logger { return logging.OrDiscard(e.log) }
 
 // newBtrbkEngine builds the btrbk engine. A nil Runner falls back to the
 // production execRunner.
@@ -52,7 +59,8 @@ func (e *btrbkEngine) Create(ctx context.Context, subvolume string) (Snapshot, e
 	}
 	path, reason := e.resolveLatest(ctx, subvolume)
 	if reason != "" {
-		warnLogf("snapshot: btrbk snapshot of %s is unidentified (%s); its archive and restic ships cannot address it", subvolume, reason)
+		e.logger().Warn("snapshot: btrbk snapshot of the subvolume is unidentified; its archive and restic ships cannot address it",
+			"subvolume", subvolume, "reason", reason)
 		return Snapshot{Subvolume: subvolume}, nil
 	}
 	return Snapshot{ID: filepath.Base(path), Subvolume: subvolume, Path: path}, nil

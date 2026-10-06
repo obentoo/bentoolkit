@@ -1,32 +1,80 @@
 package overlay
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
-// captureReviewWarnings redirects the package's warning sink for one test and
-// returns an accessor for the lines it collected.
+// captureReviewWarnings returns a logger to inject into the code under test
+// (newReviewCache's log, CompareOptions.Logger) and an accessor for the WARN
+// records it received, each rendered as the message followed by " key=value"
+// per attribute so a test can still ask whether a warning names a package.
 //
 // It is the only way to assert the "warn once and carry on" contract: the cache
 // returns no error by design — every failure is absorbed into a miss or a
 // skipped write — so the warning IS the observable, and a test that could not
 // see it would be asserting the absence of an error the code cannot produce.
-func captureReviewWarnings(t *testing.T) func() []string {
+func captureReviewWarnings(t *testing.T) (*slog.Logger, func() []string) {
 	t.Helper()
-	var lines []string
-	previous := warnLogf
-	warnLogf = func(format string, args ...any) {
-		lines = append(lines, fmt.Sprintf(format, args...))
-	}
-	t.Cleanup(func() { warnLogf = previous })
-	return func() []string { return lines }
+	rec := &reviewWarnRecorder{}
+	return slog.New(reviewWarnHandler{rec: rec}), rec.snapshot
 }
+
+// reviewWarnRecorder holds the rendered WARN records; it is safe for
+// concurrent use under -race.
+type reviewWarnRecorder struct {
+	mu    sync.Mutex
+	lines []string
+}
+
+func (r *reviewWarnRecorder) snapshot() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.lines...)
+}
+
+// reviewWarnHandler is the slog.Handler view of a reviewWarnRecorder. It
+// enables WARN and above only: the seam it replaces captured warnings and
+// nothing else, so an INFO record must not count as one.
+type reviewWarnHandler struct {
+	rec   *reviewWarnRecorder
+	attrs []slog.Attr
+}
+
+func (h reviewWarnHandler) Enabled(_ context.Context, l slog.Level) bool {
+	return l >= slog.LevelWarn
+}
+
+func (h reviewWarnHandler) Handle(_ context.Context, r slog.Record) error {
+	var b strings.Builder
+	b.WriteString(r.Message)
+	write := func(a slog.Attr) bool {
+		fmt.Fprintf(&b, " %s=%v", a.Key, a.Value.Resolve())
+		return true
+	}
+	for _, a := range h.attrs {
+		write(a)
+	}
+	r.Attrs(write)
+	h.rec.mu.Lock()
+	defer h.rec.mu.Unlock()
+	h.rec.lines = append(h.rec.lines, b.String())
+	return nil
+}
+
+func (h reviewWarnHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return reviewWarnHandler{rec: h.rec, attrs: append(append([]slog.Attr(nil), h.attrs...), attrs...)}
+}
+
+func (h reviewWarnHandler) WithGroup(string) slog.Handler { return h }
 
 // The two ebuilds one finding compares. They are realistic enough that a reader
 // can see what a divergence is, and short enough to read: ours carries a patch
@@ -86,8 +134,8 @@ func TestReviewCache(t *testing.T) {
 	})
 
 	t.Run("a miss is followed by a hit for the same two files", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
-		cache := newReviewCache(t.TempDir())
+		warnLog, warnings := captureReviewWarnings(t)
+		cache := newReviewCache(t.TempDir(), warnLog)
 		req := reviewFixtureRequest()
 
 		if _, ok := cache.get(req); ok {
@@ -112,13 +160,13 @@ func TestReviewCache(t *testing.T) {
 		// This is the requirement itself: the SECOND run is where a cache earns its
 		// place, and an in-memory hit would pass the subtest above while issuing a
 		// fresh request every time the operator ran the command.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		dir := t.TempDir()
 		req := reviewFixtureRequest()
 
-		newReviewCache(dir).put(req, reviewFixtureNote())
+		newReviewCache(dir, warnLog).put(req, reviewFixtureNote())
 
-		got, ok := newReviewCache(dir).get(req)
+		got, ok := newReviewCache(dir, warnLog).get(req)
 		if !ok {
 			t.Fatal("a second run over the same directory missed; the note was not persisted")
 		}
@@ -140,8 +188,8 @@ func TestReviewCache(t *testing.T) {
 	})
 
 	t.Run("a changed ebuild misses", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
-		cache := newReviewCache(t.TempDir())
+		warnLog, warnings := captureReviewWarnings(t)
+		cache := newReviewCache(t.TempDir(), warnLog)
 		stored := reviewFixtureRequest()
 		cache.put(stored, reviewFixtureNote())
 
@@ -180,8 +228,8 @@ func TestReviewCache(t *testing.T) {
 	})
 
 	t.Run("the entry is keyed on content and not on the package", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
-		cache := newReviewCache(t.TempDir())
+		warnLog, warnings := captureReviewWarnings(t)
+		cache := newReviewCache(t.TempDir(), warnLog)
 
 		cache.put(reviewFixtureRequest(), reviewFixtureNote())
 
@@ -211,7 +259,7 @@ func TestReviewCache(t *testing.T) {
 	})
 
 	t.Run("a stored note round-trips exactly", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		dir := t.TempDir()
 
 		// Two notes that between them cover what a model actually returns: prose
@@ -245,12 +293,12 @@ func TestReviewCache(t *testing.T) {
 			},
 		}
 
-		writer := newReviewCache(dir)
+		writer := newReviewCache(dir, warnLog)
 		for _, c := range notes {
 			writer.put(c.req, c.note)
 		}
 
-		reader := newReviewCache(dir)
+		reader := newReviewCache(dir, warnLog)
 		for name, c := range notes {
 			got, ok := reader.get(c.req)
 			if !ok {
@@ -267,14 +315,14 @@ func TestReviewCache(t *testing.T) {
 	})
 
 	t.Run("a corrupt cache reads as a miss, and the next store heals it", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		dir := t.TempDir()
 		path := filepath.Join(dir, reviewCacheFileName)
 		if err := os.WriteFile(path, []byte("{not json at all"), 0o600); err != nil {
 			t.Fatalf("plant a corrupt cache: %v", err)
 		}
 
-		cache := newReviewCache(dir)
+		cache := newReviewCache(dir, warnLog)
 		req := reviewFixtureRequest()
 		if _, ok := cache.get(req); ok {
 			t.Fatal("a corrupt cache reported a hit")
@@ -286,7 +334,7 @@ func TestReviewCache(t *testing.T) {
 		}
 
 		cache.put(req, reviewFixtureNote())
-		got, ok := newReviewCache(dir).get(req)
+		got, ok := newReviewCache(dir, warnLog).get(req)
 		if !ok {
 			t.Fatal("the run after a corrupt cache still missed; the corruption is permanent")
 		}
@@ -302,7 +350,7 @@ func TestReviewCache(t *testing.T) {
 		// therefore treated as corruption — one warning, recompute — rather than
 		// degraded to OriginUnknown, which would keep a note whose classification
 		// has been erased and print no proposed declaration for it, forever.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		dir := t.TempDir()
 		req := reviewFixtureRequest()
 		planted := fmt.Sprintf(`{"notes":{%q:{"origin":"sideways","summary":"s","declaration":""}}}`,
@@ -311,7 +359,7 @@ func TestReviewCache(t *testing.T) {
 			t.Fatalf("plant the entry: %v", err)
 		}
 
-		if _, ok := newReviewCache(dir).get(req); ok {
+		if _, ok := newReviewCache(dir, warnLog).get(req); ok {
 			t.Error("an entry whose origin this build cannot read was served anyway")
 		}
 		if lines := warnings(); len(lines) != 1 {
@@ -322,13 +370,13 @@ func TestReviewCache(t *testing.T) {
 	t.Run("a corrupt cache warns once for the run, not once per package", func(t *testing.T) {
 		// Eight divergences is the live overlay's real number. Eight identical
 		// warnings would bury the report the operator actually asked for.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		dir := t.TempDir()
 		if err := os.WriteFile(filepath.Join(dir, reviewCacheFileName), []byte("[]"), 0o600); err != nil {
 			t.Fatalf("plant a corrupt cache: %v", err)
 		}
 
-		cache := newReviewCache(dir)
+		cache := newReviewCache(dir, warnLog)
 		for i := range 8 {
 			req := reviewFixtureRequest()
 			req.Ours = fmt.Appendf(nil, "EAPI=8\n# package %d\n", i)
@@ -346,13 +394,13 @@ func TestReviewCache(t *testing.T) {
 		// The parent is a regular FILE, so creating the directory fails with
 		// ENOTDIR for every user — including root, which `act` runs tests as and
 		// which ignores the permission bits the sibling subtest relies on.
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		blocker := filepath.Join(t.TempDir(), "not-a-directory")
 		if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
 			t.Fatalf("plant the blocking file: %v", err)
 		}
 
-		cache := newReviewCache(filepath.Join(blocker, "reviews"))
+		cache := newReviewCache(filepath.Join(blocker, "reviews"), warnLog)
 		req := reviewFixtureRequest()
 		if _, ok := cache.get(req); ok {
 			t.Fatal("a cache that cannot exist reported a hit")
@@ -377,7 +425,7 @@ func TestReviewCache(t *testing.T) {
 	})
 
 	t.Run("an unwritable directory does not fail the lookup", func(t *testing.T) {
-		warnings := captureReviewWarnings(t)
+		warnLog, warnings := captureReviewWarnings(t)
 		dir := t.TempDir()
 		if err := os.Chmod(dir, 0o500); err != nil {
 			t.Fatalf("make the directory unwritable: %v", err)
@@ -393,7 +441,7 @@ func TestReviewCache(t *testing.T) {
 			t.Skip("the directory is writable despite mode 0500 (running as root); the ENOTDIR subtest covers this path for every user")
 		}
 
-		cache := newReviewCache(dir)
+		cache := newReviewCache(dir, warnLog)
 		req := reviewFixtureRequest()
 		if _, ok := cache.get(req); ok {
 			t.Fatal("an empty unwritable cache reported a hit")
@@ -413,8 +461,8 @@ func TestReviewCache(t *testing.T) {
 		// cannot be resolved. The caller that could not name a directory is the one
 		// holding the reason, so the cache itself says nothing — and still answers
 		// every call.
-		warnings := captureReviewWarnings(t)
-		cache := newReviewCache("")
+		warnLog, warnings := captureReviewWarnings(t)
+		cache := newReviewCache("", warnLog)
 		req := reviewFixtureRequest()
 
 		if _, ok := cache.get(req); ok {

@@ -62,9 +62,15 @@ make coverage        # Run tests with coverage report
 make audit           # Run security audit (go mod verify + govulncheck)
 make clean           # Remove build artifacts
 make build-all       # Cross-compile for linux amd64 and arm64
+make checksums       # Write build/SHA256SUMS over the binaries in build/
 make check           # Run lint, test, and audit
 make help            # Show all available targets
 ```
+
+Builds are reproducible: binaries are built with `-trimpath`, and the build
+date they report is the time in `SOURCE_DATE_EPOCH`, else the last commit's, so
+two builds of one commit from clean checkouts are byte-identical wherever the
+tree was cloned.
 
 ## Configuration
 
@@ -168,6 +174,32 @@ per-repo `BENTOO_REPO_<NAME>_TOKEN` > global `GITHUB_TOKEN`/`GH_TOKEN`**.
 > **One deliberate exception:** `${VAR}` expansion in `packages.toml` request
 > `headers` reads the **process environment only** (never the secrets file) —
 > see [Headers and environment variables](#headers-and-environment-variables).
+
+### Logging
+
+bentoo writes its diagnostics — warnings about degraded paths, progress
+detail, a failing command's cause — in two places on every run:
+
+- **stderr**, one `key=value` line per diagnostic (`log/slog` text format,
+  without a timestamp), for example
+  `level=WARN msg="loading config: failed" err="..."`;
+- **`$XDG_STATE_HOME/bentoo/logs/bentoo.log`** (`~/.local/state/bentoo/logs/bentoo.log`
+  when `XDG_STATE_HOME` is unset), one JSON object per line with `time`,
+  `level`, `msg` and the diagnostic's attributes, so a cron run can be read
+  back with `jq`. The directory is created `0750` and the file `0600`; the
+  file is appended to and never rotated (use `logrotate`).
+
+The stderr level is set, in order of precedence, by `--quiet` (errors only),
+`--verbose` (debug), then the `BENTOO_LOG_LEVEL` environment variable
+(`debug`, `info`, `warn` or `error`, any case), and is `info` otherwise. The
+file always records `info` and above — `debug` too when the stderr level is
+`debug` — so `--quiet` never empties it.
+
+Every secret bentoo resolved (see [Secrets](#secrets)) is replaced with `***`
+in both places, as is the value of any attribute whose key names a credential
+(`*_token`, `*_password`, `*_secret`, `*_api_key`, `*_authorization`). A
+command's own output — results, reports, prompts — is not a diagnostic: it is
+not written to `bentoo.log`.
 
 ## Usage
 

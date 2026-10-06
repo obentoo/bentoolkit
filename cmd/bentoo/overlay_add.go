@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/obentoo/bentoolkit/internal/common/logger"
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
 )
@@ -20,23 +20,24 @@ If no paths are specified, adds all changes (equivalent to "git add .").`,
 }
 
 func runAdd(cmd *cobra.Command, args []string) error {
+	log := logging.FromContext(commandContext(cmd))
 	ctx := commandContext(cmd)
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		logger.Error("loading config: %v", err)
+		log.Error("loading config: failed", "err", err)
 		return exitWith(1)
 	}
 
 	result, err := overlay.AddFiles(ctx, appCtx.Config, args...)
 	if err != nil {
-		logger.Error("%v", err)
+		log.Error("staging files: failed", "err", err)
 		return exitWith(1)
 	}
 
 	// Display errors for individual files
 	for _, e := range result.Errors {
-		logger.Error("%v", e)
+		log.Error("staging a file: failed", "err", e)
 	}
 
 	// Display success message if any files were added.
@@ -45,14 +46,14 @@ func runAdd(cmd *cobra.Command, args []string) error {
 	if len(result.Added) > 0 {
 		statuses, err := overlay.StagedStatus(ctx, appCtx.Config)
 		if err != nil {
-			logger.Error("getting status: %v", err)
+			log.Error("getting status: failed", "err", err)
 			return exitWith(1)
 		}
 		// Plain text, by the same call runStatus documents at length: the library
 		// composes what was staged, this command shows it, and nothing here
 		// re-applies the colour overlay.FormatStatus used to decide for it
 		// (S046-R5.2).
-		logger.Info("%s", overlay.FormatStatus(statuses))
+		uiInfo(overlay.FormatStatus(statuses))
 	}
 
 	// Exit with error if there were any failures

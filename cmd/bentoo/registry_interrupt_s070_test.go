@@ -223,7 +223,7 @@ func TestS070CompareUnknownRepositoryStillReportsNotFound(t *testing.T) {
 	if killed || code != 1 {
 		t.Errorf("bentoo %s exited %d (killed=%v), want 1:\n%s", strings.Join(args, " "), code, killed, out)
 	}
-	if want := "Repository 'nosuchrepo' not found."; !strings.Contains(out, want) {
+	if want := `msg="Repository not found." repository=nosuchrepo`; !strings.Contains(out, want) {
 		t.Errorf("output does not say %q:\n%s", want, out)
 	}
 	if want := "Registry repositories:"; !strings.Contains(out, want) {

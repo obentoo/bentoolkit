@@ -179,7 +179,7 @@ func TestResolveGentooProvider_SuccessAPIOnly(t *testing.T) {
 
 	cfg := configWithGentooGitHub()
 
-	prov, err := resolveGentooProvider(t.Context(), cfg)
+	prov, err := resolveGentooProvider(t.Context(), discardLog(), cfg)
 	if err != nil {
 		t.Fatalf("resolveGentooProvider: unexpected error: %v", err)
 	}

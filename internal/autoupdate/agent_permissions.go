@@ -3,12 +3,14 @@ package autoupdate
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -243,11 +245,12 @@ func upstreamURLsIn(text string) []string {
 // de-duplicated and sorted so the argv is stable (S051-R3.3).
 //
 // A URL that does not parse, uses another scheme, or whose host is not a
-// lowercase DNS name after lowercasing, or is an IPv4 literal (S051-R3.9), is left out with one warning naming pkg
-// and the rejected value quoted with %q (S051-R3.6). A trailing dot is not
+// lowercase DNS name after lowercasing, or is an IPv4 literal (S051-R3.9), is left out with one warning to log naming pkg
+// and the rejected value in attributes (S051-R3.6); nil log discards it. A trailing dot is not
 // trimmed: `example.com.` is rejected like any other non-DNS spelling, so the
 // host a rule names is always the one the operator can read in packages.toml.
-func upstreamHosts(pkg string, urls ...string) []string {
+func upstreamHosts(log *slog.Logger, pkg string, urls ...string) []string {
+	log = logging.OrDiscard(log)
 	set := make(map[string]struct{}, len(urls)+len(agentFixedHosts))
 	for _, h := range agentFixedHosts {
 		set[h] = struct{}{}
@@ -255,16 +258,16 @@ func upstreamHosts(pkg string, urls ...string) []string {
 	for _, raw := range urls {
 		u, err := url.Parse(raw)
 		if err != nil {
-			warnLogf("agent hosts for %s: rejected URL %q: %v", pkg, raw, err)
+			log.Warn("agent hosts: rejected URL", "package", pkg, "url", raw, "err", err)
 			continue
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
-			warnLogf("agent hosts for %s: rejected URL %q: scheme %q is not http or https", pkg, raw, u.Scheme)
+			log.Warn("agent hosts: rejected URL: scheme is not http or https", "package", pkg, "url", raw, "scheme", u.Scheme)
 			continue
 		}
 		host := strings.ToLower(u.Hostname())
 		if err := checkWebFetchHost(host); err != nil {
-			warnLogf("agent hosts for %s: rejected host %q: %v", pkg, host, err)
+			log.Warn("agent hosts: rejected host", "package", pkg, "host", host, "err", err)
 			continue
 		}
 		set[host] = struct{}{}

@@ -80,7 +80,7 @@ func TestValidatePackageConfigAcceptsAPinlessRegistryAtScale(t *testing.T) {
 		if pc.Version != "" {
 			t.Fatalf("fixture is meant to be pinless, but %s carries %q", key, pc.Version)
 		}
-		if err := ValidatePackageConfig(key, &pc); err != nil {
+		if err := ValidatePackageConfig(nil, key, &pc); err != nil {
 			t.Errorf("pinless record %s must validate: %v", key, err)
 		}
 	}

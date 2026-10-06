@@ -90,7 +90,7 @@ func s058AutoupdateRows() []s058Row {
 		{name: "--fix without --lint", args: []string{"overlay", "autoupdate", "--fix"}, want: 1, once: "--fix repairs what --lint reports"},
 		{name: "--except without --mark-auto-disabled", args: []string{"overlay", "autoupdate", "--except", "app-misc/foo"}, want: 1, once: "--except names the entries --mark-auto-disabled must not stamp"},
 		{name: "--concurrency 0", args: []string{"overlay", "autoupdate", "--concurrency", "0"}, want: 1, once: "--concurrency must be in range [1, 100], got 0"},
-		{name: "--only with an unknown type", args: []string{"overlay", "autoupdate", "--only", "weird"}, want: 1, once: `--only must be "bin" or "source", got "weird"`},
+		{name: "--only with an unknown type", args: []string{"overlay", "autoupdate", "--only", "weird"}, want: 1, once: `err="--only must be \"bin\" or \"source\", got \"weird\""`},
 		{name: "--lint with findings", args: []string{"overlay", "autoupdate", "--lint"}, setup: s058Registry(s058StrandedBannerRegistry), want: 1, once: "issue(s)", after: s058LockGone},
 		{name: "--lint on a clean registry", args: []string{"overlay", "autoupdate", "--lint"}, setup: s058Registry(s058CleanRegistry), want: 0, after: s058LockGone},
 		{name: "--lint with no registry", args: []string{"overlay", "autoupdate", "--lint"}, want: 1, after: s058LockGone},

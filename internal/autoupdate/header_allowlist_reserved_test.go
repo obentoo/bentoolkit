@@ -46,7 +46,7 @@ func TestSubstituteEnvVars_ReservedBentooSecretsStayLiteral(t *testing.T) {
 			t.Setenv(name, secret)
 
 			ref := "${" + name + "}"
-			got := SubstituteEnvVars("Bearer "+ref, "Authorization")
+			got := SubstituteEnvVars(lc.logger(), "Bearer "+ref, "Authorization")
 
 			if got != "Bearer "+ref {
 				t.Errorf("SubstituteEnvVars expanded %s: got %q, want the literal %q", name, got, "Bearer "+ref)
@@ -91,7 +91,7 @@ func TestSubstituteEnvVars_ReservedBentooSecretsStayLiteral(t *testing.T) {
 			lc := captureWarnLogs(t)
 			t.Setenv(name, "ordinary-value")
 
-			got := SubstituteEnvVars("Bearer ${"+name+"}", "Authorization")
+			got := SubstituteEnvVars(lc.logger(), "Bearer ${"+name+"}", "Authorization")
 			if got != "Bearer ordinary-value" {
 				t.Errorf("got %q, want %q — %s is not one of bentoolkit's own secrets", got, "Bearer ordinary-value", name)
 			}

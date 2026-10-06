@@ -143,7 +143,7 @@ func TestLintFixFixtureReparsesIdentically(t *testing.T) {
 	}
 	for pkg, cfg := range after.Packages {
 		c := cfg
-		if err := ValidatePackageConfig(pkg, &c); err != nil {
+		if err := ValidatePackageConfig(nil, pkg, &c); err != nil {
 			t.Errorf("record %q fails validation after the repair: %v", pkg, err)
 		}
 	}
@@ -191,7 +191,7 @@ func TestLintFixFixtureIsIdempotent(t *testing.T) {
 		t.Fatalf("write: %v", err)
 	}
 
-	issues, err := LintPackagesConfig(overlay)
+	issues, err := LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("lint after the repair: %v", err)
 	}

@@ -25,9 +25,9 @@ import (
 func TestNewConfiguredRegistryFixer_NonClaudeReturnsTrueNil(t *testing.T) {
 	for _, provider := range []string{"", "claude", "ollama", "bogus"} {
 		t.Run("provider="+provider, func(t *testing.T) {
-			f, err := newConfiguredRegistryFixer(config.LLMConfig{Provider: provider})
+			f, err := newConfiguredRegistryFixer(discardLog(), config.LLMConfig{Provider: provider})
 			if err != nil {
-				t.Fatalf("newConfiguredRegistryFixer(%q): unexpected error %v", provider, err)
+				t.Fatalf("newConfiguredRegistryFixer(discardLog(), %q): unexpected error %v", provider, err)
 			}
 			// Interface-level nil: must be a TRUE nil, not a boxed nil pointer.
 			if f != nil {
