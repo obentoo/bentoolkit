@@ -17,22 +17,15 @@ import (
 // what to call it in the report, how deep to go, and where a failed run's log is
 // kept.
 //
-// # Key and Version are the REPORT's names, not the build's
+// Key and Version are the REPORT's names, not the build's: Portage stamps its
+// errors with the STAGING repository's name, a repository the operator never
+// created, and those errors are re-labelled to Key and Version before they reach
+// a report.
 //
-// The build reads the staged tree, and Portage will stamp its own errors with
-// the STAGING repository's name — a repository the operator never created. Key
-// and Version are what those errors are re-labelled to before any of it reaches
-// a report (D13). They are therefore not decoration: without them this package
-// could only quote Portage, and quoting Portage here means showing somebody a
-// repository they have never heard of.
-//
-// # RequireIsolation is honoured by the isolation policy below
-//
-// It is read by RunBuildGates itself: with isolation required and unavailable,
-// NOTHING IS SPAWNED and every covered gate reports SKIPPED naming why. A flag
-// that a caller can set and no code reads is worse than an absent flag — the
-// operator believes a build was refused when it in fact ran — so the policy and
-// the field land together.
+// RequireIsolation is read by RunBuildGates itself: with isolation required and
+// unavailable, NOTHING IS SPAWNED and every covered gate reports SKIPPED naming
+// why. A flag no code reads would leave the operator believing a build was
+// refused when it in fact ran.
 type BuildRequest struct {
 	// StagedRoot is the staged repository Stage produced — the repo root, the
 	// directory holding profiles/ and the candidate's category directory. It is
@@ -54,41 +47,30 @@ type BuildRequest struct {
 	// consumed by the isolation policy rather than by the phase derivation.
 	RequireIsolation bool
 
-	// LogDir is where a FAILED run's log is retained (R5.1, R6.5). An empty
+	// LogDir is where a FAILED run's log is retained. An empty
 	// LogDir retains nothing and says so in the gate's reason, because a log
 	// nobody was told about is a log nobody will read.
 	LogDir string
 
 	// Distdir is the directory this run resolved for the build's archives. It is
-	// SET on the child as DISTDIR when it is non-empty (R3.1).
+	// SET on the child as DISTDIR when it is non-empty.
 	//
-	// # It is a COMPUTED input, and that distinction is the whole point
+	// It is a COMPUTED input — resolved BY this run, from --distdir or from the
+	// private directory an apply's own manifest step filled — so it is assigned
+	// explicitly rather than admitted through allowedBuildEnv, which filters the
+	// PARENT's environment. When DISTDIR sat on that allow-list the gate ran
+	// against whatever distdir the operator's shell named, and --distdir never
+	// reached the fetch. The allow-list keeps meaning one thing: NOTHING crosses
+	// in from outside.
 	//
-	// Every other variable the child carries is FILTERED OUT OF THE PARENT'S:
-	// allowedBuildEnv reads os.Environ() and lets an allow-listed set through, so
-	// that something exported in the invoking shell cannot reach a build whose
-	// verdict is then read as a statement about the ebuild. DISTDIR used to be on
-	// that list, which reads as "we pass it" and in fact meant "we let the
-	// SHELL's value through, if it had one": the gate ran against whatever
-	// distdir the operator's terminal happened to name, and the value they
-	// resolved with --distdir reached the fetch not at all.
-	//
-	// This field is the other kind of value entirely. It is resolved BY this run
-	// — from --distdir, or from the private directory an apply's own manifest
-	// step filled — so it travels as a request field and is assigned explicitly,
-	// rather than being admitted through a widened allow-list. The allow-list
-	// then keeps meaning exactly one thing, which is what makes it worth having:
-	// NOTHING crosses in from outside.
-	//
-	// EMPTY RESOLVES TO NOTHING (R3.2). No DISTDIR is set and none is invented,
-	// so the child's environment is left precisely as the allow-list built it and
-	// Portage answers from its own configuration — which is the honest answer for
-	// a run that resolved no directory of its own.
+	// EMPTY RESOLVES TO NOTHING. No DISTDIR is set and none is invented, so
+	// Portage answers from its own configuration — the honest answer for a run
+	// that resolved no directory of its own.
 	Distdir string
 }
 
 // The phase markers `ebuild` prints, START and DONE for each phase, measured on
-// the maintainer's host (design M-A). They are written out as constants because
+// the maintainer's host. They are written out as constants because
 // they are the entire evidence this file reasons from: a marker that drifts is
 // not a cosmetic change, it is every gate silently reporting "no evidence".
 //
@@ -110,23 +92,14 @@ const (
 	// ">>> Install" would also match a hypothetical ">>> Installing", and with
 	// the package name baked in it would match nothing at all.
 	//
-	// Read from the Portage installed on the maintainer's host rather than
-	// guessed, so a future reader can re-verify instead of trusting:
-	// /usr/lib/portage/python3.14/phase-functions.sh:636 prints
+	// Source: /usr/lib/portage/python3.14/phase-functions.sh:636 prints
 	// `>>> Install ${CATEGORY}/${PF} into ${D}` and :654 prints
-	// `>>> Completed installing ${CATEGORY}/${PF} into ${D}`. Both go through
-	// __vecho, which suppresses them under __quiet_mode — which is why this
-	// gate must keep passing no --quiet.
-	//
-	// # PORTAGE_QUIET IS reachable, and the gate is safe anyway
-	//
-	// Do not read the allow-list as a guard here: buildEnvAllows admits the
-	// whole PORTAGE_ family BY PREFIX, so an operator who exported
-	// PORTAGE_QUIET does reach the child and does suppress these lines. What
-	// that buys is not a false green. With the markers gone, completed() never
-	// sees the done marker, derive() takes its default branch, and the gate
-	// reports SKIPPED quoting the line it needed. Underivable, never PASS
-	// (S042-D5, R2.4).
+	// `>>> Completed installing ${CATEGORY}/${PF} into ${D}`, both through
+	// __vecho, which suppresses them under __quiet_mode — so this gate must keep
+	// passing no --quiet. An exported PORTAGE_QUIET does reach the child (the
+	// PORTAGE_ prefix is allow-listed) and does suppress them, but that yields no
+	// false green: completed() never sees the done marker, derive() takes its
+	// default branch, and the gate reports SKIPPED quoting the line it needed.
 	markerStartInstall = ">>> Install "
 	markerDoneInstall  = ">>> Completed installing "
 )
@@ -135,26 +108,20 @@ const (
 // had BEGUN — that the run got as far as the first phase the ebuild itself
 // drives.
 //
-// It is exported for one caller: the applier's build-fix gate, which has to
-// decide whether a failed build is the ebuild's fault before it is allowed to
-// hand it to an agent (S033-R8.5, design D6). That gate asks the question this
-// package already answers, and it asks it HERE rather than grepping for the
-// marker itself, because a marker spelled in two packages is a marker that can
-// drift in one of them — and the drift would be silent in both directions.
+// It is exported for the applier's build-fix gate, which must decide whether a
+// failed build is the ebuild's fault before handing it to an agent. It asks
+// HERE rather than grepping for the marker itself, so the marker is spelled in
+// one package and cannot drift silently.
 //
-// The predicate is deliberately the START of prepare and not `>>> Source
-// prepared.`, because design D6 states the rule as "a failure before
-// `>>> Source prepared.` — IN SETUP OR UNPACK — is a host or distfile fault;
-// from `prepare` onward it is the ebuild's". A patch that no longer applies
-// fails BETWEEN the two markers, and it is the ebuild's fault: derive() above
-// already reports exactly that (a phase that started and never finished is where
-// the bump died, so the patches gate reads FAILED, not SKIPPED). Keying the gate
-// on the DONE marker instead would refuse a repair for the single most common
-// breakage a version bump produces.
+// The predicate is the START of prepare, not `>>> Source prepared.`: a failure
+// in setup or unpack is a host or distfile fault, from prepare onward it is the
+// ebuild's. A patch that no longer applies fails BETWEEN the two markers and is
+// the ebuild's fault (derive() reports the patches gate FAILED), so keying on
+// the DONE marker would refuse a repair for the most common bump breakage.
 //
-// The transcript is read with ANSI escapes removed, for the reason stripANSI
-// gives: Portage colours these markers whenever a terminal is attached, and the
-// applier's compile gate attaches a real one (S010-R4.1).
+// The transcript is read with ANSI escapes removed (see stripANSI): Portage
+// colours these markers whenever a terminal is attached, and the applier's
+// compile gate attaches a real one.
 func SourcePrepareStarted(transcript string) bool {
 	return strings.Contains(stripANSI(transcript), markerStartPrepare)
 }
@@ -170,50 +137,33 @@ const excerptLines = 12
 // reason into a page. The COUNT is always exact.
 const patchNamesShown = 6
 
-// labelUnverifiedIsolation is story 031's OWN wording for a pass that ran
-// without a proven network namespace, reused verbatim rather than reworded
-// (R6.6). The applier prints it as `Compile: PASS (unverified isolation)` and the
+// labelUnverifiedIsolation is the applier's own wording for a pass that ran
+// without a proven network namespace, reused verbatim rather than reworded. The
+// applier prints it as `Compile: PASS (unverified isolation)` and the
 // --require-isolation flag's help text quotes it; a second phrasing here would
 // have one tool describe the same fidelity two ways, and an operator grepping a
 // sweep for the weaker passes would find half of them.
 const labelUnverifiedIsolation = "unverified isolation"
 
 // buildEnvAllowed is the whole set of environment variables that crosses into
-// the build child by NAME (R6.3), and buildEnvAllowedPrefix the one family that
-// crosses by prefix.
+// the build child by NAME, and buildEnvAllowedPrefix the one family that crosses
+// by prefix.
 //
-// # Why an allow-list and not a deny-list
-//
-// The evidence is concrete: a stray variable exported in an interactive shell
-// broke a configure inside `emerge`. A deny-list can only remove the variables
-// somebody already knew to name, so the next stray one gets through and the gate
-// reports a FAILED that the operator's shell manufactured — the exact class of
-// wrong answer this whole story exists to remove. An allow-list fails the other
-// way: a variable the build genuinely needed is missing, which shows up as a
-// reproducible failure on every host rather than as one machine's mystery.
-//
-// Each entry earns its place. PATH finds the toolchain; HOME is where Portage
-// and the compilers put their caches; TERM keeps the child's output legible when
-// it is attached to a real terminal; PORTAGE_* carries the whole staged-build
-// configuration, PORTAGE_TMPDIR and PORTAGE_REPOSITORIES above all; FEATURES and
-// MAKEOPTS are the two knobs an operator legitimately overrides per run.
-//
-// # DISTDIR is NOT here, and its ABSENCE is what makes the distdir trustworthy
-//
-// It was here, and what the entry actually did was let the INVOKING SHELL's
-// DISTDIR through — this list filters the PARENT's environment, it never passes
-// anything of ours. The directory a run resolves is now set explicitly on the
-// child instead (BuildRequest.Distdir, assigned in RunBuildGates), which makes
-// the computed value the ONLY source of DISTDIR and leaves the parent unable to
-// influence it at all. Keeping the name on the list as well would put the
-// shell's value into the same environment as the computed one and leave
-// exec.Cmd's duplicate-key behaviour to choose between them: a decision nobody
-// made, written down nowhere, and not the one an operator who typed --distdir is
-// expecting (R3.3).
-//
-// Nothing here is a secret, and that is deliberate: an allow-list is also the
-// mechanism that keeps a token exported in the invoking shell out of a child
+// An allow-list, not a deny-list: a stray variable exported in an interactive
+// shell once broke a configure inside `emerge`. A deny-list removes only the
+// variables somebody knew to name, so the next stray one makes the gate report a
+// FAILED the operator's shell manufactured; an allow-list fails reproducibly on
+// every host instead. It also keeps a token exported in the shell out of a child
 // whose log this package retains on disk.
+//
+// PATH finds the toolchain; HOME holds Portage's and the compilers' caches; TERM
+// keeps attached output legible; PORTAGE_* carries the staged-build
+// configuration (PORTAGE_TMPDIR, PORTAGE_REPOSITORIES); FEATURES and MAKEOPTS
+// are the two knobs an operator legitimately overrides per run.
+//
+// DISTDIR is NOT here: the list filters the PARENT's environment, so listing it
+// would let the invoking shell's value compete with BuildRequest.Distdir and
+// leave exec.Cmd's duplicate-key behaviour to choose between them.
 var buildEnvAllowed = []string{"PATH", "HOME", "TERM", "FEATURES", "MAKEOPTS"}
 
 // buildEnvAllowedPrefix is the family that crosses whole: every variable Portage
@@ -226,79 +176,25 @@ const buildEnvAllowedPrefix = "PORTAGE_"
 // name different tools on one host.
 var privilegeTools = []string{"doas", "sudo"}
 
-// RunBuildGates runs the staged candidate's build phases ONCE and reports the
-// patches, configure and compile gates from that single run (R4, R5, R6).
+// RunBuildGates runs the staged candidate's build phases ONCE and reports every
+// build gate the depth covers from that single run.
 //
-// # One invocation, three gates (D4)
+// It invokes the DEEPEST phase the depth requires exactly once and derives every
+// shallower gate from the markers `ebuild` prints: the patch gate passes at
+// `>>> Source prepared.` (src_prepare applies the patches the way the build
+// will), the configure gate at `>>> Source configured.`, the compile gate on a
+// zero exit. A failure is attributed to the last phase that STARTED; a run that
+// dies before prepare finished proved nothing about the patches and reports
+// SKIPPED. Every covered gate carries its own outcome, never silence.
 //
-// `ebuild <path> clean configure` runs setup, unpack, prepare AND configure, and
-// prints a marker as each one starts and finishes. Running a patches gate and
-// then a configure gate as two invocations would unpack the same 6 MB tarball
-// twice and learn nothing the first run had not already printed. So this invokes
-// the DEEPEST phase the depth requires, exactly once, and derives every
-// shallower gate from the markers: the patch gate passes at
-// `>>> Source prepared.`, the configure gate at `>>> Source configured.`, and
-// the compile gate on a zero exit.
+// The build runs AS THE INVOKING USER, with an allow-listed environment (see
+// buildEnvAllowed): escalation would stop a sweep at a password prompt. When
+// isolation is REQUIRED and unavailable nothing is spawned and every gate
+// reports SKIPPED; otherwise every PASS says `unverified isolation`.
 //
-// D4 also settles what the "patches gate" IS. Story 031 deferred it because
-// `patch --dry-run` needs an unpacked tree, which the static gate existed to
-// avoid; here the tree is unpacked anyway, and src_prepare is a strictly better
-// test — it applies the patches the way the build will, in the ebuild's own
-// order, through eapply/eapply_user.
-//
-// # A failure attributes itself to the last phase that STARTED
-//
-// A run that dies before `>>> Source prepared.` has proved nothing about the
-// patches: it is a host or distfile fault (design D6), so that gate reports
-// SKIPPED naming the phase, because PASS and FAILED would both be lies in
-// opposite directions. A run that dies after prepare finished but inside
-// configure blames configure alone, so the operator is not sent to the wrong
-// file.
-//
-// # Every gate carries its own outcome
-//
-// There is no path out of here that reports nothing for a gate the depth
-// covered. Applier.runCompile returns ("", nil) when it declines to build, and a
-// caller cannot tell that from a pass — that silence is the defect this package
-// exists to remove, and it is deliberately not reproduced.
-//
-// # Unprivileged, allow-listed, and honest about the isolation it had
-//
-// The build runs AS THE INVOKING USER (R6.1). Measured on the maintainer's host
-// (design M-B): membership in `portage` carries the whole unpack → prepare →
-// configure cycle, and `sudo -n` on that same host answers "interactive
-// authentication is required". So escalation is not the safety it looks like —
-// it is a sweep that stops at a password prompt at three in the morning.
-//
-// The one thing privilege would buy is a network namespace, and this gate does
-// not buy it: when isolation is REQUIRED and the probe cannot create one, no
-// process is spawned at all and every covered gate reports SKIPPED naming the
-// reason (R6.2). When it is not required — the default, unmoved from story 031
-// (R6.6, D11) — the build runs and every PASS says out loud that it ran with
-// `unverified isolation`.
-//
-// The child's environment is an allow-list rather than the operator's shell
-// (R6.3); see buildEnvAllowed for what crosses and why.
-//
-// # The error return is about the REQUEST, never about the build
-//
-// A build that fails is a reported outcome, not an aborted run: it returns gates
-// and a nil error. The error is reserved for a request that cannot be attempted
-// at all — a malformed atom, no version, no staged tree — because those are a
-// caller's bug and reporting them as a failed bump would blame the ebuild for
-// them. A host that simply has no `ebuild` is neither: it is reported as every
-// covered gate SKIPPED, naming why.
-//
-// # What is deliberately not checked
-//
-// The staged tree is not stat'ed. Stage already returned it, and `ebuild`'s own
-// error is better than a duplicate check — it names the file it wanted. A tree
-// that is not there fails before any phase marker, which the attribution rule
-// above already renders as SKIPPED rather than as a verdict on the bump.
-//
-// There is also no timeout: a legitimate compile can run for hours, and a bound
-// that fired would report a failure this host manufactured. The caller's context
-// governs, exactly as it does for a signal.
+// The error is about the REQUEST (a malformed atom, no version, no staged
+// tree), never the build: a failed build, or a host with no `ebuild`, returns
+// gates and a nil error. No timeout: a legitimate compile can run for hours.
 func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]GateResult, error) {
 	phase, runs := deepestPhaseFor(req.Depth)
 	if !runs {
@@ -315,7 +211,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// malformed atom must fail as a malformed atom rather than as an `ebuild`
 	// invocation pointed somewhere unintended. splitContentAtom, because this
 	// split names the candidate INSIDE the staged repository — Stage writes that
-	// content from the suffix-stripped key (design D4, role B), so a registry
+	// content from the suffix-stripped key (role B), so a registry
 	// key's ":slot" or "@label" reaching the path handed to `ebuild` below would
 	// name a file that was never staged.
 	category, pkg, err := splitContentAtom(atom)
@@ -325,7 +221,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		return nil, fmt.Errorf("running the build gates: %w", err)
 	}
 	// Role A's half of the same key: the staged repository's NAME was written
-	// from the SUFFIXED package (stage.go, R5.4), so the recomputing fallback in
+	// from the SUFFIXED package (stage.go), so the recomputing fallback in
 	// stagedRepoNameAt must be handed the same one — a clean package here would
 	// have a tree missing its repo_name file resolve under a name Stage never
 	// wrote. splitStagedAtom words its errors for Stage, hence the same wrap.
@@ -340,18 +236,18 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		return nil, fmt.Errorf("running the build gates for %s-%s: no staged tree given to build from", atom, version)
 	}
 
-	// label.pv keeps the FULL key: it is the report's name for the operator
-	// (D13), who knows the bump by its registry spelling, suffix and all.
+	// label.pv keeps the FULL key: it is the report's name for the operator,
+	// who knows the bump by its registry spelling, suffix and all.
 	label := reportLabel{pv: atom + "-" + version, stagedRepo: stagedRepoNameAt(stagedRoot, suffixedPkg, version)}
 
-	// Measured BEFORE anything is looked up or spawned, exactly where story 031
-	// put it: a build --require-isolation will refuse must not first cost this
-	// host a lookup, a fetch or a question. The answer is needed on both paths —
+	// Measured BEFORE anything is looked up or spawned: a build
+	// --require-isolation will refuse must not first cost this host a lookup, a
+	// fetch or a question. The answer is needed on both paths —
 	// it refuses the run on one and labels the pass on the other.
 	isolated, isolationReason := deps.isolationProbe()()
 	if !isolated && req.RequireIsolation {
 		refused := isolationRefusedReason(label.pv, isolationReason, availablePrivilegeTool(deps.binaryLookup()))
-		// DeclineHost (S039-R2.1): an isolation refusal is this machine saying it
+		// DeclineHost: an isolation refusal is this machine saying it
 		// has no privilege to build under the conditions the caller demanded. It
 		// is not a fact about the candidate, so it must not withdraw the bump.
 		return declinedGates(req.Depth, label.clean(refused), DeclineHost), nil
@@ -369,7 +265,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	}
 
 	// `ebuild` is invoked DIRECTLY, as the user who started the sweep — no sudo,
-	// no doas (R6.1). Measured (design M-B): membership in `portage` is enough
+	// no doas. Measured: membership in `portage` is enough
 	// for the whole unpack → prepare → configure cycle, while `sudo -n` on that
 	// same host answers "interactive authentication is required". So escalating
 	// would not buy a build that works, it would buy a sweep that stops at a
@@ -377,19 +273,19 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	//
 	// `ebuild` discovers the repository from the path it is given and from its
 	// working directory, so Dir is what decides which tree is built: the staged
-	// one, never the published overlay (R3.2).
+	// one, never the published overlay.
 	cmd := deps.commandFactory()(ctx, "ebuild",
 		filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild"), "clean", phase.String())
 	cmd.Dir = stagedRoot
 
-	// S054-R3.1. The build runs in its OWN process group, so a cancelled
+	// The build runs in its OWN process group, so a cancelled
 	// context stops all of it — make, gcc and every helper that inherited the
 	// output pipe — and not `ebuild` alone, whose orphans held that pipe open and
 	// kept this call blocked until the last of them finished. procgroup.Group sets
 	// cmd.Cancel, which os/exec accepts only on a command exec.CommandContext
 	// built: the shape commandFactory's signature already promises.
 	//
-	// S054-R3.2. Leaving the terminal's foreground group has a price: a child that
+	// Leaving the terminal's foreground group has a price: a child that
 	// reads the terminal from a background group is stopped by SIGTTIN, and a
 	// build stopped that way never ends. So its standard input is EMPTY and
 	// `ebuild` reads EOF at once. It is an empty reader rather than nil because
@@ -398,7 +294,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	procgroup.Group(cmd)
 	cmd.Stdin = strings.NewReader("")
 
-	// R6.3. Set HERE rather than left to the runner, because a nil cmd.Env means
+	// Set HERE rather than left to the runner, because a nil cmd.Env means
 	// "inherit os.Environ() wholesale" — the allow-list has to be installed on the
 	// command itself or it is not installed at all. It also survives a runner that
 	// rebinds the child's streams, which is what the TUI's RunAttached does
@@ -407,8 +303,8 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// gets.
 	cmd.Env = allowedBuildEnv(os.Environ())
 
-	// R3.1, and it is applied to the INSTALL PHASE ONLY — that narrowness IS
-	// R6.1 (S042-D3).
+	// src_test is disabled for the INSTALL PHASE ONLY, so that runs which do not
+	// ask for that rung keep their environment.
 	//
 	// src_test runs between compile and install, so a -test imposed on a
 	// patches, configure or compile run subtracts a feature that phase would
@@ -422,14 +318,14 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 		cmd.Env = withSrcTestDisabled(cmd.Env)
 	}
 
-	// R3.1. The resolved distdir is ASSIGNED, not allow-listed, and the two are
+	// The resolved distdir is ASSIGNED, not allow-listed, and the two are
 	// different mechanisms on purpose: the filter above exists so the parent's
 	// environment cannot leak in, while this is an input THIS RUN computed. With
 	// DISTDIR off buildEnvAllowed, the line below is the single source of the
 	// variable — the child gets the directory the operator resolved, and the
 	// invoking shell's own DISTDIR cannot compete with it.
 	//
-	// Empty resolves to NOTHING (R3.2): no assignment, no invented default, the
+	// Empty resolves to NOTHING: no assignment, no invented default, the
 	// environment left exactly as the allow-list built it. Appending
 	// `DISTDIR=` instead would point the fetch at the process's working
 	// directory, which is a value this package made up.
@@ -440,40 +336,23 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	output, runErr := deps.attachedRunner()(cmd)
 	// Group mode sets WaitDelay, so a build that exited 0 while a helper it left
 	// behind still held the output pipe comes back as exec.ErrWaitDelay. That is
-	// a success, and procgroup.Result says so (S054-R1.5); every other error
-	// stays.
+	// a success, and procgroup.Result says so; every other error stays.
 	runErr = procgroup.Result(cmd, runErr)
 
 	// An interrupted run is not a verdict on the ebuild — and it is not a SKIP
-	// either. IT IS AN ERROR, and the distinction is the whole of this comment.
+	// either. IT IS AN ERROR.
 	//
-	// The child is spawned through CommandContext in group mode, so a cancelled
-	// context STOPS it — SIGTERM to its whole group, SIGKILL to whatever is left
-	// after procgroup.GracePeriod: runErr becomes `signal: terminated` or
-	// `signal: killed`, and derive's attribution rule — the
-	// phase started and the run failed, therefore this is where the bump died —
-	// reports FAILED with error-severity findings. The operator pressed Ctrl-C
-	// and was told their ebuild is broken.
+	// A cancelled context kills the child's group, and derive's attribution rule
+	// would then report FAILED: the operator pressed Ctrl-C and was told their
+	// ebuild is broken. Returning SkippedGates is worse: PromotionDecision
+	// promotes on PASS-or-SKIPPED, so an interrupted `--apply --depth=compile`
+	// would PUBLISH the bump. Every gate list is a statement about the candidate,
+	// and there is nothing to state.
 	//
-	// THE FIRST ATTEMPT AT THIS RETURNED SkippedGates, AND THAT WAS WORSE THAN
-	// THE BUG IT FIXED. PromotionDecision (stage.go) promotes on a list of
-	// PASS-or-SKIPPED: an interrupted `overlay autoupdate --apply --depth=compile`
-	// would then PUBLISH the bump — into an overlay that auto-commits and pushes
-	// — on the strength of gates that were killed mid-build. Reporting FAILED at
-	// least refused it. A gate list is the wrong shape for this answer entirely,
-	// because every shape it can take is a statement about the candidate, and
-	// there is nothing to state.
-	//
-	// So the error travels. Each of the three drivers already treats a non-nil
-	// error here as "this could not be attempted": the applier fails the apply
-	// rather than promoting, realign's Prove returns without a verdict, and
-	// validate's Run aborts the sweep. None of them can publish on it. The
-	// context error is wrapped so a caller can still recognise the cause with
-	// errors.Is rather than by matching this sentence.
-	//
-	// The retained log is deliberately still written: a partial transcript of an
-	// interrupted compile is evidence someone may want, and refusing to keep it
-	// would make the interruption cost more than it has to.
+	// So the error travels, wrapped for errors.Is. The applier fails the apply,
+	// realign's Prove returns without a verdict, and validate's Run aborts the
+	// sweep; none can publish on it. The retained log is still written: a partial
+	// transcript of an interrupted compile is evidence someone may want.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		note := retainedLogNote(req.LogDir, atom, version, output)
 		return nil, fmt.Errorf("the run was interrupted while %s was building, so no phase reached a verdict "+
@@ -485,7 +364,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// escapes around the very bullets and markers every gate below greps for; a
 	// tracer that missed them would report "no evidence" for a perfectly good
 	// build. The retained bytes stay exactly as the child produced them — see
-	// reportLabel for the same report/evidence asymmetry stated for D13.
+	// reportLabel for the same report/evidence asymmetry.
 	transcript := stripANSI(string(output))
 	run := buildRun{
 		label:        label,
@@ -538,7 +417,7 @@ func eachBuildGate(d Depth, visit func(gate string, phase buildPhase)) {
 }
 
 // allowedBuildEnv is the environment the build child receives: the allow-listed
-// variables of the parent's, and nothing else (R6.3).
+// variables of the parent's, and nothing else.
 //
 // It NEVER returns nil, and that is the whole contract. os/exec reads a nil Env
 // as "inherit the parent's", so a filter that returned nil on a host where none
@@ -561,25 +440,18 @@ func allowedBuildEnv(parent []string) []string {
 }
 
 // withSrcTestDisabled returns env with src_test subtracted from FEATURES, as
-// exactly ONE assignment (R3.1, R3.3).
+// exactly ONE assignment.
 //
-// # Why the value is composed and not appended as a second entry
+// The value is composed rather than appended as a second entry: allowedBuildEnv
+// may already have placed a FEATURES entry, and two would leave exec.Cmd's
+// duplicate-key behaviour to choose between them.
 //
-// allowedBuildEnv may already have placed a FEATURES entry here. Adding a second
-// would leave exec.Cmd's duplicate-key behaviour to choose between them, which
-// is precisely the hazard documented above as the reason DISTDIR came off the
-// allow-list: a decision nobody made, written down nowhere.
-//
-// # Why appending ` -test` SUBTRACTS rather than overwrites
-//
-// FEATURES is INCREMENTAL, measured on the maintainer's host rather than assumed
-// (S042-M3): 42 features at baseline, and FEATURES="-userpriv" yields 41 with
-// only that one gone. So this preserves sandbox, network-sandbox, userpriv,
-// ccache and everything else the host configured (R3.2) and removes one thing.
-//
-// The measurement was taken against a feature the host actually HAS, because
-// this host does not carry `test` (S042-M4) and a -test that removed nothing
-// would have proved nothing.
+// Appending ` -test` SUBTRACTS rather than overwrites because FEATURES is
+// INCREMENTAL — measured on the maintainer's host: 42 features at baseline, and
+// FEATURES="-userpriv" yields 41 with only that one gone (measured against a
+// feature the host HAS, since it does not carry `test`). So sandbox,
+// network-sandbox, userpriv, ccache and the rest of the host's configuration
+// survive.
 //
 // The LAST assignment is the one read, matching os/exec's own dedupEnv:
 // composing from an earlier duplicate would disable src_test in a value the
@@ -604,7 +476,7 @@ func withSrcTestDisabled(env []string) []string {
 	}
 
 	// Replaced IN THE FIRST ENTRY'S POSITION, and any further duplicate the
-	// parent carried is dropped: "exactly one" is the property R3.3 states.
+	// parent carried is dropped: the contract is "exactly one".
 	replaced := false
 	for _, kv := range env {
 		if !strings.HasPrefix(kv, key) {
@@ -631,7 +503,7 @@ func buildEnvAllows(name string) bool {
 //
 // It is asked ONLY on the path that has already decided to skip, and it is asked
 // through the LookPath seam rather than by running anything: `sudo -n` was
-// measured to PROMPT on the maintainer's host (design M-B), so a probe that ran
+// measured to PROMPT on the maintainer's host, so a probe that ran
 // it would be the very interactive stop this gate exists to avoid. What the
 // answer buys is the operator's next step — "install one" and "run this
 // attended" are different instructions — not a different outcome.
@@ -645,7 +517,7 @@ func availablePrivilegeTool(look func(name string) (string, error)) string {
 }
 
 // isolationRefusedReason is the sentence every gate carries when the run asked
-// for isolation this host cannot provide (R6.2).
+// for isolation this host cannot provide.
 //
 // It is a SKIP and never a FAILED: the ebuild was not measured and nothing about
 // it is known, so reporting a failure would blame a bump for a kernel policy.
@@ -673,30 +545,19 @@ func isolationRefusedReason(pv, probeReason, privTool string) string {
 }
 
 // IsolationFidelityNote is the sentence a PASS carries when the run happened
-// without a verified network namespace — story 031's label, applied to the build
-// gates (R6.6, D11).
+// without a verified network namespace — the applier's `unverified isolation`
+// label, applied to the build gates.
 //
-// # Why the run happens at all
+// The run happens at all because the default does not move: `unshare --net` is
+// denied to an ordinary user on the maintainer's host, so requiring isolation by
+// default would turn every build gate there into a SKIPPED. The pass is kept AND
+// qualified instead, which makes the weaker default honest rather than quiet.
+// It returns "" on a verified run, so the label stays a signal.
 //
-// The default does not move (D11): `unshare --net` is denied to an ordinary user
-// on the maintainer's host, so requiring isolation by default would turn every
-// build gate on that machine into a SKIPPED and the feature inert where it was
-// written. The pass is kept AND qualified instead, which is what makes the weaker
-// default honest rather than quiet.
-//
-// It returns "" on a verified run, so the label stays a signal: a sentence
-// printed under every gate on every host is one nobody reads.
-//
-// # It is exported because it now serves TWO callers (S040-R2.5)
-//
-// The depth-driven ladder reaches it through gateFor, below; the applier's
-// privileged `--compile` gate calls it directly, because that path already knows
-// its own exit status and routing it through gateFor would re-derive an answer it
-// was handed. What both paths must share is not the derivation but the SENTENCE:
-// one word — PASS — cannot be allowed to describe two different amounts of
-// evidence, and a copy of this text in the applier would drift the first time
-// someone reworded one of them. So there is exactly one copy, here, and a
-// rewording lands on both paths at once.
+// It is exported because the applier's privileged `--compile` gate calls it
+// directly, while the ladder reaches it through gateFor. Both paths must share
+// the SENTENCE: one word — PASS — cannot describe two amounts of evidence, and a
+// copy in the applier would drift the first time someone reworded one.
 func IsolationFidelityNote(isolated bool, probeReason string) string {
 	if isolated {
 		return ""
@@ -711,40 +572,24 @@ func IsolationFidelityNote(isolated bool, probeReason string) string {
 }
 
 // DistdirEvidenceNote is the sentence a PASS carries about the distdir the run
-// read from (R3.4).
+// read from.
 //
-// # Why a pass has to say this
+// A pass asserts hermeticity, and a reader cannot tell a distdir this run
+// enforced from the ambient one the host's own Portage configuration names
+// unless the pass SAYS which one it exported. It states the ACT, not where the
+// archives actually came from, so it can sit in front of the isolation note
+// without contradicting it: this sentence says the gate set DISTDIR, that one
+// says an unisolated build could have reached past it.
 //
-// IsolationFidelityNote, directly above, already worries in the code about "the
-// pass does not prove the sources came from DISTDIR alone". Sub-task 3.1 made
-// that directory real by exporting it on the child; a pass that does not SAY
-// which one it exported still cannot support the sentence, because a reader has
-// no way to tell a distdir this run enforced from the ambient one the host's
-// own Portage configuration names.
+// BOTH directions speak: if only the enforced case had a sentence, its absence
+// would be ambiguous between "no distdir enforced" and "this reason predates the
+// change", so the empty case says the build answered from the host's own
+// configuration.
 //
-// It states the ACT — what was exported — and not a conclusion about where the
-// archives actually came from. That distinction is what lets it sit in front of
-// the isolation note without contradicting it: this sentence says the gate set
-// DISTDIR, and that one says an unisolated build could have reached past it.
-//
-// # BOTH directions speak, and the empty one is the load-bearing half
-//
-// If only the enforced case had a sentence, its absence would be ambiguous
-// between "this run enforced no distdir" and "this reason predates the change".
-// An operator cannot read an absence, so the empty case says out loud that the
-// build answered from the host's own configuration (R3.2's honest answer, made
-// legible).
-//
-// # It is exported because it now serves TWO callers (S040-R2.5)
-//
-// Like IsolationFidelityNote above: the depth-driven ladder reaches it through
-// gateFor, and the applier's privileged `--compile` gate calls it directly for
-// the two states it shares with this path — nothing resolved, and resolved and
-// carried into the child. (Its third state, a directory the privilege tool could
-// not carry, exists only there and is worded there.) The point of the export is
-// that there is ONE copy of each sentence: a rewording of either lands on the
-// privileged and the unprivileged pass at once, instead of leaving one of them
-// quietly making the older claim.
+// It is exported, like IsolationFidelityNote, so the applier's privileged
+// `--compile` gate shares ONE copy of each sentence for the two states it shares
+// with this path. Its third state, a directory the privilege tool could not
+// carry, exists only there and is worded there.
 func DistdirEvidenceNote(distdir string) string {
 	if distdir = strings.TrimSpace(distdir); distdir == "" {
 		return "; the gate exported no DISTDIR, so the build read whatever the host's own Portage configuration names"
@@ -760,7 +605,7 @@ const (
 	// phaseSetup prints no marker of its own, so it is also what "nothing
 	// started" resolves to. Its name says both, because a failure there and a
 	// failure in unpack are the same answer to the operator: not the bump's
-	// fault (D6).
+	// fault.
 	phaseSetup buildPhase = iota
 	phaseUnpack
 	phasePrepare
@@ -769,7 +614,7 @@ const (
 
 	// phaseInstall runs src_install, which assembles the package image under
 	// ${D}. It is the deepest phase this ladder invokes: qmerge is a different
-	// activity and is out permanently (S042-D2).
+	// activity and is out permanently.
 	phaseInstall
 
 	phaseCount
@@ -801,7 +646,7 @@ func (p buildPhase) String() string {
 // THE LADDER IS CUMULATIVE, so this is the only place a depth is turned into a
 // phase: a configure-deep request runs `clean configure`, which has already run
 // prepare by the time it gets there. Asking for a shallower phase separately is
-// exactly the second invocation D4 exists to prevent.
+// exactly the second invocation the one-run design exists to prevent.
 func deepestPhaseFor(d Depth) (buildPhase, bool) {
 	switch {
 	// FIRST, because the switch reads deepest-first: a case placed below
@@ -878,9 +723,9 @@ type phaseTrace struct {
 // belongs to. Nothing started resolves to phaseSetup, whose name covers setup
 // and unpack together because setup prints no marker to tell them apart.
 func (t phaseTrace) lastStarted() buildPhase {
-	// The bound is phaseCount-1, NOT the deepest phase spelled by name. It read
-	// `phaseCompile` until story 042 added a rung above it, at which point the
-	// loop would have stopped one phase short and attributed an install failure
+	// The bound is phaseCount-1, NOT the deepest phase spelled by name. It once
+	// read `phaseCompile`, and when a rung was added above it the loop would have
+	// stopped one phase short and attributed an install failure
 	// to compile. Deriving the ceiling from the enum is what keeps the next rung
 	// from re-introducing that silently.
 	for p := phaseCount - 1; p > phaseSetup; p-- {
@@ -898,7 +743,7 @@ func (t phaseTrace) lastStarted() buildPhase {
 // the whole log for "Applying". A compile log is full of sentences, and one of
 // them saying "Applying" somewhere would otherwise turn an ebuild that applies
 // no patch into one that reports patches it never had, which is precisely the
-// distinction R4.3 asks this gate to keep.
+// distinction this gate must keep.
 func tracePhases(transcript string) phaseTrace {
 	var trace phaseTrace
 	current := phaseSetup
@@ -970,31 +815,16 @@ type buildRun struct {
 }
 
 // gateFor derives one gate's outcome from the run's markers, and is the ONE
-// place the D13 re-labelling, the isolation label and the distdir evidence are
-// applied.
+// place the staging-name re-labelling, the isolation label and the distdir
+// evidence are applied — a funnel, like Stage's single sentinel boundary, so a
+// branch added later cannot forget what it never had to remember.
 //
-// It is a funnel rather than a call in each branch for the same reason Stage
-// applies its sentinel at a single boundary: a branch added later cannot forget
-// what it never had to remember. Every reason and every finding leaves this
-// function translated, on the clean path as well as the failing one.
-//
-// # Why only a PASS is labelled
-//
-// Both labels answer an OVERCLAIM, and a pass is the only outcome that claims to
-// have proved anything.
-//
-// For the isolation label: a build that ran with the network reachable proved
-// less than one that did not (R6.6, story 031's rule). A FAILED gate is not made
-// less true by an unisolated run — if anything the network made it easier to
-// pass — and a SKIPPED gate measured nothing to qualify.
-//
-// The distdir evidence is the same rule read once more (R3.4). A pass asserts
-// hermeticity, so a pass is what owes the evidence for it: which DISTDIR the
-// gate exported, or that it exported none. A FAILED gate is not made less true
-// by where its sources came from, and a SKIPPED gate has no sources to place.
-//
-// Putting either sentence on all three would turn the signal into decoration on
-// every line of every report.
+// Only a PASS is labelled, because both labels answer an OVERCLAIM and a pass is
+// the only outcome that claims to have proved anything. A build that ran with
+// the network reachable proved less than one that did not, and a pass asserts
+// hermeticity, so it owes the DISTDIR it exported (or that it exported none). A
+// FAILED gate is not made less true by either, and a SKIPPED gate measured
+// nothing to qualify; a sentence on every outcome would be decoration.
 func (r buildRun) gateFor(gate string, phase buildPhase) GateResult {
 	result := r.derive(gate, phase)
 	if result.Outcome == OutcomePass {
@@ -1031,7 +861,7 @@ func (r buildRun) derive(gate string, phase buildPhase) GateResult {
 	case r.runErr != nil:
 		// The run died before this phase began, so this gate measured nothing.
 		//
-		// Declined is LEFT UNRECORDED, deliberately (S039-R2.1). notReachedReason
+		// Declined is LEFT UNRECORDED, deliberately. notReachedReason
 		// itself says why: a death before `>>> Source prepared.` is "a host or
 		// distfile fault" — the ebuild's SRC_URI and the box's network are both
 		// live possibilities and this code cannot tell them apart. Guessing
@@ -1053,25 +883,18 @@ func (r buildRun) derive(gate string, phase buildPhase) GateResult {
 
 // completed reports whether a phase finished successfully.
 //
-// compile is the exception and the exception is the rule R6 states: when it is
-// the deepest phase THIS invocation ran, the child's own EXIT STATUS is the
-// authority on it. Every shallower phase is judged by its marker instead,
-// because a zero exit at the end says nothing about which of the phases before
-// it ran.
+// compile is the exception: when it is the deepest phase THIS invocation ran,
+// the child's own EXIT STATUS is the authority on it. Every shallower phase is
+// judged by its marker, because a zero exit at the end says nothing about which
+// phases before it ran.
 //
-// # Why the exception is scoped to r.phase and not to compile alone
+// The exception is scoped to r.phase, not to compile alone: on an install-depth
+// run a dying src_install makes runErr non-nil, and an unscoped exception would
+// report compile FAILED while its own `>>> Source compiled.` marker sits in the
+// transcript, sending the operator to the wrong file.
 //
-// It read `if p == phaseCompile` while compile WAS the deepest phase any request
-// could invoke, so the two conditions were the same condition. Story 042 added
-// a rung above it and split them: on an install-depth run a dying src_install
-// makes runErr non-nil, and an unscoped exception would report the compile gate
-// FAILED for a phase whose own `>>> Source compiled.` marker is sitting in the
-// transcript — blaming compile for an install failure and sending the operator
-// to the wrong file.
-//
-// install is NOT given the same exception, and that is R2.4 rather than an
-// omission: a zero exit without `>>> Completed installing ` is a gate that could
-// not be derived, never a pass.
+// install is NOT given the same exception, deliberately: a zero exit without
+// `>>> Completed installing ` is a gate that could not be derived, never a pass.
 func (r buildRun) completed(p buildPhase) bool {
 	if p == phaseCompile && r.phase == phaseCompile {
 		return r.runErr == nil
@@ -1081,12 +904,12 @@ func (r buildRun) completed(p buildPhase) bool {
 
 // passReason states what a pass covered AND what it did not. An outcome names
 // its own reach, which is why none of these is empty: a green that does not say
-// where it stops reads as "it builds", and that overclaim is what this story
+// where it stops reads as "it builds", and that overclaim is what this package
 // removes.
 func (r buildRun) passReason(gate string) string {
 	switch gate {
 	case GatePatches:
-		// R4.3: "every patch applied" and "there were no patches" are different
+		// "every patch applied" and "there were no patches" are different
 		// answers and must not render alike.
 		if len(r.trace.patches) == 0 {
 			return fmt.Sprintf("%s applies no patch, so src_prepare had nothing to apply: this gate passed with nothing to do, not because a patch still applies", r.label.pv)
@@ -1095,21 +918,19 @@ func (r buildRun) passReason(gate string) string {
 			patchCount(len(r.trace.patches)), r.label.pv, namedPatches(r.trace.patches))
 
 	case GateConfigure:
-		// R5.2.
 		return fmt.Sprintf("the configure phase completed for %s; a configure pass does not cover compilation, which this depth never ran", r.label.pv)
 
 	case GateCompile:
-		// R6.4. STILL TRUE at compile depth, and deliberately unchanged by story
-		// 042: a compile-depth run does stop there. What 042 added is the
-		// sentence below, for the rung that does not.
+		// STILL TRUE at compile depth: a compile-depth run does stop there. The
+		// install gate's sentence below covers the rung that does not.
 		return fmt.Sprintf("the compile phase completed for %s; a compile pass does not cover src_install, which this ladder deliberately stops short of", r.label.pv)
 
 	case GateInstall:
-		// S042-R2.2 and R2.3. Two omissions in one sentence, because they have
-		// DIFFERENT CAUSES and an operator reading a green should need neither
-		// the ladder's history nor its source to learn what the green bought:
-		// qmerge is out of this ladder permanently (D2), while src_test is a
-		// subtraction THIS GATE MADE for determinism (D3) — one the operator did
+		// Two omissions in one sentence, because they have DIFFERENT CAUSES and an
+		// operator reading a green should need neither the ladder's history nor
+		// its source to learn what the green bought: qmerge is out of this ladder
+		// permanently, while src_test is a subtraction THIS GATE MADE for
+		// determinism — one the operator did
 		// not ask for, which is exactly why it is stated.
 		//
 		// It says "assembling the package image under ${D}" and never that
@@ -1124,7 +945,7 @@ func (r buildRun) passReason(gate string) string {
 	}
 }
 
-// failure is a gate the run died in: FAILED, with the log named (R5.1, R6.5) and
+// failure is a gate the run died in: FAILED, with the log named and
 // the child's own last words quoted as findings.
 //
 // The summary finding is always emitted, and always at error severity, so a
@@ -1165,7 +986,7 @@ func (r buildRun) notReachedReason(gate string, phase buildPhase) string {
 		r.trace.lastStarted(), phase, r.label.pv, r.logNote)
 
 	if gate == GatePatches {
-		// D6, said out loud: before `>>> Source prepared.` the failure is the
+		// Said out loud: before `>>> Source prepared.` the failure is the
 		// host's or the distfile's, and reporting it as the ebuild's would send a
 		// maintainer to fix a patch that is fine.
 		reason += fmt.Sprintf("; a failure before `%s` is a host or distfile fault rather than a statement about the ebuild's patches", markerDonePrepare)
@@ -1183,41 +1004,20 @@ func (r buildRun) unmeasuredReason(phase buildPhase) string {
 
 // failureExcerpt is the part of the transcript after the last phase marker that
 // carries the CAUSE: the lines the failing phase itself produced, where the
-// option upstream removed or the header that went missing is actually named.
+// option upstream removed or the header that went missing is actually named. It
+// is a SUMMARY; the full log is retained and named by the reason beside it.
 //
-// It is a SUMMARY. The full log is retained and named by the reason beside it,
-// so this quotes what explains the failure and stops.
+// The tail is the wrong thing to quote: `die` prints its epilogue (call stack,
+// snippet, boilerplate) AFTER the error. On the gst-plugins-qt6-1.29.2 configure
+// failure, `meson.build:1:0: ERROR: Unknown option: "aalib".` was the 7th of 24
+// non-empty lines and the epilogue the last 16, so the last 12 lines quoted
+// none of the cause.
 //
-// # Why the tail is the wrong thing to quote (S037-R5.1, measured 2026-08-16)
-//
-// The obvious reading of "quote the end, that is where the error is" does not
-// survive contact with Portage. On a real `ebuild … configure` failure the
-// output ends with `die`'s own epilogue — the call stack, the code snippet, the
-// support boilerplate, four `located at '…'` lines — and THAT epilogue comes
-// AFTER the error it is reporting. Measured on this host: the transcript of the
-// gst-plugins-qt6-1.29.2 configure failure carries
-// `meson.build:1:0: ERROR: Unknown option: "aalib".` as the 7th of 24 non-empty
-// lines, and die's epilogue is the last 16. Quoting the last 12 therefore
-// quoted 12 lines of boilerplate and none of the cause, for every FAILED build
-// gate this package has ever reported.
-//
-// So the window ENDS at die's banner instead of at the transcript's end, and the
-// banner itself is appended: it is the line that names the atom and the phase,
-// and it is the line the staging-repository name has to be scrubbed out of
-// (`clean`), so dropping it would quietly retire that guarantee's only witness.
-//
-// A transcript with no banner — a phase that failed without `die`, or a
-// synthetic one — keeps exactly the old behaviour: the last excerptLines lines.
-//
-// # The banner is not the last thing worth quoting (measured 2026-08-16)
-//
-// Ending AT the banner was still one line short. `die` prints the message it was
-// CALLED with immediately after its banner, and for a failure that produced no
-// diagnostic of its own — `emake || die "emake failed"`, the common shape — that
-// message is the entire cause. Ending at the banner made the excerpt collapse to
-// the banner alone, which only repeats what failReason already says. So
-// dieMessage is appended too: the banner names WHAT failed, and the message
-// after it names WHY.
+// So the window ENDS at die's banner, and the banner is appended: it names the
+// atom and the phase, and it is the line `clean` scrubs the staging name from.
+// The message `die` was CALLED with, printed right after the banner, is appended
+// too — for `emake || die "emake failed"` it is the entire cause. A transcript
+// with no banner keeps the old behaviour: the last excerptLines lines.
 func (r buildRun) failureExcerpt() []string {
 	lines := strings.Split(r.transcript, "\n")
 
@@ -1236,7 +1036,7 @@ func (r buildRun) failureExcerpt() []string {
 	}
 
 	// The cause lives before die's banner; the banner names what failed; and
-	// die's own message is the line AFTER it (S037-R5.1, second measurement).
+	// die's own message is the line AFTER it.
 	if at := dieBannerIndex(excerpt); at >= 0 {
 		cause := excerpt[:at]
 		if len(cause) > excerptLines {
@@ -1328,7 +1128,7 @@ func namedPatches(patches []string) string {
 }
 
 // retainedLogNote retains a failed run's log and returns the sentence naming it,
-// for the gates that have to cite it (R5.1, R6.5).
+// for the gates that have to cite it.
 //
 // It always returns a sentence. A log that could not be written, and a run with
 // nowhere to write one, are both said out loud rather than rendered as a report
@@ -1349,7 +1149,7 @@ func retainedLogNote(dir, atom, version string, output []byte) string {
 // retainBuildLog writes the child's output, VERBATIM, to one file per
 // invocation.
 //
-// # Verbatim, and that is the point (D13)
+// # Verbatim, and that is the point
 //
 // The report is re-labelled and this is not. The log is the evidence pasted into
 // an upstream bug or a pkgdev question, and a log bentoo edited is one nobody can
@@ -1376,28 +1176,21 @@ func retainBuildLog(dir, atom, version string, output []byte) (string, error) {
 }
 
 // reportLabel translates Portage's own naming into the operator's before any of
-// it reaches a report (D13).
-//
-// # The repository the operator never created
+// it reaches a report.
 //
 // The build runs from a STAGED repository, so Portage stamps its failure with
 // that repository's name — measured:
 //
 //	media-plugins/gst-plugins-qt6-1.29.2::bentoo-staging failed (configure phase)
 //
-// Nobody asked about bentoo-staging. They asked about media-plugins/gst-plugins-qt6,
-// and should not have to learn the staging tree's name to read the answer.
-//
-// # Why the qualifier is stripped rather than substituted
-//
-// The `::` qualifier is removed and the PACKAGE TOKEN IS LEFT ALONE, which keeps
-// the VERSION: replacing the whole `<atom>-<version>::<repo>` token with the bare
-// atom would read correctly and lose which version failed, and inside a sweep
-// that is the part the operator needs most.
+// Nobody asked about bentoo-staging, and nobody should have to learn the staging
+// tree's name to read the answer. The `::` qualifier is stripped and the PACKAGE
+// TOKEN IS LEFT ALONE, which keeps the VERSION — inside a sweep, the part the
+// operator needs most.
 //
 // It applies to EVERY reason and EVERY finding, on the clean path as well as the
-// failing one, because a re-labelling implemented on the failure path alone is
-// one that leaks the first time a PASS quotes anything.
+// failing one, because a re-labelling on the failure path alone leaks the first
+// time a PASS quotes anything.
 type reportLabel struct {
 	// pv is the real package and version, `category/package-version`.
 	pv string

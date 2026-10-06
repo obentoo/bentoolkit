@@ -12,33 +12,18 @@ import (
 // every field the config actually sets in CanonicalFieldOrder, the doc field,
 // and the `# END` marker that closes it.
 //
-// It is the ONLY place a record becomes text. Both writers go through it — the
-// registry rewrite behind `overlay analyze --save` (savePackagesConfig) and the
-// suggestion `overlay analyze` prints for the maintainer to paste — so a
-// generated record and a linted record cannot drift apart: both are emitted from
-// the same slice the linter ranks against (R8, R8.1).
+// It is the ONLY place a record becomes text: both `overlay analyze --save`
+// (savePackagesConfig) and the suggestion `overlay analyze` prints go through
+// it, emitting from the same slice the linter ranks against, so a generated
+// and a linted record cannot drift apart. A generic TOML encoder would not do:
+// it writes fields in struct order, a populated `headers`/`meta` as a
+// SUB-TABLE the record scanner reads as a new record, and (BurntSushi v1.6.0
+// omitempty ignores numeric zeros) `timeout = 0` / `revision = 0`.
 //
-// The encoder it replaces lost that agreement three ways, all of them producing
-// a file the linter next to it rejected:
-//
-//   - fields came out in STRUCT-DECLARATION order, which is not the canonical
-//     one — the struct declares timeout before select, the registry writes
-//     select before timeout;
-//   - a populated `headers` or `meta` came out as a SUB-TABLE,
-//     ["dev-util/x".headers], which the record scanner reads as the header of a
-//     new record: the record it belongs to was then reported unclosed and
-//     undocumented while the phantom collected its `# END`;
-//   - `omitempty` does not suppress a numeric zero in BurntSushi v1.6.0 (its
-//     isEmpty has no numeric case), so every saved record carried `timeout = 0`
-//     and `revision = 0`, two keys not one of the registry's 411 records
-//     declares.
-//
-// Emission is driven by reflection over PackageConfig's own `toml:` tags rather
-// than by a hand-written switch, so a field added to the struct and to
-// CanonicalFieldOrder is written without a third edit here — and cannot be
-// forgotten: TestCanonicalFieldOrderCoversPackageConfig pins that the order
-// slice covers every tag exactly once, and a tag absent from it is a tag this
-// function never emits.
+// Emission is driven by reflection over PackageConfig's `toml:` tags, so a field
+// added to the struct and to CanonicalFieldOrder needs no third edit here;
+// TestCanonicalFieldOrderCoversPackageConfig pins that the order slice covers
+// every tag exactly once.
 //
 // A nil config renders nothing rather than a headed but empty record: the
 // caller has no record to write.
@@ -65,7 +50,7 @@ func RenderRecord(pkg string, cfg *PackageConfig) string {
 		switch key {
 		case "enabled":
 			// `enabled = true` says exactly what an absent enabled says, and the
-			// linter reports it as redundant (LintRedundantEnabled, R2.1). A
+			// linter reports it as redundant (LintRedundantEnabled). A
 			// writer emitting what the linter next to it reports is the
 			// disagreement this function exists to remove, so only the
 			// informative `false` is written.
@@ -250,23 +235,14 @@ func tomlInlineTable(v reflect.Value) string {
 // ('…') whenever the value would otherwise need escaping, and a basic string
 // ("…") otherwise.
 //
-// That is measured practice, not taste. The registry writes 414 of its regexes
-// as literal strings and 2 as basic ones, and those 2 are correct rather than
-// sloppy: their regex contains a ', which a literal string cannot hold at all —
-// TOML gives it no escape. The rule below reproduces that split, so what this
-// emits is what a maintainer would have typed: `url = "https://…"` plain,
-// `pattern = 'href="([0-9.]+)/"'` literal, and a pattern carrying its own quote
-// escaped into the basic form.
+// That reproduces what a maintainer types: `url = "https://…"` plain,
+// `pattern = 'href="([0-9.]+)/"'` literal, and a pattern carrying its own '
+// in the basic form, since a literal string cannot hold a ' at all.
 //
-// The rule reads the VALUE, not the field. The registry's own convention is
-// field-driven — a regex field is literal-quoted whether or not it needs to be —
-// and reproducing that would mean a second list, this one naming which of the 38
-// fields hold regexes, kept in step with the struct by hand. Measured against
-// the real registry, declining to keep that list costs 53 values out of ~1700 a
-// change of quoting style on a full rewrite (5 scalars such as `series = '_pre$'`
-// and 48 transform elements such as `['^v', ""]`), every one of them style only:
-// no value changes, nothing stops parsing, and no lint rule reads quoting at all.
-// Revisit it only if the registry starts caring about the style itself.
+// The rule reads the VALUE, not the field. Following the registry's
+// field-driven convention would need a hand-kept list of which fields hold
+// regexes; without it a full rewrite changes the quoting style of about 53 of
+// ~1700 values — style only, no value changes and no lint rule reads quoting.
 //
 // A value holding a newline or any other control character also takes the basic
 // form: a literal string may contain none of them but tab.

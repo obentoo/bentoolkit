@@ -13,10 +13,10 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 )
 
-// The registry-fix transaction of story 060: it edits the registry through a
+// The registry-fix transaction: it edits the registry through a
 // fixer.RegistryFixer, re-checks the package with a fresh Checker and reverts
 // the edit unless the re-check passes. It stays in the core because it drives
-// the Checker (story 061).
+// the Checker.
 
 // RegistryFixStatus is the outcome of one AttemptRegistryFix.
 type RegistryFixStatus int

@@ -11,32 +11,22 @@ import (
 	"path/filepath"
 )
 
-// This file is R10.4: beside every retained staged tree, one line per gate
-// saying what it answered and how deep the run got — and the digests of the
-// inputs those answers were about.
+// Beside every retained staged tree sits one record: per gate, what it answered
+// and how deep the run got, plus the digests of the inputs those answers were
+// about.
 //
-// # Why the record lives INSIDE the tree it describes
+// The record lives INSIDE the tree it describes. Staging has no index and no
+// lock on purpose — the PATH <staging>/<category>/<package>/<version> is the
+// retention rule, so packages stage concurrently with no coordination. A central
+// index of proofs would bring back a shared file, a lock, and stale entries for
+// restaged trees. Inside the tree, the record is created, replaced and destroyed
+// by the same operations as the tree: Stage's RemoveAll takes the proof away
+// with it, which is right — a restaged tree has not been proved yet.
 //
-// D1 chose no index and no lock on purpose: the retention rule is expressed by
-// the PATH, <staging>/<category>/<package>/<version>, which is why several
-// packages can be staged concurrently with no coordination at all. A central
-// index of proofs would put that back — one file every worker writes, needing a
-// lock, and a stale entry pointing at a tree that was restaged underneath it.
-// The record therefore goes in the one directory that already belongs to this
-// package and this version, so it is created, replaced and destroyed by exactly
-// the operations that create, replace and destroy the tree: Stage's RemoveAll
-// takes the proof away with the tree it was about (R3.7), which is precisely
-// right — a restaged tree has not been proved yet.
-//
-// # Why there is no timestamp in it
-//
-// "The inputs are unchanged" is a question about CONTENT and never about a
-// clock. A mtime moves on checkout, on rsync, on a container build and on a
-// restored backup without a byte changing, and it does NOT move when a file is
-// replaced by one of the same size through a tool that preserves times. Storing
-// a time here would invite exactly the comparison that gets both of those wrong,
-// so the record stores digests and nothing else that could be mistaken for
-// freshness.
+// It holds no timestamp. "The inputs are unchanged" is a question about
+// CONTENT: an mtime moves on checkout, rsync or restore without a byte
+// changing, and stays put when a time-preserving tool replaces a file. So the
+// record stores digests and nothing that could be mistaken for freshness.
 
 // stageRecordName is the file the record lives in, inside the staged tree.
 //
@@ -47,13 +37,13 @@ const stageRecordName = ".bentoo-stage-record.json"
 
 // ErrNoStageRecord reports that a staged tree carries no record at all.
 //
-// It is a sentinel because R10.5 is a decision made ON it — an unrecorded tree is
+// It is a sentinel because a decision is made ON it — an unrecorded tree is
 // REVALIDATED — and the caller must be able to tell "no claim" from "the record
 // could not be read". Both revalidate today, but they are different facts about
 // the operator's machine and only one of them is worth a warning.
 var ErrNoStageRecord = errors.New("the staged tree carries no validation record")
 
-// ProducedByApplier and ProducedByValidate name what wrote a stage record (D6).
+// ProducedByApplier and ProducedByValidate name what wrote a stage record.
 // They are the only two values StageRecord.ProducedBy is ever written with.
 //
 // They are constants because these STRINGS are on-disk vocabulary rather than
@@ -64,8 +54,8 @@ var ErrNoStageRecord = errors.New("the staged tree carries no validation record"
 //
 // # Why the producer decides anything at all
 //
-// A stage record is a licence to publish WITHOUT running the gates again
-// (R10.1): a later `--apply` promotes a bump on the strength of what an earlier
+// A stage record is a licence to publish WITHOUT running the gates again: a
+// later `--apply` promotes a bump on the strength of what an earlier
 // run recorded. The applier writes such a record having staged the very
 // candidate it means to publish. A read-only validation run writes one having
 // only MEASURED a tree — it promotes nothing, by contract — so its record is
@@ -77,21 +67,20 @@ const (
 )
 
 // StageRecord is what one validation run leaves beside its staged tree so that a
-// later run can promote it without paying for the same hours twice (R10.1,
-// R10.4).
+// later run can promote it without paying for the same hours twice.
 //
 // # It is evidence, not a cache
 //
 // A cache answers "have I seen this key". This answers "was this exact candidate
 // PROVED, how deeply, and over which inputs" — and it records failures just as
-// faithfully as passes, because R3.6 retains the staged tree of every bump that
-// was NOT promoted. Feed retention straight into promotion with no record in
+// faithfully as passes, because the staged tree of every bump that was NOT
+// promoted is retained too. Feed retention straight into promotion with no record in
 // between and yesterday's rejected bump publishes today; Gates is what stops
 // that, and it is why the record stores each gate's own outcome rather than a
 // single boolean.
 type StageRecord struct {
 	// Package and Version name the bump, for the human who opens the file. They
-	// are deliberately NOT what identifies the record: the path does that (D1),
+	// are deliberately NOT what identifies the record: the path does that,
 	// so a tree moved into the wrong directory is already the wrong tree
 	// whatever these two say.
 	Package string `json:"package,omitempty"`
@@ -102,13 +91,13 @@ type StageRecord struct {
 	// evidence about a tree's outcome, NOT a licence to publish it.
 	//
 	// EMPTY MEANS ProducedByApplier, and the read path is where that is said —
-	// see ReadStageRecord (R5.2). Every record already on an operator's disk was
+	// see ReadStageRecord. Every record already on an operator's disk was
 	// written before this field existed, and every one of them came from the
 	// applier.
 	ProducedBy string `json:"produced_by,omitempty"`
 
 	// Depth is the depth this run SELECTED, which is the depth the gates below
-	// were asked to cover — not the depth they reached. R10.1 compares it
+	// were asked to cover — not the depth they reached. Reuse compares it
 	// against the depth the promoting run selects, and the comparison is "not
 	// below": a compile-deep proof answers a configure-deep question, a
 	// options-deep proof does not.
@@ -124,7 +113,7 @@ type StageRecord struct {
 	// build fixer edited them.
 	//
 	// The pre-fixer bytes are the ones that matter, and getting this wrong is
-	// invisible: R8.1 has the fixer edit the staged ebuild in place, so a digest
+	// invisible: the build fixer edits the staged ebuild in place, so a digest
 	// taken from the tree as it stands after a repair would never again match
 	// what the next run computes from the overlay, and EVERY bump the fixer
 	// touched would revalidate — which are exactly the slow ones, the ones that
@@ -173,7 +162,7 @@ func StageRecordPath(stagedRoot string) string {
 	return filepath.Join(stagedRoot, stageRecordName)
 }
 
-// WriteStageRecord puts rec beside the staged tree at stagedRoot (R10.4).
+// WriteStageRecord puts rec beside the staged tree at stagedRoot.
 //
 // stagedRoot must already be a directory: this writes a record ABOUT a tree, and
 // creating the directory here would leave a proof standing where the thing it
@@ -181,14 +170,14 @@ func StageRecordPath(stagedRoot string) string {
 //
 // A failure is the caller's to decide about, and every caller in this repository
 // treats it as a warning rather than as a failed bump: the cost of an unwritten
-// record is one revalidation, which is the behaviour that predates R10 entirely.
+// record is one revalidation, which is the behaviour that predates records.
 //
 // rec.ProducedBy is written exactly as the caller stated it and is never
 // defaulted here. A writer is the one thing that KNOWS what it is, so filling a
 // producer in on this side would let a future one inherit the applier's
 // provenance by merely forgetting to name itself. Absence is given its meaning
 // on the way back in, in ReadStageRecord, where the records that predate the
-// field are (R5.2).
+// field are.
 func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 	info, err := os.Stat(stagedRoot)
 	if err != nil {
@@ -224,7 +213,7 @@ func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 
 // ReadStageRecord reads the record beside the staged tree at stagedRoot.
 //
-// A missing record answers ErrNoStageRecord, which is R10.5's whole input: an
+// A missing record answers ErrNoStageRecord, and the reuse decision is: an
 // unrecorded tree is revalidated. So is an unreadable or malformed one — a
 // half-written record is not a weaker claim than a whole one, it is no claim,
 // and the only safe reading of "I cannot tell what this tree proved" is to prove
@@ -250,7 +239,7 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 		return StageRecord{}, fmt.Errorf("reading the validation record %s: %w", path, err)
 	}
 
-	// R5.2: a record carrying no producer at all is applier-produced.
+	// A record carrying no producer at all is applier-produced.
 	//
 	// The normalization lives here, beside ParseDepth, because this is where the
 	// on-disk shape is turned into what the value MEANS — but it is deliberately
@@ -258,7 +247,7 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 	// loudly; an ABSENT producer is a perfectly well-formed record from before
 	// the field existed, and all of those were written by the applier. Read
 	// absence as anything else and the provenance check on the reuse path refuses
-	// every tree an earlier release staged: R10.1's whole saving switched off in
+	// every tree an earlier release staged: the whole saving switched off in
 	// silence, every bump paying for its gates a second time with nothing in the
 	// output saying why.
 	//
@@ -285,61 +274,25 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 	}, nil
 }
 
-// Proves answers R10.1's half of the promotion condition: does this record show
-// a candidate that was actually MEASURED, at a depth not below want. The string
-// explains the answer in BOTH directions, because a promotion that cannot say
-// why it skipped the gates is indistinguishable from a bump nobody validated.
+// Proves answers the record's half of the promotion condition: does it show a
+// candidate that was actually MEASURED, at a depth not below want. The string
+// explains the answer either way: a promotion that cannot say why it skipped
+// the gates is indistinguishable from a bump nobody validated.
 //
-// # A record whose deciding gates ALL reported SKIPPED is not a proof
+// At least one deciding gate must PASS. A run that stopped before any gate read
+// the tree (no Manifest, an interrupt) records its requested depth beside a
+// list of SKIPPED gates, and the reuse path consults neither refuseUnproved nor
+// PromotionDecision, so accepting that would publish an unmeasured bump. A skip
+// BESIDE a pass still proves: requiring every gate to PASS would revalidate,
+// and re-skip, every bump whose host lacks a build dependency, on every run.
 //
-// This used to ask "every gate PASS or SKIPPED", which is the same vacuity
-// S039-R2.1 denies in PromotionDecision — arriving here one reader later and by
-// a different door. A run that staged a tree and then stopped before any gate
-// read it (a Manifest that could not be produced, an interrupt) records the
-// depth it REQUESTED plus a full list of SKIPPED gates, and this accepted that
-// as evidence; the reuse path it gates consults neither refuseUnproved nor
-// PromotionDecision, so nothing downstream would have caught it and the bump
-// published one run later instead of not at all. At least one deciding gate
-// must now report PASS (S039-R2.4).
+// This keys on the OUTCOME where PromotionDecision keys on the CAUSE, and the
+// two must not be unified: Declined is `json:"-"`, so a reloaded record reads
+// DeclineUnrecorded and a cause-keyed refusal would never fire; and a wrong
+// refusal here costs one revalidation, where there it stops an apply.
 //
-// # Why this keys on the OUTCOME where PromotionDecision keys on the CAUSE
-//
-// PromotionDecision refuses only when a skip named the CANDIDATE
-// (GateResult.Declined == DeclineCandidate), so that a host which simply cannot
-// build still promotes (S033-R3.12). The two rules must NOT be unified, for two
-// reasons:
-//
-//   - Declined is `json:"-"`. It does not survive this record's round-trip
-//     through disk, so every gate of a RELOADED record reads DeclineUnrecorded.
-//     Keyed on the cause, the refusal here would be a rule that silently never
-//     fires.
-//   - A wrong refusal does not cost the same on the two sides. There it STOPS
-//     AN APPLY on any workstation that merely lacks the bump's build
-//     dependencies. Here it costs one re-validation — the tree is proved again,
-//     which is what every release before R10.1 did. Fail-closed is cheap on
-//     this side and expensive on the other.
-//
-// # SKIPPED still counts, beside a measurement
-//
-// R3.3 promotes on "PASS or SKIPPED" and R3.12 has the outcome name its own
-// reach: a host that could not run the configure gate for want of an installed
-// dependency produced a promotable result that says so, and a record holding
-// that skip BESIDE a pass is still a proof. Reading this as "every deciding
-// gate must PASS" would revalidate — and then re-skip — every such bump on
-// every run, which is the loop R10.1 exists to break.
-//
-// # The QA gate never decides
-//
-// The same D8 exclusion PromotionDecision, Report.ExitCode and WorstOutcome all
-// make: the overlay carries pre-existing pkgcheck findings that have nothing to
-// do with any bump, and letting them decide would stop every bump in the tree on
-// a metadata.xml typo.
-//
-// # An empty gate list proves nothing
-//
-// "Some gate was run" is not a statement anybody can act on, and a record that
-// names no gate is far more likely to be a truncated or hand-made file than a
-// run that legitimately had nothing to report.
+// The QA gate never decides (pre-existing pkgcheck findings must not stop every
+// bump), and an empty gate list proves nothing.
 func (r StageRecord) Proves(want Depth) (bool, string) {
 	if r.Depth < want {
 		return false, fmt.Sprintf("the retained tree was proved at depth %s and this run selected %s, so the proof stops short of the question",

@@ -1,7 +1,7 @@
 package validate
 
 // This file holds the option model both sides of the comparison are expressed
-// in (design.md D3). Everything here is data: the shapes are shared by the
+// in. Everything here is data: the shapes are shared by the
 // archive reader, the ebuild reader and Compare, and none of them owns it.
 
 // Option is one build option name, on either side of the comparison.

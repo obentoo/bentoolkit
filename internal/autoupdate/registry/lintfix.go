@@ -10,8 +10,7 @@ import (
 )
 
 // This file is the repair half of the linter: lint.go says what deviates from
-// the record model, this rewrites the file so it no longer does (R2.2, R3.3,
-// R7).
+// the record model, this rewrites the file so it no longer does.
 //
 // It is TEXTUAL on purpose, and that is the single most important thing to know
 // before editing it. The obvious implementation — decode packages.toml into
@@ -177,7 +176,7 @@ func (l registryLayout) render() string {
 
 // commentsBlock returns the record's doc field exactly as the file writes it —
 // the `comments = """` line through the closing delimiter — and whether the
-// record has one. It is the unit UB2 pins byte for byte.
+// record has one. It is the unit verifyRepair pins byte for byte.
 func (r recordBlock) commentsBlock() (string, bool) {
 	for _, f := range r.fields {
 		if f.key == "comments" {
@@ -189,23 +188,23 @@ func (r recordBlock) commentsBlock() (string, bool) {
 
 // recordRepair is what the repair declares it did to one record — and, read the
 // other way, what the reparse gate is allowed to see change there. Nothing
-// outside this list may differ (R7.1).
+// outside this list may differ.
 type recordRepair struct {
 	name string
-	// migratedBinary: `binary = true` became `type = "bin"` (R1.2). The parsed
+	// migratedBinary: `binary = true` became `type = "bin"`. The parsed
 	// record's Type goes from "" to "bin"; `binary` itself is invisible to both
 	// parses, since no struct field claims it.
 	migratedBinary bool
-	// droppedBinary: a `binary` line was deleted outright (R1.3). It needs no
+	// droppedBinary: a `binary` line was deleted outright. It needs no
 	// adjustment in the gate — the key has no struct field, so neither parse ever
 	// saw it — and is declared anyway, because a repair the plan does not name is
 	// a repair nobody reviewed.
 	droppedBinary bool
-	// droppedEnabled: a redundant `enabled = true` was deleted (R2.2). The parsed
+	// droppedEnabled: a redundant `enabled = true` was deleted. The parsed
 	// record's Enabled goes from a pointer to true to nil, which IsEnabled reads
 	// the same way.
 	droppedEnabled bool
-	// reordered: the fields were sorted into CanonicalFieldOrder (R3.2). Wholly
+	// reordered: the fields were sorted into CanonicalFieldOrder. Wholly
 	// invisible to the parse — a TOML table is a map — which is why the gate
 	// needs the byte-level checks beside it.
 	reordered bool
@@ -232,7 +231,7 @@ func (p *repairPlan) changed() bool {
 // the file as the repair would write it, and a tally of what it did. It is
 // produced by RepairPackagesConfig and written by Write — two steps, because the
 // registry auto-commits and auto-publishes, so the caller shows the diff and
-// asks before anything lands (R7.3, wired in the command layer).
+// asks before anything lands (wired in the command layer).
 type RepairResult struct {
 	// Path is the registry the result was computed from.
 	Path string
@@ -254,29 +253,24 @@ type RepairResult struct {
 }
 
 // RepairPackagesConfig computes the canonical rewrite of the overlay's
-// packages.toml and proves it inert before returning it. It writes NOTHING; call
-// Write on the result to do that.
+// packages.toml and proves it inert before returning it; Write writes it.
 //
-// The repair applies exactly four transformations, all of them the repairs
-// lint.go already reports (so `--lint --fix` never touches a record `--lint` did
-// not name):
+// It applies exactly four transformations, all reported by lint.go, so
+// `--lint --fix` never touches a record `--lint` did not name:
 //
-//   - `binary = true` in a record with no `type` becomes `type = "bin"`, in
-//     place, so the field then sorts as `type` (R1.2);
-//   - any other `binary` line is deleted — the record already classifies itself,
-//     or `binary = false` was only spelling out the default (R1.3);
-//   - `enabled = true` is deleted, `enabled = false` never (R2.2);
-//   - the record's fields are sorted into CanonicalFieldOrder (R3.2).
+//   - `binary = true` with no `type` becomes `type = "bin"`, in place;
+//   - any other `binary` line is deleted (the record already classifies itself,
+//     or `binary = false` only spelled out the default);
+//   - `enabled = true` is deleted, `enabled = false` never;
+//   - the record's fields are sorted into CanonicalFieldOrder.
 //
-// Everything else is carried through verbatim, `comments` blocks byte for byte
-// (R3.3). `track = "commit"` without `base_from` is reported by the linter and
-// deliberately not repaired here: which base source is right depends on where
-// upstream versions itself (R6.1).
+// Everything else is carried verbatim, `comments` blocks byte for byte.
+// `track = "commit"` without `base_from` is not repaired: the right base source
+// depends on where upstream versions itself.
 //
-// An error means the repair was ABORTED and nothing was produced — either the
-// file could not be read or parsed, or the verification found a difference
-// outside the four transformations above. That is a bug report about this code,
-// not a condition the caller can retry around.
+// An error means the repair was ABORTED and nothing was produced: the file did
+// not read or parse, or verification found a difference outside the four
+// transformations — a bug in this code, not a condition to retry around.
 func RepairPackagesConfig(overlayPath string) (*RepairResult, error) {
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 
@@ -323,8 +317,8 @@ func RepairPackagesConfig(overlayPath string) (*RepairResult, error) {
 }
 
 // Write replaces the registry with the repaired text, atomically and preserving
-// the file's mode (R7.2). A result with nothing to change writes nothing and
-// leaves the file's mtime alone.
+// the file's mode. A result with nothing to change writes nothing and leaves
+// the file's mtime alone.
 //
 // The verification runs again here, deliberately. RepairPackagesConfig already
 // ran it, but between the two calls the result travels through a diff, a
@@ -425,7 +419,7 @@ func repairRecord(rec *recordBlock, plan *repairPlan) {
 
 		case f.key == "enabled" && singleLine:
 			// Only `true` goes. `enabled = false` is the bookkeeping that keeps an
-			// orphaned entry out of the run and must survive untouched (R2.2).
+			// orphaned entry out of the run and must survive untouched.
 			if on, isBool := tomlBoolValue(assignedValue(f.body[0])); isBool && on {
 				plan.removed = append(plan.removed, f.body[0])
 				plan.actions[FixDropEnabled]++
@@ -460,8 +454,8 @@ func repairRecord(rec *recordBlock, plan *repairPlan) {
 // A record carrying a field the canonical order does not name is left alone
 // rather than sorted with the stranger pushed to one end: the repair must never
 // decide where a field it does not recognise belongs. In practice such a record
-// never reaches here — an unknown key fails the load (R4.1) and the repair
-// refuses to start on a file that does not load — so this is the guard for the
+// never reaches here — an unknown key fails the load and the repair refuses
+// to start on a file that does not load — so this is the guard for the
 // case where that stops being true.
 func reorderFields(rec *recordBlock) bool {
 	for _, f := range rec.fields {
@@ -506,32 +500,23 @@ func lineIndent(line string) string {
 	return line[:len(line)-len(strings.TrimLeft(line, " \t"))]
 }
 
-// verifyRepair is R7.1: it proves the rewrite differs from the original only by
-// the transformations the plan declares, and returns an error — meaning ABORT,
-// write nothing — as soon as it does not.
+// verifyRepair proves the rewrite differs from the original only by the
+// transformations the plan declares, and returns an error — ABORT, write
+// nothing — as soon as it does not. Its five checks are redundant on purpose;
+// each covers the previous one's blind spot:
 //
-// It runs five checks, and the redundancy between them is the point. Each one
-// alone has a blind spot the next covers:
-//
-//  1. THE REWRITE PARSES. A truncated `comments` block usually shows up here:
-//     the doc text spills out of the string and the file stops being TOML.
-//  2. THE SAME RECORDS EXIST. A record gained, lost or renamed is fatal
-//     whatever else matches.
-//  3. EVERY RECORD PARSES TO THE SAME VALUES, after applying the declared
-//     transformations to the original. This is what catches a comments block
-//     that was truncated at a point where the file still parses, a value
-//     re-quoted into something different, or a line that migrated from one
-//     record to another.
-//  4. EVERY `comments` BLOCK IS BYTE-IDENTICAL (R3.3, UB2). Check 3 compares
-//     DECODED values, so it cannot see a doc block rewritten into different
-//     bytes that decode the same — a re-escaped quote, a re-wrapped line. This
-//     one can, and it is the only check that pins the ORDER of the doc lines.
-//  5. THE LINE INVENTORY BALANCES. The multiset of lines in the rewrite must
-//     equal the original's, minus the lines the plan says were deleted, plus the
-//     ones it says were inserted. This is the check that sees what the parser
-//     cannot: the `# END` markers, the file header, the blank lines between
-//     records — none of which any TOML parse can tell you went missing, because
-//     to a parser they were never there.
+//  1. THE REWRITE PARSES — catches most truncated `comments` blocks.
+//  2. THE SAME RECORDS EXIST — none gained, lost or renamed.
+//  3. EVERY RECORD PARSES TO THE SAME VALUES once the declared transformations
+//     are applied — catches a truncation that still parses, a re-quoted value,
+//     or a line that migrated between records.
+//  4. EVERY `comments` BLOCK IS BYTE-IDENTICAL — check 3 compares decoded
+//     values and cannot see a re-escaped quote, a re-wrapped line or reordered
+//     doc lines.
+//  5. THE LINE INVENTORY BALANCES — the rewrite's multiset of lines equals the
+//     original's minus the declared deletions plus the declared insertions,
+//     which sees what no TOML parse can: `# END` markers, the file header, the
+//     blank lines between records.
 func verifyRepair(original, repaired string, plan repairPlan) error {
 	// 1. The rewrite parses at all.
 	after, err := decodePackagesConfig([]byte(repaired))
@@ -576,7 +561,7 @@ func verifyRepair(original, repaired string, plan repairPlan) error {
 		}
 	}
 
-	// 4. Every doc block survived byte for byte (R3.3, UB2).
+	// 4. Every doc block survived byte for byte.
 	beforeDocs := parseRegistryLayout(original).records
 	afterDocs := make(map[string]recordBlock, len(beforeDocs))
 	for _, rec := range parseRegistryLayout(repaired).records {

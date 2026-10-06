@@ -1,5 +1,5 @@
-// applier_gates_environment.go is story 043's D3, and it holds both of its
-// halves.
+// applier_gates_environment.go holds both halves of the unmet-precondition
+// record.
 //
 // The RECORDING half is at the top: once build_failure.go has decided that a
 // failed build belongs to the machine (ErrBuildEnvironment), this file answers
@@ -11,10 +11,10 @@
 // a different question from the one the caller's own `stat` answers — and either
 // declines the gate or clears the record and lets it run.
 //
-// Today that answer is thrown away thirteen times over two days: mt7927-dkms and
-// edk2 fail in pkg_setup on a key file the `portage` uid cannot read, the failure
-// is correctly classified as the host's, and the next run starts the same build
-// again because nothing survives to say what was missing.
+// Without the record that answer was thrown away thirteen times over two days:
+// mt7927-dkms and edk2 failed in pkg_setup on a key file the `portage` uid could
+// not read, the failure was correctly classified as the host's, and the next run
+// started the same build again because nothing survived to say what was missing.
 //
 // # Fail open is a DIRECTION, not defensive coding
 //
@@ -24,12 +24,12 @@
 //   - Record nothing when something was missing → the package is retried, which
 //     costs a build that was going to be spent anyway. That is today's behaviour,
 //     exactly, and it is the floor this change cannot fall below.
-//   - Record the WRONG thing → sub-task 3.2's pre-check asks about a path that
+//   - Record the WRONG thing → the re-check asks about a path that
 //     nothing on the host will ever satisfy, and the package is suppressed
 //     FOREVER, silently, on the strength of a parse that failed.
 //
 // So a message this file does not understand yields "", never a placeholder. The
-// direction is the one build_failure.go inherited from story 030 (applier.go:1462)
+// direction is the one build_failure.go inherited from the manifest path,
 // pointed at a different cost: a wrong classification must cost a wasted
 // invocation, never a lost repair. Here, a wrong extraction must cost a wasted
 // build, never a lost package.
@@ -38,8 +38,7 @@
 //
 // Portage's messages are the ebuild author's prose. A wording change breaks the
 // extraction, and when it does, the extraction returns "" and the feature simply
-// stops helping — it does not start lying. That is the trade design D3 named
-// explicitly and accepted.
+// stops helping — it does not start lying. That trade is accepted explicitly.
 package autoupdate
 
 import (
@@ -97,32 +96,23 @@ const portageBuildRoot = "/var/tmp/portage/"
 
 // extractUnmetPrecondition returns the absolute path a host-caused build failure
 // named as missing or unreadable, or "" when the transcript does not yield one it
-// can stand behind (S043-R3.1).
-//
-// The two failures this was built from, verbatim from the run of 2026-08-22:
+// can stand behind. Built from two failures of 2026-08-22:
 //
 //	… USE=modules-sign is set but the private key '/etc/kernel/keys/module-signing.key' was not found
 //	Could not open file or uri for loading private key from /var/lib/sbctl/keys/db/db.key
 //
-// One quotes the path inside the ERROR block, the other prints it bare, several
-// lines before the ERROR block, next to an OpenSSL diagnostic that carries a
-// RELATIVE path (`../openssl-3.6.3/crypto/bio/bss_file.c`) which must not be
-// mistaken for it.
+// The second prints its path bare, before the ERROR block, next to an OpenSSL
+// RELATIVE path (`../openssl-3.6.3/crypto/bio/bss_file.c`) that must not win.
+// Each filter exists because passing it wrongly freezes a package:
 //
-// Three filters stand between a transcript and an answer, and each one exists
-// because passing it wrongly freezes a package:
-//
-//  1. The phase must be the host's (hostCheckPhases). No phase line at all is a
-//     refusal, not a pass: an unrecognised transcript is one this cannot reason
-//     about.
+//  1. The phase must be the host's (hostCheckPhases); no phase line is a refusal.
 //  2. The line must carry a cue that something was missing
 //     (unmetPreconditionCues), not merely contain a path.
-//  3. The candidate must be usable as a precondition (usableAsPrecondition):
-//     absolute, not the root directory, not ephemeral.
+//  3. The candidate must pass usableAsPrecondition: absolute, not the root
+//     directory, not ephemeral.
 //
-// The first candidate that survives all three wins, reading top-down, so the
-// earliest complaint — the one that caused the ones below it — is the one
-// recorded.
+// The first survivor reading top-down wins: the earliest complaint caused the
+// ones below it.
 func extractUnmetPrecondition(log string) string {
 	if !failedOnAHostPhase(log) {
 		return ""
@@ -244,7 +234,7 @@ func usableAsPrecondition(candidate string) bool {
 
 // recordUnmetPrecondition stores what a host-caused build failure said was
 // missing, so a later run has something to decline the gate on instead of paying
-// for the identical failure again (S043-R3.1).
+// for the identical failure again.
 //
 // Nothing here can fail the apply, and that is the point twice over. The apply
 // has ALREADY failed — the build died — so a cache that could not be written is
@@ -283,54 +273,30 @@ func (a *Applier) recordUnmetPrecondition(pkg, transcript string) {
 		"package", pkg, "precondition", required)
 }
 
-// --- the RE-CHECKING half (S043-R3.2, R3.3, R3.4) ---------------------------
+// --- the RE-CHECKING half ----------------------------------------------------
 //
 // Everything above WRITES a record. Everything below decides, on a later run,
 // whether that record still holds — which is the only thing that ever ends one.
 // There is no TTL and no flag, deliberately: see PreconditionRecord.RecordedAt.
 
 // buildUserCanRead reports whether the build could read path, asked from the
-// BUILD's vantage point rather than from this process's (S043-R3.2, Constraint).
+// BUILD's vantage point rather than from this process's. It is not os.Stat: the
+// gate escalates to `sudo ebuild`, so Portage's FEATURES="userpriv userfetch"
+// makes the build read as uid `portage` (see portage_access.go). Both failures
+// it was written from are files that EXIST — a key behind a 0700 root:root
+// directory and one at 0400 root:root — so only the mode bits tell them apart.
 //
-// # Why this is not os.Stat
+// A wrong "cannot read" freezes the package FOREVER, since only this function
+// clears a record; a wrong "can read" costs one build that fails as it did
+// before. So whatever it cannot decide answers TRUE: no `portage` group on the
+// host (the grants are a no-op there, so its refusals must be too), or a stat
+// that failed other than "not there" (THIS process cannot traverse it, which
+// says nothing about who can). Absence is the one sure negative.
 //
-// The gate escalates to `sudo ebuild`, and running as root is precisely what
-// makes Portage honour FEATURES="userpriv userfetch": from that moment the build
-// reads as uid `portage`, not as the operator who started the sweep
-// (portage_access.go says this at length). A stat from the caller answers a
-// DIFFERENT question — "is it there" — and both failures this was written from
-// are files that ARE there: /etc/kernel/keys/module-signing.key behind a 0700
-// root:root directory, and /var/lib/sbctl/keys/db/db.key at 0400 root:root.
-// Existence tells those two apart not at all. The mode bits do.
-//
-// # The two wrong answers do not cost the same
-//
-// A wrong "cannot read" freezes the package FOREVER: nothing but this function
-// clears a record (R3.3), so a false negative is a package that silently stops
-// being updated. A wrong "can read" costs one build that fails the way it failed
-// yesterday — which is today's behaviour exactly, and the floor this change
-// cannot fall below. So everything this cannot decide answers TRUE:
-//
-//   - No `portage` group on this host. The build user's identity is then not one
-//     this can reason about at all, and its group bits are unreadable to us.
-//     portageGroupID's own note says such a host is one where this package's
-//     grants are a no-op; its refusals must be a no-op there for the same reason.
-//   - A stat that failed for any reason other than "not there" — typically THIS
-//     process cannot traverse to it, which says nothing about who can.
-//
-// Absence is the one negative that is not a guess: a path that is not there is
-// unreadable by everyone. It is also the mt7927 case, where the signing key was
-// never created at all.
-//
-// # What it deliberately does not model
-//
-// Owner bits. There is no uid seam here, only portageGroupID, so a file owned BY
-// uid `portage` and closed to everyone else reads as unreadable. That shape
-// cannot arise from a record this system writes — the record exists BECAUSE the
-// build user could not read the path — but an operator who "fixes" it with
-// `chown portage: <key>` and no g+r would keep the package held. The remedy is
-// the mode, and the decline names the path so that it is the next thing the
-// operator looks at.
+// Owner bits are not modelled — there is only portageGroupID, no uid seam — so
+// a file owned BY `portage` and closed to others reads as unreadable. A record
+// never yields that shape, but an operator "fixing" it with `chown portage:`
+// and no g+r keeps the package held; the decline names the path for them.
 func buildUserCanRead(path string) bool {
 	gid, ok := portageGroupID()
 	if !ok {
@@ -412,9 +378,9 @@ func modeGrants(info fs.FileInfo, gid int, other, group fs.FileMode) bool {
 }
 
 // unmetPrecondition answers whether pkg is held back by a host precondition that
-// is STILL unmet, and clears the record when it is not (S043-R3.2, R3.3).
+// is STILL unmet, and clears the record when it is not.
 //
-// Clearing here, rather than in a sweep or on a timer, is the whole of R3.3: the
+// Clearing here, rather than in a sweep or on a timer, is deliberate: the
 // event that ends a record is the path becoming readable, and this is the only
 // place that ever asks. No flag to pass, no expiry to wait out — the next run
 // after the operator's `chmod` runs the gate.

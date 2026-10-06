@@ -28,10 +28,11 @@ import (
 // whole machine.
 //
 // distfiles.Resolve with nothing configured lands on the host's own DISTDIR
-// (/var/cache/distfiles), which is the point of this story — and which the test
+// (/var/cache/distfiles), which is what production wants — and which the test
 // suite must never write into. Tests reach runManifest from two directions: a
-// sweeper they build themselves, and Applier.sweeper(), which takes no distdir
-// option at all, so there is no per-test way to redirect the second one. One
+// sweeper they build themselves, and Applier.sweeper(), whose distdir comes from
+// WithApplierDistdir: an option a test can forget, which lands it on the host's
+// DISTDIR. One
 // seam is what makes "no test can quarantine, lock or probe inside the host's
 // DISTDIR" a property of the package rather than a promise each test keeps.
 //
@@ -47,7 +48,7 @@ var resolveDistdir = distfiles.Resolve
 //
 // The executor used to live on Applier, which put it behind Apply's pending.json
 // guard: a package with no pending update never reached it, so a directory could
-// only be swept in the same run that bumped it (S027 Summary). Building a real
+// only be swept in the same run that bumped it. Building a real
 // Applier just to sweep is not the fix either — NewApplier initialises a
 // PendingList and creates a logs directory, state a sweep has no business
 // creating. So the executor is lifted off Applier entirely and Applier holds one
@@ -55,7 +56,7 @@ var resolveDistdir = distfiles.Resolve
 //
 // The fields are exactly what the removal loop and the Manifest step need, and
 // nothing else. In particular there is no fixer: runManifestWithFix stays on
-// Applier, so no sweep can reach the LLM manifest repair (S027-R4.5).
+// Applier, so no sweep can reach the LLM manifest repair.
 type sweeper struct {
 	// overlayPath is the overlay root every path is built from.
 	overlayPath string
@@ -67,16 +68,14 @@ type sweeper struct {
 	// authenticated distfile fetch. A nil map simply disables that path.
 	configs map[string]registry.PackageConfig
 	// distdir and configuredDistdir are the two configurable rungs of
-	// distfiles.Resolve's precedence (S030-D2): the --distdir flag and the
-	// autoupdate.distdir config key. Both are empty today, and two empty
-	// strings ARE the production default — Resolve then asks the host itself
-	// (`portageq distdir`), which is S030-R1.2. Sub-task 5.2 adds the flag and
-	// the config key that fill them.
+	// distfiles.Resolve's precedence: the --distdir flag and the
+	// autoupdate.distdir config key. Two empty strings ARE the production
+	// default — Resolve then asks the host itself (`portageq distdir`).
 	distdir           string
 	configuredDistdir string
 	// distfilesCache is the read-only cache the manifest step symlinks already
 	// downloaded distfiles from, under the name `overlay manifest` uses for the
-	// same thing (S030-R1.3). Empty disables prepopulation entirely, and empty
+	// same thing. Empty disables prepopulation entirely, and empty
 	// is this struct's DEFAULT on purpose: the CLI layer owns the
 	// /var/cache/distfiles default, so a sweeper built inside a test reads no
 	// directory that test did not name.
@@ -108,9 +107,8 @@ func withSweeperConfigs(cfgs map[string]registry.PackageConfig) sweeperOption {
 
 // withSweeperDistdir supplies the two configurable rungs of the distdir
 // precedence: explicit is the --distdir flag, configured is autoupdate.distdir
-// from the config file. Leaving both empty — what every production caller does
-// until sub-task 5.2 wires the flag and the key — makes Resolve fall through to
-// the DISTDIR the host itself names.
+// from the config file. Leaving both empty — the default when neither is set —
+// makes Resolve fall through to the DISTDIR the host itself names.
 func withSweeperDistdir(explicit, configured string) sweeperOption {
 	return func(s *sweeper) {
 		s.distdir = explicit
@@ -133,8 +131,8 @@ func withSweeperDistfilesCache(dir string) sweeperOption {
 // sweeper built outside NewApplier — which is the whole point of this type —
 // arrives with a nil execCommand and a nil reporter unless a caller remembers
 // every option, and both panic on the first Manifest run rather than failing
-// with an error. A suite that only ever constructs one through a fully-populated helper
-// never sees it (S027-G5).
+// with an error. A suite that only ever constructs one through a fully-populated
+// helper never sees it.
 func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 	s := &sweeper{overlayPath: overlayPath}
 	for _, opt := range opts {
@@ -155,7 +153,7 @@ func newSweeper(overlayPath string, opts ...sweeperOption) *sweeper {
 // ebuildPath returns the path of one version's ebuild inside pkg's directory,
 // or "" when pkg is not a well-formed atom. The path is always built from the
 // split components, never from the raw key: a ":slot" or "@label" leaking into
-// a path is destructive here rather than merely wrong (S027-G4).
+// a path is destructive here rather than merely wrong.
 func (s *sweeper) ebuildPath(pkg, version string) string {
 	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
 	if !ok {
@@ -171,7 +169,7 @@ func (s *sweeper) ebuildPath(pkg, version string) string {
 // cosmetic: runManifest forwards it to prefetchAuthDistfile, which downloads a
 // serial-gated distfile for exactly that version. An apply passes the version it
 // just created; a sweep must pass a version that REMAINS in the directory, never
-// one it is about to delete (S027-G2).
+// one it is about to delete.
 //
 // Every failure returns the plan as executed so far, so a caller can report what
 // really happened rather than what was intended.
@@ -198,7 +196,7 @@ func (s *sweeper) execute(ctx context.Context, pkg string, plan sweepPlan, manif
 	}
 	plan.Remove = removed
 
-	// R4.2: exactly once, after the last removal, and only when a file actually
+	// Exactly once, after the last removal, and only when a file actually
 	// went away. The Manifest is regenerated so its distfile entries stop
 	// referencing the removed versions; with nothing removed there is nothing to
 	// prune, and the run would only re-fetch distfiles for an untouched
@@ -221,7 +219,7 @@ func (s *sweeper) execute(ctx context.Context, pkg string, plan sweepPlan, manif
 // implying it happened.
 type SweepDirPlan struct {
 	// Atom is "category/package" — never a registry key. Paths are built from
-	// it, so a ":slot" or "@label" here would be destructive (S027-G4).
+	// it, so a ":slot" or "@label" here would be destructive.
 	Atom string
 	// Remove lists the versions to delete, ascending in Gentoo order. Empty on
 	// any blocked plan.
@@ -265,7 +263,7 @@ type SweepBatch struct {
 	// swept because a held entry covers them, sorted.
 	//
 	// It exists so the tool cannot contradict itself. The reconciliation ends
-	// its unclaimed group by pointing at `--clean` (S027-R7.1), and without this
+	// its unclaimed group by pointing at `--clean`, and without this
 	// field a sweep whose only findings were held would answer "every ebuild is
 	// claimed by an entry" — which is false twice over: the ebuild is unclaimed,
 	// and it is being protected rather than overlooked. Skipping quietly is what
@@ -288,7 +286,7 @@ var ErrInvalidSweepTarget = errors.New("invalid sweep target")
 // obvious thing to do and the resulting path is built from the atom either way.
 //
 // The directory must exist. Failing here rather than returning an empty batch is
-// what makes a typo obvious instead of reading as "nothing to clean" (S027-R1.4).
+// what makes a typo obvious instead of reading as "nothing to clean".
 func normaliseSweepTarget(overlayPath, target string) (atom, category string, err error) {
 	if target == "" {
 		return "", "", nil
@@ -330,15 +328,14 @@ func dirMustExist(path string) error {
 // # Why this keeps more than it looks like it should
 //
 // It is an optimisation — sparing a one-package sweep the directory read
-// Reconcile performs per enabled entry — and it is the most dangerous function
-// in this story, because the sweep it feeds deletes files.
+// Reconcile performs per enabled entry — and it is among the most dangerous
+// functions in this package, because the sweep it feeds deletes files.
 //
 // Matching is by ATOM, never by exact key, and disabled and held entries are
-// kept. Both rules exist for the same reason: unclaimedIn collects claims from
-// EVERY entry of an atom, switched-off ones included, because a switched-off
-// entry still holds its ebuild. Drop "media-plugins/gst-plugins-vpx@dev" while
+// kept, because unclaimedIn collects claims from EVERY entry of an atom: a
+// switched-off entry still holds its ebuild. Drop "media-plugins/gst-plugins-vpx@dev" while
 // keeping "@stable" and the dev line's ebuild becomes claimed by nobody — so
-// the sweep deletes a maintained release line (S027-G1).
+// the sweep deletes a maintained release line.
 func scopeConfigs(cfgs map[string]registry.PackageConfig, atom, category string) map[string]registry.PackageConfig {
 	if atom == "" && category == "" {
 		return cfgs
@@ -385,28 +382,21 @@ func atomHasHeldEntry(cfgs map[string]registry.PackageConfig, atom string) bool 
 // PlanOverlaySweep computes what a sweep would do to every package directory
 // holding an ebuild no entry claims, for the whole overlay or for one target.
 //
-// # Why the candidates come from Reconcile
-//
-// Reconcile already walks the registry and reports exactly this class of
-// finding (UnclaimedEbuild), including its enabled filter. Taking the
-// candidates from it means what a sweep touches is what `--check` printed —
-// parity by construction rather than by two implementations agreeing (S027-R2.1,
-// S027-R2.2). Its Key for that class is already the bare atom.
-//
-// The one place that parity is deliberately broken is `hold`, and it is broken
-// in the reporting direction only: see the filter below (S026-R1.1, S027-R1.3).
+// The candidates come from Reconcile, which already reports this class of
+// finding (UnclaimedEbuild) with its enabled filter and the bare atom as Key,
+// so what a sweep touches is what `--check` printed — parity by construction,
+// not by two implementations agreeing. The one deliberate break is `hold`, in
+// the reporting direction only: see the filter below.
 //
 // # Why the verdict does NOT come from Reconcile
 //
-// A divergence says a file is unclaimed. Whether removing it is allowed is a
-// different question, and planSweep is the only thing that answers it: the
-// live-ebuild rule, the last-non-live floor, and both block cases live there.
-// Deleting straight from the divergence list would drop all of them — which is
-// precisely the failure story 021 exists to prevent (S027-D1).
+// A divergence says a file is unclaimed; whether removing it is allowed is
+// planSweep's question alone — the live-ebuild rule, the last-non-live floor
+// and both block cases live there, and deleting straight from the divergence
+// list would drop all of them.
 //
-// Nothing here touches the filesystem beyond reading directories.
-//
-// The registry's reconciliation reports what it skips to log; nil discards it.
+// Nothing here touches the filesystem beyond reading directories. The
+// registry's reconciliation reports what it skips to log; nil discards it.
 func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (SweepBatch, error) {
 	atom, category, err := normaliseSweepTarget(overlayPath, target)
 	if err != nil {
@@ -423,11 +413,11 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]regi
 		if d.Kind != UnclaimedEbuild || seen[d.Key] {
 			continue
 		}
-		// A held directory is reported by --check and swept by nothing. Story
-		// 026 stopped Reconcile from skipping held entries so their pin could be
-		// recorded, and that made it scan their directories for unclaimed
-		// ebuilds too — a reporting change that would arrive here as a DELETION
-		// candidate if it were not stopped (S026-R1.1).
+		// A held directory is reported by --check and swept by nothing.
+		// Reconcile does not skip held entries, so their pin can be recorded,
+		// and therefore scans their directories for unclaimed ebuilds too — a
+		// reporting behaviour that would arrive here as a DELETION candidate if
+		// it were not stopped.
 		//
 		// It is stopped because `hold` exists precisely for the case that makes
 		// this dangerous: a maintainer bumps a held package by hand and keeps
@@ -440,7 +430,8 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]regi
 		// The filter is HERE and not in scopeConfigs on purpose: dropping a held
 		// entry from the config map would remove it as a CLAIMANT, its own
 		// ebuild would become unclaimed, and the sweep would delete the held
-		// package itself. That is S027-G1, inverted into a worse bug.
+		// package itself — the claimant-dropping bug of scopeConfigs, inverted
+		// into a worse one.
 		if atomHasHeldEntry(scoped, d.Key) {
 			// Recorded, never silent: see SweepBatch.SkippedHeld.
 			seen[d.Key] = true
@@ -480,30 +471,22 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]regi
 // runManifest regenerates the Manifest file with pkgdev, from inside the
 // package directory so pkgdev discovers the ebuilds itself.
 //
-// versions are the versions whose distfiles may need pre-fetching before pkgdev
-// digests them. It is variadic because pkgdev manifests the WHOLE directory:
-// an apply has exactly one new version to pre-fetch, while a sweep can leave
-// several ebuilds behind and every one of them needs its distfile present
-// (S027-G2). Passing none is valid — it simply skips the pre-fetch, which is a
-// no-op for every package without an authenticated-fetch [meta] block.
+// versions are those whose distfiles may need pre-fetching before pkgdev digests
+// them — variadic because pkgdev manifests the WHOLE directory, and a sweep can
+// leave several ebuilds behind. Passing none skips the pre-fetch.
 //
-// # The distdir is resolved now, and the order around it is not free
-//
-// The directory below is the host's real DISTDIR unless something named another
-// one, so it is shared with the system package manager and with every other
-// worker of this sweep (the batch runs its packages concurrently, see
-// ExecuteOverlaySweep). That is what the steps around pkgdev are for, and they
-// have to happen in this order (S030-D3/D4; the reasoning lives on each function
-// in internal/common/distfiles, since no signature can enforce it):
+// The distdir is the host's real DISTDIR unless something named another, shared
+// with the system package manager and every concurrent worker of this sweep, so
+// the steps around pkgdev run in this order (reasoning on each function in
+// internal/common/distfiles; no signature can enforce it):
 //
 //	resolve -> lock -> quarantine -> record -> fetch (auth prefetch, pkgdev)
 //	        -> on failure: cleanup -> release -> cleanup the directory
 //
-// Lock BEFORE quarantine, because quarantine's look-then-move has a window the
-// lock is what closes. Record AFTER quarantine, because a name we have just
-// moved aside is absent, and the file that appears under it next is ours to
-// clean up. Release AFTER the cleanup, because releasing earlier reopens the
-// window the record depends on.
+// Lock BEFORE quarantine: the lock closes quarantine's look-then-move window.
+// Record AFTER quarantine: a name just moved aside is absent, so the file that
+// appears under it next is ours to clean up. Release AFTER the cleanup:
+// releasing earlier reopens the window the record depends on.
 func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...string) error {
 	// Parse package name
 	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
@@ -516,7 +499,7 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 
 	// A distdir backed by a disk, resolved and never invented: the --distdir
 	// flag, then autoupdate.distdir, then the DISTDIR the host's own package
-	// manager names (S030-R1.1, S030-R1.2). What stood here created a temporary
+	// manager names. What stood here created a temporary
 	// directory instead, and on the machine the defect was measured on /tmp is a
 	// 31 GB tmpfs — so every distfile a bump fetched went into RAM, several
 	// packages at a time.
@@ -529,11 +512,11 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	dir, err := resolveDistdir(ctx, s.distdir, s.configuredDistdir)
 	if err != nil {
 		// dir.Path is the directory that could not be prepared. It is carried
-		// for the diagnostic and is never used as a directory (S030-R1.4).
+		// for the diagnostic and is never used as a directory.
 		return fmt.Errorf("%w: distdir %s: %w", ErrManifestFailed, dir.Path, err)
 	}
 	// Removes the directory only when THIS run created it, so the host's DISTDIR
-	// — and any directory an operator named — survives the run (S030-R1.5).
+	// — and any directory an operator named — survives the run.
 	// Registered first, so it runs last: after the locks are released.
 	defer dir.Cleanup()
 	distdir := dir.Path
@@ -547,7 +530,7 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	// Lock first: everything below reads or writes those names, and both the
 	// quarantine and the record/cleanup pair have a window between looking and
 	// acting. The claim is all-or-nothing and is held for the whole pkgdev
-	// invocation (S030-R2.4).
+	// invocation.
 	lock, err := distfiles.LockFetch(ctx, distdir, expected)
 	if err != nil {
 		return fmt.Errorf("%w: claiming the distfiles for %s in %s: %w", ErrManifestFailed, pkg, distdir, err)
@@ -557,9 +540,8 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	// Quarantine: a distfile present under a name the current Manifest does not
 	// list cannot be verified by anything, and a fetch killed midway leaves
 	// exactly that — under the FINAL name, because portage's fetcher writes
-	// straight to it (S030-R2.2). Moved aside, never deleted: the directory is
-	// the host's (S030-R2.5). A name the Manifest DOES list is left alone, which
-	// is S030-R2.1's reuse.
+	// straight to it. Moved aside, never deleted: the directory is the host's.
+	// A name the Manifest DOES list is left alone and reused.
 	moved, qErr := distfiles.Quarantine(distdir, manifestNames, expected)
 	// Reported even when the call failed: what moved still moved.
 	s.reportQuarantined(pkg, distdir, moved)
@@ -570,8 +552,8 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	}
 
 	// Prepopulate from the read-only cache (--distfiles-cache /
-	// autoupdate.distfiles_cache), which is S030-R2.1's reuse across two
-	// directories rather than within one.
+	// autoupdate.distfiles_cache): reuse across two directories rather than
+	// within one.
 	//
 	// The position is the contract, not a preference. AFTER the quarantine,
 	// because quarantine moves aside every expected name it cannot verify and a
@@ -591,7 +573,7 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 
 	// Record what a failed fetch may take away: the expected names that are
 	// ABSENT right now. Everything else in this directory belongs to somebody
-	// else (S030-R2.3).
+	// else.
 	scope, err := distfiles.RecordFetchScope(distdir, expected)
 	if err != nil {
 		return fmt.Errorf("%w: recording the fetch scope in %s: %w", ErrManifestFailed, distdir, err)
@@ -620,15 +602,14 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	// context with a finite deadline so a stalled distfile fetch cannot hang the
 	// caller forever. Cancelling either the parent (SIGINT) or this child
 	// (timeout) stops pkgdev and every process it started (group mode, below),
-	// so the step returns within manifestTimeout plus procgroup.GracePeriod
-	// (S054-R2.3).
+	// so the step returns within manifestTimeout plus procgroup.GracePeriod.
 	opCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
 	defer cancel()
 
 	// Run pkgdev manifest from the package directory.
 	cmd := s.execCommand(opCtx, "pkgdev", "manifest", "--distdir", distdir)
 	cmd.Dir = pkgDir
-	// Group mode (S054-R2.1). pkgdev's fetchers inherit the output pipe below,
+	// Group mode. pkgdev's fetchers inherit the output pipe below,
 	// and exec.CommandContext alone stops pkgdev and nothing under it, so a
 	// cancelled run used to last as long as the slowest download. Group gives
 	// pkgdev a process group of its own, sends the whole group SIGTERM when opCtx
@@ -640,29 +621,29 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	procgroup.Group(cmd)
 
 	// Stream the long manifest run (distfile download + digest) live as TaskLine
-	// events (S010-R1.1; the StreamCapture handles in-place "\r" updates, S010-R1.2). The
-	// task id is pkg so the lines are attributed to the same task the reporter
-	// lifecycle uses (sub-task 3.1). The SAME StreamCapture instance is used for
-	// both stdout and stderr, so exec gives the child a single pipe — the captured
-	// bytes are byte-identical to CombinedOutput's, keeping the error string and
-	// every existing failure test byte-identical (S010-R7.1). Under the default Noop
-	// reporter the TaskLine events are discarded, so behaviour is unchanged (S010-R3.3).
+	// events; the StreamCapture handles in-place "\r" updates. The task id is pkg
+	// so the lines are attributed to the same task the reporter lifecycle uses.
+	// The SAME StreamCapture instance is used for both stdout and stderr, so exec
+	// gives the child a single pipe — the captured bytes are byte-identical to
+	// CombinedOutput's, keeping the error string and every existing failure test
+	// byte-identical. Under the default Noop reporter the TaskLine events are
+	// discarded, so behaviour is unchanged.
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
 	cmd.Stdout = sc
 	cmd.Stderr = sc
 	// Result: a pkgdev that exited 0 while a helper it left behind still held
-	// the pipe past the WaitDelay is a success, not exec.ErrWaitDelay (S054-R1.5).
+	// the pipe past the WaitDelay is a success, not exec.ErrWaitDelay.
 	runErr := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
 	if runErr != nil {
 		// Before the error goes anywhere: take away whatever this run created
 		// under a name that was absent when it started. A truncated distfile
-		// left behind is what the next run would digest (S030-R2.3).
+		// left behind is what the next run would digest.
 		s.cleanupFailedFetch(pkg, distdir, scope)
 		// The message is unchanged, byte for byte — existing tests pin it and an
 		// operator reads it. What is added is structure AROUND it, so the caller
 		// can classify the failure with errors.As instead of re-deriving state
-		// that has already moved on (S030-D6).
+		// that has already moved on.
 		return &manifestRunError{
 			Distdir:  distdir,
 			Expected: expected,
@@ -752,7 +733,7 @@ func (s *sweeper) reportPrepopulated(pkg, cacheDir string, reused int) {
 // It is called from the failure branches ONLY, and the name says so because
 // nothing in the type can enforce it: after a success those same names are the
 // distfiles pkgdev has just fetched and digested, and removing them would delete
-// verified files out of the host's DISTDIR (S030-R2.1).
+// verified files out of the host's DISTDIR.
 //
 // Nothing here can abort anything — the package has already failed. A removal
 // that could not be done is still said out loud rather than swallowed, because
@@ -813,51 +794,21 @@ func (s *sweeper) prefetchAuthDistfile(ctx context.Context, pkg, version, distdi
 // manifested are expected to need — the `expected` list Quarantine, LockFetch
 // and RecordFetchScope all take.
 //
-// # Why this is a derivation and not a lookup
+// It is a derivation, not a lookup. The authoritative answer is the new
+// ebuild's SRC_URI, which means expanding bash (${P}, $(ver_cut …), "->"
+// renames, USE-conditional groups, eclass variables); pkgdev learns it only once
+// it runs, after every caller here needs it. Nothing in this repository expands
+// SRC_URI, and a half-correct expander would be worse than none: an invented
+// name is one Quarantine moves a real file out from under. So it uses two
+// sources naming only files this package is itself about to write or fetch:
 //
-// The authoritative answer is the new ebuild's SRC_URI, and reading it means
-// expanding bash: ${P}, ${MY_P}, $(ver_cut …), the "-> renamed.tar.gz" arrow,
-// USE-conditional groups, and variables an eclass sets. pkgdev knows the answer
-// because it asks portage's own parser — and it only knows it once it runs,
-// which is after the moment every caller here needs it. Nothing in this
-// repository expands SRC_URI (internal/common/ebuild parses paths, and
-// ebuild_meta.go extracts the raw text with its ${…} intact), and a
-// half-correct expander would be worse than none: a name invented here is a name
-// Quarantine moves a real file out from under.
+//  1. the authenticated-fetch filename from the [meta] block — exact, the same
+//     template prefetchAuthDistfile resolves;
+//  2. the current Manifest's DIST names with an on-disk ebuild's version
+//     replaced by the version being manifested.
 //
-// So it derives from what is already known, from two sources that name only
-// files this package is itself about to write or fetch:
-//
-//  1. The authenticated-fetch filename, when the package's [meta] block
-//     configures one. That is exact rather than guessed — it is the same
-//     template prefetchAuthDistfile resolves and writes, just above.
-//  2. The current Manifest's own DIST names, with the version of an ebuild
-//     still sitting in the directory replaced by the version being manifested.
-//     That covers the ordinary ${P} shape — zed-0.209.4.tar.gz becomes
-//     zed-0.212.0.tar.gz — which is the shape the defect this story fixes was
-//     measured on.
-//
-// # What it misses, and why missing is safe
-//
-// An upstream that renames its archive between releases (a changed tag scheme, a
-// per-release hash, a SRC_URI arrow) produces a name this cannot guess, and the
-// name it does produce then simply never exists. Every consumer is a no-op on a
-// name that is not there: Quarantine finds nothing to move, RecordFetchScope
-// records an absence nothing fills, LockFetch claims a name nobody contends,
-// and the classifier's zero-length check has nothing to inspect. R2.1-R2.3
-// therefore protect the common case and stand down on the rest — less
-// protection, never a wrong action.
-//
-// A guessed name can also never authorise a deletion of something that was
-// already there: RecordFetchScope records only names that are ABSENT when the
-// step begins, so a name that happens to match a real, pre-existing distfile is
-// excluded by the very check that would otherwise remove it.
-//
-// Deliberately NOT included: the current Manifest's names as they stand. A file
-// already listed there is checksum-protected — pkgdev compares it and refetches
-// on a mismatch — which is exactly why Quarantine leaves such a file alone
-// (S030-D3, case 2). Adding them would widen the lock and the removable set for
-// no protection gained.
+// The current Manifest's names as they stand are NOT included: such a file is
+// checksum-protected, so they would widen the lock for nothing.
 func (s *sweeper) expectedDistfiles(pkg, pkgDir, pkgName string, manifestNames, versions []string) []string {
 	seen := make(map[string]bool)
 	var out []string
@@ -880,7 +831,15 @@ func (s *sweeper) expectedDistfiles(pkg, pkgDir, pkgName string, manifestNames, 
 		}
 	}
 
-	// (2) The current DIST names with an on-disk version substituted.
+	// (2) The current DIST names with an on-disk version substituted. This
+	// covers the ordinary ${P} shape (zed-0.209.4.tar.gz -> zed-0.212.0.tar.gz).
+	// An upstream that renames its archive between releases yields a name that
+	// never exists, and every consumer is a no-op on a missing name: Quarantine
+	// moves nothing, RecordFetchScope records an absence nothing fills,
+	// LockFetch claims an uncontended name, and the classifier has nothing to
+	// inspect — less protection, never a wrong action. Nor can a guess
+	// authorise deleting a pre-existing file: RecordFetchScope records only
+	// names ABSENT when the step begins.
 	olds := otherEbuildVersions(pkgDir, pkgName, versions)
 	for _, name := range manifestNames {
 		for _, version := range versions {
@@ -1019,13 +978,13 @@ type SweepDirResult struct {
 	// report.
 	Removed []string
 	// Kept mirrors the plan's Keep so a report can name the entry claiming each
-	// surviving version (S027-R6.1).
+	// surviving version.
 	Kept map[string]string
 	// Blocked names the entry that blocked this directory, when there was one.
 	Blocked string
 	// WouldRemove lists what a blocked directory left alone.
 	WouldRemove []string
-	// Err is this directory's failure. It never aborts the batch (S027-R4.4).
+	// Err is this directory's failure. It never aborts the batch.
 	Err error
 }
 
@@ -1088,7 +1047,7 @@ func WithSweepPackagesConfig(cfgs map[string]registry.PackageConfig) SweepOption
 
 // WithSweepDistdir supplies the two configurable rungs of the distdir
 // precedence: explicit is the --distdir flag, configured is autoupdate.distdir
-// from the config file (S030-R1.3). Both empty is the production default and
+// from the config file. Both empty is the production default and
 // resolves to the DISTDIR the host itself names.
 func WithSweepDistdir(explicit, configured string) SweepOption {
 	return func(o *sweepOptions) {
@@ -1109,7 +1068,7 @@ func WithSweepDistfilesCache(dir string) SweepOption {
 // # Failure isolation
 //
 // A directory's error is recorded on its own result and never returned as the
-// batch's error (S027-R4.4). One unreadable directory, one locked file or one
+// batch's error. One unreadable directory, one locked file or one
 // failing pkgdev must not strand the other ninety-nine — the sweep's whole
 // purpose is clearing an accumulation, and an all-or-nothing batch would make
 // the accumulation permanent.
@@ -1117,7 +1076,7 @@ func WithSweepDistfilesCache(dir string) SweepOption {
 // # Why the default is serial
 //
 // concurrency defaults to 1. Parallel `pkgdev manifest` runs are unproven
-// against a repository-level lock or the metadata cache (S027-A3), so a caller
+// against a repository-level lock or the metadata cache, so a caller
 // that forgets to pass a bound gets the safe behaviour rather than the fast one.
 func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBatch, opts ...SweepOption) SweepReport {
 	o := sweepOptions{concurrency: 1}
@@ -1144,8 +1103,8 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 	var wg sync.WaitGroup
 
 	for i, dir := range batch.Dirs {
-		// Blocked directories are carried into the report untouched, so R5.1 and
-		// R5.2 print from the same structure the plan showed rather than from a
+		// Blocked directories are carried into the report untouched, so both
+		// block cases print from the same structure the plan showed rather than from a
 		// second, differently-computed one.
 		if dir.IsBlocked() {
 			results[i] = SweepDirResult{
@@ -1207,7 +1166,7 @@ func ExecuteOverlaySweep(ctx context.Context, overlayPath string, batch SweepBat
 func sweepOneDir(ctx context.Context, s *sweeper, dir SweepDirPlan) SweepDirResult {
 	kept := survivingVersions(dir.Keep)
 	if len(kept) == 0 {
-		// Nothing would remain. The floor rule (S021-R4.3) makes this
+		// Nothing would remain. The last-release floor rule makes this
 		// unreachable through planSweep, so reaching it means the plan was built
 		// some other way — refuse rather than empty a directory of releases,
 		// which no overlay can recover from on its own.

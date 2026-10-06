@@ -4,15 +4,15 @@ package validate
 //
 // SKIPPED is the reason this is three values and not a boolean. "The gate could
 // not run" and "the gate ran and found nothing wrong" are different answers, and
-// collapsing them is the defect this whole story exists to remove: a clean
-// report must never be readable as "we did not look".
+// collapsing them is the defect this type exists to prevent: a clean report
+// must never be readable as "we did not look".
 type Outcome string
 
 const (
-	// OutcomePass means both sides were read and they agree (R3.5).
+	// OutcomePass means both sides were read and they agree.
 	OutcomePass Outcome = "PASS"
 	// OutcomeFailed means both sides were read and at least one error finding
-	// came out of the comparison (R3.4).
+	// came out of the comparison.
 	OutcomeFailed Outcome = "FAILED"
 	// OutcomeSkipped means the gate could not run. It ALWAYS carries a reason.
 	OutcomeSkipped Outcome = "SKIPPED"
@@ -20,25 +20,18 @@ const (
 
 // DeclineCause says WHY a SKIPPED gate declined, in the ONE dimension a
 // promotion decision turns on: was the thing that stopped the gate a fact about
-// the CANDIDATE, or a fact about THIS MACHINE (S039-R2.1).
+// the CANDIDATE, or a fact about THIS MACHINE.
 //
-// # Why this is a field and not a sentence
+// It is a field and not a sentence because PromotionDecision REFUSES a bump on
+// this distinction. Every skip's Reason already says which it is, in prose, but
+// prose gets reworded, and reading the cause back out of it would let a wording
+// change silently start (or stop) publishing unmeasured ebuilds. Nothing
+// pattern-matches a Reason string.
 //
-// Every skip already carries a Reason, and the reason already says which it is —
-// in prose. Prose is free to be reworded, and PromotionDecision now REFUSES a
-// bump on this distinction, so reading it back out of the sentence would make a
-// wording change silently start (or stop) publishing unmeasured ebuilds. The
-// cause therefore travels as data from the producer that knows it to the rule
-// that needs it, and nothing anywhere pattern-matches a Reason string.
-//
-// # The same split D1(c) already makes, one level up
-//
-// unbuildableHereReason exists because "this host lacks the dependency" and
-// "this ebuild is broken" must not reach the same verdict. DeclineCause is that
-// distinction carried past the gate and into the promotion rule: R2.1 refuses a
-// list that measured nothing ABOUT THE CANDIDATE; S033-R3.12 promotes a list
-// that measured nothing because THIS MACHINE could not answer, because refusing
-// those makes `overlay autoupdate --apply` inert on an ordinary workstation.
+// It carries unbuildableHereReason's split one level up: a list that measured
+// nothing ABOUT THE CANDIDATE is refused, while one that measured nothing
+// because THIS MACHINE could not answer is promoted — refusing those would make
+// `overlay autoupdate --apply` inert on an ordinary workstation.
 type DeclineCause string
 
 const (
@@ -56,52 +49,33 @@ const (
 	// DeclineCandidate: something about THIS EBUILD stopped the gate — no
 	// Manifest could be produced for it, its tree could not be staged. Nothing
 	// read the candidate, and the bentoo overlay auto-commits and pushes within
-	// minutes, so promoting on this publishes an unmeasured ebuild (R2.1).
+	// minutes, so promoting on this publishes an unmeasured ebuild.
 	DeclineCandidate DeclineCause = "candidate"
 	// DeclineHost: something about THIS MACHINE stopped it — a build dependency
 	// is not installed, no privilege to isolate, no `ebuild` on PATH. The
 	// machine says nothing about the bump, so the bump is promoted with the
-	// depth it did not reach named (S033-R3.12).
+	// depth it did not reach named.
 	DeclineHost DeclineCause = "host"
 )
 
 // GateResult is what ONE gate has to say about one ebuild.
 //
-// # Why the reason lives here and not on the result
+// The reason lives per gate, not per ebuild: a single shared Reason let the
+// last gate to write it overwrite another gate's cause.
 //
-// EbuildResult shipped with a single Reason shared by every gate, and attachQA
-// overwrote it: an option gate that skipped for a missing distfile and a QA gate
-// that skipped for a missing pkgcheck came out of the run as one cause, and
-// whichever wrote last won. A reason is a property of the gate that could not
-// run. With five gates that is no longer a nicety — four of them would be
-// explaining themselves through one field.
+// Invariant: Outcome SKIPPED ALWAYS carries a non-empty Reason — a skip nobody
+// can read is a pass. The converse does not hold: a PASS may carry a reason
+// too, because an outcome names its own reach ("a configure pass does not cover
+// compilation"). Each Finding also carries its own Gate so a renderer
+// flattening every gate's findings into one list can still say which check
+// spoke.
 //
-// # The invariant
-//
-// Outcome SKIPPED ALWAYS carries a non-empty Reason. That is the whole story in
-// one sentence — a skip nobody can read is a pass — and putting Reason on the
-// gate is what makes it statable once per gate instead of once per ebuild. The
-// converse does NOT hold: a PASS may carry a reason too, because an outcome
-// names its own reach and "a configure pass does not cover compilation" is
-// exactly the kind of qualification R4 asks for.
-//
-// Findings are the ones THIS gate produced. Each also carries its own Gate
-// field, which looks redundant here and is not: a renderer flattening every
-// gate's findings into one list must still be able to say which check spoke.
-//
-// # Declined is deliberately NOT serialized, and that costs something
-//
-// `json:"-"` is a requirement, not a default. This document is the one S039-R1.6
-// and story 031's R11.3 pin BYTE-FOR-BYTE, and the same struct is also
-// StageRecord.Gates on disk (record.go). A new key in either changes bytes this
-// story promised not to change — including the records already written by every
-// installed copy of the tool.
-//
-// The price is real and is stated here so nobody discovers it as a surprise: a
-// gate list ROUND-TRIPPED THROUGH A StageRecord comes back DeclineUnrecorded,
-// whatever it was when it was written. So the vacuity rule below decides on a
-// list held in memory by the run that produced it, and a reload sees only
-// "SKIPPED, cause unrecorded" — which fails open, by DeclineUnrecorded's rule.
+// Declined is `json:"-"` as a requirement: this document is pinned
+// BYTE-FOR-BYTE, and the same struct is StageRecord.Gates on disk, so a new key
+// would change bytes already written by every installed copy of the tool. The
+// price: a gate list ROUND-TRIPPED through a StageRecord comes back
+// DeclineUnrecorded, so the vacuity rule decides only on a list held in memory
+// by the run that produced it, and a reload fails open.
 type GateResult struct {
 	Gate     string    `json:"gate"`
 	Outcome  Outcome   `json:"outcome"`
@@ -115,39 +89,20 @@ type GateResult struct {
 
 // EbuildResult is everything the run has to say about one ebuild version.
 //
-// # A list of gates, not one field per gate
-//
-// This shipped with two hardcoded outcome fields, Options and QA, and one Reason
-// for both. Five gates do not fit that shape, and the failure is not cosmetic:
-// ExitCode filtered its findings on GateOptions, so an error from the gate that
-// actually runs the build was invisible to it and the command exited 0 while the
-// report printed a failure. Gates is a list so that a sixth gate costs a
-// constant and no surgery (D12).
-//
-// # Depth beside DepthRequested
+// Gates is a list, not one field per gate: with per-gate fields, ExitCode once
+// filtered on GateOptions alone, so an error from the gate that runs the build
+// exited 0 while the report printed a failure. A new gate costs a constant.
 //
 // Depth is how far validation actually got; DepthRequested is how far it was
-// asked to go. Both are needed to say "compile was asked for and configure is as
-// far as it got, because …", which is the R4 rule — an outcome names its own
-// reach — applied to the ladder itself. DepthReason is that "because", and it is
-// the one of the three that is genuinely absent when the two agree.
+// asked to go; DepthReason is the "because" between them, absent when they
+// agree — an outcome names its own reach, ladder included. All three are
+// strings, the spelling `--depth` accepts and Depth.String prints, because
+// Depth is an int whose ORDERING is its contract and must not reach the wire.
 //
-// All three are strings rather than the Depth type on purpose: Depth is an int
-// whose ORDERING is its contract, so it would reach the wire as a number and
-// force every consumer to carry the ladder's ordering to read it. The string is
-// the same spelling `--depth` accepts and Depth.String prints.
-//
-// # The json tags are the contract
-//
-// `overlay validate --json` is the first JSON surface in this CLI, so there is
-// no precedent to inherit and these names are established here. They are
-// written out explicitly rather than left to Go's field names for one reason: a
-// rename on the Go side must not silently rename the wire key under a consumer
-// who has already shipped a jq expression against it.
-//
-// Only the fields that are genuinely absent carry omitempty. Package, Version,
-// Depth, DepthRequested, Gates and Sources are always present, so a consumer
-// never has to tell "missing" from "empty" for them.
+// The json tags are the contract of `overlay validate --json`: written out so a
+// Go rename cannot silently rename a key under a consumer's jq expression. Only
+// genuinely absent fields carry omitempty; Package, Version, Depth,
+// DepthRequested, Gates and Sources are always present.
 type EbuildResult struct {
 	Package        string       `json:"package"`
 	Version        string       `json:"version"`
@@ -164,14 +119,14 @@ type EbuildResult struct {
 // FAILED beats SKIPPED beats PASS, and PASS is only reached when EVERY deciding
 // gate passed. A result carrying no deciding gate at all answers SKIPPED: it has
 // said nothing about this ebuild, and "nothing" read as a pass is the defect
-// this whole story exists to remove.
+// this outcome exists to prevent.
 //
 // # pkgcheck is excluded, exactly as it is from ExitCode
 //
 // The QA gate skips whenever pkgcheck is not installed, which on such a host is
 // every ebuild in the tree. Folding that into the headline would turn a clean
 // whole-overlay run into "0 passed, 500 skipped" and put the summary line at
-// odds with the exit code beside it — the same D8 argument that keeps QA
+// odds with the exit code beside it — the same argument that keeps QA
 // findings out of ExitCode, applied to the outcome instead of the finding. The
 // QA gate is still rendered, still named, and still carries its own reason.
 func (r EbuildResult) WorstOutcome() Outcome {
@@ -199,7 +154,7 @@ func (r EbuildResult) WorstOutcome() Outcome {
 // UnmatchedSelector carries the selector when it named a category or package
 // the overlay does not hold. It is a field rather than an error because the run
 // still produced a report — an empty one — and the command has to exit 2 while
-// still rendering something (R5.7).
+// still rendering something.
 type Report struct {
 	Overlay           string         `json:"overlay"`
 	Results           []EbuildResult `json:"results"`
@@ -235,42 +190,18 @@ func (r Report) Normalized() Report {
 //	1 — at least one finding of severity error, from any gate but pkgcheck's
 //	2 — the selector named something the overlay does not hold
 //
-// # This is NOT BatchResult.ExitCode, and the two must not be unified
+// This is NOT internal/autoupdate.BatchResult.ExitCode (0 none, 2 TOTAL, 1
+// PARTIAL failure), and the two must not be unified. BatchResult counts ITEMS IT
+// COULD NOT PRODUCE; this gate turns every would-be failure into a produced
+// outcome that names why it was SKIPPED. Unified, `2` would carry two meanings
+// in one binary — a bug that surfaces only in someone's CI script.
 //
-// internal/autoupdate.BatchResult defines its own exit codes for the batch
-// commands: 0 no failures, 2 TOTAL failure, 1 PARTIAL failure. Both use 1 and 2
-// and neither means what the other does.
-//
-// They are not reconcilable and should not be made to look it. BatchResult
-// counts ITEMS IT COULD NOT PRODUCE. The option gate has no such mode: R4 turns
-// every would-be failure — missing distfile, foreign build system, undetermined
-// build system — into a produced outcome that names why it was SKIPPED. A gate
-// whose entire purpose is to never fail silently cannot borrow an exit code
-// shaped around failing to produce a result.
-//
-// Unify them and `2` acquires two meanings inside one binary, which is a bug
-// that surfaces in someone's CI script and nowhere else.
-//
-// # Every gate counts, except the two that never decide
-//
-// This filtered on GateOptions, which is why it existed to be rewritten: the
-// configure gate is the one that actually runs the build, and an error from it
-// answered 0. The rule is now uniform — an error finding fails the run whatever
-// produced it — and the two exceptions are structural rather than listed:
-//
-//   - pkgcheck findings ride in the same report and are excluded here (D8). The
-//     overlay carries pre-existing QA findings that have nothing to do with a
-//     bump; letting them set the exit status would make `overlay validate` fail
-//     across the whole tree and reduce it to noise — a metadata.xml DOCTYPE typo
-//     outranking the real signal.
-//   - The reviewer is not excluded and does not need to be: it emits at info or
-//     warning and never at error (R7.6), so a model's opinion cannot fail a bump
-//     even when the rule counting it is uniform. That is a severity discipline
-//     enforced where the findings are produced, not a special case here.
-//
-// The exclusion selects on the GATE THAT RAN, not on the finding's own Gate
-// label. The gate that produced a finding owns whether it decides; the label is
-// for a renderer flattening several gates into one list.
+// An error finding fails the run whatever gate produced it, with two
+// structural exceptions. pkgcheck findings are excluded: the overlay carries
+// pre-existing QA findings unrelated to any bump, and a metadata.xml typo must
+// not fail `overlay validate` across the whole tree. The reviewer needs no
+// exclusion: it never emits at error, so a model's opinion cannot fail a bump.
+// The exclusion selects on the GATE THAT RAN, not on a finding's Gate label.
 func (r Report) ExitCode() int {
 	if r.UnmatchedSelector != "" {
 		return 2
@@ -316,8 +247,8 @@ func skippedResult(pkg, version, reason string) EbuildResult {
 }
 
 // comparedResult builds the outcome for an ebuild whose two sides were both
-// read. It is the ONLY way to produce a PASS, which is how R3.5 — "PASS only
-// after reading both sides" — is made structural: a caller that has only one
+// read. It is the ONLY way to produce a PASS, which is how "PASS only after
+// reading both sides" is made structural: a caller that has only one
 // side has no function to call that would give it a pass.
 func comparedResult(pkg, version string, d Declared, p Passed) EbuildResult {
 	findings := Compare(d, p, pkg, version)

@@ -3,5 +3,5 @@
 // failed bump — the manifest fixer, the build fixer, the bump reviewer and the
 // registry fixer. It imports llm, registry and validate, never the update core;
 // the registry-fix transaction that re-checks a package stays in the core
-// because it drives the Checker (story 061).
+// because it drives the Checker.
 package fixer

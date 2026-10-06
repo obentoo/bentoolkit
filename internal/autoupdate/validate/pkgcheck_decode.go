@@ -9,33 +9,21 @@ import (
 
 // pkgcheck's JsonStream reporter writes one JSON object per line. The struct
 // below was designed against records CAPTURED from a real scan, not from the
-// documentation — design.md D7 recorded that no record had ever been observed,
-// and that the field carrying a level was therefore an assumption.
+// documentation, and the capture settled two things:
 //
-// # What the capture settled
-//
-// Two things, and the first explains the second.
-//
-//  1. The empty scans D7 reported were not "no findings". pkgcheck's GitAddon
-//     raises on this overlay's history, prints a Python traceback to STDERR and
-//     exits 0 with an empty stdout — which is why three scans looked clean.
-//     Running with `--cache=-git` produces findings immediately. The existing
-//     runQACheck in applier.go already documents that traceback; nothing had
-//     connected it to the empty output.
+//  1. Empty scans were not "no findings". pkgcheck's GitAddon raises on this
+//     overlay's history, prints a Python traceback to STDERR and exits 0 with an
+//     empty stdout. Running with `--cache=-git` produces findings. (The
+//     applier's runQACheck documents the same traceback.)
 //
 //  2. Across 95 real records there is NO LEVEL FIELD. The only classifier is
-//     `__class__`, the keyword's own name. Every other key is specific to that
-//     keyword — `lineno`, `eclass`, `flags`, `replacement`, and so on.
+//     `__class__`, the keyword's name; every other key is keyword-specific.
 //
-// So every pkgcheck finding is carried at `info`, and the report says so. That
-// is the plan's own IF-branch, and it is the honest option: inferring a level
-// from the message text would be a guess wearing a severity's clothes, and this
-// story exists to remove exactly that.
-//
-// (`pkgcheck show --keywords` DOES print a severity per keyword. Reading it
-// would be a lookup rather than an inference, and is a reasonable follow-up —
-// but it is a second invocation and a second cache, and the exit code does not
-// depend on any of it (D8), so it buys presentation only.)
+// So every pkgcheck finding is carried at `info`, and the report says so.
+// Inferring a level from the message text would be a guess wearing a
+// severity's clothes. (`pkgcheck show --keywords` does print a severity per
+// keyword; reading it costs a second invocation and cache, and since the exit
+// code never depends on it, it would buy presentation only.)
 
 // pkgcheckIdentity is the part of a record whose shape is stable across every
 // keyword. Everything else varies per keyword and is rendered generically.

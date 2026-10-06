@@ -9,59 +9,41 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
-// This file deletes records from packages.toml (R5.2, R5.4): the counterpart of
+// This file deletes records from packages.toml: the counterpart of
 // DisablePackagesInConfig for a package that is not being disabled but removed
 // from the overlay outright.
 //
-// It is built on parseRegistryLayout — the same block model lintfix.go repairs
-// through — and for the reason that file states at length: the registry is 6224
-// hand-written lines, more than half of them documentation, and a round trip
-// through toml.Encoder returns the same RECORDS with every comment, every
-// quoting choice and every doc block gone. DisablePackagesInConfig's doc comment
-// records the same decision for the same file.
+// It is built on parseRegistryLayout — the block model lintfix.go repairs
+// through — because the registry is hand-written, mostly documentation, and a
+// round trip through toml.Encoder would drop every comment, quoting choice and
+// doc block.
 //
-// So a removal here DROPS A BLOCK and re-emits every other one verbatim, tails
-// included. R5.4's "every other record byte-identical" is then a property of not
-// touching them, not of editing them carefully — which is a much cheaper thing
-// to be sure of.
-//
-// The tail is what makes that work. A block's tail holds its `# END` marker and
-// the blank line separating it from the next header, so a dropped record takes
-// its own separator with it and each survivor keeps its own. The alternative —
-// deleting lines from a record's header up to the next one — is exactly where a
-// marker is lost or the blank lines collapse or double up, because the spacing
-// belongs to no line's record until the block model says which.
+// So a removal DROPS A BLOCK and re-emits every other one verbatim, tails
+// included: every other record stays byte-identical by not being touched,
+// which is cheaper to be sure of than careful editing. A block's tail holds its
+// `# END` marker and the blank line before the next header, so a dropped record
+// takes its own separator and each survivor keeps its own; deleting lines from
+// header to header is where markers get lost and blank lines collapse.
 
 // RemovePackagesFromConfig deletes every record of each named atom from the
 // overlay's packages.toml, writing atomically and preserving the file's mode.
 //
-// Matching is by ATOM, not by key (R5.2). "net-libs/webkit-gtk",
-// "net-libs/webkit-gtk:4.1" and "net-libs/webkit-gtk@stable" are three entries
-// for one package DIRECTORY, so a caller holding any one of the three spellings
-// removes all three — 90 of the registry's 321 atoms carry two or more entries,
-// one per slot or per release channel. An entry left behind once its directory
-// is gone promises an endpoint for a package that no longer exists, and the next
-// --check disables it without saying why.
+// Matching is by ATOM, not by key: "net-libs/webkit-gtk", "…:4.1" and
+// "…@stable" are entries for one package DIRECTORY, so any spelling removes
+// all of them. An entry left behind once its directory is gone is disabled by
+// the next --check without saying why.
 //
-// Nothing matching means nothing is written — not "written with identical
-// bytes". The overlay auto-commits and pushes, so a rewrite that only moves the
-// mtime becomes a commit with no content in the one history someone would read
-// to understand a bad removal. An empty or nil atom list is the same no-op.
+// Nothing matching (or an empty atom list) writes nothing, not identical
+// bytes: the overlay auto-commits, and an mtime-only rewrite is an empty commit.
 //
-// The candidate text is re-parsed BEFORE the rename and the write is refused if
-// it does not parse, if a record outside the requested atoms vanished, or if a
-// surviving record decodes to different values (see verifyRemoval). Losing a
-// record from this file is losing the knowledge that the package was ever
-// tracked, and the diff is where that damage would be hiding.
+// The candidate is re-parsed BEFORE the rename and refused if it does not
+// parse, if a record outside the requested atoms vanished, or if a survivor
+// decodes differently (verifyRemoval).
 //
-// A missing packages.toml is reported as ErrPackagesConfigNotFound rather than
-// treated as an empty registry, so a caller pointed at the wrong overlay hears
-// about it instead of concluding there was nothing to remove. A malformed atom
-// is an error for the same reason: skipping it silently, while its package
-// directory is deleted around it, produces the orphan R5.2 exists to prevent.
-//
-// R5.3 (--keep-registry) needs no parameter here. The flag's whole effect is
-// that this function is not called.
+// A missing packages.toml is ErrPackagesConfigNotFound, not an empty registry,
+// so a wrong overlay is reported; a malformed atom is an error, since skipping
+// it while its directory is deleted leaves an orphan. --keep-registry's whole
+// effect is that this function is not called.
 func RemovePackagesFromConfig(overlayPath string, atoms []string) error {
 	targets, err := requestedAtoms(atoms)
 	if err != nil {
@@ -111,7 +93,7 @@ func RemovePackagesFromConfig(overlayPath string, atoms []string) error {
 			continue
 		}
 		// A key this package cannot split into an atom is not a key it may delete.
-		// Reporting a malformed record key is the linter's job (R4.1); guessing
+		// Reporting a malformed record key is the linter's job; guessing
 		// which package it meant, while deleting it, is nobody's.
 		kept = append(kept, rec)
 	}
@@ -172,27 +154,20 @@ func recordAtom(key string) (string, bool) {
 }
 
 // verifyRemoval proves the candidate text is the original MINUS the requested
-// atoms and nothing else, and returns an error — meaning abort, write nothing —
-// as soon as it is not. It runs before the rename, which is the only point where
-// the check buys anything: afterwards the damage is on disk and, in an overlay
-// that auto-commits, probably already published.
-//
-// Three claims, of which the third is the one a successful parse cannot make:
+// atoms and nothing else, and returns an error — abort, write nothing — as soon
+// as it is not. It runs before the rename: afterwards the damage is on disk
+// and, in an overlay that auto-commits, probably published.
 //
 //  1. THE CANDIDATE PARSES. A block dropped across a `comments = """` boundary
 //     spills doc text out of its string and the file stops being TOML.
-//  2. EVERY REQUESTED ENTRY IS GONE AND EVERY OTHER RECORD SURVIVES (R5.2,
-//     R5.4). "The file still parses" and "the file still holds what it held" are
-//     different claims, and only the second is what a removal may promise.
-//  3. EVERY SURVIVOR DECODES TO THE SAME VALUES. A block boundary read one line
-//     wrong takes a neighbour's field with it — the `enabled = false` that keeps
-//     an orphaned entry out of the run, say — and the result parses perfectly
-//     while meaning something else.
+//  2. EVERY REQUESTED ENTRY IS GONE AND EVERY OTHER RECORD SURVIVES — "still
+//     parses" is not "still holds what it held".
+//  3. EVERY SURVIVOR DECODES TO THE SAME VALUES. A boundary read one line wrong
+//     takes a neighbour's field (say its `enabled = false`) and still parses.
 //
-// It does NOT compare the survivors' bytes, because nothing rewrites them: their
-// blocks are re-emitted from the very slices they were parsed into, and the
-// round-trip assertion in RemovePackagesFromConfig already proved those slices
-// reproduce the file exactly.
+// It does NOT compare the survivors' bytes: they are re-emitted from the slices
+// they were parsed into, and RemovePackagesFromConfig's round-trip assertion
+// already proved those slices reproduce the file exactly.
 func verifyRemoval(before *PackagesConfig, candidate string, targets map[string]bool) error {
 	after, err := decodePackagesConfig([]byte(candidate))
 	if err != nil {

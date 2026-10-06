@@ -15,24 +15,24 @@ import (
 )
 
 // errUnsafeAgentDir is wrapped by agentPermissionArgs when an agent's own
-// directory cannot be written into a permission rule safely (S051-R2.8).
+// directory cannot be written into a permission rule safely.
 var errUnsafeAgentDir = errors.New("not an absolute path made only of [A-Za-z0-9._+@/-]")
 
 // errUnsafeHost is returned by webFetchDomainRule for a value that is not a
-// lowercase DNS name (S051-R3.6).
+// lowercase DNS name.
 var errUnsafeHost = errors.New("not a lowercase DNS name")
 
-// errIPLiteralHost is the S051-R3.9 refusal. It wraps errUnsafeHost, because an
+// errIPLiteralHost is the IPv4-literal refusal. It wraps errUnsafeHost, because an
 // IPv4 literal is a host no rule may carry, and says why in its own words: the
 // value passed the DNS shape and was refused for what a fetcher would read it as.
 var errIPLiteralHost = fmt.Errorf("an IPv4 literal, which would reach loopback, the internal network or a metadata endpoint: %w", errUnsafeHost)
 
 // agentDirChars is the whole alphabet an agent directory may use. A space or a
 // comma would be re-split by the CLI into a second rule, a parenthesis would end
-// the rule early, and a glob character would widen it (S051-R2.8).
+// the rule early, and a glob character would widen it.
 var agentDirChars = regexp.MustCompile(`^[A-Za-z0-9._+@/-]+$`)
 
-// dnsHost is the only host shape a WebFetch rule may carry (S051-R3.6): at
+// dnsHost is the only host shape a WebFetch rule may carry: at
 // least two lowercase labels, each alphanumeric at both ends. It rejects `*`
 // (which would widen the rule) and `)`, `,` and spaces (which would forge a
 // second one), because the hosts come from packages.toml and pkgdev output —
@@ -40,11 +40,11 @@ var agentDirChars = regexp.MustCompile(`^[A-Za-z0-9._+@/-]+$`)
 var dnsHost = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
 // agentFixedHosts are reachable by every agent that holds WebFetch: GitHub is
-// where most upstream tarballs and release listings live (S051-R3.3).
+// where most upstream tarballs and release listings live.
 var agentFixedHosts = []string{"github.com", "codeload.github.com", "objects.githubusercontent.com"}
 
 // agentPinnedSettings is the inline --settings document every agent runs
-// under (S051-R4.2). blockReadsOutsideWorkingDirectories is what actually
+// under. blockReadsOutsideWorkingDirectories is what actually
 // removes `cat`: Claude Code runs its built-in read-only Bash commands (cat, ls,
 // head, grep, find, ...) without approval in every permission mode, so dropping
 // the allow rule that named cat would, alone, leave cat working.
@@ -76,33 +76,21 @@ type AgentPermissions struct {
 // --tools, --allowedTools, --disallowedTools, --permission-mode dontAsk,
 // --setting-sources "", the pinned --settings and --strict-mcp-config.
 //
-// # The argv form, measured against claude 2.1.281 on 2026-09-23
+// The argv form (measured against claude 2.1.281 on 2026-09-23): --tools,
+// --allowedTools and --disallowedTools are VARIADIC, swallowing every following
+// element that does not start with "-", so every rule is its own element
+// (`Bash(pkgdev *)` as one element is granted, its space notwithstanding) and
+// the block ends with a boolean flag. `--setting-sources ""` loads no user,
+// project or local settings; --strict-mcp-config also drops the MCP servers and
+// claude.ai connectors the operator's account would otherwise hand the agent.
+// A refused tool lands in the result envelope's permission_denials.
 //
-// --tools, --allowedTools and --disallowedTools are VARIADIC: each swallows every
-// following argv element that does not start with "-". So every rule is its own
-// element (S051-R2.7) — `Bash(pkgdev *)` as one element was granted and ran
-// pkgdev, its space notwithstanding — and every list here is followed by another
-// flag, never by a positional value. The block ends with a boolean flag, so a
-// caller may append anything after it. `--setting-sources ""` is accepted and
-// loads no user, project or local settings (S051-R4.1); --strict-mcp-config
-// additionally drops the MCP servers and claude.ai connectors the operator's
-// account would otherwise hand the agent (the probe listed Google Drive tools
-// in an agent spawned with `--tools Read,Bash`). A refused tool is recorded in
-// the result envelope's permission_denials as {tool_name, tool_use_id,
-// tool_input}.
-//
-// # The rule form
-//
-// Read is granted as `Read(//<dir>/**)`. Edit AND Write are granted as one
-// `Edit(//<dir>/**)`, because Claude Code never consults a Write(path) rule —
-// Edit rules apply to every built-in tool that edits files. The extra leading
-// slash is deliberate: `//` anchors at the filesystem root, while a single `/`
-// would anchor at the settings source (S051-R2.3).
-//
-// Every secrets.Paths() entry is denied as `Read(//<path>)`, and as
-// `Edit(//<path>)` when the agent holds Edit or Write (S051-R2.5). The paths are
-// read on every call, because secrets.Paths() follows HOME and
-// XDG_CONFIG_HOME. A Read-only agent's argv therefore names no Edit at all.
+// Read is granted as `Read(//<dir>/**)`; Edit AND Write as one `Edit(//<dir>/**)`,
+// because Claude Code never consults a Write(path) rule. The leading `//`
+// anchors at the filesystem root; a single `/` would anchor at the settings
+// source. Every secrets.Paths() entry, read per call because it follows HOME and
+// XDG_CONFIG_HOME, is denied as `Read(//<path>)`, plus `Edit(//<path>)` when the
+// agent holds Edit or Write.
 func AgentPermissionArgs(p AgentPermissions) ([]string, error) {
 	var names []string
 	var allow []string
@@ -150,7 +138,7 @@ func AgentPermissionArgs(p AgentPermissions) ([]string, error) {
 // agentArgv renders the argv block from tool names and allow rules that are
 // already safe, adding the secrets deny rules and the pinned flags. It cannot
 // fail, which is what lets the text client — no tools, no directory, nothing to
-// validate — build its argv without an error path (S051-R2.1).
+// validate — build its argv without an error path.
 func agentArgv(names, allow []string, holdsEdit bool) []string {
 	var deny []string
 	for _, path := range secrets.Paths() {
@@ -175,7 +163,8 @@ func agentArgv(names, allow []string, holdsEdit bool) []string {
 	)
 }
 
-// checkAgentDir enforces S051-R2.8 on an agent's own directory.
+// checkAgentDir refuses an agent directory a permission rule cannot carry
+// safely: it must be absolute, clean and made only of agentDirChars.
 func checkAgentDir(dir string) error {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir || !agentDirChars.MatchString(dir) {
 		return errUnsafeAgentDir
@@ -184,7 +173,7 @@ func checkAgentDir(dir string) error {
 }
 
 // webFetchDomainRule returns the WebFetch allow rule for host, or an error when
-// host is not a lowercase DNS name (S051-R3.6, S051-R8.1). It never lowercases
+// host is not a lowercase DNS name. It never lowercases
 // or trims: normalising is upstreamHosts' job, and a rule builder that repaired
 // its input would be the place a hostile value got repaired into a valid one.
 func webFetchDomainRule(host string) (string, error) {
@@ -195,8 +184,7 @@ func webFetchDomainRule(host string) (string, error) {
 }
 
 // checkWebFetchHost is the one test every WebFetch host passes, wherever it is
-// read: a lowercase DNS name (S051-R3.6) that is not an IPv4 literal
-// (S051-R3.9). It returns errUnsafeHost or errIPLiteralHost, or nil.
+// read: a lowercase DNS name that is not an IPv4 literal. It returns errUnsafeHost or errIPLiteralHost, or nil.
 func checkWebFetchHost(host string) error {
 	if !dnsHost.MatchString(host) {
 		return errUnsafeHost
@@ -209,7 +197,7 @@ func checkWebFetchHost(host string) error {
 
 // isIPv4Literal reports whether host's last label is a NUMBER in the WHATWG URL
 // parser's "ends in a number" sense: all ASCII digits, or "0x"/"0X" followed
-// only by hex digits (S051-R3.9). A host like that is parsed as an IPv4 address
+// only by hex digits. A host like that is parsed as an IPv4 address
 // by a WHATWG-based fetcher — 127.1 and 127.0.0.0x1 both reach 127.0.0.1 — while
 // no real top-level domain is a number, so no DNS name is lost; dl.0xide, whose
 // last label is not hex, stays a name.
@@ -231,8 +219,7 @@ func isIPv4Literal(host string) bool {
 }
 
 // upstreamURLPattern finds http(s) URLs in free text such as pkgdev's error
-// output (S051-R3.5). The excluded characters end a URL where prose or quoting
-// would.
+// output. The excluded characters end a URL where prose or quoting would.
 var upstreamURLPattern = regexp.MustCompile(`https?://[^\s"'<>()]+`)
 
 // UpstreamURLsIn returns every http(s) URL in text, in order.
@@ -242,12 +229,12 @@ func UpstreamURLsIn(text string) []string {
 
 // UpstreamHosts returns the WebFetch host set for pkg: the lowercased host of
 // every http or https URL in urls that is a DNS name, plus agentFixedHosts,
-// de-duplicated and sorted so the argv is stable (S051-R3.3).
+// de-duplicated and sorted so the argv is stable.
 //
 // A URL that does not parse, uses another scheme, or whose host is not a
-// lowercase DNS name after lowercasing, or is an IPv4 literal (S051-R3.9), is left out with one warning to log naming pkg
-// and the rejected value in attributes (S051-R3.6); nil log discards it. A trailing dot is not
-// trimmed: `example.com.` is rejected like any other non-DNS spelling, so the
+// lowercase DNS name after lowercasing, or is an IPv4 literal, is left out with
+// one warning to log naming pkg and the rejected value in attributes; nil log
+// discards it. A trailing dot is not trimmed: `example.com.` is rejected like any other non-DNS spelling, so the
 // host a rule names is always the one the operator can read in packages.toml.
 func UpstreamHosts(log *slog.Logger, pkg string, urls ...string) []string {
 	log = logging.OrDiscard(log)
@@ -283,7 +270,7 @@ func UpstreamHosts(log *slog.Logger, pkg string, urls ...string) []string {
 // RefusedToolsNote renders the tools an agent was refused as the suffix a
 // "still failed" message carries — ` (agent was refused: WebFetch(host), Bash)` —
 // or "" when none were, so a message about a fix that simply did not work names
-// no tool (S051-R5.2).
+// no tool.
 func RefusedToolsNote(denied []string) string {
 	if len(denied) == 0 {
 		return ""

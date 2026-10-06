@@ -24,10 +24,10 @@ type Declared struct {
 // ErrBuildSystemUndetermined reports that the archive carries no meson.build at
 // any project root, so nothing here can say what builds it.
 //
-// This is a sentinel and not a guess on purpose (R4.3). The caller turns it into
-// a SKIPPED outcome that says the build system was undetermined; inferring
-// "probably autotools" from the absence of one file would be exactly the
-// unearned confidence this story removes.
+// This is a sentinel and not a guess on purpose. The caller turns it into a
+// SKIPPED outcome that says the build system was undetermined; inferring
+// "probably autotools" from the absence of one file would be unearned
+// confidence.
 var ErrBuildSystemUndetermined = errors.New("no meson.build found: build system undetermined")
 
 // Option-file names, newest first. Meson renamed meson_options.txt to
@@ -40,13 +40,13 @@ var mesonOptionFiles = []string{"meson.options", "meson_options.txt"}
 //
 // It never unpacks the archive: one listing pass picks the members worth
 // reading, and each is extracted to stdout (see extractArchiveMember). Only the
-// members it parses are extracted, which is R1.5.
+// members it parses are extracted.
 //
 // # The namespacing rule
 //
 // Meson puts one option file at each PROJECT root. What lives under
 // subprojects/<name>/ is a separate project with its own root, and its options
-// are addressed as -D<name>:<option>= (design.md D3). Filing a subproject's
+// are addressed as -D<name>:<option>=. Filing a subproject's
 // options under the root would compare them against declarations that never
 // list them — every one would surface as an undeclared option, and a gate whose
 // first finding is false is a gate someone switches off.
@@ -65,8 +65,8 @@ func OptionsFromArchive(ctx context.Context, archive string) (Declared, error) {
 	if !ok {
 		// Name what WAS found rather than only what was not. "SKIPPED: build
 		// system is cmake" tells the operator this archive is out of scope by
-		// design (R4.2); "SKIPPED: undetermined" tells them the gate could not
-		// tell (R4.3). Both are honest, and they call for different actions —
+		// design; "SKIPPED: undetermined" tells them the gate could not
+		// tell. Both are honest, and they call for different actions —
 		// collapsing them into one message loses that.
 		return Declared{}, fmt.Errorf("%s: %w%s", archive, ErrBuildSystemUndetermined, detectedSystem(members))
 	}
@@ -74,7 +74,7 @@ func OptionsFromArchive(ctx context.Context, archive string) (Declared, error) {
 	var declared Declared
 
 	// The root's own options. Absent is a legitimate answer, not a failure: a
-	// Meson project may declare none (R1.4), and treating that as an error would
+	// Meson project may declare none, and treating that as an error would
 	// turn a whole class of packages into false SKIPPEDs.
 	if member, found := pickOptionFile(members, prefix); found {
 		opts, err := readOptions(ctx, archive, member, "")
@@ -141,12 +141,12 @@ func readOptions(ctx context.Context, archive, member, subproject string) ([]Opt
 // compared webkit's CMake `-DENABLE_*=` cache variables against an unrelated
 // subproject's option file. Every one came out undeclared.
 //
-// That is the exact failure this story keeps naming: the first false error is
+// That is the failure that matters most: the first false error is
 // what gets a gate switched off, and 89 of them would have done it on the first
 // run. So the rule is positional, not existential — a Meson project declares
 // itself with a meson.build at ITS OWN ROOT, and an archive without one there
-// is reported undetermined (R4.3) with whatever marker WAS found named beside
-// it (R4.2), rather than validated against a file that belongs to someone else.
+// is reported undetermined with whatever marker WAS found named beside it,
+// rather than validated against a file that belongs to someone else.
 func projectRoot(members []string) (string, bool) {
 	prefix := archiveRoot(members)
 	for _, m := range members {
@@ -195,7 +195,7 @@ func archiveRoot(members []string) string {
 // buildSystemMarkers maps a marker file to the build system it names. Only
 // files a build system REQUIRES at its project root are listed: a marker that
 // merely often accompanies one would turn this from an observation into the
-// guess R4.3 refuses to make.
+// guess the undetermined outcome refuses to make.
 var buildSystemMarkers = []struct{ file, system string }{
 	{"CMakeLists.txt", "cmake"},
 	{"configure.ac", "autotools"},
@@ -217,9 +217,8 @@ var buildSystemMarkers = []struct{ file, system string }{
 // this knows about.
 //
 // It is deliberately shallow. Reading a CMake or Autotools option surface is
-// out of scope (story Out of Scope), so all this has to do is let the report
-// distinguish "out of scope" from "could not tell" — the two SKIPPED reasons
-// R4.2 and R4.3 ask for. It never changes an outcome and never overrides the
+// out of scope, so all this has to do is let the report distinguish "out of
+// scope" from "could not tell" — two different SKIPPED reasons. It never changes an outcome and never overrides the
 // sentinel.
 func detectedSystem(members []string) string {
 	best, bestDepth := "", -1

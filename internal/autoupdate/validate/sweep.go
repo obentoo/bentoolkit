@@ -11,15 +11,11 @@ import (
 	"strings"
 )
 
-// Story 039, task 6 — R6, R6.1, R6.2, R6.3, R6.4, R6.5.
-//
-// Stage removes and recreates the tree OF THE PACKAGE it is staging ("R3.7:
-// replace, never accumulate"). That is a replacement of ONE tree. Nothing
-// removed the trees of packages that have LEFT SCOPE, so a --depth run over the
-// whole overlay left one tree per package under StagingRoot, permanently. This
-// file is the sweep that closes that, and it is deliberately a capability with
-// no caller yet: a sweeper that runs before anyone has read its report is not
-// something to ship blind.
+// Stage removes and recreates the tree OF THE PACKAGE it is staging ("replace,
+// never accumulate"). That is a replacement of ONE tree. Nothing removed the
+// trees of packages that have LEFT SCOPE, so a --depth run over the whole
+// overlay left one tree per package under StagingRoot, permanently. This file is
+// the sweep that closes that.
 
 // StagedCandidate names one package/version the current run still needs.
 type StagedCandidate struct {
@@ -40,7 +36,7 @@ type SweepRequest struct {
 
 // SweptEntry is one thing the sweep kept, and why.
 //
-// The reason is not decoration (R6.4). An operator looking at a staging root
+// The reason is not decoration. An operator looking at a staging root
 // that did not shrink has to be able to read why it did not, and a sweeper that
 // silently keeps things reads as a sweeper that swept.
 type SweptEntry struct {
@@ -79,42 +75,22 @@ type StagedSweepPlan struct {
 }
 
 // SweepStagedTrees removes the staged trees the current run no longer needs, and
-// reports everything it kept with a reason each (R6, R6.1, R6.4).
+// reports everything it kept with a reason each.
 //
-// It is the plan followed by its effect and nothing else: PlanStagedSweep
-// reaches every verdict — including the refusal of a staging root inside the
-// overlay, which still happens before a single entry is read — and
-// ExecuteStagedSweep is the only thing in this file that acts on them. The
-// retention policy is documented on PlanStagedSweep, where it is applied.
+// It is PlanStagedSweep followed by ExecuteStagedSweep and nothing else: the
+// plan reaches every verdict, including the refusal of a staging root inside
+// the overlay, and the executor is the only thing that acts on them.
 //
-// # Why it is RETAINED
+// It is RETAINED with NO production caller because its tests are the evidence
+// that the plan/execute split preserved the behaviour — the same verdicts, in
+// the same order, a failed removal still reported as a keep carrying the error.
+// Rewriting those tests against the new pair would replace the evidence with
+// assertions written by the change they check. The subcommand calls the pair
+// directly, so it can print the plan and ask before executing.
 //
-// This is the surface story 039's R6 tests assert, and those tests are the only
-// thing guarding the behaviour the split refactors: the same verdicts, in the
-// same order, with a failed removal still reported as a keep carrying the error.
-// Keeping the function is what lets them stay the proof they were written to be.
-// The alternative — deleting it and rewriting its four tests against the new
-// pair — would have replaced the evidence with assertions written by the same
-// change they are supposed to check, which proves nothing about what was
-// preserved (S041-R7.2).
-//
-// # It has NO production caller
-//
-// Nothing outside tests calls it. The subcommand this story adds holds
-// PlanStagedSweep and ExecuteStagedSweep directly, because it prints the plan
-// and asks before executing it, and there is no point in this shape at which it
-// could interject. That is stated here rather than left to be found, because
-// THIS story exists precisely because this capability shipped in 0.25.0 with no
-// caller — this file's own header says so, at the top. A second uncalled
-// function in the same file at least declares itself.
-//
-// # Why context.Background() is not a shortcut here
-//
-// The signature takes no context and could only gain one by changing, which
-// R7.2 forbids. An entry point that cannot be cancelled is acceptable because
-// the caller that needs cancellation is the subcommand, which passes its own
-// context to ExecuteStagedSweep so a SIGINT lands between trees. What is
-// uncancellable is this test surface, not the path an operator interrupts.
+// It takes no context because its signature must not change; the subcommand
+// passes its own context to ExecuteStagedSweep, so what is uncancellable is this
+// test surface, not the path an operator interrupts.
 func SweepStagedTrees(req SweepRequest) (SweepReport, error) {
 	plan, err := PlanStagedSweep(req)
 	if err != nil {
@@ -122,54 +98,27 @@ func SweepStagedTrees(req SweepRequest) (SweepReport, error) {
 		// has to be the one PlanStagedSweep reached, not a second wording of it.
 		return SweepReport{}, err
 	}
-	return ExecuteStagedSweep(context.Background(), plan), nil // SAFE: non-cancellable retained surface; the subcommand that needs cancellation passes its own ctx to ExecuteStagedSweep (S041-R7.2)
+	return ExecuteStagedSweep(context.Background(), plan), nil // SAFE: non-cancellable retained surface; the subcommand that needs cancellation passes its own ctx to ExecuteStagedSweep
 }
 
 // PlanStagedSweep walks one staging root, classifies every entry it finds, and
-// leaves the filesystem exactly as it found it (S041-R1.1).
-//
-// # Why the decision is separate from the effect
-//
-// The sweeper used to judge and os.RemoveAll in the same traversal, so there was
-// no point at which a complete report existed and nothing had yet been removed:
-// nothing to show an operator before the deletions, and nothing a caller could
-// decline. The house convention is the opposite in four places already —
-// PlanOverlaySweep/ExecuteOverlaySweep, PlanPrune/ExecutePrune, PlanApply/Apply
-// — and this is that same split. Producing a plan is a read-only act; that is
-// the whole point of it, not an incidental property of the current code.
-//
-// # The retention policy, and why it is not "keep the last N"
+// leaves the filesystem exactly as it found it. Deciding apart from acting gives
+// an operator a complete report before anything is removed — the same split as
+// PlanOverlaySweep/ExecuteOverlaySweep, PlanPrune/ExecutePrune, PlanApply/Apply.
 //
 // A tree is planned for removal when all three hold: this package RECOGNISES it
-// as one of its own, it is not in req.InScope, and its record shows no deciding
-// gate FAILED. Everything else is kept and reported.
+// as its own, it is not in req.InScope, and its record shows no deciding gate
+// FAILED. Everything else is kept and reported. Not "keep the last N": a passed
+// tree has served its purpose, while a failed one is the artifact an operator
+// still needs next to the retained log. A tree with no readable record has an
+// UNKNOWN outcome and is kept — a wrong keep costs disk, a wrong removal costs
+// the artifact an operator was about to open.
 //
-// The reason to keep a staged tree at all is to look at it after something went
-// wrong. A tree whose gates PASSED has served its purpose the moment the verdict
-// was recorded; a tree whose gate FAILED is the artifact an operator still
-// needs, next to the log LogDir retained. "Keep the last N" is worse on both
-// counts: it keeps passes, and it can still discard the failure somebody is
-// mid-investigation on.
-//
-// A tree with no readable record is a tree whose outcome is UNKNOWN. It is kept,
-// and the plan says so. Fail-closed is right here: the cost of a wrong keep is
-// disk, the cost of a wrong removal is the artifact an operator was about to
-// open.
-//
-// # Safety (R6.2), and why the check is the FIRST statement
-//
-// The overlay check is ensureOutsideOverlay — the SAME one Stage uses, not a
-// second one. A deletion routine with its own idea of what is inside the overlay
-// is how a sweeper eventually eats a published package. It came first when one
-// function both judged and deleted, and it comes first here for a second reason:
-// this is now the thing that READS the staging root, and a reader that walks
-// first and refuses afterwards has already listed the published overlay by the
-// time it says no.
-//
-// inScopeTreePaths comes next and propagates its error unchanged, for the reason
-// stated there: a request whose scope cannot be named is refused, never silently
-// swept. Both refusals return the zero plan — a refusal carrying a populated
-// plan is an invitation to execute it.
+// ensureOutsideOverlay — the SAME check Stage uses — is the FIRST statement, so
+// the published overlay is refused before it is ever listed. inScopeTreePaths
+// comes next and propagates its error unchanged: a scope that cannot be named is
+// refused, never silently swept. Both refusals return the zero plan, because a
+// refusal carrying a populated plan is an invitation to execute it.
 func PlanStagedSweep(req SweepRequest) (StagedSweepPlan, error) {
 	// First, and before anything is read or listed.
 	if err := ensureOutsideOverlay(req.Overlay, req.StagingRoot); err != nil {
@@ -189,38 +138,21 @@ func PlanStagedSweep(req SweepRequest) (StagedSweepPlan, error) {
 }
 
 // ExecuteStagedSweep removes exactly the trees plan.Remove names, and reports
-// what it did and what it left (S041-R1.4, R3.1, R3.2).
+// what it did and what it left.
 //
-// # Why it acts on the plan and never decides again
+// It acts on the plan and never walks again: the plan is what an operator was
+// shown and approved, and a second walk would reach its own verdicts on a root
+// that has moved since — a tree staged between the prompt and the answer.
 //
-// The plan is what an operator was shown, and at a confirmation prompt it is
-// what they said yes to. An executor that walked the staging root a second time
-// would reach its own verdicts on a root that has moved since: a tree staged
-// between the printing and the answer is removable by every rule in the policy
-// and appears nowhere in the list that was approved. So the walk happens once,
-// in PlanStagedSweep, and this reads plan.Remove and nothing else — every path
-// it touches was named by the plan, under the root the plan walked.
+// It returns no error, like ExecuteOverlaySweep: a tree that could not be
+// removed is reported as a keep carrying the error, and a batch-level error
+// would either repeat it or be read as "the sweep failed" and hide the removals
+// that did succeed.
 //
-// # Why it returns no error
-//
-// It matches ExecuteOverlaySweep. A tree that could not be removed is reported
-// as a keep carrying the error as its reason, which is the fact an operator
-// staring at a staging root that did not shrink actually needs. A batch-level
-// error on top of that would either repeat it or, worse, be read as "the sweep
-// failed" and discard the removals that did succeed.
-//
-// # Cancellation (R3.1), and where R3.2 actually lives
-//
-// ctx is consulted BEFORE each removal rather than after, so a SIGINT lands
-// between trees while the next one is still whole. Every tree the sweep did not
-// reach is then reported as a keep naming the interruption: "you stopped me" is
-// a reason, and a report that simply stopped listing would be indistinguishable
-// from a completed sweep over a shorter plan.
-//
-// That check decides WHICH trees are touched. What makes R3.2's "wholly present
-// or wholly absent" true of a tree that IS touched is removeStagedTree being one
-// os.RemoveAll that is never split — the reasoning is on that function, and it
-// is the half of the invariant no amount of checking here could provide.
+// ctx is consulted BEFORE each removal, so a SIGINT lands between trees. Every
+// tree not reached is reported as a keep naming the interruption, or the report
+// would read as a completed sweep over a shorter plan. That a touched tree is
+// wholly present or wholly absent comes from removeStagedTree, not from here.
 func ExecuteStagedSweep(ctx context.Context, plan StagedSweepPlan) SweepReport {
 	// Cloned rather than appended to in place. The plan is the record of what
 	// was decided, and possibly what an operator was shown; a sweep that grew
@@ -254,7 +186,7 @@ func ExecuteStagedSweep(ctx context.Context, plan StagedSweepPlan) SweepReport {
 	return report
 }
 
-// unreachedKeeps names every tree a stopped sweep did not get to (R3.1).
+// unreachedKeeps names every tree a stopped sweep did not get to.
 //
 // It exists as its own function because "kept" is doing two different jobs in
 // this file, and only one of them is a decision: PlanStagedSweep's keeps are
@@ -356,9 +288,9 @@ func (s *sweeper) walkPackage(packageDir, pkg string) {
 // tree sits, and RECORDS the verdict instead of acting on it.
 //
 // It used to os.RemoveAll right here, in the same pass that judged. Appending
-// the path instead is the whole of S041-R1.1 at the level where it is decided:
-// every branch below either keeps or plans, none of them touches the disk, and
-// the two lists it feeds partition everything the walk saw.
+// the path instead is what keeps planning read-only where it is decided: every
+// branch below either keeps or plans, none of them touches the disk, and the two
+// lists it feeds partition everything the walk saw.
 func (s *sweeper) decide(dir, pkg, version string) {
 	if recognised, why := recognisedStagedTree(dir, pkg, version); !recognised {
 		s.keep(dir, why)
@@ -375,13 +307,13 @@ func (s *sweeper) decide(dir, pkg, version string) {
 	s.remove = append(s.remove, dir)
 }
 
-// removeStagedTree takes one recognised tree out as a UNIT (R6.5).
+// removeStagedTree takes one recognised tree out as a UNIT.
 //
 // The one thing this must not do is remove the marker first and the rest after.
 // profiles/repo_name is the ONLY thing that identifies a tree as this package's
 // (see recognisedStagedTree), so a removal interrupted after the marker was
 // deliberately taken out on its own would leave a tree nothing recognises — and
-// R6.3 keeps what it does not recognise, so it would sit under the staging root
+// the sweep keeps what it does not recognise, so it would sit under the staging root
 // forever, which is the very defect this file exists to close.
 //
 // One os.RemoveAll keeps every state an interruption can leave on the safe side
@@ -398,7 +330,7 @@ func removeStagedTree(dir string) error {
 }
 
 // recognisedStagedTree answers whether dir is a tree THIS package produced, and
-// says why not when it is not (R6.3).
+// says why not when it is not.
 //
 // The check is self-verifying on purpose. Stage writes profiles/repo_name
 // holding stagedRepoName(pkg, version), so a directory is one of ours when that
@@ -447,7 +379,7 @@ func recordKeepsIt(dir string) (string, bool) {
 	}
 
 	for _, gate := range record.Gates {
-		// GateQA decides nothing — the same D8 exclusion Report.ExitCode,
+		// GateQA decides nothing — the same exclusion Report.ExitCode,
 		// EbuildResult.WorstOutcome and StageRecord.Proves already make. A
 		// metadata.xml finding is not the failure an operator keeps a whole tree
 		// around to look at.
@@ -473,8 +405,8 @@ const notADirectoryReason = "it is not a directory, so it is neither a tree this
 //
 // A directory that vanished between its parent's listing and this call has
 // nothing left to keep or remove, and nothing to report. A directory that cannot
-// be LISTED is one whose contents cannot be recognised, and R6.3 keeps what it
-// does not recognise — so it is kept, named, and not descended into.
+// be LISTED is one whose contents cannot be recognised, and the sweep keeps what
+// it does not recognise — so it is kept, named, and not descended into.
 func (s *sweeper) children(dir string) []os.DirEntry {
 	entries, err := os.ReadDir(dir)
 	switch {
@@ -487,7 +419,7 @@ func (s *sweeper) children(dir string) []os.DirEntry {
 	return entries
 }
 
-// keep records one entry the sweep left behind, with the reason (R6.4).
+// keep records one entry the sweep left behind, with the reason.
 func (s *sweeper) keep(path, reason string) {
 	s.kept = append(s.kept, SweptEntry{Path: path, Reason: reason})
 }

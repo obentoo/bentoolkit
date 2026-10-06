@@ -19,7 +19,7 @@ var ErrNoLocalPackageDir = errors.New("the gentoo provider has no local package 
 // ReviveStatus is the result class of reviving one package.
 type ReviveStatus string
 
-// The revive results the summary keys on. ReviveWaiting (story 079) is a bump
+// The revive results the summary keys on. ReviveWaiting is a bump
 // whose required versions are not available yet: the entry is re-enabled and
 // the bump stays pending, so it is not a failure.
 const (
@@ -39,7 +39,7 @@ type ReviveOutcome struct {
 }
 
 // ReviveApplier is the part of *Applier the pipeline drives. It is an interface
-// so a unit test can make Apply report an obsolete bump (R4.3).
+// so a unit test can make Apply report an obsolete bump.
 type ReviveApplier interface {
 	SeedFromGentoo(pkg, srcDir, version string) error
 	// MarkReenabled tells the applier the entry was re-enabled after it loaded
@@ -181,7 +181,7 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 		if applyResult != nil && applyResult.LogPath != "" {
 			detail = fmt.Sprintf("%v (log: %s)", err, applyResult.LogPath)
 		}
-		// S033-R3.6: a revive whose bump failed kept its staged tree exactly like
+		// A revive whose bump failed kept its staged tree exactly like
 		// any other failed apply, and this outcome is the only report the operator
 		// gets for it. A tree named in no report is found only by going looking.
 		if applyResult != nil && applyResult.StagedPath != "" {

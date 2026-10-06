@@ -5,38 +5,24 @@ import (
 	"sort"
 )
 
-// This file is the ONE-SHOT migration story 043 R1.5 asks for, and it exists
-// only because the fail-safe direction chosen in R1.3 has a price.
+// This file is a ONE-SHOT migration, needed only because the fail-safe direction
+// of reconcilesAutomatically has a price. It clears a disable only when the
+// record says the CHECKER wrote it (disabled_by = "auto"), so an ABSENT origin
+// reads as "a human decided" — which protects deliberate pins such as
+// dev-libs/icu-compat and media-libs/libjxl-compat, whose re-enable once left
+// www-client/orion-bin's slot dependency broken for ten days.
 //
-// reconcilesAutomatically clears a disable only when the record says the CHECKER
-// wrote it (disabled_by = "auto"). An ABSENT origin therefore reads as "a human
-// decided", and that reading is what protects dev-libs/icu-compat and
-// media-libs/libjxl-compat — the two deliberate pins a scan re-enabled and
-// bumped, leaving www-client/orion-bin's slot dependency broken for ten days.
-// The fail-safe needs no migration to hold, which is exactly why it was chosen
-// that way round.
+// The price: the ~90 entries the checker auto-disabled BEFORE the field existed
+// look the same on disk, so they would stay disabled forever after their ebuild
+// returned. This tool stamps the automatic origin onto those, and nothing else.
+// The operator's exclusion list must name the two pins; an exclusion naming no
+// record is reported, because a typo there silently re-arms the bug.
 //
-// Its price is that the ~90 entries the checker auto-disabled BEFORE the field
-// existed are indistinguishable, on disk, from those two deliberate pins: they
-// also carry `enabled = false` and no origin, so they also stop reconciling and
-// would stay disabled forever after their ebuild returned. This tool pays that
-// price by stamping the automatic origin onto the entries whose disable really
-// WAS the checker's bookkeeping — and onto nothing else.
-//
-// The operator supplies the exclusion list, and the two entries it must contain
-// are dev-libs/icu-compat and media-libs/libjxl-compat. Marking either of them
-// re-arms the exact bug this story removes, which is why the plan below reports
-// an exclusion naming no record at all: a typo in that list is silent, and its
-// consequence is a published bump of a pin that exists to prevent one.
-//
-// THE DECISION COMES FROM THE PARSED REGISTRY, NEVER FROM A TEXT SCAN. The real
-// packages.toml records what grep does to this question in its own header — 98
-// hits unanchored, 95 anchored, 92 real — and the gap is doc bodies: a record's
-// `comments` field is the documented place it explains itself, and several
-// quote the very keys they describe. Only the TOML parser can tell a
-// configuration line from a line about one. The WRITE still goes through
-// editPackagesConfigSections, because a full re-encode would erase the
-// hand-written prose that made the question hard in the first place.
+// THE DECISION COMES FROM THE PARSED REGISTRY, NEVER FROM A TEXT SCAN: a record's
+// `comments` field may quote the very keys it describes (grep finds 98 hits for
+// 92 real ones), and only the TOML parser can tell them apart. The WRITE still
+// goes through editPackagesConfigSections, because a full re-encode would erase
+// that hand-written prose.
 
 // AutoDisableMigration is what MarkAutoDisabled would do, decided but not yet
 // written. Every disabled record in the registry lands in exactly one of the
@@ -89,31 +75,21 @@ func PlanAutoDisableMigration(overlayPath string, except []string) (*AutoDisable
 
 // MarkAutoDisabled stamps `disabled_by = "auto"` onto every entry of the
 // overlay's packages.toml whose disable was the checker's own bookkeeping, so
-// R1.3's fail-safe stops freezing them: an entry the reconciliation may clear
-// says so, and the ones it must never clear keep saying nothing.
+// the fail-safe stops freezing them. except is the caller's protection list —
+// the deliberate pins (dev-libs/icu-compat and media-libs/libjxl-compat in the
+// real registry); stamping either would re-arm the defect.
 //
-// except is the caller's protection list — the deliberate pins, which for the
-// real registry are dev-libs/icu-compat and media-libs/libjxl-compat. Stamping
-// either would re-arm the defect this story exists to remove.
+// An entry is stamped only when the PARSED record is disabled, carries no origin
+// yet (so a second run rewrites nothing), is not held (hold is a maintainer's
+// decision, so claiming the checker wrote it would be false) and is not named in
+// except.
 //
-// An entry is stamped only when the PARSED record says all four of:
-//   - it is disabled (enabled = false), because the origin of a disable that did
-//     not happen is nothing;
-//   - it carries no origin yet, so a second run rewrites nothing;
-//   - it is not held, because hold is a maintainer's decision and the checker
-//     never wrote that disable — claiming it did would be false;
-//   - it is not named in except.
-//
-// It returns the atoms it actually stamped, SORTED, and nil when it stamped
-// nothing. "Actually" is not a formality: an entry the plan selected but whose
-// `enabled` assignment the surgical editor cannot reach is reported as unmarked
-// rather than as marked, so the caller can see the difference instead of
-// trusting a count.
-//
-// The write is the atomic one every registry writer shares, so a failure leaves
-// packages.toml exactly as it was and is returned rather than swallowed — this
-// overlay auto-commits and pushes, and a half-written registry would be a
-// published one.
+// It returns the atoms it actually stamped, SORTED, or nil: an entry whose
+// `enabled` assignment the surgical editor cannot reach is reported as
+// unmarked, so the caller sees the difference instead of trusting a count. The
+// write is the shared atomic one, so a failure leaves packages.toml untouched
+// and is returned — this overlay auto-commits and pushes, and a half-written
+// registry would be a published one.
 func MarkAutoDisabled(overlayPath string, except []string) ([]string, error) {
 	// Through the same entry point the review path uses, so the plan a human
 	// approved and the change that lands cannot come from two readings of the

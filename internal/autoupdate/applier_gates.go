@@ -17,34 +17,32 @@ import (
 )
 
 // This file is the validation pipeline Apply runs between the manifest step and
-// promotion (S033-12.1). Everything blocks A and B of story 033 built —
-// classification, the depth policy, staging, the static gates, the reviewer, the
-// dependency pre-check and the build gates — is inert until it sits HERE, on the
-// path the operator's own `--apply` takes.
+// promotion. Classification, the depth policy, staging, the static gates, the
+// reviewer, the dependency pre-check and the build gates are inert until they
+// sit HERE, on the path the operator's own `--apply` takes.
 //
 // # The whole pipeline is on the STAGED path and only there
 //
 // Every function below answers "nothing to do" for a candidate that was not
-// staged. That is not caution, it is the contract WithApplierStagingRoot states:
-// a caller that supplies no staging root keeps the behaviour it has always had —
-// the candidate written straight into the overlay and rolled back on failure —
-// and gates bolted onto that path would validate a file that is ALREADY
-// published, which is the inversion this whole story exists to remove.
+// staged. That is the contract WithApplierStagingRoot states: a caller with no
+// staging root keeps the old behaviour — the candidate written straight into the
+// overlay and rolled back on failure — and gates bolted onto that path would
+// validate a file that is ALREADY published, the very inversion staging removes.
 //
 // # Why the reasons are so wordy
 //
 // Every SKIPPED outcome carries a sentence naming what stopped it and what the
 // operator can do about it. A skip nobody can read is a pass (validate's own
-// rule), and the failure mode this story is about is a green that claims more
-// than it measured.
+// rule), and the failure mode to avoid is a green that claims more than it
+// measured.
 
 // gateDepths maps a gate back to the rung of the ladder it PROVES. It is the
 // inverse of validate's own depth→gate table and exists for one question:
-// "how far did validation actually get" (R3.12), which is answered by the
+// "how far did validation actually get", which is answered by the
 // deepest rung whose own gate passed.
 //
 // qa and review are absent, and their absence is the rule rather than an
-// oversight: neither decides anything (D8, R7.6), so neither can be evidence
+// oversight: neither decides anything, so neither can be evidence
 // that a rung was reached.
 var gateDepths = map[string]validate.Depth{
 	validate.GateOptions:   validate.DepthOptions,
@@ -55,7 +53,7 @@ var gateDepths = map[string]validate.Depth{
 }
 
 // RequiresSerialApply reports whether a run validating at depth d must apply one
-// package at a time (S033-D14).
+// package at a time.
 //
 // `--compile` already serialises applies, for the prompt and the sudo
 // invocation. The rule extends to every depth that STARTS A BUILD, for a reason
@@ -70,8 +68,8 @@ func RequiresSerialApply(d validate.Depth) bool {
 	return d > validate.DepthOptions
 }
 
-// SerialApplyRequired answers D14 for a whole batch: does any of these pending
-// updates resolve to a depth that starts a build.
+// SerialApplyRequired asks RequiresSerialApply of a whole batch: does any of
+// these pending updates resolve to a depth that starts a build.
 //
 // It resolves each bump through the SAME decision Apply will make, rather than
 // guessing from the flags, so the concurrency choice and the gates cannot come to
@@ -94,12 +92,11 @@ func (a *Applier) SerialApplyRequired(updates []PendingUpdate) bool {
 	return false
 }
 
-// depthFor resolves how deep one bump is validated, and why (R2, R2.2, R2.3,
-// R2.6, R2.7).
+// depthFor resolves how deep one bump is validated, and why.
 //
 // The classification goes through validate.ClassifyForDepth rather than
 // Classify, so a version this package cannot read cannot be dropped on the floor
-// by a reflexive `if err != nil { return }`: R1.5 answers ClassMajor for exactly
+// by a reflexive `if err != nil { return }`: it answers ClassMajor for exactly
 // that case, and losing the class would give the bump NO validation instead of
 // the deepest — the precise inversion of what the fallback is for. The note
 // travels into the reason so the report says why the deepest rung was chosen.
@@ -152,44 +149,24 @@ func (a *Applier) resolvedPackageType(pkg, currentVersion string) string {
 }
 
 // runStaticGates runs the option gate and the advisory QA scan over the STAGED
-// candidate (R3, story 031's gate reused rather than reimplemented).
+// candidate, reusing validate's gate rather than reimplementing it.
 //
-// validate.Run is given the staged tree as its overlay, which is what makes this
-// a reuse and not a copy: that tree is a single-package repository holding
-// exactly the candidate, so the run it performs over "the whole overlay" is this
-// one ebuild. Re-deriving the option comparison here instead would put the same
-// distfile-selection rules in two places, and the copy would be the one that goes
-// stale — the defect R12 had to fix once already.
+// validate.Run gets the staged tree — a single-package repository holding
+// exactly the candidate — as its overlay; a second copy of the distfile rules
+// here would be the one that goes stale. A run that could not scan is ONE
+// skipped option gate, not an error: a gate that cannot run is an outcome.
 //
-// A run that could not scan at all is reported as ONE skipped option gate rather
-// than as an error: a gate that cannot run is an outcome with a reason, and
-// aborting the apply for it would fail a bump for something that is not about the
-// bump.
+// # WHOSE archive this is
 //
-// # The one input validate.Run cannot derive for itself: WHOSE archive this is
-//
-// The staged tree is a fresh single-package repository, and validate answers
-// "which tarball is this ebuild's" out of the package directory's Manifest. Until
-// the manifest step has written one there, the directory names no archive, the
-// option gate reports SKIPPED, and R3.3 promotes on SKIPPED — a bump published on
-// the strength of a gate that read nothing, which is how obentoo/bentoo#33 reached
-// the tree.
-//
-// So the names are decided HERE, per bump, from cand (S037-R3.1, S037-R3.2):
-//
-//   - the staged tree already carries a Manifest — the manifest child really ran —
-//     so the seam stays nil and the gate parses that file directly. It describes
-//     THIS candidate; the published one describes the release being replaced, and
-//     answering a bump with it is the defect R12 already had to fix once.
-//   - it carries none, so the PUBLISHED names travel through the seam as values.
-//     Nothing is written into the staged tree to say them, which is the whole of
-//     S037-R3.2 and the reason the lend that used to write a temporary Manifest
-//     here no longer exists (design D4).
-//
-// The value rides the per-CALL Options built from cand and is never a field on
-// Applier (S037-D7): ApplyAll runs applies concurrently, and a seam stored
-// once would hand package A's archive names to package B — story 035's D2, with
-// names in place of a directory.
+// validate answers "which tarball is this ebuild's" from the package Manifest.
+// Without one the gate reports SKIPPED, and SKIPPED promotes — a bump published
+// on a gate that read nothing, which is how obentoo/bentoo#33 reached the tree.
+// So the names are decided HERE, per bump: a staged Manifest (the manifest child
+// really ran) is parsed directly, since the published one describes the release
+// being replaced; otherwise the PUBLISHED names travel through the seam as
+// values, and nothing is written into the staged tree. The value rides the
+// per-CALL Options, never an Applier field: ApplyAll runs applies concurrently,
+// and a stored seam would hand package A's archive names to package B.
 func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, version string) []validate.GateResult {
 	if !cand.staged {
 		return nil
@@ -207,13 +184,13 @@ func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, 
 
 	report, err := validate.Run(ctx, opts)
 	if err != nil {
-		// Unstamped, and the cause is genuinely not one thing (S040-R1.5).
+		// Unstamped, and the cause is genuinely not one thing.
 		// validate.Run returns an error for a run the operator INTERRUPTED — the
 		// route refuseOnInterrupt exists for, and it says so at its own guard —
 		// and for a staged tree ScanOverlay could not walk, which is this
 		// machine's filesystem at least as often as it is the tree's contents.
 		// All this site holds is the error; telling those apart would mean
-		// classifying it by its text, which is the reading D1 rejects.
+		// classifying it by its text, which is never evidence.
 		return []validate.GateResult{{
 			Gate:    validate.GateOptions,
 			Outcome: validate.OutcomeSkipped,
@@ -227,7 +204,7 @@ func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, 
 			return res.Gates
 		}
 	}
-	// Unstamped (S040-R1.5). The scan ran and reported no result for this
+	// Unstamped. The scan ran and reported no result for this
 	// version, which is either the staged tree really not holding the candidate —
 	// the candidate's — or this applier and the scan spelling the version
 	// differently, say over a revision suffix, which is a fault in bentoo and not
@@ -245,37 +222,23 @@ func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, 
 
 // staticGateDistdir names the directory the option gate reads archives from.
 //
-// The run's OWN fetch comes first (S035-R1.1, R1.2). The manifest step of this
-// same apply downloaded the candidate's archive into a private directory, and on
-// any host that had not already fetched this release that copy is the ONLY one
-// on disk. Reading the shared distdir instead is how the gate came to be handed
-// an empty room: the sole archive present was the PREVIOUS release's, sub-task
-// 8.1 declined it — correctly, because answering about the wrong tarball is
-// worse than not answering — the gate reported SKIPPED, and R3.3's "PASS or
-// SKIPPED" promoted a bump nothing had read.
+// The run's OWN fetch comes first: on a host that had not already fetched this
+// release, the private directory the manifest step downloaded into holds the
+// ONLY copy. Reading the shared distdir instead handed the gate the PREVIOUS
+// release's archive, which it rightly declined — and the resulting SKIPPED
+// promoted a bump nothing had read.
 //
-// The fall-back keeps the precedence the rest of this command already uses: the
-// --distdir flag, then autoupdate.distdir, then — left to validate.Run's own
-// distfiles.Locate — the host's DISTDIR. It is what answers for a candidate with
-// no manifest step of its own, and for the unstaged path, which never had a
-// private directory because it wrote into the shared one all along.
+// The fall-back keeps this command's precedence: --distdir, then
+// autoupdate.distdir, then the host's DISTDIR via validate.Run's own
+// distfiles.Locate. Nothing is created or written on any branch — the gate only
+// opens archives already on disk, hence Locate rather than Resolve, and the host
+// DISTDIR is still only ever read.
 //
-// Nothing is created and nothing is written on either branch: the gate opens
-// archives that the manifest step already put on disk, which is why Locate and
-// not Resolve is the accessor on the last rung (distfiles D2). D3 is untouched —
-// the host DISTDIR is still only ever read, and reading a private directory
-// instead reads it even less.
-//
-// # An EMPTY private directory is "nothing was fetched", not "nothing is there"
-//
-// The preference is conditional on the directory holding something, and that is
-// not defensive coding. The private distdir is created before the manifest step
-// runs, so it exists on paths where the step brought nothing back: a manifest
-// child that had nothing to download, or one stubbed out entirely. Preferring an
-// empty directory would hand the gate the same empty room this story exists to
-// stop handing it — with the shared distdir, which does hold the archive, right
-// there unread. So the fall-back triggers on the directory being empty, which is
-// exactly the ToDo's "falling back to the shared one when nothing was fetched".
+// An EMPTY private directory means "nothing was fetched", not "nothing is
+// there": it is created before the manifest step, so it exists even when the
+// step brought nothing back (nothing to download, or stubbed out). Preferring
+// it would hand the gate an empty room with the shared distdir, which does hold
+// the archive, unread — so the fall-back triggers on it being empty.
 func (a *Applier) staticGateDistdir(cand candidatePaths) string {
 	if holdsAnyFile(cand.fetchedDistdir) {
 		return cand.fetchedDistdir
@@ -304,7 +267,7 @@ func holdsAnyFile(dir string) bool {
 
 // stagedTreeNamesArchive answers whether the staged package directory already
 // names an upstream archive of its own — which is to say whether the manifest
-// step really wrote a Manifest there (S037-R3.1).
+// step really wrote a Manifest there.
 //
 // It is the ONE place that rule is written, and it is deliberately "names an
 // archive" rather than "a file called Manifest exists": a Manifest holding only
@@ -315,45 +278,26 @@ func stagedTreeNamesArchive(cand candidatePaths) bool {
 }
 
 // publishedDistNames is the per-bump seam value the option gate reads its
-// candidate archive names from when the staged tree names none of its own
-// (S037-R3.2, design D4). It answers with BASENAMES — never Manifest lines.
+// candidate archive names from when the staged tree names none of its own. It
+// answers with BASENAMES — never Manifest lines.
 //
-// # Why the published Manifest is a legitimate source of the NAMES
+// The published Manifest is a legitimate source of NAMES, never of hashes: the
+// gate decides on the archive's CONTENTS, and selectDistfile still requires
+// exactly one present name carrying THIS version before it reads a byte. It is
+// the same record presentArchive and the manifest step's prefetch already use.
+// A DIST line ("<name> <size> BLAKE2B … SHA512 …") handed over verbatim would
+// miss every os.Stat and report a silent SKIPPED, so the shared parser answers.
 //
-// It is a name lookup and never a hash check. The gate opens the archive and
-// reads meson.options out of it, so the answer is decided by the archive's
-// CONTENTS; a wrong name yields a wrong answer, which is precisely why
-// selectDistfile still has to find exactly one present name carrying THIS version
-// before it reads a byte, and reports what it declined otherwise (R12). The
-// published Manifest is the same record presentArchive already consults for the
-// reviewer and the same one the manifest step derives its prefetch names from, so
-// this adds no new notion of which file belongs to a package.
-//
-// # Names, not the Manifest's own lines
-//
-// A DIST record is "<name> <size> BLAKE2B … SHA512 …", and the gate looks each
-// name it is given up with os.Stat in the directory searched. Handing the lines
-// over verbatim would miss on every one of them and report SKIPPED — the silent
-// non-answer this story exists to remove, reintroduced through the seam meant to
-// remove it. So the shared parser answers, and the applier holds no second copy
-// of the DIST-line grammar.
-//
-// # An unreadable Manifest is an ERROR here, and that is the point
-//
-// A non-nil seam returning no names is AUTHORITATIVE — "I looked, this package
-// publishes no archive" — and the gate answers on it without falling back
-// (S037-D2). A package whose published Manifest could not be read has said no
-// such thing, so swallowing the read error to an empty slice would put a claim
-// in the operator's report that nothing ever measured. The error travels instead,
-// and validate turns it into a SKIPPED carrying these words verbatim (S037-R3.5)
-// — the same sentence the retired lend produced for the same condition, kept to
-// the byte so the outcome an operator has already learned to read did not change
-// along with the mechanism underneath it.
+// An unreadable Manifest is an ERROR here, on purpose. A non-nil seam returning
+// no names is AUTHORITATIVE — "this package publishes no archive" — and the gate
+// answers on it without falling back, so swallowing a read error into an empty
+// slice would report a claim nothing measured. The error travels instead, and
+// validate turns it into a SKIPPED carrying namingFailure's words verbatim.
 func publishedDistNames(overlayPath, pkg, version string) func(string) ([]string, error) {
 	// The pkgDir the gate asks about is ignored: this value is built for ONE bump
 	// and rides the Options of the one Selector-scoped run that validates it, so
-	// the only directory it can ever be asked about is that candidate's
-	// (S037-D7). Answering some other directory out of this package's Manifest is
+	// the only directory it can ever be asked about is that candidate's.
+	// Answering some other directory out of this package's Manifest is
 	// exactly what the per-package func signature exists to prevent.
 	return func(string) ([]string, error) {
 		published, err := publishedCandidate(overlayPath, pkg, version)
@@ -368,8 +312,8 @@ func publishedDistNames(overlayPath, pkg, version string) func(string) ([]string
 		// than as the failure to produce one it is; recovering the distinction used
 		// to mean reading the file once to prove it readable and then parsing it
 		// again, here and in cmd/bentoo's publishedManifestDistNames alike.
-		// ReadManifestDistFilenames reports it from a single read (S039-R5.1), and
-		// the sentence below is unchanged to the byte (S039-R5.3).
+		// ReadManifestDistFilenames reports it from a single read, and the
+		// sentence below is unchanged to the byte.
 		names, err := distfiles.ReadManifestDistFilenames(manifestPath)
 		if err != nil {
 			return nil, namingFailure(pkg, version,
@@ -381,8 +325,8 @@ func publishedDistNames(overlayPath, pkg, version string) func(string) ([]string
 
 // namingFailure is the sentence a producer failure reaches the operator in.
 //
-// It is preserved to the byte from the retired lend's own SKIPPED reason
-// (S037-R3.5, design D4): the mechanism changed, the condition did not, and a
+// It is preserved to the byte from the retired lend's own SKIPPED reason: the
+// mechanism changed, the condition did not, and a
 // report whose wording moves with a refactor costs a reader the ability to
 // recognise a case they have seen before.
 func namingFailure(pkg, version string, cause error) error {
@@ -398,8 +342,8 @@ func namingFailure(pkg, version string, cause error) error {
 // are data on the report, and the standalone command renders them from there.
 // An apply has no such report to render. Its whole outcome reaches the operator
 // through one error string and one summary line, so a refusal that named only the
-// gate would leave them to go and diff two tarballs by hand — which is the work
-// this story exists to replace.
+// gate would leave them to go and diff two tarballs by hand — the very work the
+// gates exist to replace.
 //
 // Error findings only, and deduplicated: a warning or an info did not decide
 // anything, and repeating one detail per gate that carried it would bury the
@@ -408,7 +352,7 @@ func refusalWithFindings(reason string, gates []validate.GateResult) error {
 	var details []string
 	seen := map[string]bool{}
 	for _, gate := range gates {
-		// The QA gate never decides (D8), so its findings cannot be part of why
+		// The QA gate never decides, so its findings cannot be part of why
 		// this bump was refused — PromotionDecision skipped it for the same reason.
 		if gate.Gate == validate.GateQA || gate.Outcome != validate.OutcomeFailed {
 			continue
@@ -432,8 +376,7 @@ func refusalWithFindings(reason string, gates []validate.GateResult) error {
 }
 
 // reviewBump asks the optional LLM reviewer to read the two versions' build
-// declarations and, where it sees a risk, to ask for MORE validation (R7, R7.3,
-// R7.5).
+// declarations and, where it sees a risk, to ask for MORE validation.
 //
 // # It can only ever raise the depth
 //
@@ -444,7 +387,7 @@ func refusalWithFindings(reason string, gates []validate.GateResult) error {
 //
 // # A reviewer that could not run never fails a bump
 //
-// Its report is advisory (R7.6/R7.7): a skip becomes a SKIPPED review gate
+// Its report is advisory: a skip becomes a SKIPPED review gate
 // carrying the reviewer's own sentence, and the depth is untouched. Even the
 // error return — reserved by the interface for a programming fault — is recorded
 // as a skipped gate rather than surfaced as the apply's failure, because an
@@ -465,16 +408,16 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 		NewArchive: newArchive,
 	})
 	if err != nil {
-		// Unstamped (S040-R1.5): the reviewer is an optional capability outside
+		// Unstamped: the reviewer is an optional capability outside
 		// this process, so a failure to ask it is a missing credential, a provider
 		// that answered nothing, a transport that broke — none of them a fact
 		// about the ebuild, and none of them "this machine cannot build it"
 		// either. DeclineCause names two causes, the host's and the candidate's,
-		// and this belongs to neither; inventing a third for an advisory gate is a
-		// wider change than R1 asks for. What it must NOT be is the candidate's:
+		// and this belongs to neither; inventing a third for an advisory gate is
+		// not worth its cost. What it must NOT be is the candidate's:
 		// PromotionDecision excludes only the QA gate, so a candidate stamp here
 		// would let an unreachable reviewer refuse a bump the deterministic gates
-		// never got to judge — the exact authority R7.6 withholds from it.
+		// never got to judge — authority an advisory reviewer must never have.
 		reason := fmt.Sprintf("the bump reviewer could not be asked about %s-%s: %v", pkg, newVersion, err)
 		a.logger().Debug("the bump reviewer could not be asked", "package", pkg, "version", newVersion, "err", err)
 		*gates = append(*gates, validate.GateResult{Gate: validate.GateReview, Outcome: validate.OutcomeSkipped, Reason: reason})
@@ -482,7 +425,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	}
 
 	if report.Skipped {
-		// Unstamped for the same reason and one of its own (S040-R1.5): this skip
+		// Unstamped for the same reason and one of its own: this skip
 		// is the REVIEWER's own answer, and the only account of why it declined is
 		// the prose it chose for SkipReason. Deriving a cause from that string is
 		// precisely what putting the cause on the producer exists to avoid — and
@@ -493,7 +436,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	}
 
 	// A review that ran is a PASS whatever it found: its findings are clamped to
-	// info or warning (R7.6), so the gate itself never decides — it reports.
+	// info or warning, so the gate itself never decides — it reports.
 	*gates = append(*gates, validate.GateResult{
 		Gate:     validate.GateReview,
 		Outcome:  validate.OutcomePass,
@@ -502,7 +445,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	})
 
 	if report.ProposedDepth == nil {
-		// R7.7: proposing nothing and proposing `none` are different facts, which
+		// Proposing nothing and proposing `none` are different facts, which
 		// is why ProposedDepth is a pointer. Nothing proposed leaves the policy
 		// depth exactly as it was, uncommented — crediting a reviewer that decided
 		// nothing would turn "escalated by review" into a count of agreements.
@@ -558,7 +501,7 @@ func presentArchive(distdir, manifestPath, version string) string {
 }
 
 // hostDeclinedGates is validate.SkippedGates with the cause stamped on every
-// gate: THIS HOST could not answer (S039-R2.1, S033-R3.12).
+// gate: THIS HOST could not answer.
 //
 // The cause is data rather than prose because validate.PromotionDecision now
 // REFUSES a bump whose every deciding gate declined over the CANDIDATE, and
@@ -584,49 +527,24 @@ func hostDeclinedGates(depth validate.Depth, reason string) []validate.GateResul
 }
 
 // candidateDeclinedGates is the other half of that pair: validate.SkippedGates
-// with the cause stamped as THIS CANDIDATE's (S040-R1.1, S040-R1.2).
+// with the cause stamped as THIS CANDIDATE's.
 //
-// The two faults it answers for — a staged tree that could not be prepared, a
-// manifest step that failed — are faults OF THE BUMP. No gate ever opened the
-// ebuild, so a list of these skips is a candidate nothing measured, which is the
-// vacuity validate.PromotionDecision refuses (S039-R2.1). Left unstamped they
-// are indistinguishable from a host that merely lacks a build dependency, and
-// that list must keep promoting (S033-R3.12) — the same conflation the two
-// helpers exist to keep apart.
+// It answers for a staged tree that could not be prepared and a manifest step
+// that failed — faults OF THE BUMP: no gate ever opened the ebuild, which is the
+// vacuity validate.PromotionDecision refuses. Unstamped, they would look like a
+// host merely lacking a build dependency, which must keep promoting. validate's
+// own core (run.go) already answers these two conditions with DeclineCandidate;
+// a cause that depended on the route a bump took would be no cause at all.
 //
-// The stamp is not a new opinion, it is the one validate's own core already
-// holds: run.go answers exactly these two conditions — Stage failing, and a
-// staged tree that could not be given its Manifest — with DeclineCandidate. The
-// applier reaches them by its own route, and a cause that depended on which
-// route a bump took would be no cause at all.
+// It refuses nothing TODAY (Validate serves only `--check`, the apply path
+// returns through failApply first, and a StageRecord drops Declined). It is
+// written anyway because the cause is known at the producer and nowhere else;
+// downstream it could only be guessed from a Reason string.
 //
-// # It refuses nothing TODAY, and is written anyway
-//
-// Measured before it was added: Applier.Validate is reached only from
-// `overlay autoupdate --check`, which publishes nothing; the apply path's two
-// equivalents return through failApply well before PromotionDecision is
-// consulted; and a gate list that survives into a StageRecord loses Declined to
-// `json:"-"`, where StageRecord.Proves refuses an all-SKIPPED record on the
-// OUTCOME instead. So no promotion changes its answer for this stamp alone.
-//
-// That is the same argument hostDeclinedGates makes for itself, and it is the
-// reason to write it HERE rather than later: the cause is known at the producer
-// and nowhere else. A reader recovering it downstream would be pattern-matching
-// a Reason string this file is free to reword, which is the objection story 039
-// made and honoured.
-//
-// # Why a second function and not one that takes the cause
-//
-// Because the wrong argument is catastrophic in one direction only. A shared
-// helper called with `candidate` where the host was meant stops
-// `overlay autoupdate --apply` on every workstation that does not already hold
-// a bump's build dependencies — most of them — and in a parameterised function
-// that mistake is one word away. Here it is a whole function away, and each
-// call site names the cause by naming the callee.
-//
-// It stamps the field for hostDeclinedGates' reason, restated because it is the
-// constraint and not a preference: SkippedGates' exported signature is fixed, so
-// which gates a depth owes an outcome for keeps having exactly one definition.
+// It is a second function, not one taking the cause, because the wrong argument
+// is catastrophic one way: `candidate` where the host was meant stops `--apply`
+// on every workstation lacking a bump's build dependencies. Here that mistake is
+// a whole function away, not one word.
 func candidateDeclinedGates(depth validate.Depth, reason string) []validate.GateResult {
 	gates := validate.SkippedGates(depth, reason)
 	for i := range gates {
@@ -637,37 +555,31 @@ func candidateDeclinedGates(depth validate.Depth, reason string) []validate.Gate
 
 // runBuildGates runs the gates that need the sources unpacked — patches,
 // configure, compile — at the selected depth, and reports one outcome per gate
-// the depth covers (R3, R5, R6).
+// the depth covers.
 //
-// # Portage is asked BEFORE anything is built
+// Portage is asked BEFORE anything is built. `ebuild … configure` never installs
+// dependencies, so a bump whose dependencies are absent on this host would fail
+// configure for a reason unrelated to the bump — a confident FAILED nobody can
+// trust across a whole-registry sweep. The pretend resolve separates "the bump
+// is broken" from "this host cannot build it": unsatisfied names the atoms to
+// install, undetermined names the probe that could not answer.
 //
-// `ebuild … configure` never installs dependencies: it runs the phase in front of
-// it and fails if a header or a build tool is not already here. So a bump whose
-// dependencies are simply absent on this host would fail configure for a reason
-// that has nothing to do with the bump — a confident FAILED about an ebuild that
-// is fine, which over a whole-registry sweep is a report nobody trusts. The
-// pretend resolve (design M-D) separates "the bump is broken" from "this host
-// cannot build it", and the two answers get different gates: unsatisfied names
-// the atoms to install, undetermined names the probe that could not answer.
-//
-// # The error return means the APPLY failed, never that a gate reported FAILED
-//
-// A gate that reports FAILED is data, and PromotionDecision refuses the bump on
-// it. A non-nil error here is the build CHILD having failed in a way no gate
-// could attribute — the run died before any covered phase began — and that must
-// fail the apply rather than promote on a list of skips. It is also exactly what
-// the shipped compile gate already does with a failing child, and a generalised
-// gate must not be more permissive than the gate it generalises.
+// The error return means the APPLY failed, never that a gate reported FAILED (a
+// FAILED gate is data PromotionDecision refuses on). A non-nil error is the
+// build CHILD failing before any covered phase began; that must fail the apply
+// rather than promote on a list of skips, as the shipped compile gate already
+// does — a generalised gate must not be more permissive than the one it
+// generalises.
 func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, version string, depth validate.Depth, result *ApplyResult) ([]validate.GateResult, error) {
 	if !cand.staged || depth <= validate.DepthOptions {
 		// Below DepthPatches nothing is built, so there is no build gate to
 		// report — an empty list, not a hollow pass. It is the same threshold
 		// RequiresSerialApply reads, and deliberately so: the depths that start a
-		// build are exactly the depths that must not run concurrently (D14).
+		// build are exactly the depths that must not run concurrently.
 		return nil, nil
 	}
 
-	// The SECOND host pre-check (S043-R3.2), and it sits AHEAD of the dependency
+	// The SECOND host pre-check, and it sits AHEAD of the dependency
 	// probe because it is both the cheaper refusal and the more certain one: the
 	// probe spawns `emerge -p` to learn something about this host, while this
 	// reads back something this host already wrote about itself. Ordering them
@@ -680,9 +592,9 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	// promotion report has to explain about a gate that was never going to run.
 	//
 	// hostDeclinedGates, not candidateDeclinedGates: an unreadable key is this
-	// MACHINE's, and the stamp is what keeps R3.4 true — the bump reads as a
-	// package this host could not measure rather than as an errored one, without
-	// the tally logic learning a new case (S039-R2.1).
+	// MACHINE's, and the stamp is what makes the bump read as a package this
+	// host could not measure rather than as an errored one, without the tally
+	// logic learning a new case.
 	if path, unmet := a.unmetPrecondition(pkg); unmet {
 		return hostDeclinedGates(depth, fmt.Sprintf(
 			"%s is not readable by the build user, so no build phase was run for %s-%s: the last build failed on it and this run declines rather than buy the same failure again; make it readable by the %s group and the gate runs on the next run, with no flag to set and nothing to wait for",
@@ -694,21 +606,21 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	switch {
 	case err != nil:
 		// UNDETERMINED. The caller still skips, but must NOT name a missing
-		// dependency, because it does not know of one (R6.2).
+		// dependency, because it does not know of one.
 		//
-		// Declined = host (S039-R2.1). Without it PromotionDecision would read
-		// this all-SKIPPED list as a candidate nothing measured and REFUSE the
-		// bump — the flat reading R3.12 exists to prevent. The probe failing to
+		// Declined = host. Without it PromotionDecision would read this
+		// all-SKIPPED list as a candidate nothing measured and REFUSE the bump —
+		// conflating "this host cannot tell" with "the bump is unproven". The probe failing to
 		// answer is this machine's problem, not the ebuild's.
 		return hostDeclinedGates(depth, fmt.Sprintf(
 			"whether this host holds the build dependencies of %s-%s could not be determined, so no build phase was run: %v",
 			pkg, version, err)), nil
 	case !satisfied:
-		// R5.3/R3.12: determined and unsatisfied. The atoms are named because
+		// Determined and unsatisfied. The atoms are named because
 		// they are the operator's next action, and the promotion report says the
 		// depth this bump therefore did not reach.
 		//
-		// Declined = host, and this is R3.12's own case: the operator's next
+		// Declined = host, the plainest host case: the operator's next
 		// action is `emerge` on THIS BOX. Refusing here would make
 		// `overlay autoupdate --apply` inert on any workstation that does not
 		// already hold the bump's build dependencies, which is most of them.
@@ -730,8 +642,8 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 		Depth:            depth,
 		RequireIsolation: a.requireIsolation,
 		LogDir:           a.logsDir,
-		// The SAME directory the static gate reads, resolved by the same helper
-		// (S039-R3.1). The question staticGateDistdir answers is "which distdir
+		// The SAME directory the static gate reads, resolved by the same helper.
+		// The question staticGateDistdir answers is "which distdir
 		// holds this apply's archive" — the run's own fetch first, the shared one
 		// when that fetch brought nothing back — and the build has exactly that
 		// question: the manifest step downloaded the candidate's tarball into the
@@ -772,12 +684,12 @@ func (a *Applier) recordingRunner(ctx context.Context, into *buildAttempt) func(
 		// The build runs in procgroup's group mode, whose WaitDelay also runs
 		// after a NORMAL exit: a build that exited 0 while a helper it left behind
 		// still held the output pipe comes back as exec.ErrWaitDelay. RunBuildGates
-		// reads that as the success it is (S054-R1.5); recorded raw here, it would
+		// reads that as the success it is; recorded raw here, it would
 		// send a passing build into repairBuildGatesAndRerun as a failure.
 		err = procgroup.Result(cmd, err)
 		into.transcript = string(output)
 		if err != nil {
-			// S054-R3.5, as compileOnce applies it: a build its context stopped
+			// As compileOnce applies it: a build its context stopped
 			// says nothing about the ebuild, so it is never labelled a compile
 			// failure. RunBuildGates returns the interrupt as its own error before
 			// anything reads this attempt; the label stays honest regardless.
@@ -794,15 +706,15 @@ func (a *Applier) recordingRunner(ctx context.Context, into *buildAttempt) func(
 // repairBuildGatesAndRerun is what happens after the build gates' child has
 // failed once: the failure is attributed, and only if it is the EBUILD's does an
 // agent get to see it — after which the SAME gates run again and that re-run is
-// the verdict (S033-R8.1, S033-R8.2, S033-R8.5).
+// the verdict.
 //
 // It is repairBuildAndRerun's twin for the depth-driven gates rather than a
 // second policy: the attribution rungs, their order and the refusal are the same
 // functions, so a machine fault is diagnosed identically whether the build was
 // reached through `--compile` or through a configure-depth policy. What differs
 // is only what is re-run — RunBuildGates rather than one privileged `ebuild
-// compile` — and that difference is the point: R8.2 says the gate that decides is
-// the gate that failed.
+// compile` — and that difference is the point: the gate that decides is the
+// gate that failed.
 func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePaths, pkg, version string, req validate.BuildRequest, deps validate.BuildDeps, first buildAttempt, result *ApplyResult) ([]validate.GateResult, error) {
 	// The free rung: the transcript this run already holds. Reported to every
 	// operator, LLM or not, because the verdict is a fact about the failure and
@@ -852,7 +764,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 		return nil, fmt.Errorf("%w (the build fixer reported no change, so the %s gate was not re-run)", first.err, gate)
 	}
 
-	// R8.2. The authoritative re-run: bentoo's own build of the same gates, never
+	// The authoritative re-run: bentoo's own build of the same gates, never
 	// the agent's account of what it did.
 	a.reporter.TaskStage(pkg, "re-check")
 	var second buildAttempt
@@ -910,41 +822,33 @@ func (a *Applier) buildDeps(runAttached func(cmd *exec.Cmd) ([]byte, error)) val
 
 // compileGateResult turns a `--compile` run that got past runCompile into the
 // GateResult the rest of the pipeline reasons about, so the ladder's reach and
-// R3.13's refusal read the privileged gate exactly as they read the depth-driven
+// refuseUnproved read the privileged gate exactly as they read the depth-driven
 // ones.
 //
 // It is a SKIPPED and not a PASS when --require-isolation refused the build:
 // runCompile answers ("", nil) there, and a caller cannot tell that from a pass —
-// which is precisely the silence this story removes rather than reproduces.
+// a silence that must not be reproduced here.
 //
-// # The PASS carries the same fidelity statements its unprivileged sibling does
-//
-// One word — PASS — cannot describe two different amounts of evidence (S040-R2.5).
-// Since stories 031 and 039 every `--depth compile` pass has stated which DISTDIR
-// it enforced and whether its isolation was verified; this gate hand-rolled its
-// reason and stated neither, so a reader could not tell an enforced build from an
-// ambient one. It now appends both, in gateFor's own order and BY CALLING
-// gateFor's own note-producing functions — one copy of each sentence, so a
-// rewording lands on the privileged and the unprivileged pass at once.
-//
-// It does NOT route through buildRun.gateFor to get them. That function derives
-// an outcome from the phase markers in a transcript; this path already knows its
-// exit status, so routing it would re-derive an answer it was handed.
+// The PASS carries the same fidelity statements its unprivileged sibling does:
+// one word cannot describe two different amounts of evidence, so it states
+// which DISTDIR it enforced and whether isolation was verified, in gateFor's
+// order and BY CALLING gateFor's own note-producing functions — one copy of each
+// sentence. It does NOT route through buildRun.gateFor itself: that derives an
+// outcome from a transcript's phase markers, and this path already knows its
+// exit status.
 func (a *Applier) compileGateResult(cand candidatePaths, pkg, version string, result *ApplyResult) []validate.GateResult {
 	if !cand.staged {
 		return nil
 	}
 	if a.requireIsolation && !result.IsolationVerified {
-		// Unstamped, and here the honest answer is not that the cause is unknown
-		// (S040-R1.5). It is the HOST's, by DeclineCause's own example: the probe
-		// answered about this machine's ability to create a namespace, and
-		// "no privilege to isolate" is the case DeclineHost names. It is left
-		// alone because this change stamps the two CANDIDATE faults R1.1 and R1.2
-		// name and touches no other producer, and because nothing reads
-		// DeclineHost today — it is a claim held for a future tightening, which is
-		// hostDeclinedGates' own argument for carrying it. Marking it host would
-		// be correct and is a decision for whoever next rewrites this gate; what
-		// is not in question is that it is not the candidate's.
+		// Unstamped, though the honest answer is not that the cause is unknown.
+		// It is the HOST's, by DeclineCause's own example: the probe answered
+		// about this machine's ability to create a namespace, and "no privilege
+		// to isolate" is the case DeclineHost names. It is left alone because
+		// only the two CANDIDATE faults are stamped, and nothing reads DeclineHost
+		// today — it is a claim held for a future tightening. Marking it host
+		// would be correct and is a decision for whoever next rewrites this gate;
+		// what is not in question is that it is not the candidate's.
 		return []validate.GateResult{{
 			Gate:    validate.GateCompile,
 			Outcome: validate.OutcomeSkipped,
@@ -973,28 +877,22 @@ func (a *Applier) compileGateResult(cand candidatePaths, pkg, version string, re
 	}}
 }
 
-// compileDistdirNote is the distdir half of the privileged PASS's fidelity
-// (S040-R2.5), and the one place that path has a state its unprivileged sibling
-// does not.
+// compileDistdirNote is the distdir half of the privileged PASS's fidelity, and
+// the one place that path has a state its unprivileged sibling does not.
 //
-// The two paths SHARE two states, and both are answered by validate's own
-// sentence so there is no second copy of it here: this run resolved no directory
-// (Portage then answers from its own configuration, R3.2's honest answer), or it
-// resolved one and the privilege tool carried it into the child.
+// Two states are shared and answered by validate's own sentence: no directory
+// was resolved (Portage answers from its own configuration), or one was and the
+// privilege tool carried it into the child.
 //
-// # The third state is this path's own, so it is worded here (S040-R2.3)
+// The third state is this path's own: a resolved directory that cannot reach the
+// build. privilegedDistdirArgs carries it as `sudo DISTDIR=<dir> ebuild …`, and
+// `doas` has no VAR=value form at all. Silence would imply a hermeticity this run
+// never had, and the enforced sentence would claim an export that did not
+// happen — so the note says the directory could not be enforced, and names it
+// for the operator who wants the enforcement.
 //
-// A directory can be resolved and still not reach the build: privilegedDistdirArgs
-// carries it as `sudo DISTDIR=<dir> ebuild …`, measured on this host, and `doas`
-// has no VAR=value argument form at all to carry it with. Saying nothing would let
-// the pass imply a hermeticity this run never had, and borrowing the enforced
-// sentence would be a claim about an export that did not happen — so the gate
-// says the directory could not be enforced, and names it, because an operator who
-// wants the enforcement needs to know which directory was going to be used.
-//
-// IT IS STILL A PASS. The build ran and the compile phase completed; what the
-// privilege tool could not carry changes what the pass may CLAIM, not whether the
-// ebuild built.
+// IT IS STILL A PASS: the compile phase completed; what the privilege tool could
+// not carry changes what the pass may CLAIM, not whether the ebuild built.
 func compileDistdirNote(result *ApplyResult) string {
 	switch {
 	case result.CompileDistdir == "":
@@ -1009,7 +907,7 @@ func compileDistdirNote(result *ApplyResult) string {
 }
 
 // recordDepthReached states, on the result, how far validation actually got and —
-// when that is short of what was asked for — why (R3.12).
+// when that is short of what was asked for — why.
 //
 // The "why" is the SKIPPED build gates' own reasons, deduplicated: one skip
 // produces one sentence however many gates the cumulative ladder made it cover,
@@ -1031,9 +929,9 @@ func (a *Applier) recordDepthReached(result *ApplyResult, gates []validate.GateR
 	}
 }
 
-// refuseUnproved is R3.13: where configuration requires proof at the selected
-// depth, a bump whose build gates were SKIPPED is refused instead of published
-// with the unreached depth named.
+// refuseUnproved enforces require_proof: where configuration requires proof at
+// the selected depth, a bump whose build gates were SKIPPED is refused instead
+// of published with the unreached depth named.
 //
 // It names what stopped the gate, because without that the operator cannot make
 // the bump publishable — "refused, proof required" alone would leave them with a

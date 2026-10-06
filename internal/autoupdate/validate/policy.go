@@ -6,33 +6,25 @@ import (
 )
 
 // This file is the one place that answers "how deep does this bump go, and
-// why". The second half of that sentence is not decoration: a report that says
-// `depth: options` tells an operator nothing they can act on, while
-// `depth: options (override, below the configure depth policy chose: the build
-// needs a GPU this host does not have)` names the input to change. Every path
-// through ResolveDepth therefore produces a reason, and the reason names the
-// input that decided.
+// why". Every path through ResolveDepth produces a reason naming the input that
+// decided, because `depth: options` alone gives an operator nothing to act on.
 //
 // THE ORDER OF AUTHORITY, increasing:
 //
-//	1. class → policy                     the configured depth for the bump's class (R2.2)
-//	2. the binary tier lowers it to none   derived, not configured (R2.3)
-//	3. configuration overrides it          carrying its stated reason (R2.4, R2.5)
-//	4. an operator flag replaces it        --depth (R2.7), --compile (R2.8)
+//	1. class → policy                     the configured depth for the bump's class
+//	2. the binary tier lowers it to none   derived, not configured
+//	3. configuration overrides it          carrying its stated reason
+//	4. an operator flag replaces it        --depth, --compile
 //
 // ONLY AN EXPLICIT OPERATOR FLAG MAY LOWER DEPTH SILENTLY. Every other lowering
-// — the binary tier, a per-package override — is reported as skipped by policy
-// and never as validated (R2.6), because a bump that received fewer gates than
-// policy asked for did not prove more cheaply, it proved less, and the proved
-// column is the one number this whole story is about.
+// is reported as skipped by policy and never as validated: a bump that received
+// fewer gates than policy asked for proved less, not more cheaply.
 //
-// THE BUMP REVIEWER IS NOT A FIFTH LEVEL OF THAT LIST. Its proposal arrives
-// after ResolveDepth has already answered, from a caller in internal/autoupdate,
-// and is combined with that answer by Escalate — which may only RAISE it (R7.5).
-// It is named here so a reader does not go hunting for it inside ResolveDepth,
-// and so nobody moves it in there, where it would inherit the authority to lower.
+// THE BUMP REVIEWER IS NOT A FIFTH LEVEL. Its proposal arrives after
+// ResolveDepth has answered and is combined by Escalate, which may only RAISE
+// it; moving it inside ResolveDepth would give it the authority to lower.
 
-// typeBinary is the resolved package type that carries R2.3.
+// typeBinary is the resolved package type that is validated at depth none.
 //
 // The match against it is EXACT — no trimming, no case folding — for the reason
 // ParseDepth is exact: this string decides whether a bump is built at all, and
@@ -46,9 +38,9 @@ const typeBinary = "bin"
 // DepthOverride is a per-package instruction to validate at a depth other than
 // the one policy chose, together with the reason it exists.
 //
-// The reason is a field and not a comment because R2.5 makes it mandatory and
-// R2.6 makes it consequential: an override that lowers depth removes a gate, and
-// the report has to be able to say on whose authority. An override that lowers
+// The reason is a field and not a comment because it is mandatory and
+// consequential: an override that lowers depth removes a gate, and the report
+// has to be able to say on whose authority. An override that lowers
 // WITHOUT a reason is refused rather than applied — see ResolveDepth.
 type DepthOverride struct {
 	// Depth is the depth to use in place of the class default.
@@ -70,7 +62,7 @@ type DepthOverride struct {
 // Depth values, and rejecting a typo by name through ParseDepth, is the job of
 // whoever builds this struct.
 type DepthPolicy struct {
-	// ByClass is the depth each bump class earns (R2.2). A class missing from
+	// ByClass is the depth each bump class earns. A class missing from
 	// the map does not mean "no validation": see classDepth.
 	ByClass map[Class]Depth
 	// Overrides is keyed by the full package atom ("category/package"), the
@@ -82,24 +74,15 @@ type DepthPolicy struct {
 // bump is read but never built, and a series or major bump is taken as far as
 // configure.
 //
-// # Why an empty policy must not be the same thing as this one
-//
-// classDepth's last fallback is DepthCompile, and that is right for a table
-// somebody filled in and left a hole in: not knowing how far a bump moved is not
-// evidence that it moved a little. It is the WRONG answer for a table nobody
-// filled in at all, because then the fallback is not covering a hole, it IS the
-// policy — every revision bump compiles, which is neither what the documentation
-// promises nor a cost anyone agreed to. So a caller that supplies no table gets
-// the shipped one, and the fail-safe goes back to covering the case it was
-// written for.
-//
-// # It is duplicated in config, deliberately and visibly
+// An empty policy must not mean this one's fallback. classDepth falls back to
+// DepthCompile, which is right for a hole in a filled-in table but wrong for a
+// table nobody filled in: then every revision bump would compile, a cost nobody
+// agreed to. So a caller that supplies no table gets the shipped one.
 //
 // config.DefaultDepthRevision and its three siblings hold the same values as
-// strings, because the config layer has to answer GetDepthForClass for a key the
-// operator did not write. This package cannot read those constants — the import
-// runs the other way, and validate deliberately knows nothing about config — so
-// THE TWO MUST BE READ TOGETHER: a change to either is a change to both.
+// strings, because the config layer answers GetDepthForClass for a key the
+// operator did not write, and validate cannot import config. THE TWO MUST BE
+// READ TOGETHER: a change to either is a change to both.
 func DefaultDepthPolicy() DepthPolicy {
 	return DepthPolicy{
 		ByClass: map[Class]Depth{
@@ -142,7 +125,7 @@ type DepthRequest struct {
 	// and the zero value would otherwise be indistinguishable from "unset" —
 	// the one confusion that switches validation off in silence.
 	FlagDepth *Depth
-	// Compile is `--compile`, which is exactly `--depth=compile` (R2.8).
+	// Compile is `--compile`, which is exactly `--depth=compile`.
 	Compile bool
 }
 
@@ -155,20 +138,19 @@ type DepthDecision struct {
 	Reason string
 	// SkippedByPolicy reports that this bump received LESS validation than
 	// policy chose for its class, and therefore must be counted as skipped
-	// rather than validated (R2.6). An explicit operator flag never sets it:
+	// rather than validated. An explicit operator flag never sets it:
 	// that is the operator's own instruction, not a package opting out.
 	SkippedByPolicy bool
 }
 
-// ResolveDepth answers how deep a bump is validated and why (R2, R2.2, R2.3,
-// R2.6, R2.7, R2.8).
+// ResolveDepth answers how deep a bump is validated and why.
 //
 // It applies the four levels of authority in order, and it is total: every
 // request produces a depth and a non-empty reason, and no input other than an
 // explicit operator flag can lower the depth without that being reported.
 func ResolveDepth(req DepthRequest) DepthDecision {
 	// 4. An explicit flag replaces the whole computation — class, tier and
-	// configuration (R2.7). The operator typing it is looking at one package and
+	// configuration. The operator typing it is looking at one package and
 	// knows something the policy does not, which is also why this is the one
 	// input allowed to lower depth without being called a skip.
 	if depth, spelling, ok := flagDepth(req); ok {
@@ -178,13 +160,13 @@ func ResolveDepth(req DepthRequest) DepthDecision {
 		}
 	}
 
-	// 1. class → policy (R2.2). This is also the yardstick every later lowering
+	// 1. class → policy. This is also the yardstick every later lowering
 	// is measured against: "below what policy selected" means below this value,
 	// not below whatever the previous step left behind.
 	policyDepth, reason := classDepth(req.Policy, req.Class)
 	depth := policyDepth
 
-	// 2. A binary record is validated at depth none (R2.3): there is no source
+	// 2. A binary record is validated at depth none: there is no source
 	// to unpack, patch, configure or compile, so no build gate can run.
 	if req.ResolvedType == typeBinary {
 		depth = DepthNone
@@ -192,13 +174,14 @@ func ResolveDepth(req DepthRequest) DepthDecision {
 	}
 
 	// 3. Configuration overrides the class default and the tier, carrying its
-	// stated reason (R2.4, R2.5).
+	// stated reason.
 	if override, ok := req.Policy.Overrides[req.Package]; ok {
 		depth, reason = applyOverride(depth, policyDepth, override)
 	}
 
-	// R2.6, applied once for every way depth can end up below what policy chose,
-	// so a new lowering path cannot be added without inheriting the honesty rule.
+	// The skipped-by-policy rule, applied once for every way depth can end up
+	// below what policy chose, so a new lowering path cannot be added without
+	// inheriting it.
 	skipped := depth < policyDepth
 	if skipped {
 		reason += fmt.Sprintf("; this is less than the %s depth policy chose, so the bump is reported as skipped by policy, never as validated", policyDepth)
@@ -211,7 +194,7 @@ func ResolveDepth(req DepthRequest) DepthDecision {
 // name in the reason, and whether a flag was given at all.
 //
 // `--compile` is routed through the same return as `--depth=compile` rather than
-// short-circuiting somewhere of its own, because R2.8 says the two are the same
+// short-circuiting somewhere of its own, because the two are the same
 // request and a second path is exactly how they would drift apart. The spelling
 // still differs in the reason: the report should name the flag the operator
 // actually typed.
@@ -229,22 +212,16 @@ func flagDepth(req DepthRequest) (Depth, string, bool) {
 	return DepthNone, "", false
 }
 
-// classDepth reads the configured depth for a class (R2.2).
+// classDepth reads the configured depth for a class.
 //
 // A class absent from the table falls through to the major row, and a table with
 // no major row falls through to DepthCompile. NEITHER falls through to
 // DepthNone, which is what a bare map lookup would return: not knowing how far a
-// bump moved is not evidence that it moved a little, and the failure mode that
-// rule exists to prevent is a bump ending up with no depth instead of a deep
-// one.
+// bump moved is not evidence that it moved a little.
 //
-// # The fallback STAYS at compile now that the ladder goes deeper
-//
-// It was the deepest rung until story 042 added DepthInstall, and the wording
-// here said so. It deliberately does NOT follow the ladder's new top: this is a
-// fail-safe covering a hole in a table somebody filled in, not a place to raise
-// what an unconfigured bump costs (S042-R1.4). A reader who "fixes" the
-// inconsistency by returning DepthInstall changes a shipped cost.
+// The fallback STAYS at compile although DepthInstall is now the deepest rung:
+// it is a fail-safe for a hole in a filled-in table, not a place to raise what
+// an unconfigured bump costs. Returning DepthInstall would change a shipped cost.
 //
 // It is the same reading Classify applies when it answers ClassMajor for a
 // version it cannot parse, and the same one config.GetDepthForClass applies to
@@ -261,17 +238,17 @@ func classDepth(policy DepthPolicy, class Class) (Depth, string) {
 
 // applyOverride applies a per-package override on top of the depth the class and
 // the tier produced, measuring it against policyDepth — what policy chose for the
-// class — because that is the comparison R2.5 and R2.6 are written about.
+// class — because that is the comparison the reason and skip rules are about.
 //
 // An override that LOWERS depth and states no reason is refused rather than
-// applied. R2.5 makes the reason mandatory precisely because a lowering removes
+// applied. The reason is mandatory precisely because a lowering removes
 // a gate, and applying a reasonless one would be a code path by which something
 // other than an operator flag lowers depth silently. Refusing it is loud in the
 // only way this function can be loud: the policy depth stands and the reason
 // says why the override did not take effect.
 func applyOverride(depth, policyDepth Depth, override DepthOverride) (Depth, string) {
 	if override.Reason == "" && override.Depth < depth {
-		return depth, fmt.Sprintf("override refused: it lowers %s to %s without stating a reason, which a lowering override must (R2.5), so the %s depth stands",
+		return depth, fmt.Sprintf("override refused: it lowers %s to %s without stating a reason, which a lowering override must, so the %s depth stands",
 			depth, override.Depth, depth)
 	}
 
@@ -284,7 +261,7 @@ func applyOverride(depth, policyDepth Depth, override DepthOverride) (Depth, str
 // the difference between a deliberate exception and a package quietly opting out.
 //
 // The lowering arm says only "below policy" because ResolveDepth appends the
-// R2.6 note right after it, and that note already names the policy depth. Saying
+// skipped-by-policy note right after it, and that note already names the policy depth. Saying
 // it twice in one sentence reads as a stutter and buries the consequence.
 func relativeToPolicy(overrideDepth, policyDepth Depth) string {
 	switch {
@@ -309,34 +286,22 @@ func overrideReason(override DepthOverride) string {
 
 // Escalate combines the depth policy already resolved — the floor — with a depth
 // the bump reviewer proposes, answering the depth to validate at and the case
-// for it (R7, R7.5).
+// for it.
 //
 // THE RULE IS max(floor, proposed), AND IT IS ONE-WAY. A reviewer reads a diff;
-// it does not carry the authority an operator's flag carries, so it may buy more
-// scrutiny and may never sell any. There is deliberately no code path here by
-// which a proposal below the floor takes effect. The ladder's integer ordering
-// (see depth.go) is what makes that max mean "the deeper of the two", which is
-// also why reordering those constants would silently change this answer.
+// it lacks an operator flag's authority, so it may buy more scrutiny and never
+// sell any. The ladder's integer ordering (see depth.go) is what makes max mean
+// "the deeper of the two".
 //
-// IT TAKES PRIMITIVES, NOT autoupdate.BumpReviewReport, AND MUST KEEP DOING SO.
-// That type lives in internal/autoupdate, which already imports this package
-// (applier.go), so accepting it here is an import CYCLE — a build failure, not a
-// layering preference. The caller unpacks the report and passes the two values.
-// Its ProposedDepth is a pointer precisely so "proposed nothing" and "proposed
-// none" stay different facts, and the caller therefore reaches this function
-// only when that pointer is non-nil.
+// IT TAKES PRIMITIVES, NOT autoupdate.BumpReviewReport: internal/autoupdate
+// imports this package, so accepting that type is an import CYCLE. The caller
+// calls this only when the report's ProposedDepth pointer is non-nil, keeping
+// "proposed nothing" and "proposed none" different facts.
 //
-// A PROPOSAL THAT RAISES DEPTH AND STATES NO REASON IS REFUSED rather than
-// applied silently, for the same reason a reasonless lowering override is (see
-// applyOverride): R7.5 reports the reviewer's stated reason BESIDE the raised
-// depth, and a depth an operator cannot account for is a depth they will switch
-// off. With no error in the signature, refusal has exactly one observable form —
-// the floor is returned and the reason says why the proposal did not apply.
-//
-// The reason names the reviewer ONLY when the reviewer actually decided
-// something. A proposal at or below the floor changed nothing, and crediting it
-// would turn "escalated by review" into a count of agreements rather than of
-// gates actually added.
+// A PROPOSAL THAT RAISES DEPTH AND STATES NO REASON IS REFUSED, like a
+// reasonless lowering override: a depth an operator cannot account for is one
+// they will switch off. The floor is returned and the reason says why. The
+// reason credits the reviewer ONLY when it actually added a gate.
 func Escalate(floor, proposed Depth, reason string) (Depth, string) {
 	if proposed <= floor {
 		return floor, floorStands(floor, proposed)
@@ -346,7 +311,7 @@ func Escalate(floor, proposed Depth, reason string) (Depth, string) {
 	// nothing an operator can act on, and would print as an empty quotation
 	// beside the raised depth, which is worse than saying it was refused.
 	if strings.TrimSpace(reason) == "" {
-		return floor, fmt.Sprintf("reviewer proposal refused: it raises %s to %s without stating a reason, which a raised depth must carry (R7.5), so the %s depth stands",
+		return floor, fmt.Sprintf("reviewer proposal refused: it raises %s to %s without stating a reason, which a raised depth must carry, so the %s depth stands",
 			floor, proposed, floor)
 	}
 
@@ -374,7 +339,7 @@ func floorStands(floor, proposed Depth) string {
 // ClassifyForDepth classifies a bump for ResolveDepth without offering the
 // caller a way to throw the classification away.
 //
-// Classify returns ClassMajor AND an error for a version it cannot read (R1.5):
+// Classify returns ClassMajor AND an error for a version it cannot read:
 // both halves matter, the class because it is the safe answer and the error
 // because it explains why the bump is about to be validated at the greatest
 // depth. The reflexive `if err != nil { return }` at a call site discards the

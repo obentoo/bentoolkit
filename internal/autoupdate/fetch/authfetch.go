@@ -764,13 +764,11 @@ func (s *authFetchSpec) resolveCredentials() (authFetchCredentials, error) {
 // With fetch_response = "file" (the default) the reply to the form IS the
 // distfile, and it is streamed straight to disk.
 //
-// With fetch_response = "url" the reply is a short text body holding the URL of
-// a CDN the vendor signed for this request; the file is fetched from there. The
-// difference is not cosmetic: measured against Blackmagic's endpoint on
-// 2026-09-19, the first reply is 492 bytes of text/plain holding a URL whose
-// signature expires in three hours. Written to disk as-is, that is a 492-byte
-// "DaVinci_Resolve_21.1_Linux.zip" — a file pkgdev digests without complaint,
-// producing a green Manifest for a distfile that is a sentence.
+// With fetch_response = "url" the reply is a short text body holding a CDN URL
+// the vendor signed for this request; the file is fetched from there. Written
+// to disk as-is, Blackmagic's 492-byte reply would become a
+// "DaVinci_Resolve_21.1_Linux.zip" that pkgdev digests without complaint — a
+// green Manifest for a distfile that is a sentence.
 //
 // Failure modes are mapped to clear errors, and the serial is scrubbed from any
 // message that could echo it (notably transport errors on the GET path, where

@@ -26,7 +26,7 @@ const (
 
 // Gate names which check produced a finding, and which check a GateResult
 // answers for. It exists so Report.ExitCode can select on it: pkgcheck findings
-// ride in the same report and must never move the exit code (D8).
+// ride in the same report and must never move the exit code.
 //
 // # The names are the ladder's own names
 //
@@ -37,8 +37,8 @@ const (
 // ladder.
 //
 // qa and review are the two that name no rung, because neither is one. pkgcheck
-// runs beside the ladder and is advisory (D8); the reviewer raises scrutiny and
-// never decides (R7.6). Their findings are reported like any other and are the
+// runs beside the ladder and is advisory; the reviewer raises scrutiny and
+// never decides. Their findings are reported like any other and are the
 // only ones that cannot fail a bump.
 const (
 	GateOptions   = "options"
@@ -60,34 +60,23 @@ type Finding struct {
 	Detail   string   `json:"detail"`
 }
 
-// Compare subtracts the two option sets and returns the findings.
+// Compare subtracts the two option sets and returns the findings. It is pure —
+// no I/O, no clock, no filesystem — so every case is a table row, not a fixture.
 //
-// It is pure — no I/O, no clock, no filesystem — which is what makes every case
-// below a table row instead of a fixture, and what lets the exhaustive tests be
-// exhaustive.
-//
-// # The three rules
-//
-//   - A project option the archive does not declare is an `error` (R3.1). This
-//     is the whole point: it is what `-Daalib=` became when upstream removed
-//     the option at 1.29.
-//   - A declared option the ebuild never passes is `info` (R3.2) — upstream
-//     gained something we have not adopted. Useful, never blocking.
-//   - Each unresolved name is a `warning` (R3.3), quoting the text as written,
-//     because a name the gate could not read is a gap in its own answer and
-//     saying so is the difference between a report and a claim.
+//   - A project option the archive does not declare is an `error`: it is what
+//     `-Daalib=` became when upstream removed the option at 1.29.
+//   - A declared option the ebuild never passes is `info` — upstream gained
+//     something we have not adopted. Useful, never blocking.
+//   - Each unresolved name is a `warning` quoting the text as written, because a
+//     name the gate could not read is a gap in its own answer.
 //
 // Built-ins are never compared: Meson defines them and no option file declares
 // them, so comparing one would manufacture an error out of a correct ebuild.
-//
-// Matching happens WITHIN a namespace. `sub:foo` is checked against `sub`'s
-// declarations, never the root's — otherwise every subproject option an ebuild
-// legitimately passes would surface as undeclared.
-//
-// Every Detail names its source: the ebuild line for a passed option, the
-// archive member for a declared one. A finding that cannot be traced back to
-// the line that caused it makes the operator grep for it, which is the
-// difference between an actionable gate and an annoying one.
+// Matching happens WITHIN a namespace: `sub:foo` is checked against `sub`'s
+// declarations, never the root's, or every legitimate subproject option would
+// surface as undeclared. Every Detail names its source (the ebuild line for a
+// passed option, the archive member for a declared one) so a finding can be
+// traced without grepping.
 func Compare(d Declared, p Passed, pkg, version string) []Finding {
 	var findings []Finding
 

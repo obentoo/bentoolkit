@@ -40,7 +40,7 @@ var (
 	ErrResponseTooLarge = httpx.ErrResponseTooLarge
 	// ErrCredentialHostMismatch is returned, before any network I/O, when a
 	// header references a credential variable that is bound to hosts other
-	// than the one the request goes to (S052-R1.2).
+	// than the one the request goes to.
 	ErrCredentialHostMismatch = errors.New("credential header bound to another host")
 )
 
@@ -222,7 +222,7 @@ func NewRetryableHTTPClientWithConfig(config RetryConfig) *RetryableHTTPClient {
 	return &RetryableHTTPClient{
 		// Both clients follow redirects under the credential-safe policy, so a
 		// redirect never carries a credential header to another host or to
-		// plain http (S052-R4.6).
+		// plain http.
 		client: &http.Client{
 			Timeout:       config.Timeout,
 			Transport:     httpx.BuildTransport(),
@@ -486,7 +486,7 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 			}
 			// A refused https -> http redirect is the redirect policy's verdict
 			// on the request, not a transient failure: retrying would only
-			// re-send the credential to the original host (S052-R4.4).
+			// re-send the credential to the original host.
 			if errors.Is(err, httpx.ErrInsecureRedirect) {
 				return nil, err
 			}
@@ -657,7 +657,7 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 	}
 	if resp != nil && resp.Body != nil {
 		// Cap the body so an oversized or malicious response cannot exhaust
-		// memory when a caller reads it (S001-R11.1, AD-12).
+		// memory when a caller reads it.
 		resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	}
 	return resp, nil
@@ -666,7 +666,7 @@ func (c *RetryableHTTPClient) GetWithContext(ctx context.Context, url string) (*
 // ClassifyBodyReadError maps an error returned while reading an HTTP response
 // body to a domain error. When the read tripped an http.MaxBytesReader cap the
 // standard library yields an *http.MaxBytesError; this is translated into an
-// error wrapping ErrResponseTooLarge (S001-R11.3). Any other non-nil error is
+// error wrapping ErrResponseTooLarge. Any other non-nil error is
 // returned unchanged, and a nil error yields nil. It delegates to
 // httpx.ClassifyBodyReadError, which owns the shared sentinel.
 func ClassifyBodyReadError(err error) error {
@@ -675,24 +675,22 @@ func ClassifyBodyReadError(err error) error {
 
 // ReadBodyForStatus validates an HTTP response status against the accepted set
 // supplied by the caller and, when the status is accepted, reads the body in
-// full and classifies an overflow (S019-R3.1). A status outside the set yields
+// full and classifies an overflow. A status outside the set yields
 // "HTTP request returned status %d" without touching the body.
 //
-// The accepted statuses are the caller's to choose (S019-R3.2):
-// Checker.fetchContent passes http.StatusOK plus http.StatusPartialContent when
-// the request that was actually sent carried a Range header (the
-// sentRequestDeclaresRange predicate in checker.go, which reads the request
-// recorded on the response rather than the record's declared header map),
+// The accepted statuses are the caller's to choose: Checker.fetchContent passes
+// http.StatusOK plus http.StatusPartialContent when the request actually sent
+// carried a Range header (sentRequestDeclaresRange in checker.go reads the
+// request recorded on the response, not the record's declared header map);
 // Analyzer.fetchContentFromURL passes http.StatusOK alone. Both list codes
-// explicitly rather than accepting the whole 2xx range, since 204 and 205 have
-// an empty body by definition.
+// explicitly rather than accepting all of 2xx, since 204 and 205 have an empty
+// body by definition.
 //
-// This helper imposes no cap of its own: the GET helpers already wrap the body
-// in an http.MaxBytesReader bounded by httpx.MaxBodyBytes, so the bound has a
-// single source. A read that trips that cap is translated into an error wrapping
-// ErrResponseTooLarge via classifyBodyReadError (S001-R11.3). The LLM path keeps
-// its own per-client, raisable cap (readCappedBody in llm.go) and deliberately
-// does not route through here (S019-R3.3, S019-UB3).
+// It imposes no cap of its own: the GET helpers already bound the body with
+// httpx.MaxBodyBytes, so the bound has a single source, and an overflow is
+// translated into ErrResponseTooLarge via classifyBodyReadError. The LLM path
+// keeps its own per-client, raisable cap (readCappedBody in llm.go) and
+// deliberately does not route through here.
 func ReadBodyForStatus(resp *http.Response, accepted ...int) ([]byte, error) {
 	if !slices.Contains(accepted, resp.StatusCode) {
 		return nil, fmt.Errorf("HTTP request returned status %d", resp.StatusCode)
@@ -824,16 +822,11 @@ func (c *RetryableHTTPClient) GetDefaultHeaders() map[string]string {
 // Callers that need cancellation should use GetWithHeadersContext directly.
 func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]string) (*http.Response, error) {
 	// This convenience wrapper is intentionally non-cancellable; the Checker and
-	// Analyzer context spine (S001-R3) uses GetWithContext /
-	// GetWithHeadersContext, which context-aware callers must use instead.
-	//
-	// The trailing "(R3)" on the return statement below is deliberately left
-	// bare rather than qualified as S001-R3: that line carries the annotation
-	// the audit-ctx Makefile target greps for to whitelist this deliberate
-	// non-cancellable call, and it is kept byte-identical so the audit keeps
-	// matching it (S020-UB5). The asymmetry with the line above is intentional;
-	// do not "fix" it.
-	return c.GetWithHeadersContext(context.Background(), url, headers) // SAFE: non-cancellable convenience wrapper (R3)
+	// Analyzer context spine uses GetWithContext / GetWithHeadersContext, which
+	// context-aware callers must use instead. The "// SAFE:" annotation must stay
+	// on the return line: the audit-ctx Makefile target greps for it there to
+	// whitelist this deliberate non-cancellable call.
+	return c.GetWithHeadersContext(context.Background(), url, headers) // SAFE: non-cancellable convenience wrapper
 }
 
 // GetWithHeadersContext performs an HTTP GET request with custom headers, context, and retry logic.
@@ -846,19 +839,19 @@ func (c *RetryableHTTPClient) GetWithHeaders(url string, headers map[string]stri
 // such read errors through classifyBodyReadError so the overflow surfaces as
 // ErrResponseTooLarge. The cap holds even when a caller sent a Range header: a
 // Range is only a request, and a server that ignores it and streams the full
-// body is bounded here rather than at the caller's read (S019-R1.1, S019-R1.2).
+// body is bounded here rather than at the caller's read.
 //
 // A header that references a credential variable bound to another host is
 // refused before any network I/O with an error wrapping
 // ErrCredentialHostMismatch. With no package to consult, the request URL's own
-// host is taken as the package host for BENTOO_* variables (S052-R1.5).
+// host is taken as the package host for BENTOO_* variables.
 func (c *RetryableHTTPClient) GetWithHeadersContext(ctx context.Context, url string, headers map[string]string) (*http.Response, error) {
 	return c.GetWithHeadersScopedContext(ctx, url, headers, requestOwnScope(url))
 }
 
 // GetWithHeadersScopedContext is GetWithHeadersContext with the package's
 // credential scope supplied by the caller (the checker passes the hosts of the
-// package's url and base_url, S052-R1.4).
+// package's url and base_url).
 func (c *RetryableHTTPClient) GetWithHeadersScopedContext(ctx context.Context, url string, headers map[string]string, scope CredentialScope) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -876,7 +869,7 @@ func (c *RetryableHTTPClient) GetWithHeadersScopedContext(ctx context.Context, u
 	}
 	if resp != nil && resp.Body != nil {
 		// Cap the body so an oversized or malicious response cannot exhaust
-		// memory when a caller reads it (S019-R1.1, AD-12).
+		// memory when a caller reads it.
 		resp.Body = http.MaxBytesReader(nil, resp.Body, httpx.MaxBodyBytes)
 	}
 	return resp, nil
@@ -894,8 +887,7 @@ func (c *RetryableHTTPClient) GetWithHeadersScopedContext(ctx context.Context, u
 //
 // Before anything is applied, the default and custom headers are checked
 // against scope with checkCredentialBinding — both are expanded by setHeader,
-// so both are bound; its error is returned unchanged and req is left untouched
-// (S052-R1.2).
+// so both are bound; its error is returned unchanged and req is left untouched.
 func (c *RetryableHTTPClient) applyHeaders(req *http.Request, url string, customHeaders map[string]string, scope CredentialScope) error {
 	for _, headers := range []map[string]string{c.defaultHeaders, customHeaders} {
 		if err := CheckCredentialBinding(url, headers, scope); err != nil {
@@ -934,8 +926,7 @@ func (c *RetryableHTTPClient) setHeader(req *http.Request, name, value string) {
 }
 
 // SubstituteEnvVars replaces ${VAR_NAME} patterns in a header value with the
-// corresponding environment variable values, subject to a strict allow-list
-// (S001-R1, AD-8).
+// corresponding environment variable values, subject to a strict allow-list.
 //
 // A ${VAR} reference is expanded ONLY when BOTH of the following hold:
 //   - headerName is an allow-listed header (see isAllowedHeaderName), AND
@@ -987,7 +978,7 @@ func SubstituteEnvVars(log *slog.Logger, value, headerName string) string {
 // isGitHubAPIURL reports whether url is a GitHub API URL the automatic token
 // may be attached to. Only https qualifies: a token sent over plain http
 // travels in cleartext to anyone on the path, and api.github.com serves https
-// only, so the http form can only ever be a downgrade (S052-R5.1).
+// only, so the http form can only ever be a downgrade.
 func isGitHubAPIURL(url string) bool {
 	return strings.HasPrefix(url, "https://api.github.com/")
 }

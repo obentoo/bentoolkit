@@ -38,7 +38,7 @@ type CacheEntry struct {
 // PreconditionRecord is what a build gate learned about THIS HOST while failing:
 // a path the build needed and could not have. It is a fact about the machine, not
 // about the package's upstream, and it is what lets a second run decline a gate
-// that can only fail the same way again (S043-R3.1).
+// that can only fail the same way again.
 //
 // It lives here — in cache.json, under ~/.config/bentoo — and it may live nowhere
 // else. The obvious alternative, the package's own registry entry, is in
@@ -207,9 +207,9 @@ func (c *Cache) load() error {
 		c.Entries = cf.Entries
 	}
 
-	// Absent in every cache.json written before S043 — and absent again the
-	// moment the last record is cleared — so nil means "nothing recorded" and
-	// leaves the freshly made map in place.
+	// Absent in every cache.json written before preconditions were recorded —
+	// and absent again the moment the last record is cleared — so nil means
+	// "nothing recorded" and leaves the freshly made map in place.
 	if cf.Preconditions != nil {
 		c.Preconditions = cf.Preconditions
 	}

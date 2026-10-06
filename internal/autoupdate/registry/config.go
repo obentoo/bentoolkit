@@ -87,21 +87,16 @@ type PackageConfig struct {
 	// reconciliation in CheckAll may clear it when the ebuild returns. Any other
 	// value — including absent — means a human decided, and no scan revokes it.
 	//
-	// It exists because `enabled` alone is a two-valued field asked to carry three
-	// states: enabled, disabled-because-the-ebuild-is-absent, and
-	// disabled-because-a-maintainer-said-so. The reconciliation could not tell the
-	// last two apart, so it re-enabled a deliberate pin and bumped it, breaking a
-	// slot dependency for ten days (story 043, R1).
+	// `enabled` alone cannot tell "disabled because the ebuild is absent" from
+	// "disabled by a maintainer"; reconciliation once re-enabled a deliberate pin
+	// and broke a slot dependency for ten days.
 	//
-	// ABSENT MEANS DELIBERATE, and that direction is the whole safety property:
-	// "auto" is the ONLY value reconciliation may clear, so an entry nobody
-	// stamped — every record in the registry predating this field — reads as a
-	// human decision and survives untouched. The fail-safe reading therefore needs
-	// no migration to hold; the opposite default would have left the bug armed on
-	// every record until each one was rewritten.
+	// ABSENT MEANS DELIBERATE, and that direction is the safety property: "auto"
+	// is the ONLY value reconciliation may clear, so an unstamped entry (every
+	// record predating this field) survives untouched with no migration.
 	//
-	// It is meaningful only beside enabled = false — the origin of a disable that
-	// did not happen is nothing — and omitempty keeps it out of the file otherwise.
+	// It is meaningful only beside enabled = false; omitempty keeps it out of the
+	// file otherwise.
 	DisabledBy string `toml:"disabled_by,omitempty"`
 	// Hold, when true, deliberately excludes the package from autoupdate even
 	// though its ebuild IS present in the overlay. It expresses an explicit
@@ -127,7 +122,7 @@ type PackageConfig struct {
 	// a -bin suffix, or a binary SRC_URI). Set it only to override/correct the
 	// heuristic. Used for reporting and the --only filter.
 	//
-	// It ALSO decides how deeply a bump is validated (story 033, R2.3): a record
+	// It ALSO decides how deeply a bump is validated: a record
 	// resolved as "bin" is validated at depth none, because there is no source to
 	// unpack, patch, configure or compile and therefore no build gate that could
 	// run against it. What decides is the RESOLVED type — Checker.resolveType's
@@ -260,28 +255,20 @@ type PackageConfig struct {
 
 	// Series restricts the entry to one release line, given as a regex matched
 	// against the version — for an overlay ebuild, its PV without the -rN
-	// revision, so a revbump never moves an ebuild out of its line. It narrows BOTH ends of the comparison: which ebuild
-	// in the overlay counts as this entry's current version, and which upstream
-	// candidates survive selection.
+	// revision, so a revbump never moves an ebuild out of its line. It narrows
+	// BOTH ends of the comparison: which overlay ebuild is the entry's current
+	// version, and which upstream candidates survive selection.
 	//
-	// It exists because an overlay routinely carries more than one ebuild per
-	// package, and one entry cannot track them all — selectCurrentEbuild takes
-	// the directory's highest version, so the other lines are never bumped. The
-	// ":slot" key suffix already solves that when the lines are separate SLOTs
-	// (net-libs/webkit-gtk). Series solves the other half: lines that share a
-	// SLOT and differ by version. app-office/libreoffice keeps the stable 26.2
-	// series beside the testing 26.8 one, both SLOT=0; app-editors/zed-bin keeps
-	// 1.13.1 stable beside 1.14.1_pre, likewise.
+	// One entry cannot track parallel ebuilds — selectCurrentEbuild takes the
+	// highest version, so the other lines are never bumped. The ":slot" suffix
+	// covers lines in separate SLOTs; Series covers lines sharing a SLOT, such as
+	// libreoffice 26.2 beside 26.8, or zed-bin 1.13.1 beside 1.14.1_pre — where
+	// without it every stable release compared older than the preview and the
+	// line silently stopped updating.
 	//
-	// zed-bin is what the absence of this costs. Its entry tracks the stable
-	// channel, but the scan returns 1.14.1_pre as "current", so every stable
-	// release below 1.14.1 compares older and reports "up to date": the line
-	// stops being updated, and the silence looks like success.
-	//
-	// A package with one line does not need it. With it, give each entry of the
-	// same package a distinct "@label" so the keys stay unique
-	// ("app-office/libreoffice@stable" / "@testing"); the label is identity only
-	// and never reaches a filesystem path.
+	// With it, give each entry of the same package a distinct "@label" so the
+	// keys stay unique ("app-office/libreoffice@stable" / "@testing"); the label
+	// is identity only and never reaches a filesystem path.
 	Series string `toml:"series,omitempty"`
 
 	// Script is a JS expression/IIFE evaluated against the live DOM by the
@@ -318,52 +305,25 @@ type PackageConfig struct {
 	// "1.4.352_p20260515" → "1.4.353_p<today>" when the match is "1.4.353").
 	CommitVersionPattern string `toml:"commit_version_pattern,omitempty"`
 
-	// BaseFrom declares WHERE the base version of a track = "commit" package
-	// comes from — the X.Y.Z that carries the _p<date>/_pre<date> snapshot
-	// suffix. Absent means the legacy behaviour: the base is whatever the current
-	// ebuild already has, optionally raised by commit_version_pattern.
+	// BaseFrom declares WHERE a track = "commit" package's base version (the
+	// X.Y.Z before the _p<date>/_pre<date> suffix) comes from. Absent keeps the
+	// current ebuild's base, optionally raised by commit_version_pattern.
 	//
-	// It exists because scanning commit titles is the weakest of the three ways
-	// upstreams announce a version, and it was the only one available. The fetch
-	// reads a fixed window of the most recent commits (per_page= in the URL), so
-	// the pattern only ever sees what fits in it — and the window is measured in
-	// COMMITS, not days. Measured on 2026-07-31: 50 commits cover ten months of
-	// Vulkan-Headers but 1.3 days of zed, whose "Bump Zed to v1.15.0" had already
-	// fallen to index 59 and become invisible. Worse, six of the seven registry
-	// entries carrying a commit_version_pattern matched nothing at all — the
-	// pattern had been copied between Khronos packages, but only Vulkan-Headers
-	// writes "Update for Vulkan-Docs X.Y.Z" in its commits. The bases froze up to
-	// seven releases behind while the _p<date> kept advancing, so the versions
-	// looked alive and were not.
+	// Commit titles are the weakest source: the fetch sees only a fixed window
+	// of recent COMMITS (per_page=), and bases froze while _p<date> advanced.
 	//
-	// Values:
-	//
-	//	"file"           — fetch base_url and apply base_pattern. The strongest
-	//	                   option: one request, no window, no pagination. Use it
-	//	                   whenever upstream versions itself in-tree (zed's
-	//	                   crates/zed/Cargo.toml, mesa's VERSION, libqmi's
-	//	                   meson.build, sqlitebrowser's CMakeLists.txt).
+	//	"file"           — fetch base_url and apply base_pattern: one request, no
+	//	                   window. Use it whenever upstream versions itself
+	//	                   in-tree (Cargo.toml, VERSION, meson.build, CMakeLists).
 	//	"tag"            — fetch base_url (a tag/ref listing) and take the highest
-	//	                   version whose tag name matches base_tag_pattern. For
-	//	                   upstreams that mark releases with a tag and say nothing
-	//	                   in-tree about the scheme the ebuild uses: glslang and
-	//	                   spirv-* version themselves as "2026.3"/"1.5.5" in their
-	//	                   own files, while the overlay tracks them on the
-	//	                   vulkan-sdk-X.Y.Z.W scheme that exists only as tags.
-	//	"commit_message" — the legacy scan, driven by commit_version_pattern +
-	//	                   commit_message_path. Correct only when upstream marks
-	//	                   releases in commit titles AND commits slowly enough that
-	//	                   the bump stays inside the window.
+	//	                   version whose tag matches base_tag_pattern, for schemes
+	//	                   that exist only as tags (vulkan-sdk-X.Y.Z.W).
+	//	"commit_message" — the legacy scan via commit_version_pattern +
+	//	                   commit_message_path; correct only when the bump stays
+	//	                   inside the window.
 	//
-	// Whichever is chosen, an unresolvable base is now an ERROR rather than a
-	// silent fallback to the ebuild's version: a frozen base is indistinguishable
-	// from a correct one at a glance, which is exactly how the seven-release drift
-	// went unnoticed. Say where the version lives, or do not declare a source.
-	//
-	// The source must match the scheme the EBUILD uses, not whatever upstream
-	// finds prettiest. dev-util/spirv-tools publishes "v2026.3" in its CHANGES
-	// file, but the overlay versions it on the vulkan-sdk scheme — for that
-	// package the file is the wrong source even though it parses cleanly.
+	// An unresolvable base is an ERROR, never a silent fallback: a frozen base
+	// looks correct at a glance. The source must match the EBUILD's scheme.
 	BaseFrom string `toml:"base_from,omitempty"`
 
 	// BaseURL is the endpoint fetched to resolve the base version when
@@ -447,20 +407,14 @@ type PackageConfig struct {
 	// all sharing the same PV series. Such an entry is keyed with a ":slot"
 	// suffix (see PackagesConfig) and declares the slot's BASE revision here.
 	//
-	// It must be declared rather than carried over from the source ebuild: on a
-	// PV change the revision resets (foo-1.2.3-r1 bumps to foo-1.2.4), and where
-	// a revision marks a slot the value to write is the slot's base — ::gentoo
+	// It is declared rather than carried over: on a PV change the revision
+	// resets, and where it marks a slot the value is the slot's base — ::gentoo
 	// bumps webkit-gtk-2.52.3-r411 to webkit-gtk-2.52.5-r410, not to -r411.
 	//
-	// Zero/absent means a plain PV with no revision, which is correct for every
-	// ordinary package. It is NOT the right answer for a slot that ::gentoo
-	// revisions, even when the overlay's own ebuild happens to carry a bare PV:
-	// a bare PV sorts BELOW every -rN, so portage picks ::gentoo's ebuild over
-	// the overlay's and whatever divergence the overlay carries stops being
-	// selected at all. The bentoo overlay hit exactly that with SLOT 6
-	// webkit-gtk — a bare webkit-gtk-2.52.5.ebuild losing to ::gentoo's -r600,
-	// taking its non-upstream USE=webdriver with it — and that entry now
-	// declares revision = 600.
+	// Zero/absent means a plain PV, right for ordinary packages but NOT for a
+	// slot ::gentoo revisions: a bare PV sorts BELOW every -rN, so portage picks
+	// ::gentoo's ebuild and the overlay's divergence is lost (SLOT 6 webkit-gtk
+	// lost USE=webdriver that way, hence its revision = 600).
 	Revision int `toml:"revision,omitempty"`
 
 	// Version is the ebuild version this entry keeps in the overlay — the pin
@@ -630,14 +584,14 @@ type packagesConfigFile map[string]PackageConfig
 // It exists because rejecting such a key would deadlock its own migration.
 // LintPackagesConfig loads the very file it is about to repair, so a hard
 // failure on `binary` would leave the 23 records still carrying it unreadable by
-// the only tool that can rewrite them — the strict-decode rule (R4.1) and the
-// migration (R1.2/R1.3) would annul each other. Listing the key makes it
-// *claimed* — by this list rather than by a struct field — and claimed is the
-// only distinction the load cares about.
+// the only tool that can rewrite them — the strict-decode rule and the
+// migration would annul each other. Listing the key makes it *claimed* — by
+// this list rather than by a struct field — and claimed is the only
+// distinction the load cares about.
 //
 // It is emphatically not a general escape hatch. A key in neither the struct nor
 // this list is a typo (`serie` for `series`) and still fails the load, which is
-// the whole point of R4.1. Add an entry only for a field deliberately retired by
+// the whole point of strict decoding. Add an entry only for a field deliberately retired by
 // a migration that --lint --fix can perform, and drop it once the key is gone
 // from the registries it was written for.
 var retiredKeys = map[string]string{
@@ -666,12 +620,12 @@ func (k UnknownKey) String() string {
 }
 
 // UnknownKeysError is returned by LoadPackagesConfig when packages.toml holds
-// keys that nothing claims (R4.1). It aggregates every one of them instead of
-// failing on the first, so a registry with three typos is corrected in one pass
-// rather than in three round trips.
+// keys that nothing claims. It aggregates every one of them instead of failing
+// on the first, so a registry with three typos is corrected in one pass rather
+// than in three round trips.
 //
-// There is deliberately no repair (R4.2): a wrong name may be a misspelling of a
-// real field or a concept that does not exist, and a guess would silently write
+// There is deliberately no repair: a wrong name may be a misspelling of a real
+// field or a concept that does not exist, and a guess would silently write
 // a value into a field the maintainer never meant.
 type UnknownKeysError struct {
 	// Keys are the offending keys, ordered by record then key.
@@ -734,7 +688,7 @@ func unknownRegistryKeys(undecoded []toml.Key) []UnknownKey {
 // The configuration file is expected at overlay/.autoupdate/packages.toml
 //
 // Decoding is strict: a key no struct field claims fails the load, naming the
-// record and the key (R4.1). Writing `serie` instead of `series` would otherwise
+// record and the key. Writing `serie` instead of `series` would otherwise
 // disable the release-line filter in silence — the exact failure `series` exists
 // to prevent. The only exemption is retiredKeys; see there for why.
 func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
@@ -758,7 +712,7 @@ func LoadPackagesConfig(overlayPath string) (*PackagesConfig, error) {
 // strict-decoding rule as LoadPackagesConfig.
 //
 // It is separate from the file read because the repair pass has to parse text
-// that is not on disk yet: R7.1's gate reparses the rewritten file and compares
+// that is not on disk yet: verifyRepair reparses the rewritten file and compares
 // it record by record against the original BEFORE anything is written, and
 // staging a candidate through a temp file just to read it back would make the
 // gate depend on the very write it is meant to authorise.
@@ -869,29 +823,19 @@ func tomlTableName(line string) (string, bool) {
 // DisablePackagesInConfig writes the DISABLED PAIR — `enabled = false` and
 // `disabled_by = "auto"` — for each named package in the overlay's
 // packages.toml, editing the raw text so comments, ordering, and formatting
-// survive — unlike a full re-encode (toml.Encoder), which would drop every
-// comment in the hand-maintained file. For each package it locates the
-// [section] whose table name equals the package and either rewrites an existing
-// `enabled = ...` assignment or inserts `enabled = false` immediately after the
-// header. The origin is written beside it: in place when the record already
-// carries a `disabled_by` assignment — one line, never a second copy — and
-// directly below `enabled` otherwise, which is where CanonicalFieldOrder wants
-// it.
+// survive — a full re-encode (toml.Encoder) would drop every comment in the
+// hand-maintained file. It rewrites an existing `enabled = ...` or inserts
+// `enabled = false` after the [section] header, and writes the origin in place
+// of an existing `disabled_by` or directly below `enabled` (CanonicalFieldOrder).
 //
-// The origin is half of the statement rather than a decoration. Every caller of
-// this function disables for one reason, the ebuild having vanished from the
-// overlay, and `enabled = false` alone cannot say so: on disk it is
-// indistinguishable from a maintainer's deliberate pin. Recording WHO wrote the
-// disable is what later lets the overlay reconciliation revive this one and
-// leave that one alone (story 043, R1.1) — a disable written without it reads
-// as a human decision and is never reconciled, so the two keys are produced
-// together or the record is only half of what it claims.
+// The origin is half of the statement: every caller disables because the
+// ebuild vanished, and `enabled = false` alone is indistinguishable from a
+// maintainer's pin. Without it the disable reads as a human decision and is
+// never reconciled, so the two keys are always produced together.
 //
 // Packages whose section is absent are skipped silently. The write is atomic
-// (temp file + rename) and preserves the original file mode; an empty package
-// list, or a run that changes nothing, leaves the file untouched. A failed
-// write is returned to the caller rather than swallowed: a registry edit that
-// did not land must not pass for one that did.
+// (temp file + rename) and preserves the file mode; an empty list or a no-op
+// run leaves the file untouched. A failed write is returned, never swallowed.
 func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, false, true)
 }
@@ -899,36 +843,22 @@ func DisablePackagesInConfig(overlayPath string, pkgs []string) error {
 // EnablePackagesInConfig re-enables each named package in the overlay's
 // packages.toml by DELETING BOTH keys of the disabled pair — its `enabled`
 // assignment and its `disabled_by` origin — editing the raw text so comments,
-// ordering, and formatting survive. It is the sibling of
-// DisablePackagesInConfig used to revive an orphaned entry whose ebuild has
-// reappeared (or whose upstream has overtaken ::gentoo).
+// ordering, and formatting survive. It revives an orphaned entry whose ebuild
+// reappeared (or whose upstream overtook ::gentoo).
 //
 // It deletes rather than writing `enabled = true` because an absent key already
-// means enabled (see PackageConfig.IsEnabled), so the assignment states nothing
-// the file did not already say. Writing it is not merely redundant, it is
-// churn that fights the linter: `--lint` reports every `enabled = true` under
-// the redundant-enabled rule and `--lint --fix` deletes it, so a revive and a
-// repair would rewrite each other's work on every cycle. One revive of the KDE
-// 6.7.3 → 6.7.4 batch put 71 such lines into the registry, each one a finding.
+// means enabled (PackageConfig.IsEnabled); writing it would fight the linter,
+// whose --lint --fix deletes every `enabled = true`, so revive and repair would
+// undo each other on every cycle. The origin goes too: `disabled_by = "auto"`
+// on an enabled record describes a disable that no longer exists.
 //
-// The origin goes with it because it describes a state the entry has just left:
-// `disabled_by = "auto"` sitting on an enabled record is a claim about a
-// disable that no longer exists. Deleting only `enabled` would strand exactly
-// that — a line the linter reports and a later reader takes at face value
-// (story 043, R1.2).
-//
-// Each key is removed on its own evidence, because THAT line is present, never
-// because a neighbouring one was: the pair does not always travel together.
-// Every entry disabled before the origin field existed carries `enabled` and
-// nothing else, so the incomplete shape is the one the revive path meets most
-// often, and a deletion written positionally — "the line after enabled" — would
-// eat whatever legitimately follows.
+// Each key is removed because THAT line is present, never by position: entries
+// disabled before the origin field existed carry `enabled` alone, and "the line
+// after enabled" would eat whatever legitimately follows.
 //
 // Packages whose section is absent, or which carry neither key, are left
-// untouched — there is nothing to remove. The write is atomic (temp file +
-// rename) and preserves the original file mode; an empty package list, or a run
-// that changes nothing, leaves the file untouched. A failed write is returned
-// to the caller rather than swallowed.
+// alone. The write is atomic (temp file + rename), preserves the file mode, is
+// skipped for an empty list or a no-op run, and a failure is returned.
 func EnablePackagesInConfig(overlayPath string, pkgs []string) error {
 	return setPackagesEnabled(overlayPath, pkgs, true, false)
 }
@@ -949,7 +879,7 @@ var disabledByAssignRegex = regexp.MustCompile(`^(\s*)disabled_by\s*=`)
 // constant so the two cannot drift, because the drift would be silent — an
 // origin the reader does not recognise reads as a human decision and is simply
 // left alone, so a typo would strand entries as permanently unrevivable without
-// producing a single error (story 043, R1.1/R1.2).
+// producing a single error.
 const DisabledByAuto = "auto"
 
 // versionAssignRegex matches a `version = ...` assignment line, capturing the
@@ -957,47 +887,25 @@ const DisabledByAuto = "auto"
 // nothing but spaces, so versions_path/versions_selector never match.
 var versionAssignRegex = regexp.MustCompile(`^(\s*)version\s*=`)
 
-// setPackagesEnabled is the shared editing policy behind
-// DisablePackagesInConfig (value=false, insertIfAbsent=true) and
-// EnablePackagesInConfig (value=true, insertIfAbsent=false), on top of the
-// section scanner in editPackagesConfigSections.
+// setPackagesEnabled is the editing policy behind DisablePackagesInConfig
+// (value=false, insertIfAbsent=true) and EnablePackagesInConfig (value=true,
+// insertIfAbsent=false), on top of editPackagesConfigSections.
 //
-// The two directions are NOT symmetric, because the registry's two states are
-// not spelled the same way. Disabling must be written down: `enabled = false`
-// is the only way to say it, so an existing assignment is rewritten and — when
-// insertIfAbsent is set — the key is inserted after the header. Enabling is the
-// DEFAULT, spelled by the key's absence, so it is expressed by deleting the
-// assignment rather than by writing `enabled = true`. A section that has no
-// `enabled` key is already enabled and is left alone.
+// The directions are NOT symmetric: disabling must be written down (an
+// existing assignment is rewritten, or — with insertIfAbsent — inserted after
+// the header), while enabling is the DEFAULT, spelled by the key's absence, so
+// it deletes the assignment; writing `enabled = true` would fight the linter's
+// redundant-enabled rule. `disabled_by` obeys the same asymmetry — its absence
+// means a human decided — so both keys ride one direction flag and the body
+// walk, inComments mask and insertion point stay in a single copy.
 //
-// Writing `enabled = true` would put the file at odds with the linter that
-// reads it: the redundant-enabled rule reports every such line and --lint --fix
-// deletes it, so each revive would undo the previous repair and vice versa.
+// The pair is written in CanonicalFieldOrder (`enabled` then `disabled_by`),
+// and the origin only when absent, so a record disabled twice has one origin
+// line. Deletion is driven by each key being PRESENT, never by position: the
+// records disabled before the origin field existed carry `enabled` alone.
 //
-// `disabled_by` obeys that SAME asymmetry, one key over, which is why it is
-// handled here rather than in a second editor beside this one. The origin of a
-// disable is meaningful only while the disable exists, so it is written down
-// alongside `enabled = false` and deleted alongside it — and its absence, like
-// the absence of `enabled`, is itself the meaningful reading: no origin means a
-// human decided, the state no scan revokes (see PackageConfig.DisabledBy). Both
-// keys therefore ride the one direction flag this function already takes, and
-// the body walk, the inComments mask and the insertion point stay in a single
-// copy instead of two that must be kept in step.
-//
-// The pair is written in canonical order — `enabled` then `disabled_by`, the
-// order CanonicalFieldOrder declares and the linter checks as a subsequence —
-// and the origin is emitted only when the record does not already carry one, so
-// a record disabled twice ends with one origin line and not two.
-//
-// Deletion is driven by each key being PRESENT, never by its position relative
-// to the other: the ~90 records disabled before the origin field existed carry
-// `enabled` alone, so "the line after enabled" is the url far more often than it
-// is the origin.
-//
-// The write is atomic (temp file + rename) and preserves the original file
-// mode; an empty package list, or a run that changes nothing, leaves the file
-// untouched; a write that fails is returned unchanged to the caller, since a
-// registry left half-written must not be reported as written.
+// The write is atomic and mode-preserving, skipped when nothing changes, and a
+// failure is returned: a half-written registry must not pass for written.
 func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent bool) error {
 	if len(pkgs) == 0 {
 		return nil
@@ -1054,7 +962,7 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 					// already names who disabled it is stating an intent, and
 					// stamping the automatic origin over it hands the entry back
 					// to the very reconciliation the origin exists to keep it
-					// away from (R1.2/R1.3). A record with NO origin is stamped
+					// away from. A record with NO origin is stamped
 					// at the `enabled` line above, which is the only site that
 					// may introduce one.
 					if value {
@@ -1326,7 +1234,7 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 
 	// The key must be a well-formed atom, optionally slot- and label-suffixed. A
 	// malformed key would otherwise surface much later as a path built from
-	// nonsense — or, for a "../x" key, as a path outside the overlay (S064-R1.4).
+	// nonsense — or, for a "../x" key, as a path outside the overlay.
 	if _, _, err := ebuilds.ParsePkgAtom(pkg); err != nil {
 		return fmt.Errorf("package %s: %w: %w", pkg, ErrInvalidPackageKey, err)
 	}
@@ -1682,7 +1590,7 @@ func validateDistinctEntries(pkgs map[string]PackageConfig) error {
 }
 
 // UpstreamURLs returns cfg's registry URL, FallbackURL, AuxURL and Mirrors,
-// skipping the empty ones (S051-R3.4, S051-R3.5). The zero PackageConfig — no
+// skipping the empty ones. The zero PackageConfig — no
 // config for the package — yields none.
 func (cfg PackageConfig) UpstreamURLs() []string {
 	var urls []string

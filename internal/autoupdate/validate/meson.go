@@ -5,32 +5,17 @@ import "strings"
 // parseMesonOptions returns the option names a meson.options or
 // meson_options.txt file declares, in the order the file writes them.
 //
-// # Why a scanner and not a regular expression
+// It is a scanner, not a line regex, because two shapes break a regex in
+// opposite directions. Most declarations span several lines (`option(` then
+// `'qt6',` on the next), so a per-line pattern under-reports, and every missed
+// name becomes a FALSE "undeclared" error downstream. A commented-out
+// declaration is the mirror image: counting it over-reports and MASKS a real
+// finding. Comments are therefore stripped first, quote-aware, so a `#` inside a
+// description does not truncate the declaration after it.
 //
-// Two shapes make a line-oriented regex wrong in opposite directions. A real
-// option file spreads most declarations over several lines —
-//
-//	option(
-//	    'qt6',
-//	    type : 'feature',
-//	)
-//
-// so the name is not on the `option(` line, and a per-line pattern under-reports
-// the upstream side. Every name it misses becomes a FALSE error downstream,
-// because an option the ebuild passes and the parser never saw looks undeclared.
-//
-// A commented-out declaration is the mirror image: counting it over-reports, and
-// an over-reported upstream MASKS a real finding by making an option the build
-// no longer accepts look accepted. Comments are therefore stripped before the
-// scan, and stripped quote-aware, so a `#` inside a description does not
-// truncate the declaration that follows it.
-//
-// Zero options is a valid answer and never an error: a Meson project is allowed
-// to declare none (R1.4).
-//
-// Only the name is filled in here. Subproject and Source are stamped by the
-// caller, which is the layer that knows which archive member these bytes came
-// from — see OptionsFromArchive.
+// Zero options is a valid answer, never an error: a Meson project may declare
+// none. Only the name is filled in; the caller stamps Subproject and Source,
+// since it knows which archive member these bytes came from.
 func parseMesonOptions(data []byte) []Option {
 	src := stripMesonComments(string(data))
 

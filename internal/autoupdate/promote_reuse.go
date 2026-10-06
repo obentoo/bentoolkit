@@ -16,33 +16,26 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
-// This file is R10: do not spend the same hours twice.
+// This file exists so the same hours are not spent twice.
 //
 // A run that proved a bump — `--check --llm`, or an earlier `--apply` that got as
-// far as the gates — leaves its staged tree on disk (R3.6) and a record beside it
-// (R10.4). This file is what a later apply does with the two: promote the tree as
-// it stands WHERE it still describes this bump and its record shows it passing
-// (R10.1), and otherwise validate first (R10.2).
+// far as the gates — leaves its staged tree on disk and a record beside it. A
+// later apply promotes the tree as it stands WHERE it still describes this bump
+// and its record shows it passing, and otherwise validates first.
 //
-// # THIS IS NOT A CACHE, AND THE DIFFERENCE IS ONE CONDITION
+// It is NOT a cache, and the difference is one condition. The staged tree of
+// every bump that was NOT promoted — every failure — is retained, so matching
+// package, version and inputs alone would promote yesterday's REJECTED bump and
+// the auto-committing overlay would publish an ebuild its own gates refused. The
+// record's gate outcomes stop that, which is why an unrecorded tree revalidates
+// too: absence of a claim is not a passing claim.
 //
-// R3.6 retains the staged tree of every bump that was NOT promoted — which is to
-// say, of every failure. Put that rule next to "promote a retained tree that
-// matches the package, the version and the inputs" with nothing in between and
-// the two compose into a defect with no error message: yesterday's REJECTED bump
-// matches all three, so it is promoted, and the overlay that auto-commits and
-// pushes publishes an ebuild whose own gates said no. The record's gate outcomes
-// are what stops it, and that is why an unrecorded tree revalidates too (R10.5) —
-// absence of a claim is not a passing claim.
-//
-// # "UNCHANGED INPUTS" IS DECIDED BY CONTENT, NEVER BY A TIMESTAMP
-//
-// A mtime moves on a git checkout, an rsync, a container build and a restored
-// backup without a byte changing, and it can fail to move when a byte does. Every
-// comparison below is over a digest of the bytes themselves.
+// "Unchanged inputs" is decided by content, never by a timestamp: a mtime moves
+// on a git checkout, an rsync, a container build and a restored backup without a
+// byte changing, and can fail to move when a byte does.
 
 // ValidationSource says where THIS apply's verdict came from, and it has exactly
-// two values (R10.3).
+// two values.
 //
 // It is on the result rather than only in a log line because a fast green and a
 // proved green look identical from the outside: an apply that took four seconds
@@ -51,9 +44,9 @@ import (
 // which happened, per package.
 const (
 	// ValidationSourceStaged means the gates were paid for by an earlier run and
-	// this one promoted that run's tree (R10.1).
+	// this one promoted that run's tree.
 	ValidationSourceStaged = "staged"
-	// ValidationSourceThisRun means this run ran the gates itself (R10.2).
+	// ValidationSourceThisRun means this run ran the gates itself.
 	ValidationSourceThisRun = "this-run"
 )
 
@@ -148,28 +141,18 @@ func substitutionDigest(cfg registry.PackageConfig, update *PendingUpdate) strin
 // publishedDistfileDigest reduces the DIST entries of a published package
 // Manifest to one string.
 //
-// # Why the Manifest and not the tarball
+// It reads the Manifest, not the tarball: re-hashing the distfile needs it on
+// disk, which a promoting run may not have without a download. The Manifest is
+// the tree's own statement of which archives the package is digested against,
+// written by the `pkgdev manifest` step that fetched them, so a tarball
+// re-rolled upstream under the same name changes it.
 //
-// The distfile is the one input that is not in the overlay's text at all, and
-// re-hashing it would mean having it on disk — which a promoting run may not, and
-// which would cost a download to find out. The Manifest is the tree's own
-// statement about which archives this package is digested against, it is written
-// by the same `pkgdev manifest` step that fetched them, and it is the file
-// promotion overwrites. A tarball re-rolled upstream under the same name changes
-// it; nothing else that matters does.
-//
-// # The shape of the answer
-//
-// One DIST entry yields that entry's digest VERBATIM, so the string an operator
-// is shown in a refusal is the string they can grep for in the Manifest. Several
-// entries yield their digests joined in filename order, so the value is stable
-// across runs whatever order the Manifest happens to list them in. A package with
-// no Manifest, or none with a DIST line, yields the empty string — "this package
-// has no distfile input", which is a fact two runs can agree on.
-//
-// The digest taken per line is the FIRST hash the entry names (`DIST <file>
-// <size> BLAKE2B <hash> …`), because pkgdev writes them in a fixed order and the
-// first one is present in every Manifest this overlay has ever held.
+// One DIST entry yields its digest VERBATIM, so the operator can grep a refusal's
+// value in the Manifest; several are joined in filename order, stable whatever
+// order the Manifest lists them in. No Manifest, or no DIST line, yields "" —
+// "no distfile input", a fact two runs can agree on. Each line contributes the
+// FIRST hash it names (`DIST <file> <size> BLAKE2B <hash> …`): pkgdev writes
+// them in a fixed order and the first is present in every Manifest here.
 func publishedDistfileDigest(manifestPath string) (string, error) {
 	body, err := os.ReadFile(manifestPath) //nolint:gosec // the path is the Manifest of the package directory being applied
 	switch {
@@ -205,12 +188,12 @@ type stagedReuse struct {
 	root string
 	// cand names the candidate inside root, ready for promote.
 	cand candidatePaths
-	// promote is R10.1's verdict.
+	// promote is the reuse verdict.
 	promote bool
 	// reached is the depth the retained proof got to, for the report.
 	reached string
-	// reason explains the verdict in BOTH directions and is never empty. R10.3
-	// is "state per package which of the two happened", and a bump that
+	// reason explains the verdict in BOTH directions and is never empty: the
+	// operator is told per package which of the two happened, and a bump that
 	// revalidated silently is indistinguishable from one nobody thought about.
 	reason string
 	// err is set only for the one mismatch that must STOP the apply rather than
@@ -219,48 +202,24 @@ type stagedReuse struct {
 }
 
 // reusableStagedTree decides whether the staged tree already on disk may be
-// promoted as it stands (R10.1), or whether this run has to validate first
-// (R10.2).
+// promoted as it stands, or whether this run has to validate first.
 //
-// # The order of the conditions is the point
+// Every "is this tree about THIS bump" check comes first; only a tree passing
+// all of them reaches the distfile comparison, so no apply is refused over the
+// distfile of a bump nobody is trying to promote.
 //
-// Everything that asks "is this tree about THIS bump" comes first, and only a
-// tree that passes all of them reaches the distfile comparison. A tree describing
-// a different candidate, or one whose record shows a failure, is simply not
-// evidence here — refusing the apply over ITS distfile would report a mismatch
-// about a bump nobody is trying to promote.
+// A record is a licence only if the applier wrote it. A read-only `overlay
+// validate --depth` (or a realign proposal, or `overlay compare --depth`) can
+// record the very candidate this run would stage, and promoting on it would
+// publish on the output of a command that promises to change nothing. So
+// provenance is asked BEFORE the record's claims are read, but AFTER the record
+// is read, so an unreadable record keeps its own, more specific reason. It is
+// compared against the applier's OWN name: an unknown producer costs one
+// revalidation instead of a publication.
 //
-// # A record is a licence only if the applier wrote it
-//
-// A read-only `overlay validate --depth` stages a tree and records what its
-// gates said, and nothing about that record LOOKS wrong here: same package, same
-// version, same digests, because it measured the very candidate this run would
-// stage. The tree path carries the version, so the collision is usually avoided
-// by accident — but only usually, and a realign proposal or an `overlay compare
-// --depth` reaches it routinely. Promoting on such a record publishes an ebuild
-// on the output of a command whose contract says it changes nothing.
-//
-// Provenance is therefore asked BEFORE anything the record CLAIMS is read: a
-// record that is not a licence is not turned into one by proving something. It
-// is asked AFTER the record is read, so an unreadable one keeps R10.5's own,
-// more specific reason — the zero value of a record that could not be read names
-// no producer at all, and would otherwise be blamed on its provenance.
-//
-// The comparison is against the applier's OWN name rather than against
-// validate's, and that direction is the guard: a producer this version has never
-// heard of costs one revalidation instead of a publication (R5.1).
-//
-// # Why a changed distfile digest is a refusal and not a revalidation
-//
-// Every other mismatch means "the retained tree does not answer this question",
-// and the answer to that is to ask the question again. A distfile that changed
-// under a tree that otherwise matches exactly means something else: the archive
-// this package is digested against was replaced upstream under the same name
-// between staging and now. That is the one case where the operator's own inputs
-// moved without their knowing, so it is said out loud, with BOTH digests named so
-// they can see which way it moved, rather than quietly repaired by a re-run that
-// would look like an ordinary slow apply. Re-running `--check` restages the tree
-// and records the new digest, which is the recovery and is named in the refusal.
+// A changed distfile digest under an otherwise matching tree is a refusal, not
+// a revalidation: the archive was replaced upstream under the same name, so the
+// refusal names BOTH digests and the recovery (re-run `--check`).
 func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs, want validate.Depth) stagedReuse {
 	root, err := validate.StagedTreePath(a.stagingRoot, pkg, newVersion)
 	if err != nil {
@@ -289,21 +248,21 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 
 	record, err := validate.ReadStageRecord(root)
 	if err != nil {
-		// R10.5. Both spellings revalidate; only the unreadable one is worth a
+		// Both spellings revalidate; only the unreadable one is worth a
 		// line in the log, because it says something about the machine.
 		if !errors.Is(err, validate.ErrNoStageRecord) {
 			a.logger().Warn("the validation record beside the retained tree could not be read; the bump is validated again",
 				"root", root, "err", err, "package", pkg, "version", newVersion)
 		}
-		return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree %s carries no readable validation record, and absence of a claim is not a passing claim (R10.5)", root)}
+		return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree %s carries no readable validation record, and absence of a claim is not a passing claim", root)}
 	}
 
-	// R5.1. A producer this version does not RECOGNISE lands here too, by
+	// A producer this version does not RECOGNISE lands here too, by
 	// construction: ReadStageRecord passes an unknown name through verbatim rather
 	// than refusing to read a well-formed record left by a release this one is too
 	// old to know about, and this side refuses everything that is not the
 	// applier's own name. An ABSENT producer never arrives here as absence —
-	// ReadStageRecord reads it as the applier (R5.2), because every record already
+	// ReadStageRecord reads it as the applier, because every record already
 	// on an operator's disk predates the field and came from the applier.
 	//
 	// The name is quoted because it is text found on disk rather than a value this
@@ -313,7 +272,7 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 		return stagedReuse{root: root, reason: fmt.Sprintf(
 			"the retained tree's record was produced by %q rather than by the applier, so it is evidence about a "+
 				"different question — what a run MEASURED about this tree, not whether this bump may be published "+
-				"without running a gate again (R5.1)",
+				"without running a gate again",
 			record.ProducedBy)}
 	}
 
@@ -347,7 +306,7 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 		cand:    cand,
 		promote: true,
 		reached: record.Depth.String(),
-		reason:  why + ", over inputs that have not changed since, so it is promoted without running a gate again (R10.1)",
+		reason:  why + ", over inputs that have not changed since, so it is promoted without running a gate again",
 	}
 }
 
@@ -361,15 +320,14 @@ func short(digest string) string {
 	return digest[:12] + "…"
 }
 
-// recordStagedProof writes the record beside the staged tree this run built
-// (R10.4).
+// recordStagedProof writes the record beside the staged tree this run built.
 //
 // # It runs for failures too, and that is the requirement
 //
-// R3.6 retains the tree of every bump that was not promoted, so the record beside
+// The tree of every bump that was not promoted is retained, so the record beside
 // a failure is what tells the NEXT run that this tree is evidence of a rejection
 // rather than of a proof. Writing one only for successes would leave every failed
-// tree unrecorded — and an unrecorded tree revalidates (R10.5), which is safe but
+// tree unrecorded — and an unrecorded tree revalidates, which is safe but
 // throws away the one fact worth keeping.
 //
 // # A record that cannot be written never fails a bump
@@ -388,15 +346,15 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 	// refuseOnInterrupt stops a cancelled run from publishing. It cannot stop the
 	// NEXT one: gates that were never asked report SKIPPED, Proves() accepts any
 	// list of PASS-or-SKIPPED at the requested depth, and the following --apply
-	// then takes the R10.1 reuse path — which consults neither refuseUnproved nor
-	// PromotionDecision — under a context that is not cancelled. Writing this
+	// then takes the staged-tree reuse path — which consults neither
+	// refuseUnproved nor PromotionDecision — under a context that is not cancelled. Writing this
 	// record would turn "Ctrl-C does not publish" into "Ctrl-C publishes one run
 	// later", which is the same bump reaching the overlay by a slower route.
 	//
-	// Nothing else has to change, and nothing is lost: R10.5 already revalidates
-	// a retained tree carrying no readable record, because absence of a claim is
-	// not a passing claim. The tree itself still stays on disk as the failure's
-	// evidence (R3.6).
+	// Nothing else has to change, and nothing is lost: a retained tree carrying no
+	// readable record already revalidates, because absence of a claim is not a
+	// passing claim. The tree itself still stays on disk as the failure's
+	// evidence.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		a.logger().Warn("the run was interrupted, so what the gates reported is NOT recorded beside the retained tree: "+
 			"they were stopped rather than answered, and the next run validates this bump again instead of "+
@@ -404,12 +362,13 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		return
 	}
 
-	// R5.3, and it is what keeps R5.1 from being a rule that can only refuse. The
-	// reuse path above promotes on this exact value and on no other, so an applier
-	// that stopped naming itself — or named itself in some other spelling — would
-	// see every tree it retains refuse its own evidence on the next run: R10.1's
-	// whole saving switched off with nothing in the output saying why. The named
-	// constant rather than a literal is that spelling being fixed in one place.
+	// Naming the producer is what keeps the provenance check from being a rule
+	// that can only refuse. The reuse path above promotes on this exact value and
+	// on no other, so an applier that stopped naming itself — or named itself in
+	// some other spelling — would see every tree it retains refuse its own
+	// evidence on the next run: the whole reuse saving switched off with nothing
+	// in the output saying why. The named constant rather than a literal is that
+	// spelling being fixed in one place.
 	err := validate.WriteStageRecord(root, validate.StageRecord{
 		Package:            pkg,
 		Version:            version,

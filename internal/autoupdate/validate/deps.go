@@ -19,7 +19,7 @@ import (
 //
 // IT IS A DIFFERENT ANSWER FROM "a dependency is missing", and the difference is
 // the reason this sentinel exists. Both make the caller skip the build gates
-// (R5.3, R6.2), but only one of them can name an atom to install. A caller that
+// but only one of them can name an atom to install. A caller that
 // read a bare false as "something is missing" would print a skip blaming a
 // dependency nobody has evidence for; errors.Is against this sentinel is how it
 // tells the two apart, and it survives a reworded message the way a
@@ -62,24 +62,13 @@ const depsResolveTimeout = 5 * time.Minute
 // BuildDeps is the set of process- and host-level seams the build gates run
 // through, injected as functions so that every branch — the tool is missing, the
 // resolve failed, the host cannot isolate — stays reachable in a test on a host
-// where the real thing behaves the other way.
-//
-// # Why it is declared here
-//
-// design.md groups BuildDeps beside RunBuildGates in build.go, but
-// DependenciesSatisfied is its FIRST consumer and lands first; declaring it
-// there would leave this file naming a type that does not exist yet. All four
-// seams are therefore present from the start even though this file reads only
-// two, so that the compile gate arriving later widens no struct and rewrites no
-// call site.
-//
-// # A nil field is not a bug
+// where the real thing behaves the other way. It is declared here, not beside
+// RunBuildGates in build.go, because DependenciesSatisfied was its first consumer.
 //
 // Every field may be nil, and nil means "use the real thing". Each consumer
 // normalises what it reads (see commandFactory and binaryLookup), so a caller
-// that needs no substitution passes BuildDeps{} instead of assembling defaults
-// it does not care about — and, more to the point, a nil seam can never reach a
-// call site and panic there.
+// that needs no substitution passes BuildDeps{}, and a nil seam can never reach
+// a call site and panic there.
 type BuildDeps struct {
 	// ExecCommand builds a command whose output this package CAPTURES, in the
 	// shape the rest of the repository already uses for an exec seam. It
@@ -125,11 +114,11 @@ func (d BuildDeps) binaryLookup() func(name string) (string, error) {
 // isolationProbe is the isolation measurement a build must use, normalised the
 // same way again — and the reason it is a seam at all is that BOTH answers are
 // unreachable on any single host: the maintainer's machine is denied a network
-// namespace (design M-B), and a machine that is granted one can never exercise
+// namespace, and a machine that is granted one can never exercise
 // the label the other produces.
 //
-// Its default is validate.ProbeIsolation, the same probe story 031 measures the
-// compile gate with, so the label a build gate prints and the label the applier
+// Its default is validate.ProbeIsolation, the same probe the compile gate is
+// measured with, so the label a build gate prints and the label the applier
 // prints cannot come to disagree about this host.
 func (d BuildDeps) isolationProbe() func() (bool, string) {
 	if d.IsolationProbe != nil {
@@ -154,63 +143,24 @@ func (d BuildDeps) attachedRunner() func(cmd *exec.Cmd) ([]byte, error) {
 }
 
 // DependenciesSatisfied asks Portage whether this host could build the staged
-// candidate at all, and reports every package that would have to be installed
-// first (R5, R6).
+// candidate at all, and reports every package it would have to install first.
 //
-// # The false-positive class it removes
+// `ebuild … configure` NEVER INSTALLS DEPENDENCIES, so a bump whose build
+// dependencies are absent here would fail configure for a reason unrelated to
+// the bump. Asking Portage first — a read-only `emerge -p` of the atom pinned
+// with `=` and a `::` qualifier — separates "the bump is broken" from "this host
+// cannot build it". Anything the pretend run lists BEYOND the package under test
+// is a dependency this host lacks.
 //
-// `ebuild … configure` NEVER INSTALLS DEPENDENCIES. It runs the phase in front
-// of it and fails if a header, a library or a build tool is not already on the
-// host. So a bump whose build dependencies are simply absent here fails
-// configure for a reason that has nothing to do with the bump, and without this
-// pre-check the gate reports a confident FAILED about an ebuild that is fine.
-// Over a whole-registry sweep that is not one wrong answer — it is a report
-// nobody trusts. Asking Portage first separates "the bump is broken" from "this
-// host cannot build it", which are the two things a maintainer must never have
-// to guess between.
+//	err == nil, ok == true           — satisfied; the build gates may run.
+//	err == nil, ok == false, missing — unsatisfied; the caller skips every build
+//	                                   gate and NAMES these atoms.
+//	err != nil                       — UNDETERMINED; the caller skips but names
+//	                                   nothing (missing is nil on any error).
 //
-// The answer is Portage's own, read-only and deterministic, rather than a guess
-// parsed out of a build log. Measured (design M-D):
-//
-//	$ PORTAGE_REPOSITORIES="…host config…
-//	  [bentoolkit-staging-…]
-//	  location = <stagedRoot>
-//	  masters = gentoo" \
-//	  emerge -p --quiet "=media-plugins/gst-plugins-qt6-1.29.2::bentoolkit-staging-…"
-//	[ebuild  N    ] media-plugins/gst-plugins-qt6-1.29.2
-//	EXIT=0
-//
-// Anything the pretend run lists BEYOND the package under test is a dependency
-// this host does not have.
-//
-// # Three states, not two
-//
-//	err == nil, ok == true             — satisfied; the build gates may run.
-//	err == nil, ok == false, missing   — determined and unsatisfied; the caller
-//	                                     reports every build gate SKIPPED and
-//	                                     NAMES these atoms (R5.3).
-//	err != nil                         — UNDETERMINED; the caller still skips,
-//	                                     but must not name a missing dependency,
-//	                                     because it does not know of one (R6.2).
-//
-// ok alone cannot express that, which is why the error is not an afterthought
-// here: it carries the third state. On any error missing is nil, so a caller
-// cannot accidentally print an atom list assembled from a run that failed.
-//
-// # Why nothing is written anywhere
-//
-// `emerge` does not inherit `ebuild`'s auto-append of the tree it is pointed at,
-// so the staged repository has to be made visible some other way — and the
-// obvious wrong way is a temporary repos.conf fragment dropped into
-// /etc/portage/repos.conf. That produces the same answer while needing root on
-// most hosts, racing every other bentoolkit process, and surviving a killed run
-// as a file that quietly changes the next resolve. PORTAGE_REPOSITORIES supplies
-// the whole repository configuration as an environment VALUE instead, so this
-// function creates no file, no directory and no temporary anything.
-//
-// The pretend run is a pretend run: `-p` never installs, and the atom is pinned
-// to the exact version in the staged repository with an `=` and a `::` qualifier
-// so no other version of the package can answer for it.
+// The staged repository is supplied as a PORTAGE_REPOSITORIES value, never as a
+// repos.conf fragment (root, racing runs, a leftover after a kill): nothing is
+// written anywhere.
 func DependenciesSatisfied(ctx context.Context, stagedRoot, atom, version string, deps BuildDeps) (ok bool, missing []string, err error) {
 	unsatisfied, err := unsatisfiedDependencies(ctx, stagedRoot, atom, version, deps)
 	if err != nil {
@@ -235,12 +185,12 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 	// The atom is split before anything else because the split is also the
 	// validator: a malformed atom must fail as a malformed atom, not as an
 	// `emerge` invocation that means something unintended. It is split TWICE,
-	// because a registry key has two roles here (design D4). splitContentAtom
+	// because a registry key has two roles here. splitContentAtom
 	// answers role B: the atom PINNED in the pretend run, which must be the
 	// suffix-stripped category/package — "=cat/pkg@label-1.0::repo" names a
 	// package that exists in no repository, the staged tree included, since
 	// Stage writes its content clean. splitStagedAtom answers role A: the
-	// SUFFIXED package the staged repository's NAME was written from (R5.4),
+	// SUFFIXED package the staged repository's NAME was written from,
 	// which stagedRepoNameAt's recomputing fallback must be handed too, or a
 	// tree missing its repo_name file resolves under a name Stage never wrote.
 	category, pkg, err := splitContentAtom(atom)
@@ -352,7 +302,7 @@ func composePortageRepositories(stagedRoot, repoName string) (string, error) {
 	}
 	cfg.set(repoName, "location", location)
 
-	// The masters line is stage.go's own spelling of the D2 rule, taken apart
+	// The masters line is stage.go's own stagedMasters, taken apart
 	// rather than retyped: the section written here and the layout.conf written
 	// into the tree must not be able to name different masters.
 	mastersKey, mastersValue, _ := strings.Cut(stagedMasters, "=")
@@ -444,20 +394,15 @@ func (c *reposConfig) set(name, key, value string) {
 // has when it reads several files into one ConfigParser: a section seen again is
 // EXTENDED, and a key seen again is OVERWRITTEN by the later file.
 //
-// # Why this is a merge and not a concatenation
-//
-// Measured against the installed Portage: joining two config files end to end
-// and handing the result over is rejected outright —
+// It is a merge, not a concatenation, because Portage rejects a duplicate
+// section within a single stream:
 //
 //	!!! Error while reading repo config file: While reading from
 //	'<io.StringIO>' [line 24]: section 'gentoo' already exists
 //
-// A duplicate section is an error WITHIN a single stream even though it is the
-// normal case ACROSS files, and every host that has ever run `eselect repo`
-// carries a second [gentoo] section in /etc/portage/repos.conf. Concatenating
-// would therefore report UNDETERMINED on the typical Gentoo host — the failure
-// mode this whole function exists to distinguish, produced by the function
-// itself.
+// and every host that has run `eselect repo` carries a second [gentoo] section
+// in /etc/portage/repos.conf, so concatenating would report UNDETERMINED on the
+// typical Gentoo host.
 //
 // The reader is deliberately narrow, like carriedLayout's: comments and lines it
 // cannot read as a header, an assignment or a continuation are dropped, because

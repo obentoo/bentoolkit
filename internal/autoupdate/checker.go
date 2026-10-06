@@ -181,25 +181,19 @@ func hostForError(rawURL string) string {
 
 // sentRequestDeclaresRange reports whether the request that actually reached the
 // wire asked the server for a byte range, which is what makes a 206 answer
-// legitimate (S020-R1.1, S020-R1.2). It reads the request recorded on the response instead
-// of predicting the wire from the per-package header map, because that map is
-// not what the server sees:
+// legitimate. It reads the request recorded on the response instead of
+// predicting the wire from the per-package header map, which is not what the
+// server sees:
 //
-//   - setHeader (httpclient.go) DROPS any header whose name contains CR or LF,
-//     so a "Range\n" key sends no Range at all. A map-based guess would open the
-//     gate for a header that was never on the wire — the fail-open trap this
-//     predicate closes by construction (S020-R2.3).
-//   - setHeader also applies strings.TrimSpace and
-//     textproto.CanonicalMIMEHeaderKey to the name, so " Range " and "RANGE"
-//     both arrive as the canonical "Range" (S020-R2.1, S020-R2.2).
-//   - applyHeaders (httpclient.go) additionally contributes c.defaultHeaders,
-//     a source the per-package map never sees at all (S020-R3.1).
+//   - setHeader (httpclient.go) DROPS any header name containing CR or LF, so a
+//     "Range\n" key sends no Range; a map-based guess would fail open on it.
+//   - setHeader trims and canonicalises the name, so " Range " and "RANGE" both
+//     arrive as "Range" — and Header.Get canonicalises its key too, so one Get
+//     answers every spelling with no normalisation here to drift.
+//   - applyHeaders additionally contributes c.defaultHeaders, a source the
+//     per-package map never sees.
 //
-// Header.Get canonicalises its lookup key too, so casing and padding are already
-// resolved by the time this reads it: one Get answers every spelling, with no
-// normalisation logic here to drift out of step with setHeader's.
-//
-// Absent evidence is not permission (S020-R1.4): a nil response, or one whose Request
+// Absent evidence is not permission: a nil response, or one whose Request
 // the transport did not record, reads as "no Range declared", so an unsolicited
 // 206 fails safe on the status error rather than being accepted on a guess.
 func sentRequestDeclaresRange(resp *http.Response) bool {
@@ -264,7 +258,7 @@ type Checker struct {
 	// provider for this run (autoupdate.llm.provider was non-empty), regardless
 	// of whether construction ultimately succeeded. It gates the "unused
 	// llm_prompt" Warn: that diagnostic must fire ONLY when no provider was
-	// configured at all (S003-R5.3). When a provider was configured but failed to
+	// configured at all. When a provider was configured but failed to
 	// build, runCheck emits its own failure Warn, so suppressing the construction
 	// Warn here avoids a confusing double-warn. Set via WithLLMProviderConfigured;
 	// defaults false so existing direct callers are unaffected.
@@ -302,22 +296,22 @@ type Checker struct {
 	progressCallback ProgressCallback
 	// cacheTTL, when positive, is passed to the default Cache construction so
 	// the user-configured TTL from ~/.config/bentoo/config.yaml reaches Cache.TTL
-	// (S002-R2.1, S002-R2.2). Set via WithCacheTTL. Zero (the absence sentinel) keeps the
+	// . Set via WithCacheTTL. Zero (the absence sentinel) keeps the
 	// default 1-hour TTL. It is ignored when a Cache is injected via WithCache,
 	// since that injected Cache carries its own TTL.
 	cacheTTL time.Duration
 	// bodies deduplicates upstream response bodies within this Checker's
-	// lifetime — one command invocation (S024-R2.4). fetchContent consults it
-	// BEFORE the rate-limiter wait, so a read answered from an already-fetched
-	// body costs neither a request nor a token (S024-R2.1, S024-R2.2).
+	// lifetime — one command invocation. fetchContent consults it BEFORE the
+	// rate-limiter wait, so a read answered from an already-fetched body costs
+	// neither a request nor a token.
 	//
 	// It is distinct from `cache` above: that one is the on-disk, TTL'd record of
 	// resolved VERSIONS across runs; this one is in-memory, has no TTL, holds raw
 	// response BYTES, and is discarded when the run ends.
 	//
 	// NIL IS THE OFF SWITCH, and it is a supported state rather than a defect:
-	// fetchContent then calls fetchContentUncached directly, which is the
-	// pre-story path byte for byte. NewChecker builds one in the struct literal
+	// fetchContent then calls fetchContentUncached directly, the uncached path
+	// byte for byte. NewChecker builds one in the struct literal
 	// below, so deduplication is on by default.
 	bodies *fetch.BodyCache
 
@@ -394,7 +388,7 @@ func WithLLMClient(llm llm.LLMProvider) CheckerOption {
 // LLM provider for this run (true when autoupdate.llm.provider was non-empty),
 // independent of whether the provider was successfully built and wired via
 // WithLLMClient. It exists to gate the "unused llm_prompt" Warn so that warning
-// fires only when NO provider was configured (S003-R5.3); when a provider was
+// fires only when NO provider was configured; when a provider was
 // configured but failed to construct, runCheck logs its own failure Warn and
 // this flag suppresses the duplicate construction Warn. Defaults false, so
 // callers that omit it preserve the pre-refactor warn behaviour.
@@ -516,7 +510,7 @@ func WithProgressCallback(cb ProgressCallback) CheckerOption {
 // WithCacheTTL sets the TTL applied to the default Cache constructed by
 // NewChecker when no Cache is injected via WithCache. It enables
 // `autoupdate.cache_ttl` from ~/.config/bentoo/config.yaml to reach Cache.TTL
-// (S002-R2.1). A non-positive duration is rejected at construction time (S002-R2.2),
+// . A non-positive duration is rejected at construction time,
 // mirroring WithOpTimeout's validation; the CLI guards the value upstream via
 // AutoupdateConfig.GetCacheTTL, so this is defence-in-depth for direct callers.
 func WithCacheTTL(d time.Duration) CheckerOption {
@@ -548,22 +542,19 @@ func WithPerHostConcurrency(n int) CheckerOption {
 }
 
 // WithFetchCache turns per-run deduplication of upstream response bodies on or
-// off. It is ON by default (S024-R7.2) — NewChecker builds a cache in its struct
-// literal — so the only reason to pass this option at all is to turn it OFF.
+// off. It is ON by default — NewChecker builds a cache in its struct literal —
+// so the only reason to pass this option at all is to turn it OFF.
 //
-// DISABLED IS THE ABSENCE OF A CACHE, not a flag consulted somewhere on the
-// fetch path: false sets the field to nil, and fetchContent then calls
-// fetchContentUncached directly. That is what makes the off switch worth
-// trusting as a bisection tool — the disabled path is not a second
-// implementation to audit, it is the code that shipped before this story, byte
-// for byte, with no join, no sharing and no retention.
+// DISABLED IS THE ABSENCE OF A CACHE, not a flag consulted on the fetch path:
+// false sets the field to nil, and fetchContent calls fetchContentUncached
+// directly. That makes the off switch a trustworthy bisection tool — the
+// disabled path is not a second implementation to audit, it is the uncached
+// code byte for byte, with no join, no sharing and no retention.
 //
-// true INSTALLS a cache only when none is present rather than replacing one that
-// is. The option is therefore idempotent: applying it after the default
-// construction — which is every real call — keeps the single cache already
-// there, along with the bodies and counters it has accumulated. Rebuilding
-// unconditionally would silently discard a run's shared bodies, so that every
-// read taken before the option was applied would be paid for a second time.
+// true INSTALLS a cache only when none is present, so the option is idempotent:
+// applied after the default construction it keeps the cache already there with
+// its accumulated bodies and counters, instead of discarding them and paying
+// for every earlier read a second time.
 //
 // It cannot fail: a bool has no invalid value. The error in the return type is
 // the CheckerOption signature, not a possibility.
@@ -594,12 +585,12 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		configDir:   configDir,
 		opTimeout:   DefaultOpTimeout,
 		concurrency: DefaultConcurrency,
-		// Per-run body deduplication is ON by default (S024-R2.1). It is built
+		// Per-run body deduplication is ON by default. It is built
 		// HERE, in the literal, rather than after the options loop, so that
 		// "disabled" can be expressed as the ABSENCE of a cache — an option that
 		// simply sets the field back to nil — instead of a flag threaded through
 		// the fetch path. fetchContent then has one branch on one field, and the
-		// off state is the pre-story code verbatim.
+		// off state is the uncached code verbatim.
 		bodies:    fetch.NewDefaultBodyCache(),
 		hostSlots: newHostSlots(DefaultPerHostConcurrency),
 	}
@@ -622,7 +613,7 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 
 	// Initialize cache if not provided. When WithCacheTTL set cacheTTL to a
 	// positive value, thread it through to the underlying Cache via WithTTL so
-	// the user-configured `autoupdate.cache_ttl` is honoured (S002-R2.1). When the
+	// the user-configured `autoupdate.cache_ttl` is honoured. When the
 	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
 	if checker.cache == nil {
 		cacheOpts := []fetch.CacheOption{}
@@ -686,12 +677,12 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	}
 
 	// Initialize the HTTP rate limiter if not injected. A Checker must never
-	// have a nil rateLimiter: fetchContent unconditionally waits on it (S001-R10.3).
+	// have a nil rateLimiter: fetchContent unconditionally waits on it.
 	if checker.rateLimiter == nil {
 		checker.rateLimiter = fetch.NewRateLimiter()
 	}
 
-	// S003-R5.3 / S002-R4.2: a non-empty llm_prompt only drives --check when an LLM
+	// A non-empty llm_prompt only drives --check when an LLM
 	// provider is wired (llmClient != nil). Warn for each affected package so
 	// users discover an UNUSED llm_prompt before debugging a silent no-op — but
 	// ONLY when no provider was configured for this run (llmProviderConfigured
@@ -1008,21 +999,16 @@ func (c *Checker) DisableOrphans(pkgs []string) error {
 }
 
 // ReviveDisabled re-enables each named package in the overlay's packages.toml
-// and in the in-memory config. It is the inverse of DisableOrphans: a package
-// that was auto-disabled when its ebuild vanished is reconciled back to enabled
-// once that ebuild is present in the overlay again, because the overlay — not
-// packages.toml — is the source of truth for whether a package exists. The file
-// edit is a comment-preserving DELETION of both keys of the disable — the
-// `enabled = false` assignment and the `disabled_by` origin beside it: enabled
-// is the default, spelled by the key's absence, so writing `enabled = true`
-// would state nothing new and would leave a redundant-enabled finding for
-// --lint --fix to undo (EnablePackagesInConfig likewise inserts nothing for a
-// section that lacks the key), and an origin left behind on an enabled record
-// would claim a state the record is no longer in. A nil or empty slice is a
-// no-op. The in-memory config is updated only after the file write succeeds, so
-// a failed write leaves both views consistent — including the origin, which the
-// reconciliation READS on the next entry of the same run, so a stale in-memory
-// copy would be misread as a human's decision.
+// and in the in-memory config. It is the inverse of DisableOrphans: once an
+// auto-disabled package's ebuild is back in the overlay — the source of truth
+// for whether a package exists — it is reconciled to enabled. The file edit is a
+// comment-preserving DELETION of both keys of the disable, `enabled = false` and
+// its `disabled_by` origin: enabled is spelled by the key's absence, so writing
+// `enabled = true` would leave a redundant-enabled finding for --lint --fix, and
+// a leftover origin would claim a state the record is no longer in. A nil or
+// empty slice is a no-op. The in-memory config changes only after the file
+// write succeeds, so a failed write leaves both views consistent — including
+// the origin, which the reconciliation reads later in the same run.
 //
 // Callers must exclude held packages (hold = true): a hold is an explicit
 // maintainer decision that the overlay reconciliation must never flip. Callers
@@ -1056,16 +1042,15 @@ func (c *Checker) ReviveDisabled(pkgs []string) error {
 // carries — reads as a human decision and survives untouched, so the fail-safe
 // holds with no migration behind it. The opposite reading is the defect: a scan
 // cleared a deliberate pin and bumped the package, and www-client/orion-bin's
-// slot dependency stayed broken for ten days (story 043, R1.2/R1.3).
+// slot dependency stayed broken for ten days.
 //
 // Hold is asked here rather than left to the caller so one predicate states the
 // whole rule, and a held entry answers false even when it carries the automatic
 // origin: hold is never auto-flipped, whatever the origin says.
 //
-// It deliberately does NOT ask whether the ebuild is back in the overlay. That
-// question needs the overlay itself, and leaving it to CheckAll — where
-// getCurrentVersion is reachable — keeps this a pure function of the record, so
-// the policy can be read and tested without a fixture on disk.
+// It deliberately does NOT ask whether the ebuild is back in the overlay: that
+// is CheckAll's question, which keeps this a pure function of the record,
+// testable without a fixture on disk.
 func reconcilesAutomatically(pkg registry.PackageConfig) bool {
 	return !pkg.IsEnabled() && !pkg.IsHeld() && pkg.DisabledBy == registry.DisabledByAuto
 }
@@ -1084,7 +1069,7 @@ const frozenDisableMessage = "left package(s) disabled — the reconciliation cl
 
 // logFrozenDisables writes the single line naming every entry the
 // reconciliation left disabled although its ebuild is present, because the
-// record states no origin (R1.4). An empty set writes nothing, so a run with
+// record states no origin. An empty set writes nothing, so a run with
 // nothing to report says nothing instead of printing an empty list.
 func logFrozenDisables(log *slog.Logger, pkgs []string) {
 	if len(pkgs) == 0 {
@@ -1109,32 +1094,23 @@ type ReviveCandidate struct {
 
 // FindRevivableOrphans scans the disabled entries in the config and reports
 // those an autoupdate could revive: the entry's upstream version is strictly
-// newer than the highest version ::gentoo still ships. The normal check path
-// skips disabled entries forever (CheckAll: `if !pkg.IsEnabled() { continue }`),
-// so without this report a package removed from the overlay would never surface
-// an upstream bump that ::gentoo has not yet caught up to.
+// newer than the highest version ::gentoo still ships. CheckAll skips disabled
+// entries forever, so without this report a package removed from the overlay
+// would never surface an upstream bump ::gentoo has not caught up to.
 //
-// A candidate must be BOTH disabled AND actually absent from the overlay (a
-// true orphan): an enabled entry is handled by the regular check flow, and a
-// disabled entry whose ebuild is still present is not revivable from a ::gentoo
-// base (that would seed an older version over the newer one already shipped).
+// A candidate must be BOTH disabled AND absent from the overlay (a true
+// orphan): a disabled entry whose ebuild is still present is not revivable, as
+// a ::gentoo base would seed an older version over the newer one shipped.
 //
-// "Present" has a third shape, and it is skipped just as silently: an entry
-// whose ":slot" or `series` filter matches NOTHING (ErrSlotNotFound /
-// ErrSeriesNotFound). The package directory is there, holding the ebuilds of
-// another line, so the entry is not an orphan — and it is not a fault either,
-// because a disabled line-filtered entry matching nothing is its expected state
-// (a release line upstream has not opened yet, or one whose package upstream
-// dropped). A genuine config mistake is caught where it acts: on the enabled
-// path, where CheckAll surfaces the same sentinel and Reconcile records it as
-// NoEbuild.
+// An entry whose ":slot" or `series` filter matches NOTHING is skipped just as
+// silently: its directory holds another line, so it is not an orphan, and a
+// disabled line-filtered entry matching nothing is its expected state. A real
+// config mistake is caught on the enabled path (CheckAll, Reconcile's NoEbuild).
 //
-// Every network call is best-effort:
-// a package whose upstream fetch fails, or that ::gentoo does not carry at all
-// (provider.ErrNotFound), is silently skipped rather than aborting the whole
-// scan. Other provider errors are surfaced as soft notes in the returned error
-// without dropping the candidates gathered so far. The result is sorted by
-// package name for deterministic output.
+// Every network call is best-effort: a failed upstream fetch or a package
+// ::gentoo does not carry is skipped; other provider errors become soft notes in
+// the returned error without dropping the candidates gathered. The result is
+// sorted by package name.
 func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provider) ([]ReviveCandidate, error) {
 	// Iterate in sorted order so soft-error notes (and any debugging) are
 	// deterministic; the final slice is sorted again before return.
@@ -1172,19 +1148,12 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		// Checking the overlay first also skips the upstream/gentoo lookups for
 		// packages that are still present.
 		//
-		// The lookup has THREE outcomes, not two. Besides "present" and
-		// ErrNoEbuildFound, a ":slot" or `series` filter that matches nothing
-		// yields ErrSlotNotFound/ErrSeriesNotFound: the package DIRECTORY is
-		// there, carrying the ebuilds of another line. Such an entry is neither
-		// revivable — seeding a ::gentoo base beside a sibling line that is
-		// already newer is the very mistake the "present" skip prevents — nor a
-		// failure worth a soft note, so it is skipped in silence like the other
-		// two. See the doc comment above for where a real config error is caught
-		// instead. The skip must stay HERE, ahead of fetchUpstreamVersion: that
-		// function applies the same `series` to the upstream value and fails with
-		// ErrNoVersionFound, so letting the flow continue would only retitle the
-		// note from "overlay lookup failed" to "upstream fetch failed" — and cost
-		// one request per scan to say it.
+		// The lookup has THREE outcomes: a filter matching nothing yields
+		// ErrSlotNotFound/ErrSeriesNotFound with the DIRECTORY present. That
+		// entry is neither revivable (seeding a ::gentoo base beside a newer
+		// sibling line is what the "present" skip prevents) nor worth a note.
+		// The skip stays HERE, ahead of fetchUpstreamVersion, which would fail
+		// on the same `series` and only retitle the note — at one request a scan.
 		if _, err := c.getCurrentVersion(pkg); err == nil {
 			continue // ebuild still present: disabled but not orphaned, skip silently
 		} else if errors.Is(err, ebuilds.ErrSlotNotFound) || errors.Is(err, ebuilds.ErrSeriesNotFound) {
@@ -1887,7 +1856,7 @@ func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *
 	primaryErr := err
 
 	// A credential refusal is a verdict on the record, not a failed source:
-	// neither the fallback nor the LLM stage may run after it (S052-R2.2).
+	// neither the fallback nor the LLM stage may run after it.
 	if errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		return "", fmt.Errorf("all version extraction methods failed: %w", err)
 	}
@@ -1943,7 +1912,7 @@ func nonCredentialHeaders(headers map[string]string) map[string]string {
 //
 // A mirror is the same record with url swapped and its credential headers
 // dropped. A credential refusal on url stops the chain: it is a verdict on the
-// record, not a failed source (S052-R2.2). When every source failed, the error
+// record, not a failed source. When every source failed, the error
 // is a transport failure only if every attempt was one — a mirror timing out
 // must not hide that url itself answered with something the record cannot
 // read, which is the record's fault and the registry repair's business.
@@ -2151,60 +2120,24 @@ func (c *Checker) evaluateLive(ctx context.Context, cfg *registry.PackageConfig,
 }
 
 // fetchContent is the single door every upstream read in this package goes
-// through, and therefore the one place per-run deduplication can be installed
-// without touching a caller: base_url, fallback_url and the intra-package
-// auxiliary reads all gain it by already being here (S024-R2.5).
+// through, and so the one place per-run deduplication is installed: it answers
+// from a body this run already fetched, else delegates to fetchContentUncached.
 //
-// It answers a read from a body this run already fetched when one exists, and
-// otherwise delegates to fetchContentUncached — the pre-story path, unchanged.
+// THE RETURNED BODY IS SHARED, NOT COPIED, AND MUST BE TREATED AS READ-ONLY.
+// Every record with the same fetch identity gets the SAME backing array, so a
+// mutating caller silently makes another package report its version. Today's
+// consumers (parseJSON, parseRegex, goquery, htmlquery) only read; a future
+// writer must copy first — copying here would reinstate the memory cost.
 //
-// THE RETURNED BODY IS SHARED, NOT COPIED, AND MUST BE TREATED AS READ-ONLY
-// (story 024 assumption A1). Every record that asked for the same fetch identity
-// receives the SAME backing array, so a caller that mutates it corrupts what
-// every other record sees — and does so silently: nothing fails loudly, one
-// package simply starts reporting another package's version. Every consumer
-// downstream of this function reads without mutating today (parseJSON,
-// parseRegex, goquery, htmlquery); a future one that needs to write must copy
-// first. Copying per caller here would reinstate exactly the memory cost the
-// cache exists to remove, so the contract is the mechanism rather than an
-// optimisation layered on top of one.
+// THE LOOKUP PRECEDES THE RATE-LIMITER WAIT, which lives in fetchContentUncached:
+// a hit acquires no token (at one token per 6 s per host, that is the saving),
+// while every request actually issued still passes the limiter. Each caller's
+// closure captures its OWN opTimeout, so a caller released by a failed leader
+// cannot inherit an expired deadline. Errors are never cached or shared.
 //
-// THE LOOKUP PRECEDES THE RATE-LIMITER WAIT, and that ordering is the entire
-// point rather than an implementation detail: the wait lives inside
-// fetchContentUncached, so a read served from a retained body acquires no token
-// (S024-R2.2). At one token per 6 s per host, a hit that still queued for a
-// token would save the request and none of the wall-clock time this exists for.
-// UB1 is preserved by the same arrangement: every request that IS issued still
-// goes through the limiter, at the same interval and burst, because the only way
-// to reach the request is through fetchContentUncached.
-//
-// EACH CALLER'S CLOSURE CAPTURES ITS OWN opTimeout. That is what makes S024-R3.4
-// fall out of the structure instead of needing machinery: a caller released by a
-// leader whose fetch FAILED invokes its own closure, with its own full
-// per-operation budget, and so cannot inherit an already-expired deadline it did
-// not set. Nothing here extends, shares or reuses a context.
-//
-// A nil bodies cache means deduplication is off, and that path is the pre-story
-// behaviour byte for byte — no join, no sharing, no retention.
-//
-// The error is returned exactly as the underlying fetch produced it: bodyCache.do
-// neither caches nor shares a failure, so callers' errors.Is checks against
-// context.Canceled, context.DeadlineExceeded and ErrResponseTooLarge keep holding.
-//
-// scope is the package's credential scope (packageCredentialScope). The binding
-// check runs FIRST, before the cache is consulted (S052-R2.3): the key is built
-// from the URL and the unexpanded declared headers, not from the scope, so a
-// record bound elsewhere shares its key with a record that legitimately fetched
-// the same URL, and would otherwise be served that record's body. A refusal is
-// returned before the join, so the sentence above stays true — no refusal is
-// cached or shared — and the key needs no scope term (S052-R9.4).
-//
-// ctx is the CALLER'S context, and a done one ends the read before the cache is
-// consulted (story 059, R3.1). Without that check a retained body would answer a
-// cancelled call: one Checker serves many calls, so a live call that filled the
-// cache would let a later cancelled call succeed. The refusal keeps the raw
-// context error as its cause, so errors.Is(err, context.Canceled) and
-// errors.Is(err, context.DeadlineExceeded) hold for every caller.
+// The credential binding check on scope runs FIRST, before the cache, since the
+// key carries no scope term; a done ctx then ends the read before the cache, so
+// a retained body never answers a cancelled call (errors.Is holds on ctx errors).
 func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
 	if err := fetch.CheckCredentialBinding(rawURL, headers, scope); err != nil {
 		return nil, err
@@ -2223,34 +2156,22 @@ func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[s
 	})
 }
 
-// fetchContentUncached fetches content from a URL using the HTTP client with retry logic.
+// fetchContentUncached fetches content from a URL using the HTTP client with
+// retry logic. Every call issues a request; it is reached only through
+// fetchContent, which decides whether a request is needed at all.
 //
-// It is the fetch itself, with no deduplication of any kind: every call issues a
-// request. It is reached only through fetchContent, which decides whether a
-// request is needed at all; calling it directly would bypass the join and is
-// what the arrangement above exists to make unnecessary.
+// It first waits on the per-host rate limiter, on the caller's parent ctx: the
+// wait is signal-cancellable (a cancelled wait returns the context error and
+// sends nothing) but NOT bounded by the per-operation timeout. A URL that fails
+// to parse fails open: a Warn line, and no rate-limit wait. Only after a token
+// does opTimeout start, so time queued behind the limiter is not charged
+// against the HTTP deadline — which used to fail packages sharing a host.
 //
-// It first gates on the per-host rate limiter (S001-R10.1), waiting on the caller's
-// parent context (the ctx parameter) so the wait is signal-cancellable but
-// NOT bounded by the per-operation timeout. The host is parsed from the URL and
-// c.rateLimiter.WaitHTTP blocks until a token is available; if the wait is
-// cancelled by the parent context the context error is returned and no HTTP
-// request is made (S001-R10.2). A URL that fails to parse fails open (S001-R10.1): a Warn
-// line is logged and the fetch proceeds without a rate-limit wait.
-//
-// Only after a token is acquired does the per-operation timeout start: the HTTP
-// request is bounded by a child of the parent context with that timeout, so a
-// cancelled parent or an expired deadline aborts the in-flight call. This keeps
-// time spent queued behind the rate limiter from being charged against the HTTP
-// deadline, which previously made packages sharing a host fail spuriously.
-//
-// headers carries the per-package custom headers from packages.toml (cfg.Headers);
-// they are merged with the client's default User-Agent and, for api.github.com
-// URLs, the configured GitHub token. Passing them through the header-applying
-// GET (rather than the bare GetWithContext) is what actually puts the User-Agent,
-// the Authorization token, and any TOML-declared headers on the wire. scope is
-// handed to that GET so the client re-checks the credential binding against the
-// package's hosts, not the request's own (S052-R1.4).
+// headers carries the per-package custom headers (cfg.Headers), merged with the
+// default User-Agent and, for api.github.com, the configured token; the
+// header-applying GET is what puts them on the wire. scope is handed to that
+// GET so the client re-checks the credential binding against the package's
+// hosts, not the request's own.
 func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
 	// Gate on the per-host rate limiter FIRST, waiting on the parent context
 	// rather than an opTimeout-bounded one. The wait must not be charged against
@@ -2258,7 +2179,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	// package can wait several limiter intervals, and folding that into
 	// opTimeout made late packages fail with "context deadline exceeded" before
 	// any request was issued. The parent context still carries SIGINT/SIGTERM,
-	// so a cancelled wait aborts without issuing the request (S001-R10.2).
+	// so a cancelled wait aborts without issuing the request.
 	//
 	// Fail open on a parse error: an unparseable URL still gets a
 	// (rate-limit-free) attempt rather than silently dropping the fetch.
@@ -2268,7 +2189,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	} else if waitErr := c.rateLimiter.WaitHTTP(ctx, parsed.Host); waitErr != nil {
 		// The wait did not yield a token. If the parent context is done the wait
 		// was cancelled (parent cancelled or deadline exceeded): return the
-		// context error WITHOUT issuing the HTTP request (S001-R10.2). Prefer the raw
+		// context error WITHOUT issuing the HTTP request. Prefer the raw
 		// context error so callers' errors.Is(err, context.Canceled /
 		// .DeadlineExceeded) checks hold regardless of how the limiter wraps it.
 		if ctxErr := ctx.Err(); ctxErr != nil {
@@ -2305,25 +2226,16 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	defer resp.Body.Close()
 
 	// 206 counts as success ONLY as the answer to a Range the request that
-	// reached the server actually carried (S020-R1.1, S020-R1.2): a record may ask for a
-	// byte range to read a pattern that lives near the front of a large file, and
-	// the server answers that partial request with 206 rather than 200.
-	// www-misc/warsaw is the motivating case — an 8.2 MB payload whose version
-	// string sits ~590 KB in (S019-UB4).
+	// reached the server actually carried: a record may ask for a byte range to
+	// read a pattern near the front of a large file (www-misc/warsaw: an 8.2 MB
+	// payload whose version string sits ~590 KB in). The evidence is the request
+	// recorded on resp, NOT the headers map above — sentRequestDeclaresRange
+	// documents each way the two diverge.
 	//
-	// The evidence is the request recorded on resp, NOT the headers map above:
-	// the map is what was asked for, the response carries what was actually sent,
-	// and applyHeaders rewrites and supplements the one into the other. Observing
-	// the wire keeps the acceptance policy in a single place, unable to drift out
-	// of step with header application again — sentRequestDeclaresRange documents
-	// each way the two diverge.
-	//
-	// An UNSOLICITED 206 — one no Range asked for, a protocol violation seen
-	// behind some CDNs and proxies — must fail safe with the status error
-	// instead (S020-R1.3). Its body is a fragment by definition, and a truncated
-	// fragment does not look like a failure to the version parser: it looks
-	// like a successful read, so the checker would silently record a stale or
-	// simply wrong version with no error anywhere to show for it.
+	// An UNSOLICITED 206 — a protocol violation seen behind some CDNs and
+	// proxies — must fail safe with the status error instead. Its body is a
+	// fragment, and to the version parser a fragment looks like a successful
+	// read, so the checker would silently record a wrong version.
 	acceptedStatuses := []int{http.StatusOK}
 	if sentRequestDeclaresRange(resp) {
 		acceptedStatuses = append(acceptedStatuses, http.StatusPartialContent)
@@ -2332,7 +2244,7 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 	// readBodyForStatus enumerates the accepted codes rather than admitting the
 	// whole 2xx range (204/205 have no body by definition — see its doc), then
 	// reads the body and translates an http.MaxBytesReader overflow into
-	// ErrResponseTooLarge (S019-R3.1, S019-R3.2, S001-R11.3). The cap is imposed upstream by
+	// ErrResponseTooLarge. The cap is imposed upstream by
 	// GetWithHeadersContext, not here. Its errors are already phrased for the
 	// user, so they are returned as-is rather than re-wrapped.
 	content, err := fetch.ReadBodyForStatus(resp, acceptedStatuses...)
@@ -2346,24 +2258,16 @@ func (c *Checker) fetchContentUncached(ctx context.Context, rawURL string, heade
 // CheckAll checks all packages in the configuration for updates.
 // If force is true, the cache is bypassed for all packages.
 //
-// It returns a BatchResult: successfully checked packages land in Items, while
-// a per-package failure is recorded in Failures keyed by the package name.
+// It returns a BatchResult: checked packages land in Items, a per-package
+// failure in Failures keyed by package name.
 //
-// Packages are processed concurrently, bounded by the Checker's concurrency
-// limit (see WithConcurrency). The semaphore is acquired with a
-// context-cancellable select: if the caller's context (the ctx parameter) is
-// already cancelled, the remaining packages are not dispatched — each is
-// recorded in Failures with the context error instead — so a SIGINT mid-scan
-// stops the batch promptly. Every worker recovers panics raised by
-// CheckPackage and records them as a failure, so a single misbehaving package
-// cannot crash the process. All writes to the shared result maps are
-// mutex-guarded.
-//
-// Items are sorted lexically by package name before the BatchResult is
-// returned, so the output is deterministic regardless of completion order. The
-// returned BatchResult is fully populated only after every worker goroutine
-// has joined (wg.Wait), so callers may invoke its methods (ExitCode,
-// FormatFailures) directly.
+// Packages run concurrently, bounded by WithConcurrency. The semaphore is taken
+// with a context-cancellable select: once ctx is cancelled the remaining
+// packages are not dispatched but recorded with the context error, so a SIGINT
+// stops the batch promptly. Every worker recovers a CheckPackage panic as a
+// failure, and all writes to the shared maps are mutex-guarded. Items are
+// sorted by package name, and the result is returned only after every worker
+// has joined (wg.Wait), so callers may call ExitCode and FormatFailures directly.
 func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckResult] {
 	// Reconcile status with the overlay BEFORE filtering, for the entries the
 	// checker disabled ITSELF: for those, the overlay — not packages.toml — is
@@ -2372,20 +2276,15 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	// entry up in this same run.
 	//
 	// `enabled = false` is NOT, on its own, bookkeeping the overlay may override.
-	// It is a two-valued key carrying three states, and reading every false as
-	// stale is what let a scan clear a pin a human had written and bump the
-	// package: dev-libs/icu-compat and media-libs/libjxl-compat lost their
-	// disable that way and broke www-client/orion-bin's slot dependency for ten
-	// days. What separates the two is the RECORDED ORIGIN, not the key — a
-	// disable a human wrote means what hold means, leave it alone — so
-	// reconcilesAutomatically clears only a disable stamped as the checker's own
-	// (R1.2, R1.3). Hold keeps its own meaning unchanged: never auto-flipped,
-	// origin or no origin.
+	// Reading every false as stale let a scan clear a pin a human had written
+	// (dev-libs/icu-compat, media-libs/libjxl-compat), breaking
+	// www-client/orion-bin's slot dependency for ten days. The RECORDED ORIGIN
+	// separates them, so reconcilesAutomatically clears only a disable stamped
+	// as the checker's own; hold is never auto-flipped, origin or no origin.
 	//
-	// Absent means deliberate, which is the fail-safe direction but also freezes
-	// every entry disabled before the origin field existed. Those are collected
-	// and named once below (R1.4) rather than left silent, since a legacy entry
-	// that ought to reconcile is a repair someone must make by hand.
+	// Absent means deliberate — fail-safe, but it freezes every entry disabled
+	// before the origin field existed, so those are named once below rather
+	// than left silent: each is a repair someone must make by hand.
 	var revived, frozen []string
 	for name, pkg := range c.config.Packages {
 		if pkg.IsEnabled() || pkg.IsHeld() {
@@ -2536,8 +2435,8 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 		return results[i].Package < results[j].Package
 	})
 
-	// One line per run, at DEBUG, reporting what the body deduplication did
-	// (S024-R6.1). It is emitted after wg.Wait above, so every worker has joined
+	// One line per run, at DEBUG, reporting what the body deduplication did.
+	// It is emitted after wg.Wait above, so every worker has joined
 	// and the figures are final rather than a mid-flight sample.
 	//
 	// CheckAll has a SINGLE exit — the return below — so a plain call here emits
@@ -2550,27 +2449,20 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 }
 
 // logFetchCacheStats emits this run's body-deduplication counters ONCE, at
-// DEBUG, and at no other level (S024-R6.1, S024-R6.2, S024-R6.3).
+// DEBUG, and at no other level.
 //
-// DEBUG IS THE CEILING, not a default that could be nudged up later. A miss is
-// the normal state of a cold cache and a refused retention is a memory bound
-// doing its job — neither is a defect, so neither is a warning. The failure this
-// rule exists to prevent is concrete: 411 records at one line per read would
-// push the warnings that do need a human clean off the screen. It is the same
-// reason the figures are summarised once per run instead of per read, and the
-// reason bodyCache itself logs nothing whatsoever.
+// DEBUG IS THE CEILING. A miss is a cold cache's normal state and a refused
+// retention is a memory bound doing its job — neither is a warning, and 411
+// records at one line per read would push the warnings that need a human off
+// the screen. Hence one summary per run, and bodyCache itself logs nothing.
 //
-// All six counters go on one line, in the order a reader asks about them: what
-// the cache saved (hits, joins), what it still cost (misses, refetches), and
-// what it declined to keep. The two refusals are spelled out per limit rather
-// than summed, because "not retained" without the limit that refused it does not
-// tell an operator which number to raise (S024-R6.2) — and the names say
-// not_retained precisely because a refusal never affects the body its caller
-// received, only whether the next caller must fetch it again.
+// All six counters go on one line: what the cache saved (hits, joins), what it
+// still cost (misses, refetches), and what it declined to keep — per limit,
+// because "not retained" without the limit that refused it does not say which
+// number to raise. A refusal never affects the body its caller received.
 //
-// A nil cache emits NOTHING — not a line of zeros. Deduplication is off, so
-// there are no figures to report, and six zeros would read like a cache that ran
-// and achieved nothing rather than one that was never there.
+// A nil cache emits NOTHING: six zeros would read like a cache that ran and
+// achieved nothing rather than one that was never there.
 func (c *Checker) logFetchCacheStats() {
 	if c.bodies == nil {
 		return
@@ -2603,7 +2495,7 @@ func (c *Checker) OverlayPath() string {
 }
 
 // packageCredentialScope is the scope of a package record: the hostnames of
-// its url and base_url (S052-R1.4). An empty or unparseable field contributes
+// its url and base_url. An empty or unparseable field contributes
 // no host, so a record whose url cannot be read has no own host and any
 // BENTOO_* reference in it is refused. fallback_url is deliberately not a
 // scope host: a BENTOO_* credential stays with the record's primary source.
