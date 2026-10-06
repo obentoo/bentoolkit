@@ -119,10 +119,10 @@ func TestExecRunner_StderrJoinedOnError(t *testing.T) {
 	}
 }
 
-// TestMockRunner_RecordsCalls verifies MockRunner captures argv + stdin and
+// TestMockRunner_RecordsCalls verifies mockRunner captures argv + stdin and
 // delegates to RunFunc.
 func TestMockRunner_RecordsCalls(t *testing.T) {
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
 			if name == "fail" {
 				return nil, errors.New("boom")

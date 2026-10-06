@@ -61,7 +61,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // No logger pin is needed here any more. Until story 062 the package logger
@@ -192,7 +192,7 @@ func snapshotUnderAmbientMode(t *testing.T, uiEnv string) (stdout, stderr string
 	_, configPath := writeSnapshotConfig(t, validSnapshotTOML)
 	redirectStateDir(t)
 
-	c.deps.snapshotRunner = &snapshot.MockRunner{}
+	c.deps.snapshotRunner = &snapshottest.MockRunner{}
 
 	t.Setenv("BENTOO_UI", uiEnv)
 	stubUIIsTerminal(c.deps, false)

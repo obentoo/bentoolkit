@@ -17,7 +17,7 @@ import (
 // ---------------------------------------------------------------------------
 // Story 007 T1.1 — snapper engine driver (R1, R6).
 //
-// These tests mirror engine_btrbk_test.go: a MockRunner captures every snapper
+// These tests mirror engine_btrbk_test.go: a mockRunner captures every snapper
 // invocation, so the driver's full code path runs without a real snapper or
 // btrfs. Real snapper is exercised only by gated *_live_test.go files.
 // ---------------------------------------------------------------------------
@@ -42,7 +42,7 @@ func TestSnapperConfigName(t *testing.T) {
 // algorithm (so prune's `cleanup timeline` governs these snapshots, R1.4), and
 // --print-number so the created snapshot's ID is captured.
 func TestSnapperEngine_CreateInvokesSnapper(t *testing.T) {
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte("42\n"), nil
 		},
@@ -77,7 +77,7 @@ func TestSnapperEngine_CreateInvokesSnapper(t *testing.T) {
 // TestSnapperEngine_CreateWrapsNonZeroExit: a failing snapper create is wrapped
 // with ErrEngineFailed so the Manager records a failed stage (R6.1).
 func TestSnapperEngine_CreateWrapsNonZeroExit(t *testing.T) {
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, errors.New("Unknown config")
 		},
@@ -113,11 +113,11 @@ func TestSnapperEngine_CreateWrapsNonZeroExit(t *testing.T) {
 // parser directly, so they would all keep passing if List asked for the wrong
 // format or called the wrong parser — only this test covers the wiring.
 //
-// MockRunner keeps it hermetic: no snapper subprocess runs, so the result cannot
+// mockRunner keeps it hermetic: no snapper subprocess runs, so the result cannot
 // drift with the developer's own snapshots and holds on a host without snapper.
 func TestSnapperListEngine_RequestsJSONOut(t *testing.T) {
 	golden := snapperListGolden(t)
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return golden, nil
 		},
@@ -169,7 +169,7 @@ func TestSnapperListEngine_RequestsJSONOut(t *testing.T) {
 // TestSnapperEngine_ListWrapsError: a failing snapper list is wrapped with
 // ErrEngineFailed (R6.1).
 func TestSnapperEngine_ListWrapsError(t *testing.T) {
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, errors.New("Unknown config")
 		},
@@ -186,7 +186,7 @@ func TestSnapperEngine_ListWrapsError(t *testing.T) {
 // rendered config's TIMELINE_LIMIT_* keys, so the policy argument is accepted
 // but not re-applied in Go.
 func TestSnapperEngine_PruneRunsTimelineCleanup(t *testing.T) {
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 	e := newSnapperEngine(EngineConfig{Driver: "snapper"}, mock)
 
 	if _, err := e.Prune(context.Background(), "/home", Retention{Daily: 7}); err != nil {
@@ -204,7 +204,7 @@ func TestSnapperEngine_PruneRunsTimelineCleanup(t *testing.T) {
 // TestSnapperEngine_PruneWrapsError: a failing cleanup is wrapped with
 // ErrEngineFailed (R6.1).
 func TestSnapperEngine_PruneWrapsError(t *testing.T) {
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, errors.New("cleanup failed")
 		},
@@ -219,7 +219,7 @@ func TestSnapperEngine_PruneWrapsError(t *testing.T) {
 // TestNewEngine_SnapperDriver: the factory's `case "snapper"` returns the
 // snapper engine (R1.1, R6.2 — additive: btrbk stays the default-tested path).
 func TestNewEngine_SnapperDriver(t *testing.T) {
-	e, err := newEngine(EngineConfig{Driver: "snapper"}, nil, &MockRunner{}, nil)
+	e, err := newEngine(EngineConfig{Driver: "snapper"}, nil, &mockRunner{}, nil)
 	if err != nil {
 		t.Fatalf("newEngine(snapper): %v", err)
 	}
@@ -293,7 +293,7 @@ func stubMountTables(t *testing.T, tables map[string]string) {
 // snapperMock returns a Runner answering `list-configs` with the coverage map
 // given (config name keyed by subvolume), so a test states up front what snapper
 // already knows. Every other command succeeds silently.
-func snapperMock(t *testing.T, covered map[string]string, failing ...string) *MockRunner {
+func snapperMock(t *testing.T, covered map[string]string, failing ...string) *mockRunner {
 	t.Helper()
 	type entry struct {
 		Config    string `json:"config"`
@@ -313,7 +313,7 @@ func snapperMock(t *testing.T, covered map[string]string, failing ...string) *Mo
 	for _, f := range failing {
 		fail[f] = true
 	}
-	return &MockRunner{
+	return &mockRunner{
 		RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			if name == "snapper" && len(args) > 1 && args[1] == "list-configs" {
 				return out, nil
@@ -328,7 +328,7 @@ func snapperMock(t *testing.T, covered map[string]string, failing ...string) *Mo
 
 // snapperArgs returns the argument lists of the calls to cmd, so an assertion
 // can name the exact invocation it expects.
-func snapperArgs(mock *MockRunner, cmd string) [][]string {
+func snapperArgs(mock *mockRunner, cmd string) [][]string {
 	var out [][]string
 	for _, c := range mock.Calls {
 		if c.Name == cmd {
@@ -615,7 +615,7 @@ func TestWriteEngineConfig_DispatchesByDriver(t *testing.T) {
 		dir := t.TempDir()
 		confPath := filepath.Join(dir, "snapshot.toml")
 		cfg := &Config{Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}}
-		mock := &MockRunner{}
+		mock := &mockRunner{}
 		if err := WriteEngineConfig(context.Background(), cfg, confPath, mock); err != nil {
 			t.Fatalf("WriteEngineConfig(btrbk): %v", err)
 		}

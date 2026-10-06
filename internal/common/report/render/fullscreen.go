@@ -65,55 +65,23 @@ var runProgram = func(m tea.Model, opts ...tea.ProgramOption) (tea.Model, error)
 	return tea.NewProgram(m, opts...).Run()
 }
 
-// Fullscreen renders blocks in an alternate screen and prints the whole report
-// to the scrollback when that screen goes away (R2.3, R2.4, R4.1, R4.2).
+// Fullscreen renders blocks in an alternate screen, then prints the whole
+// report to the scrollback when that screen goes away.
 //
-// # The report is held HERE, not in the program
+// The report is the blocks argument, never the finished model: every exit path
+// prints that slice, so the dump survives a model that crashed and a program
+// that never started.
 //
-// blocks is a parameter, and every path below prints THAT slice — preceded at
-// most by the one section an interrupt adds. Nothing reads the finished
-// bubbletea model — the blank in `_, err :=` is the design and not an oversight
-// — because a report that lived in the model would be lost by exactly the
-// failure the dump exists to survive: a panic inside View() takes the model with
-// it, and a scrollback dump reading a wrecked model has nothing to print (D7).
+// Bubble Tea catches a panic in Update or View by default: it leaves the
+// alternate screen and Run returns ErrProgramPanic, so that case prints through
+// the errors.Join at the end like any other return. The deferred recover covers
+// what Bubble Tea does not catch: a panic outside Run, or in a program started
+// without its panic handler. It restores the terminal itself, prints the report
+// and re-panics, since swallowing the panic would turn a crash into a silent
+// wrong answer.
 //
-// The dump therefore does not depend on the TUI having run at all. A render that
-// dies before bubbletea starts still owes the operator the report, and it has
-// one, because the sections were finished before this function was called.
-//
-// # Every exit path prints, including the one that crashes
-//
-// The deferred recover is the panic path. It restores the terminal itself,
-// prints, and re-panics: printing while SWALLOWING the panic would turn a
-// crash into a silent wrong answer, which is worse than the crash. The two
-// ordinary paths — the program returning, and the quit key — leave through the
-// errors.Join below, so the print is on the single return rather than repeated
-// per branch.
-//
-// # Why the deferred branch restores the terminal by hand
-//
-// tea.WithAltScreen leaves the alternate screen when the program shuts down,
-// which is R4.4 already satisfied for a program that RETURNS. A panic does not
-// go through that teardown, so the alternate screen would still be up and the
-// report would be printed onto the buffer the terminal is about to discard.
-// Restoring first is what makes the scrollback receive text and not a screen
-// nobody will ever see again.
-//
-// # An interrupted view is labelled on the way out
-//
-// ctrl+c leaves one bit behind, and this function turns it into one extra
-// section at the top of the dump (R4.3). It says only what a renderer is in a
-// position to know — the report was interrupted before it was read out — and
-// deliberately states no count: how many units a run never reached is a fact
-// about the RUN, and it belongs to whoever built these sections. See
-// interruptNotice below.
-//
-// # It takes no io.Writer, for Inline's reason
-//
-// The destination is a terminal, not an arbitrary byte sink: it is the device
-// whose alternate screen was taken over, and the dump belongs in the
-// scrollback that screen was hiding. A test that wants to read the output
-// captures the descriptor.
+// ctrl+c adds one section, interruptNotice, at the top of the dump. Output goes
+// to os.Stdout: the dump belongs in the scrollback the alternate screen hid.
 func Fullscreen(blocks []report.Section, opts Options) error {
 	defer func() {
 		rec := recover()

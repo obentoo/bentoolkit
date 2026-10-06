@@ -21,8 +21,8 @@ type s053MountScript struct {
 	umountHasDeadline              bool
 }
 
-func (s *s053MountScript) runner() *MockRunner {
-	return &MockRunner{RunFunc: func(ctx context.Context, name string, args []string, _ []byte) ([]byte, error) {
+func (s *s053MountScript) runner() *mockRunner {
+	return &mockRunner{RunFunc: func(ctx context.Context, name string, args []string, _ []byte) ([]byte, error) {
 		switch name {
 		case "mount":
 			if len(args) > 0 && args[0] == "--bind" {

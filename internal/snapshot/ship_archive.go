@@ -140,11 +140,11 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 	}, nil
 }
 
-// pipeStage is one command in the archive pipe: a program name and its argv. It is
+// PipeStage is one command in the archive pipe: a program name and its argv. It is
 // the unit the pure builder emits and the executor feeds through the Runner.
-type pipeStage struct {
-	name string
-	args []string
+type PipeStage struct {
+	Name string
+	Args []string
 }
 
 // archivePipeStages builds the three-stage archive pipe for snap as pure data, so
@@ -164,7 +164,7 @@ type pipeStage struct {
 //     consumes stdin) as opposed to `copy`, which needs a source file. objectName
 //     carries the per-subvolume prefix DIRECTORY (R3.1) and still needs no mkdir
 //     stage: rcat creates the parent on its own (verified against rclone 1.75.0).
-func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pipeStage {
+func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []PipeStage {
 	send := []string{"send"}
 	if parentPath != "" {
 		send = append(send, "-p", parentPath)
@@ -175,10 +175,10 @@ func archivePipeStages(snap Snapshot, parentPath, remote, compress string) []pip
 
 	dest := archiveDest(remote, snap)
 
-	return []pipeStage{
-		{name: "btrfs", args: send},
-		{name: prog, args: compArgs},
-		{name: "rclone", args: []string{"rcat", dest}},
+	return []PipeStage{
+		{Name: "btrfs", Args: send},
+		{Name: prog, Args: compArgs},
+		{Name: "rclone", Args: []string{"rcat", dest}},
 	}
 }
 
@@ -195,7 +195,7 @@ var archiveDeleteTimeout = 30 * time.Second
 // compressorStage resolves the compressor program and its stdin→stdout argv. An
 // empty or "zstd" compress selects `zstd -c`; any other value is treated as a
 // single program token invoked with `-c` as well. Returning (name, args) keeps the
-// program name in pipeStage.name so the Runner/mock sees the real binary per stage.
+// program name in PipeStage.Name so the Runner/mock sees the real binary per stage.
 func compressorStage(compress string) (name string, args []string) {
 	prog := strings.TrimSpace(compress)
 	if prog == "" {
@@ -655,15 +655,15 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 	return errors.Join(errs...)
 }
 
-// runPipe runs stages as one streaming pipe through run's piper seam and returns
+// runPipe runs stages as one streaming pipe through run's Piper seam and returns
 // the final stage's stdout (053 R5.1). Any stage error fails the whole pipe
 // (R2.3), and cancelling ctx kills every stage (R7.2).
 //
 // A Runner without the seam is refused rather than driven stage by stage: the
 // buffered chain it would need holds each stage's whole output in memory, about
 // twice a multi-GB `btrfs send` stream at peak (053 R5.7).
-func runPipe(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error) {
-	p, ok := run.(piper)
+func runPipe(ctx context.Context, run Runner, stages []PipeStage) ([]byte, error) {
+	p, ok := run.(Piper)
 	if !ok {
 		return nil, fmt.Errorf("runner %T cannot stream the archive pipe", run)
 	}
@@ -675,12 +675,12 @@ func runPipe(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error
 // stdout. A stage starts only after every earlier one succeeded, which is what
 // restoreArchive needs and what the streaming runPipe cannot give; the cost is
 // that each stage's output is held in memory.
-func runStagesBuffered(ctx context.Context, run Runner, stages []pipeStage) ([]byte, error) {
+func runStagesBuffered(ctx context.Context, run Runner, stages []PipeStage) ([]byte, error) {
 	var prev []byte
 	for _, st := range stages {
-		out, err := run.Run(ctx, st.name, st.args, prev)
+		out, err := run.Run(ctx, st.Name, st.Args, prev)
 		if err != nil {
-			return nil, fmt.Errorf("archive pipe stage %q: %w", st.name, err)
+			return nil, fmt.Errorf("archive pipe stage %q: %w", st.Name, err)
 		}
 		prev = out
 	}

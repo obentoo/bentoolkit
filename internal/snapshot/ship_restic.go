@@ -183,7 +183,7 @@ var umountTimeout = 30 * time.Second
 
 // transientMounter is the production mounter (R7): it mounts a read-only btrfs
 // snapshot at a fresh temp dir and returns a cleanup that unmounts it and removes
-// the dir. Its own unit tests script mount/umount through a MockRunner; the
+// the dir. Its own unit tests script mount/umount through a mock Runner; the
 // shipper's tests use a fakeMounter.
 type transientMounter struct {
 	run Runner

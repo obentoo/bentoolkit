@@ -79,6 +79,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // snapshotReportProse is everything the report SAYS, in one string: the titles,
@@ -237,7 +238,7 @@ target = "user@host:/backup"
 	// cancelled when it continues. No sleep decides the outcome.
 	var once sync.Once
 	var observed bool
-	c.deps.snapshotRunner = &snapshot.MockRunner{
+	c.deps.snapshotRunner = &snapshottest.MockRunner{
 		RunFunc: func(ctx context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			once.Do(func() {
 				proc, err := os.FindProcess(os.Getpid())

@@ -110,7 +110,7 @@ func TestResticShipper_Name(t *testing.T) {
 // secretLeaked reports whether the sentinel secret VALUE appears anywhere in a
 // captured call's argv or stdin. R6.2 forbids any password VALUE from reaching a
 // subprocess surface; only paths/flags are permitted there.
-func secretLeaked(call RunnerCall, secret string) bool {
+func secretLeaked(call runnerCall, secret string) bool {
 	for _, a := range call.Args {
 		if strings.Contains(a, secret) {
 			return true
@@ -126,7 +126,7 @@ func secretLeaked(call RunnerCall, secret string) bool {
 func TestResticShipper_Send_Backup(t *testing.T) {
 	const secret = "SECRET" // sentinel password VALUE that must never appear anywhere
 	fm := &fakeMounter{path: "/mnt/snap.ro"}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	r := &resticShipper{
 		repo:         "rest:https://repo.example/bentoo",
 		passwordFile: "/etc/bentoo/restic.pass",
@@ -182,7 +182,7 @@ func TestResticShipper_Send_Backup(t *testing.T) {
 // when no codec is configured (restic uses its own default, R1.3).
 func TestResticShipper_Send_NoCompression(t *testing.T) {
 	fm := &fakeMounter{path: "/mnt/snap.ro"}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	r := &resticShipper{repo: "repo", passwordFile: "/pw", mount: fm, run: mr}
 
 	if _, err := r.Send(t.Context(), Snapshot{ID: "root.1", Subvolume: "root", Path: "/s/root"}); err != nil {
@@ -198,7 +198,7 @@ func TestResticShipper_Send_NoCompression(t *testing.T) {
 // --prune, with repo/password-file flags carried through (R1.4).
 func TestResticShipper_Send_ForgetPrune(t *testing.T) {
 	fm := &fakeMounter{path: "/mnt/snap.ro"}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	r := &resticShipper{
 		repo:         "repo",
 		passwordFile: "/pw",
@@ -238,7 +238,7 @@ func TestResticShipper_Send_ForgetPrune(t *testing.T) {
 // Retention skips the forget step entirely (no pruning configured, R1.4).
 func TestResticShipper_Send_NoRetentionNoForget(t *testing.T) {
 	fm := &fakeMounter{path: "/mnt/snap.ro"}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	r := &resticShipper{repo: "repo", passwordFile: "/pw", mount: fm, run: mr}
 
 	if _, err := r.Send(t.Context(), Snapshot{ID: "home.1", Subvolume: "home", Path: "/s/home"}); err != nil {
@@ -258,7 +258,7 @@ func TestResticShipper_Send_NoRetentionNoForget(t *testing.T) {
 // the success path (R7.3), via the fakeMounter cleanup spy.
 func TestResticShipper_Send_CleansUpMount(t *testing.T) {
 	fm := &fakeMounter{path: "/mnt/snap.ro"}
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	r := &resticShipper{repo: "repo", passwordFile: "/pw", retention: Retention{Daily: 1}, mount: fm, run: mr}
 
 	if _, err := r.Send(t.Context(), Snapshot{ID: "home.1", Subvolume: "home", Path: "/s/home"}); err != nil {

@@ -24,7 +24,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // TestRootFlagsAppearOnACommandThatDeclaresNone is the help-text half of R3.1,
@@ -121,7 +121,7 @@ func TestRootFlagsReachEveryReportProducer(t *testing.T) {
 				stubBinariesOnPath(t, "btrbk", "ssh")
 				_, configPath := writeSnapshotConfig(t, validSnapshotTOML)
 				redirectStateDir(t)
-				c.deps.snapshotRunner = &snapshot.MockRunner{}
+				c.deps.snapshotRunner = &snapshottest.MockRunner{}
 				return []string{"--config=" + configPath}
 			},
 		},

@@ -5,11 +5,11 @@ import (
 	"testing"
 )
 
-// TestMockRunner_PipeRecordsStages pins the MockRunner half of the piper seam:
+// TestMockRunner_PipeRecordsStages pins the mockRunner half of the Piper seam:
 // each pipe is recorded by stage names, and every stage still lands in Calls
 // chained through stdin so argv assertions keep working.
 func TestMockRunner_PipeRecordsStages(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	markerRunner(t, mr, map[string][]byte{"btrfs": []byte("B"), "zstd": []byte("Z"), "rclone": []byte("R")})
 	stages := archivePipeStages(Snapshot{ID: "42", Subvolume: "/home", Path: "/home/.snapshots/42/snapshot"}, "", "r:bkt", "")
 	for i := 0; i < 2; i++ {

@@ -20,7 +20,7 @@ func TestBtrbkConfPath(t *testing.T) {
 func TestApply_RendersConfAndInstallsTimer(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "snapshot.toml")
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 
 	// Redirect unit writes away from the real /etc/systemd/system.
 	origUnitDir := systemdUnitDir
@@ -57,7 +57,7 @@ func TestApply_RendersConfAndInstallsTimer(t *testing.T) {
 func TestApply_NoScheduleSkipsSystemctl(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "snapshot.toml")
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 	cfg := &Config{Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}}}
 
 	if err := Apply(context.Background(), cfg, configPath, mock); err != nil {
@@ -73,7 +73,7 @@ func TestApply_NoScheduleSkipsSystemctl(t *testing.T) {
 
 func TestManagerList_PerSubvolume(t *testing.T) {
 	sample := "/.snapshots/home.20260608T120000\n/.snapshots/home.20260607T120000\n"
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte(sample), nil
 		},
@@ -94,7 +94,7 @@ func TestManagerList_PerSubvolume(t *testing.T) {
 }
 
 func TestTimerState(t *testing.T) {
-	enabled := &MockRunner{
+	enabled := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte("enabled\n"), nil
 		},
@@ -103,7 +103,7 @@ func TestTimerState(t *testing.T) {
 		t.Errorf("TimerState = %q, want enabled", got)
 	}
 
-	empty := &MockRunner{}
+	empty := &mockRunner{}
 	if got := TimerState(context.Background(), empty); got != "unknown" {
 		t.Errorf("TimerState empty = %q, want unknown", got)
 	}

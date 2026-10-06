@@ -41,6 +41,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // snapshotRunExport runs `snapshot run` over the mocked pipeline and returns
@@ -92,7 +93,7 @@ func snapshotDocumentKeys(doc map[string]any) []string {
 // nothing at all today; what it must say is which subvolume it worked on and
 // how each step came out — because "1 stage" answers neither question.
 func TestSnapshotReportNamesTheSubvolumeAndItsSteps(t *testing.T) {
-	stdout, _, code := snapshotRunExport(t, &snapshot.MockRunner{})
+	stdout, _, code := snapshotRunExport(t, &snapshottest.MockRunner{})
 
 	if code != 0 {
 		t.Errorf("`snapshot run` exited %d over a mocked pipeline", code)
@@ -113,7 +114,7 @@ func TestSnapshotReportNamesTheSubvolumeAndItsSteps(t *testing.T) {
 // report whatever happened, and a failing step is exactly the run whose report
 // the operator needs.
 func TestSnapshotReportStatesAFailingStep(t *testing.T) {
-	failing := &snapshot.MockRunner{
+	failing := &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, os.ErrPermission
 		},
@@ -150,7 +151,7 @@ func TestSnapshotReportStatesAFailingStep(t *testing.T) {
 // kinds must differ, and nothing ELSE about the two documents may differ, or
 // the discriminator is not what is doing the work.
 func TestSnapshotExportIsToldApartByItsKindAlone(t *testing.T) {
-	_, snapshotPath, _ := snapshotRunExport(t, &snapshot.MockRunner{})
+	_, snapshotPath, _ := snapshotRunExport(t, &snapshottest.MockRunner{})
 	snapshotDoc := snapshotDocument(t, snapshotPath)
 
 	if got, _ := snapshotDoc["kind"].(string); got != string(report.KindSnapshotRun) {

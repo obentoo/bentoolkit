@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 func TestRunSnapshotRun_SuccessPersistsResult(t *testing.T) {
@@ -16,7 +16,7 @@ func TestRunSnapshotRun_SuccessPersistsResult(t *testing.T) {
 	writeSnapshotConfig(t, validSnapshotTOML)
 	stateDir := redirectStateDir(t)
 	td := defaultDeps()
-	td.snapshotRunner = &snapshot.MockRunner{} // btrbk run/clean succeed (nil,nil)
+	td.snapshotRunner = &snapshottest.MockRunner{} // btrbk run/clean succeed (nil,nil)
 
 	var code int
 	var exited bool
@@ -38,7 +38,7 @@ func TestRunSnapshotRun_DryRunPrintsPlanZeroExec(t *testing.T) {
 	stubBinariesOnPath(t, "btrbk", "ssh")
 	dir, _ := writeSnapshotConfig(t, validSnapshotTOML)
 	stateDir := redirectStateDir(t)
-	mr := &snapshot.MockRunner{}
+	mr := &snapshottest.MockRunner{}
 	td := defaultDeps()
 	td.snapshotRunner = mr
 
@@ -80,7 +80,7 @@ func TestRunSnapshotRun_FailureExitsNonZero(t *testing.T) {
 	writeSnapshotConfig(t, validSnapshotTOML)
 	redirectStateDir(t)
 	td := defaultDeps()
-	td.snapshotRunner = &snapshot.MockRunner{
+	td.snapshotRunner = &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, errors.New("btrfs: subvolume not found")
 		},

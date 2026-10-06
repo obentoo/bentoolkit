@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/snapshot"
+	"github.com/obentoo/bentoolkit/internal/snapshot/snapshottest"
 )
 
 // listTOMLRemote: btrbk engine with an ssh ship (btrbk target) and a restic
@@ -29,8 +29,8 @@ password_file = "/etc/bentoo/restic.pass"
 
 // remoteListMockRunner serves local btrbk lists, btrbk target backups, and
 // restic snapshots JSON, so list --remote can merge all three sources.
-func remoteListMockRunner() *snapshot.MockRunner {
-	return &snapshot.MockRunner{
+func remoteListMockRunner() *snapshottest.MockRunner {
+	return &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			hasArg := func(want string) bool {
 				for _, a := range args {
@@ -138,7 +138,7 @@ func TestRunSnapshotList_RendersSnapshots(t *testing.T) {
 	writeSnapshotConfig(t, validSnapshotTOML)
 	sample := "/.snapshots/home.20260608T120000\n/.snapshots/home.20260607T120000\n"
 	td := defaultDeps()
-	td.snapshotRunner = &snapshot.MockRunner{
+	td.snapshotRunner = &snapshottest.MockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte(sample), nil
 		},

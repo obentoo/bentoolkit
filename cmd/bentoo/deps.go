@@ -115,10 +115,10 @@ type deps struct {
 	pruneInteractive func() bool
 
 	// snapshotRunner is the subprocess seam every snapshot verb threads into
-	// the snapshot package; tests substitute a MockRunner. Its default is nil,
-	// which the snapshot package resolves to its production execRunner: the
-	// same resolution the package variable it replaced had (R6.2). It is the
-	// one field that is an interface rather than a function.
+	// the snapshot package; tests substitute a snapshottest.MockRunner. Its
+	// default is nil, which the snapshot package resolves to its production
+	// execRunner: the same resolution the package variable it replaced had
+	// (R6.2). It is the one field that is an interface rather than a function.
 	snapshotRunner snapshot.Runner
 	// snapshotRollbackConfirm is the y/N question of `snapshot rollback`. Its
 	// default is nil, which makes snapshot.Rollback ask through its own stdin

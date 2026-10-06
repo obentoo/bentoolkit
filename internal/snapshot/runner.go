@@ -31,7 +31,7 @@ func runnerEnv() []string {
 }
 
 // Runner is the subprocess seam shared by the engine and shipper drivers. Every
-// external command goes through Run, or through the optional piper seam for a
+// external command goes through Run, or through the optional Piper seam for a
 // streamed multi-stage pipe (053 R5.1); both bind each process to ctx via
 // exec.CommandContext so a cancelled parent kills the child (R8.1). stdin is
 // piped on the process's standard input, never placed in argv.
@@ -91,11 +91,11 @@ func (e execRunner) Run(ctx context.Context, name string, args []string, stdin [
 	return stdout.Bytes(), err
 }
 
-// piper is the optional streaming seam of a Runner (053 R5.1). runPipe requires
+// Piper is the optional streaming seam of a Runner (053 R5.1). runPipe requires
 // it: a multi-stage pipe such as `btrfs send | zstd | rclone rcat` must not hold
 // any stage's whole output in memory, which a Run-only Runner cannot avoid.
-type piper interface {
-	Pipe(ctx context.Context, stages []pipeStage) (stdout []byte, err error)
+type Piper interface {
+	Pipe(ctx context.Context, stages []PipeStage) (stdout []byte, err error)
 }
 
 // pipeTailCap bounds what execRunner.Pipe keeps of each stage's stderr and of
@@ -134,7 +134,7 @@ func (b *tailBuffer) Write(p []byte) (int, error) {
 // 64 KiB of every stage's stderr (053 R5.4). When ctx itself is cancelled, the
 // error also wraps ctx.Err() (053 R5.6). It returns the last 64 KiB of the
 // final stage's stdout.
-func (e execRunner) Pipe(ctx context.Context, stages []pipeStage) ([]byte, error) {
+func (e execRunner) Pipe(ctx context.Context, stages []PipeStage) ([]byte, error) {
 	if len(stages) == 0 {
 		return nil, nil
 	}
@@ -148,7 +148,7 @@ func (e execRunner) Pipe(ctx context.Context, stages []pipeStage) ([]byte, error
 	cmds := make([]*exec.Cmd, len(stages))
 	stderrs := make([]*tailBuffer, len(stages))
 	for i, st := range stages {
-		cmd := execCommand(pctx, st.name, st.args...)
+		cmd := execCommand(pctx, st.Name, st.Args...)
 		cmd.Env = runnerEnv()
 		cmd.WaitDelay = time.Second
 		stderrs[i] = &tailBuffer{limit: pipeTailCap}
@@ -174,7 +174,7 @@ func (e execRunner) Pipe(ctx context.Context, stages []pipeStage) ([]byte, error
 	for i := range len(cmds) - 1 {
 		r, w, err := os.Pipe()
 		if err != nil {
-			return nil, errors.Join(fmt.Errorf("archive pipe: connect stage %q to stage %q: %w", stages[i].name, stages[i+1].name, err), closeEnds())
+			return nil, errors.Join(fmt.Errorf("archive pipe: connect stage %q to stage %q: %w", stages[i].Name, stages[i+1].Name, err), closeEnds())
 		}
 		cmds[i].Stdout, cmds[i+1].Stdin = w, r
 		ends = append(ends, r, w)
@@ -183,10 +183,10 @@ func (e execRunner) Pipe(ctx context.Context, stages []pipeStage) ([]byte, error
 	started := 0
 	var startErr error
 	for i, cmd := range cmds {
-		rep.TaskStage(e.taskID, stages[i].name)
+		rep.TaskStage(e.taskID, stages[i].Name)
 		if err := cmd.Start(); err != nil {
 			rep.TaskDone(e.taskID, false, "", "")
-			startErr = fmt.Errorf("archive pipe stage %q: start: %w", stages[i].name, err)
+			startErr = fmt.Errorf("archive pipe stage %q: start: %w", stages[i].Name, err)
 			cancel()
 			break
 		}
@@ -224,7 +224,7 @@ func (e execRunner) Pipe(ctx context.Context, stages []pipeStage) ([]byte, error
 		}
 		return stdout.buf, nil
 	}
-	err := fmt.Errorf("archive pipe stage %q: %w", stages[failed].name, errors.Join(stageErrs[failed], pipeStderr(stages, stderrs)))
+	err := fmt.Errorf("archive pipe stage %q: %w", stages[failed].Name, errors.Join(stageErrs[failed], pipeStderr(stages, stderrs)))
 	return nil, errors.Join(err, closeErr, ctx.Err())
 }
 
@@ -263,11 +263,11 @@ func pipeRootFailure(stageErrs []error) int {
 
 // pipeStderr joins the non-empty stderr tail of every stage, each labelled with
 // its stage name, or returns nil when no stage wrote to stderr.
-func pipeStderr(stages []pipeStage, stderrs []*tailBuffer) error {
+func pipeStderr(stages []PipeStage, stderrs []*tailBuffer) error {
 	var errs []error
 	for i, b := range stderrs {
 		if s := strings.TrimSpace(string(b.buf)); s != "" {
-			errs = append(errs, fmt.Errorf("stage %q stderr: %s", stages[i].name, s))
+			errs = append(errs, fmt.Errorf("stage %q stderr: %s", stages[i].Name, s))
 		}
 	}
 	return errors.Join(errs...)
@@ -326,67 +326,5 @@ func NewReportingRunner(r tui.Reporter, id string) Runner {
 	return execRunner{reporter: r, taskID: id}
 }
 
-// RunnerCall records a single invocation captured by MockRunner.
-type RunnerCall struct {
-	Name  string
-	Args  []string
-	Stdin []byte
-}
-
-// MockRunner is a test Runner that records every call and delegates behavior to
-// RunFunc. With RunFunc nil it returns (nil, nil), so a driver under test runs
-// its full code path while every subprocess is captured rather than executed.
-//
-// It also implements piper: each Pipe invocation is recorded in PipeCalls by its
-// stage names, and its stages run through Run one after another, each fed the
-// previous one's stdout, so every stage still lands in Calls.
-type MockRunner struct {
-	RunFunc   func(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error)
-	Calls     []RunnerCall
-	PipeCalls [][]string
-}
-
-// Run records the call (copying args/stdin so later mutation by the caller cannot
-// corrupt the record) and delegates to RunFunc when set.
-func (m *MockRunner) Run(ctx context.Context, name string, args []string, stdin []byte) ([]byte, error) {
-	call := RunnerCall{Name: name}
-	if args != nil {
-		call.Args = append([]string(nil), args...)
-	}
-	if stdin != nil {
-		call.Stdin = append([]byte(nil), stdin...)
-	}
-	m.Calls = append(m.Calls, call)
-
-	if m.RunFunc != nil {
-		return m.RunFunc(ctx, name, args, stdin)
-	}
-	return nil, nil
-}
-
-// Pipe records the pipe's stage names and chains its stages through Run.
-// Buffering is fine inside a test double; the production seam streams.
-func (m *MockRunner) Pipe(ctx context.Context, stages []pipeStage) ([]byte, error) {
-	names := make([]string, len(stages))
-	for i, st := range stages {
-		names[i] = st.name
-	}
-	m.PipeCalls = append(m.PipeCalls, names)
-
-	var prev []byte
-	for _, st := range stages {
-		out, err := m.Run(ctx, st.name, st.args, prev)
-		if err != nil {
-			return nil, fmt.Errorf("archive pipe stage %q: %w", st.name, err)
-		}
-		prev = out
-	}
-	return prev, nil
-}
-
-// Compile-time assertions: both Runners also implement the streaming seam.
-var (
-	_ Runner = (*MockRunner)(nil)
-	_ piper  = (*MockRunner)(nil)
-	_ piper  = execRunner{}
-)
+// Compile-time assertion: the production Runner implements the streaming seam.
+var _ Piper = execRunner{}

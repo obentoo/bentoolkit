@@ -218,7 +218,7 @@ func TestNewManager_BuildsFromConfig(t *testing.T) {
 		Engine: EngineConfig{Driver: "btrbk", Subvolumes: []string{"/home"}},
 		Ship:   []ShipConfig{{Type: "ssh", Target: "u@h:/p"}},
 	}
-	m, err := NewManager(cfg, "/etc/bentoo/snapshot.toml", &MockRunner{})
+	m, err := NewManager(cfg, "/etc/bentoo/snapshot.toml", &mockRunner{})
 	if err != nil {
 		t.Fatalf("NewManager: %v", err)
 	}

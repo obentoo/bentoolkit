@@ -83,10 +83,10 @@ func ScanOverlay(overlayPath string) (*ScanResult, error) {
 		}
 
 		categoryPath := filepath.Join(overlayPath, categoryName)
-		packages, errors := scanCategory(categoryPath, categoryName)
+		packages, catErrs := scanCategory(categoryPath, categoryName)
 
 		result.Packages = append(result.Packages, packages...)
-		result.Errors = append(result.Errors, errors...)
+		result.Errors = append(result.Errors, catErrs...)
 	}
 
 	// Sort packages by category/package for consistent output
@@ -103,15 +103,15 @@ func ScanOverlay(overlayPath string) (*ScanResult, error) {
 // scanCategory scans a category directory and returns all packages
 func scanCategory(categoryPath, categoryName string) ([]PackageInfo, []ScanError) {
 	var packages []PackageInfo
-	var errors []ScanError
+	var errs []ScanError
 
 	entries, err := os.ReadDir(categoryPath)
 	if err != nil {
-		errors = append(errors, ScanError{
+		errs = append(errs, ScanError{
 			Path:    categoryPath,
 			Message: err.Error(),
 		})
-		return packages, errors
+		return packages, errs
 	}
 
 	for _, entry := range entries {
@@ -131,23 +131,23 @@ func scanCategory(categoryPath, categoryName string) ([]PackageInfo, []ScanError
 		if pkg != nil {
 			packages = append(packages, *pkg)
 		}
-		errors = append(errors, scanErrs...)
+		errs = append(errs, scanErrs...)
 	}
 
-	return packages, errors
+	return packages, errs
 }
 
 // scanPackage scans a package directory and extracts all ebuild versions
 func scanPackage(pkgPath, category, pkgName string) (*PackageInfo, []ScanError) {
-	var errors []ScanError
+	var errs []ScanError
 
 	entries, err := os.ReadDir(pkgPath)
 	if err != nil {
-		errors = append(errors, ScanError{
+		errs = append(errs, ScanError{
 			Path:    pkgPath,
 			Message: err.Error(),
 		})
-		return nil, errors
+		return nil, errs
 	}
 
 	var versions []string
@@ -180,7 +180,7 @@ func scanPackage(pkgPath, category, pkgName string) (*PackageInfo, []ScanError) 
 
 	// No ebuilds found
 	if len(versions) == 0 {
-		return nil, errors
+		return nil, errs
 	}
 
 	// Find the latest version
@@ -191,7 +191,7 @@ func scanPackage(pkgPath, category, pkgName string) (*PackageInfo, []ScanError) 
 		Package:       pkgName,
 		Versions:      versions,
 		LatestVersion: latestVersion,
-	}, errors
+	}, errs
 }
 
 // FindLatestVersion finds the latest version from a list using Gentoo version comparison

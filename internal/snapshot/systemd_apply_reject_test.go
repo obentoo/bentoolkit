@@ -16,7 +16,7 @@ func TestSystemdApply_WritesNothingOnRenderError(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			dir := t.TempDir()
-			mock := &MockRunner{}
+			mock := &mockRunner{}
 			s := newSystemdScheduler("/etc/bentoo/snapshot.toml", mock)
 			s.unitDir = dir
 			set(s)
@@ -44,7 +44,7 @@ func TestSystemdApply_WrapsTemplateErrorWithUnitName(t *testing.T) {
 			orig := *tc.tmpl
 			*tc.tmpl = broken
 			t.Cleanup(func() { *tc.tmpl = orig })
-			mock := &MockRunner{}
+			mock := &mockRunner{}
 			s := newSystemdScheduler("/etc/bentoo/snapshot.toml", mock)
 			s.unitDir = t.TempDir()
 			err := s.Apply(t.Context(), ScheduleConfig{OnCalendar: "daily"})

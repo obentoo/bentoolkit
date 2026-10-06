@@ -430,7 +430,7 @@ func TestMultiNotifier_StartFansOutToStartersOnly(t *testing.T) {
 // --- 008 T1.1 email driver ---
 
 func TestEmailNotifier_SendmailReceivesSummary(t *testing.T) {
-	runner := &MockRunner{}
+	runner := &mockRunner{}
 	n := emailNotifier{
 		cfg:    EmailConfig{To: []string{"ops@example.com"}, From: "bentoo@example.com"},
 		runner: runner,
@@ -510,7 +510,7 @@ func TestEmailNotifier_SMTPSendsViaSeam(t *testing.T) {
 }
 
 func TestEmailNotifier_OnFilterRespected(t *testing.T) {
-	runner := &MockRunner{}
+	runner := &mockRunner{}
 	em := emailNotifier{cfg: EmailConfig{To: []string{"ops@example.com"}, From: "b@e.com"}, runner: runner}
 	m := multiNotifier{notifiers: []Notifier{em}, on: []string{"failure"}}
 

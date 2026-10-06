@@ -335,13 +335,13 @@ func restoreArchive(ctx context.Context, id, target string, opts RestoreOptions)
 //     stdin→stdout way with `-d`.
 //   - Stage 3 `btrfs receive <target>`: reads the `btrfs send` stream on stdin and
 //     materialises the subvolume under target.
-func restorePipeStages(remote, object, decompress, target string) []pipeStage {
+func restorePipeStages(remote, object, decompress, target string) []PipeStage {
 	src := remote + "/" + object
 	prog, decArgs := decompressorStage(decompress)
-	return []pipeStage{
-		{name: "rclone", args: []string{"cat", src}},
-		{name: prog, args: decArgs},
-		{name: "btrfs", args: []string{"receive", target}},
+	return []PipeStage{
+		{Name: "rclone", Args: []string{"cat", src}},
+		{Name: prog, Args: decArgs},
+		{Name: "btrfs", Args: []string{"receive", target}},
 	}
 }
 

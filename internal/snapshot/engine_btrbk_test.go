@@ -60,7 +60,7 @@ func TestRenderBtrbkConf_MultiSubvolumeWithTarget(t *testing.T) {
 }
 
 func TestBtrbkEngine_CreateInvokesRun(t *testing.T) {
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 	e := newBtrbkEngine(EngineConfig{Driver: "btrbk"}, nil, mock)
 	e.confPath = "/tmp/test-btrbk.conf"
 
@@ -84,7 +84,7 @@ func TestBtrbkEngine_CreateInvokesRun(t *testing.T) {
 }
 
 func TestBtrbkEngine_CreateWrapsNonZeroExit(t *testing.T) {
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return nil, errors.New("ERROR: btrfs subvolume not found")
 		},
@@ -101,7 +101,7 @@ func TestBtrbkEngine_CreateWrapsNonZeroExit(t *testing.T) {
 }
 
 func TestBtrbkEngine_PruneInvokesClean(t *testing.T) {
-	mock := &MockRunner{}
+	mock := &mockRunner{}
 	e := newBtrbkEngine(EngineConfig{Driver: "btrbk"}, nil, mock)
 	e.confPath = "/c.conf"
 
@@ -119,7 +119,7 @@ func TestBtrbkEngine_ListParsesOutput(t *testing.T) {
 /.snapshots/home.20260607T120000
 not-a-path header line
 `
-	mock := &MockRunner{
+	mock := &mockRunner{
 		RunFunc: func(_ context.Context, _ string, _ []string, _ []byte) ([]byte, error) {
 			return []byte(sample), nil
 		},

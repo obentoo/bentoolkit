@@ -18,11 +18,11 @@ import (
 // granular restore with secrets carried only as flag PATHS (R6.1).
 // ---------------------------------------------------------------------------
 
-// receiveTargets scans a MockRunner's calls for `btrfs receive <target>` and
+// receiveTargets scans a mockRunner's calls for `btrfs receive <target>` and
 // returns the target path of each, in order. It is how the archive tests prove
 // btrfs receive ran once per chain link (and, for the broken-chain test, that it
 // ran ZERO times — nothing was applied).
-func receiveTargets(calls []RunnerCall) []string {
+func receiveTargets(calls []runnerCall) []string {
 	var out []string
 	for _, c := range calls {
 		if c.Name == "btrfs" && len(c.Args) >= 2 && c.Args[0] == "receive" {
@@ -32,10 +32,10 @@ func receiveTargets(calls []RunnerCall) []string {
 	return out
 }
 
-// catObjects scans a MockRunner's calls for `rclone cat <remote>/<obj>` and
+// catObjects scans a mockRunner's calls for `rclone cat <remote>/<obj>` and
 // returns the full <remote>/<obj> source of each, in order, so a test can assert
 // each chain link's object was fetched (and in order).
-func catObjects(calls []RunnerCall) []string {
+func catObjects(calls []runnerCall) []string {
 	var out []string
 	for _, c := range calls {
 		if c.Name == "rclone" && len(c.Args) >= 2 && c.Args[0] == "cat" {
@@ -100,7 +100,7 @@ func TestValidateChain_Gap(t *testing.T) {
 func TestRestore_Archive_ReceivesInOrder(t *testing.T) {
 	// Script each pipe stage to emit a marker so we can prove stdin chaining:
 	// rclone cat → "CAT", zstd -d → "PLAIN", btrfs receive → "" (sink).
-	mr := &MockRunner{
+	mr := &mockRunner{
 		RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			switch {
 			case name == "rclone" && len(args) > 0 && args[0] == "cat":
@@ -170,7 +170,7 @@ func TestRestore_Archive_ReceivesInOrder(t *testing.T) {
 }
 
 // TestRestore_Archive_BrokenChainRefusedPreReceive is the G3 deliverable: a broken
-// chain is refused with ErrBrokenChain and NOTHING is applied — the MockRunner
+// chain is refused with ErrBrokenChain and NOTHING is applied — the mockRunner
 // records ZERO btrfs receive (and ideally zero subprocess) calls. Validation
 // happens BEFORE any receive (R5.2).
 func TestRestore_Archive_BrokenChainRefusedPreReceive(t *testing.T) {
@@ -178,7 +178,7 @@ func TestRestore_Archive_BrokenChainRefusedPreReceive(t *testing.T) {
 		{ID: "full", ParentID: "", Object: "home-full.zst"},
 		{ID: "d2", ParentID: "GONE", Object: "home-d2.zst"}, // gap → missing base
 	}
-	mr := &MockRunner{} // any subprocess call would be a violation
+	mr := &mockRunner{} // any subprocess call would be a violation
 	opts := RestoreOptions{
 		Driver: "archive",
 		Yes:    true,
@@ -204,7 +204,7 @@ func TestRestore_Archive_BrokenChainRefusedPreReceive(t *testing.T) {
 // never reaches argv/stdin — only the password-file PATH does (R6.1).
 func TestRestore_Restic_Granular(t *testing.T) {
 	const secret = "SECRET" // sentinel password VALUE that must never appear
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	opts := RestoreOptions{
 		Driver:       "restic",
 		Yes:          true,
@@ -247,7 +247,7 @@ func TestRestore_Restic_Granular(t *testing.T) {
 // TestRestore_Restic_NoIncludeOmitsFlag asserts --include is omitted entirely when
 // opts.Include is empty (a full restic restore, not granular).
 func TestRestore_Restic_NoIncludeOmitsFlag(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	opts := RestoreOptions{
 		Driver:       "restic",
 		Yes:          true,
@@ -268,9 +268,9 @@ func TestRestore_Restic_NoIncludeOmitsFlag(t *testing.T) {
 
 // TestRestore_ConfirmDenied_NoOp is the R5.4 gate: with Yes=false and a confirm
 // func that DENIES, Restore returns ErrRestoreDeclined and runs NOTHING — the
-// MockRunner records ZERO calls. The gate fires before any subprocess.
+// mockRunner records ZERO calls. The gate fires before any subprocess.
 func TestRestore_ConfirmDenied_NoOp(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	opts := RestoreOptions{
 		Driver:  "archive",
 		Yes:     false,
@@ -291,7 +291,7 @@ func TestRestore_ConfirmDenied_NoOp(t *testing.T) {
 // TestRestore_ConfirmApproved_Proceeds: with Yes=false and a confirm func that
 // APPROVES, an archive restore of a valid chain proceeds — btrfs receive runs.
 func TestRestore_ConfirmApproved_Proceeds(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	opts := RestoreOptions{
 		Driver:  "archive",
 		Yes:     false,
@@ -311,7 +311,7 @@ func TestRestore_ConfirmApproved_Proceeds(t *testing.T) {
 // TestRestore_InvalidDriver: an unknown driver is rejected with ErrInvalidDriver
 // (R5.1 dispatch default), and nothing is applied.
 func TestRestore_InvalidDriver(t *testing.T) {
-	mr := &MockRunner{}
+	mr := &mockRunner{}
 	opts := RestoreOptions{Driver: "zfs", Yes: true, Run: mr}
 	err := Restore(t.Context(), "id", "/mnt/restore", opts)
 	if !errors.Is(err, ErrInvalidDriver) {

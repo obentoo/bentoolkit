@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func s053Deletes(mr *MockRunner) [][]string {
+func s053Deletes(mr *mockRunner) [][]string {
 	var out [][]string
 	for _, c := range mr.Calls {
 		if c.Name == "rclone" && len(c.Args) > 0 && c.Args[0] == "deletefile" {
@@ -23,12 +23,12 @@ func TestArchiveShipper_Send_DeletesObjectOnPipeFailure(t *testing.T) {
 	snap := Snapshot{ID: "42", Subvolume: "/home", Path: "/home/.snapshots/42/snapshot"}
 	dest := "r:bkt/" + ArchiveObjectName("/home", "42")
 	sendErr := errors.New("btrfs send: stream truncated")
-	newShip := func(mr *MockRunner, ps *fakeParentStore) *archiveShipper {
+	newShip := func(mr *mockRunner, ps *fakeParentStore) *archiveShipper {
 		return &archiveShipper{name: "offsite", remote: "r:bkt", mode: "full", compress: "zstd", run: mr, parents: ps}
 	}
 
 	t.Run("failed pipe deletes its object and returns the pipe error", func(t *testing.T) {
-		mr := &MockRunner{RunFunc: func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
+		mr := &mockRunner{RunFunc: func(_ context.Context, name string, _ []string, _ []byte) ([]byte, error) {
 			if name == "btrfs" {
 				return nil, sendErr
 			}
@@ -50,7 +50,7 @@ func TestArchiveShipper_Send_DeletesObjectOnPipeFailure(t *testing.T) {
 		lc := &logCapture{}
 		warns := lc.all
 		delErr := errors.New("rclone deletefile: 403")
-		mr := &MockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
+		mr := &mockRunner{RunFunc: func(_ context.Context, name string, args []string, _ []byte) ([]byte, error) {
 			switch {
 			case name == "btrfs":
 				return nil, sendErr
@@ -76,7 +76,7 @@ func TestArchiveShipper_Send_DeletesObjectOnPipeFailure(t *testing.T) {
 		}
 	})
 	t.Run("successful pipe deletes nothing", func(t *testing.T) {
-		mr := &MockRunner{}
+		mr := &mockRunner{}
 		if _, err := newShip(mr, &fakeParentStore{}).Send(t.Context(), snap); err != nil {
 			t.Fatalf("Send = %v, want nil", err)
 		}

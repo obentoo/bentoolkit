@@ -29,10 +29,10 @@ func TestExecRunner_PipeStreamsBoundedMemory(t *testing.T) {
 	if err := exec.Command("sh", "-c", `head -c 67108864 /dev/urandom > "$1"`, "sh", in).Run(); err != nil {
 		t.Fatalf("generating 64 MiB input: %v", err)
 	}
-	stages := []pipeStage{
-		{name: "sh", args: []string{"-c", `cat "$1"`, "sh", in}},
-		{name: "gzip", args: []string{"-n", "-c"}},
-		{name: "sh", args: []string{"-c", `cat > "$1"`, "sh", out}},
+	stages := []PipeStage{
+		{Name: "sh", Args: []string{"-c", `cat "$1"`, "sh", in}},
+		{Name: "gzip", Args: []string{"-n", "-c"}},
+		{Name: "sh", Args: []string{"-c", `cat > "$1"`, "sh", out}},
 	}
 	runtime.GC()
 	var before, after runtime.MemStats
@@ -58,10 +58,10 @@ func TestExecRunner_PipeStageFailureNamesStage(t *testing.T) {
 	s053NeedTools(t, "sleep", "gzip", "cat")
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
 	defer cancel()
-	stages := []pipeStage{
-		{name: "sleep", args: []string{"20"}},
-		{name: "gzip", args: []string{"--definitely-not-a-flag"}},
-		{name: "cat"},
+	stages := []PipeStage{
+		{Name: "sleep", Args: []string{"20"}},
+		{Name: "gzip", Args: []string{"--definitely-not-a-flag"}},
+		{Name: "cat"},
 	}
 	start := time.Now()
 	_, err := runPipe(ctx, execRunner{}, stages)
@@ -86,7 +86,7 @@ func TestExecRunner_PipeCtxCancelKills(t *testing.T) {
 	s053NeedTools(t, "sleep", "cat")
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	stages := []pipeStage{{name: "sleep", args: []string{"5"}}, {name: "cat"}, {name: "cat"}}
+	stages := []PipeStage{{Name: "sleep", Args: []string{"5"}}, {Name: "cat"}, {Name: "cat"}}
 	timer := time.AfterFunc(200*time.Millisecond, cancel)
 	defer timer.Stop()
 	start := time.Now()
