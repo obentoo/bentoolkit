@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -15,7 +17,7 @@ import (
 // newBaseFileChecker builds a Checker whose upstream serves BOTH endpoints a
 // base_from="file" entry needs: the commit list at /commits and the version
 // file at /version. cfg.URL and cfg.BaseURL are rewritten to point at them.
-func newBaseFileChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfig,
+func newBaseFileChecker(t *testing.T, pkg, currentVersion string, cfg registry.PackageConfig,
 	commits []byte, versionFile string) *Checker {
 	t.Helper()
 	overlayDir := t.TempDir()
@@ -43,7 +45,7 @@ func newBaseFileChecker(t *testing.T, pkg, currentVersion string, cfg PackageCon
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -147,7 +149,7 @@ func TestBaseFromNone_FetchesNoBaseSource(t *testing.T) {
 	overlayDir, configDir := t.TempDir(), t.TempDir()
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -171,7 +173,7 @@ func TestBaseFromNone_ValidatesAlone(t *testing.T) {
 	cfg.CommitMessagePath = ""
 	cfg.URL = "https://example.invalid/commits"
 
-	if err := ValidatePackageConfig(nil, "sci-ml/ik_llama-cpp", &cfg); err != nil {
+	if err := registry.ValidatePackageConfig(nil, "sci-ml/ik_llama-cpp", &cfg); err != nil {
 		t.Errorf("a bare base_from=\"none\" must validate, got: %v", err)
 	}
 }
@@ -393,7 +395,7 @@ func TestCommitVersionPattern_StillWorksWhenItMatches(t *testing.T) {
 // =============================================================================
 
 func TestValidateBaseFrom(t *testing.T) {
-	base := func() PackageConfig {
+	base := func() registry.PackageConfig {
 		c := baseCommitCfg()
 		c.URL = "https://example.invalid/commits"
 		return c
@@ -401,12 +403,12 @@ func TestValidateBaseFrom(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		mutate  func(*PackageConfig)
+		mutate  func(*registry.PackageConfig)
 		wantErr string
 	}{
 		{
 			name: "file without base_url",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "file"
 				c.BasePattern = `^([0-9.]+)$`
 			},
@@ -414,7 +416,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "file without base_pattern",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "file"
 				c.BaseURL = "https://example.invalid/VERSION"
 			},
@@ -422,7 +424,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "unknown base_from",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "changelog"
 			},
 			wantErr: "invalid base_from",
@@ -432,7 +434,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		// four source fields is rejected on its own.
 		{
 			name: "none with base_url",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "none"
 				c.BaseURL = "https://example.invalid/VERSION"
 			},
@@ -440,7 +442,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "none with base_pattern",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "none"
 				c.BasePattern = `^([0-9.]+)$`
 			},
@@ -452,7 +454,7 @@ func TestValidateBaseFrom(t *testing.T) {
 			// and says the more useful of the two things: the contradiction is
 			// with the declaration, not with a missing companion.
 			name: "none with base_tag_pattern",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "none"
 				c.BaseTagPattern = `^v([0-9.]+)$`
 			},
@@ -463,7 +465,7 @@ func TestValidateBaseFrom(t *testing.T) {
 			// "commit_version_pattern requires commit_message_path" check fires
 			// first and this case never reaches the switch.
 			name: "none with commit_version_pattern",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "none"
 				c.CommitVersionPattern = `v([0-9.]+)`
 				c.CommitMessagePath = "commit.message"
@@ -472,7 +474,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "tag without base_tag_pattern",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "tag"
 				c.BaseURL = "https://example.invalid/refs/tags"
 			},
@@ -480,7 +482,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "tag pattern with two capture groups",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "tag"
 				c.BaseURL = "https://example.invalid/refs/tags"
 				c.BaseTagPattern = `^v([0-9]+)\.([0-9]+)$`
@@ -489,7 +491,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "base_tag_pattern without base_from=tag",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "file"
 				c.BaseURL = "https://example.invalid/VERSION"
 				c.BasePattern = `^([0-9.]+)$`
@@ -499,14 +501,14 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "base_url without base_from",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseURL = "https://example.invalid/VERSION"
 			},
 			wantErr: "require base_from",
 		},
 		{
 			name: "base_pattern with no capture group",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "file"
 				c.BaseURL = "https://example.invalid/VERSION"
 				c.BasePattern = `^[0-9.]+$`
@@ -515,7 +517,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "base_pattern with two capture groups",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "file"
 				c.BaseURL = "https://example.invalid/VERSION"
 				c.BasePattern = `^([0-9]+)\.([0-9]+)$`
@@ -524,7 +526,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "base_pattern that does not compile",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "file"
 				c.BaseURL = "https://example.invalid/VERSION"
 				c.BasePattern = `^([0-9.]+$`
@@ -533,14 +535,14 @@ func TestValidateBaseFrom(t *testing.T) {
 		},
 		{
 			name: "commit_message without its pattern",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.BaseFrom = "commit_message"
 			},
 			wantErr: "requires commit_version_pattern",
 		},
 		{
 			name: "base_from on a version-tracked entry",
-			mutate: func(c *PackageConfig) {
+			mutate: func(c *registry.PackageConfig) {
 				c.Track = ""
 				c.CommitSHAPath = ""
 				c.BaseFrom = "file"
@@ -555,7 +557,7 @@ func TestValidateBaseFrom(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := base()
 			tt.mutate(&cfg)
-			err := ValidatePackageConfig(nil, "cat/pkg", &cfg)
+			err := registry.ValidatePackageConfig(nil, "cat/pkg", &cfg)
 			if err == nil {
 				t.Fatalf("expected an error containing %q, got nil", tt.wantErr)
 			}
@@ -569,11 +571,11 @@ func TestValidateBaseFrom(t *testing.T) {
 func TestValidateBaseFrom_ValidConfigs(t *testing.T) {
 	valid := []struct {
 		name string
-		cfg  func() PackageConfig
+		cfg  func() registry.PackageConfig
 	}{
 		{
 			name: "file, fully specified",
-			cfg: func() PackageConfig {
+			cfg: func() registry.PackageConfig {
 				c := baseCommitCfg()
 				c.URL = "https://example.invalid/commits"
 				c.BaseFrom = "file"
@@ -584,7 +586,7 @@ func TestValidateBaseFrom_ValidConfigs(t *testing.T) {
 		},
 		{
 			name: "commit_message, fully specified",
-			cfg: func() PackageConfig {
+			cfg: func() registry.PackageConfig {
 				c := baseCommitCfg()
 				c.URL = "https://example.invalid/commits"
 				c.BaseFrom = "commit_message"
@@ -595,7 +597,7 @@ func TestValidateBaseFrom_ValidConfigs(t *testing.T) {
 		},
 		{
 			name: "absent, legacy entry",
-			cfg: func() PackageConfig {
+			cfg: func() registry.PackageConfig {
 				c := baseCommitCfg()
 				c.URL = "https://example.invalid/commits"
 				return c
@@ -606,7 +608,7 @@ func TestValidateBaseFrom_ValidConfigs(t *testing.T) {
 	for _, tt := range valid {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := tt.cfg()
-			if err := ValidatePackageConfig(nil, "cat/pkg", &cfg); err != nil {
+			if err := registry.ValidatePackageConfig(nil, "cat/pkg", &cfg); err != nil {
 				t.Errorf("ValidatePackageConfig: unexpected error %v", err)
 			}
 		})

@@ -11,6 +11,8 @@ package autoupdate
 
 import (
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 func TestPendingSave_TwoInstancesKeepBothEntries(t *testing.T) {
@@ -58,10 +60,10 @@ func TestAnalysisCacheSave_TwoInstancesKeepBothEntries(t *testing.T) {
 	dir := t.TempDir()
 	a, _ := NewAnalysisCache(dir)
 	b, _ := NewAnalysisCache(dir)
-	if err := a.Set("x/a", &PackageConfig{URL: "https://example.invalid/a", Parser: "json", Path: "v"}, "https://example.invalid/a"); err != nil {
+	if err := a.Set("x/a", &registry.PackageConfig{URL: "https://example.invalid/a", Parser: "json", Path: "v"}, "https://example.invalid/a"); err != nil {
 		t.Fatal(err)
 	}
-	if err := b.Set("x/b", &PackageConfig{URL: "https://example.invalid/b", Parser: "json", Path: "v"}, "https://example.invalid/b"); err != nil {
+	if err := b.Set("x/b", &registry.PackageConfig{URL: "https://example.invalid/b", Parser: "json", Path: "v"}, "https://example.invalid/b"); err != nil {
 		t.Fatal(err)
 	}
 	reloaded, _ := NewAnalysisCache(dir)

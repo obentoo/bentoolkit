@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // cursorBuildID is a realistic 40-hex commitSha as returned by the cursor API.
@@ -42,24 +44,6 @@ func TestSubstituteCommitHash_BuildID(t *testing.T) {
 	}
 }
 
-// TestValidate_CommitSHAPath_VersionTrack covers the relaxed validation: a
-// version-tracked package (no track="commit") may set commit_sha_path to drive
-// BUILD_ID substitution, but only with parser="json".
-func TestValidate_CommitSHAPath_VersionTrack(t *testing.T) {
-	t.Run("json ok", func(t *testing.T) {
-		cfg := PackageConfig{URL: "https://x", Parser: "json", Path: "version", CommitSHAPath: "commitSha"}
-		if err := ValidatePackageConfig(nil, "app-editors/cursor", &cfg); err != nil {
-			t.Errorf("expected valid, got %v", err)
-		}
-	})
-	t.Run("non-json rejected", func(t *testing.T) {
-		cfg := PackageConfig{URL: "https://x", Parser: "regex", Pattern: "v(.*)", CommitSHAPath: "commitSha"}
-		if err := ValidatePackageConfig(nil, "app-editors/cursor", &cfg); err == nil {
-			t.Error("expected error for commit_sha_path with parser!=json")
-		}
-	})
-}
-
 // TestCheckPackageVersionTrack_AuxSHA_StoredInPending verifies the end-to-end
 // checker behaviour for a cursor-style package: when an update is detected, the
 // commitSha from the same JSON response is stored in the pending update so the
@@ -77,7 +61,7 @@ func TestCheckPackageVersionTrack_AuxSHA_StoredInPending(t *testing.T) {
 
 	overlayDir := t.TempDir()
 	configDir := t.TempDir()
-	cfg := PackageConfig{
+	cfg := registry.PackageConfig{
 		Parser:        "json",
 		Path:          "version",
 		CommitSHAPath: "commitSha",
@@ -85,7 +69,7 @@ func TestCheckPackageVersionTrack_AuxSHA_StoredInPending(t *testing.T) {
 	}
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {

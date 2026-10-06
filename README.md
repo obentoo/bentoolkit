@@ -825,7 +825,7 @@ last one, is reported as before.
 Fields run bookkeeping → source → extraction → post-processing → transport →
 classification → auxiliary substitution → doc. Omit what you do not need; never
 invent a key — `PackageConfig` in
-[`internal/autoupdate/config.go`](internal/autoupdate/config.go) is the sole
+[`internal/autoupdate/registry/config.go`](internal/autoupdate/registry/config.go) is the sole
 authority on what parses, and a key it does not declare **fails the load**,
 naming the record and the key. That is deliberate: `serie` instead of `series`
 used to disable the release-line filter silently, which is exactly the failure
@@ -833,7 +833,7 @@ used to disable the release-line filter silently, which is exactly the failure
 
 The order below is not a style preference — it is the practice measured across
 the overlay's records, encoded as `CanonicalFieldOrder` in
-[`internal/autoupdate/lint.go`](internal/autoupdate/lint.go). `--lint` reports a
+[`internal/autoupdate/registry/lint.go`](internal/autoupdate/registry/lint.go). `--lint` reports a
 record that deviates and `--lint --fix` reorders it, so this block and the
 linter cannot disagree.
 

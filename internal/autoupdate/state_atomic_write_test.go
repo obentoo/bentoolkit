@@ -12,6 +12,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 func s056Entries(t *testing.T, dir string) []string {
@@ -97,7 +99,7 @@ func TestAnalysisCacheAtomicWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := &PackageConfig{URL: "https://example.invalid/x-a", Parser: "json", Path: "version"}
+	schema := &registry.PackageConfig{URL: "https://example.invalid/x-a", Parser: "json", Path: "version"}
 	if err := c.Set("x/a", schema, "https://example.invalid/x-a"); err != nil {
 		t.Fatalf("Set with a stale analysis_cache.json.tmp beside the cache: %v", err)
 	}

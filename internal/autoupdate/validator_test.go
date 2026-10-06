@@ -9,6 +9,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -41,7 +42,7 @@ func TestSchemaValidationFlow(t *testing.T) {
 			}
 
 			// Create schema for JSON extraction
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				Parser: "json",
 				Path:   "version",
 			}
@@ -79,7 +80,7 @@ func TestSchemaValidationFlow(t *testing.T) {
 			}
 
 			// Create schema for JSON extraction
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				Parser: "json",
 				Path:   "version",
 			}
@@ -108,7 +109,7 @@ func TestSchemaValidationFlow(t *testing.T) {
 			content := []byte(`{invalid json}`)
 
 			// Create schema for JSON extraction
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				Parser: "json",
 				Path:   "version",
 			}
@@ -141,7 +142,7 @@ func TestSchemaValidationFlow(t *testing.T) {
 			}
 
 			// Create schema for JSON extraction
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				Parser: "json",
 				Path:   "tag_name",
 			}
@@ -165,7 +166,7 @@ func TestSchemaValidationFlow(t *testing.T) {
 // TestValidateSchemaSuccess tests successful schema validation
 func TestValidateSchemaSuccess(t *testing.T) {
 	content := []byte(`{"version": "1.2.3"}`)
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "version",
 	}
@@ -186,7 +187,7 @@ func TestValidateSchemaSuccess(t *testing.T) {
 // TestValidateSchemaVersionMismatch tests validation with version mismatch
 func TestValidateSchemaVersionMismatch(t *testing.T) {
 	content := []byte(`{"version": "2.0.0"}`)
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "version",
 	}
@@ -210,7 +211,7 @@ func TestValidateSchemaVersionMismatch(t *testing.T) {
 // TestValidateSchemaExtractionFailed tests validation when extraction fails
 func TestValidateSchemaExtractionFailed(t *testing.T) {
 	content := []byte(`{"other": "value"}`)
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "version",
 	}
@@ -231,7 +232,7 @@ func TestValidateSchemaExtractionFailed(t *testing.T) {
 // TestValidateSchemaWithVPrefix tests validation with 'v' prefix in extracted version
 func TestValidateSchemaWithVPrefix(t *testing.T) {
 	content := []byte(`{"tag_name": "v1.2.3"}`)
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "tag_name",
 	}
@@ -249,7 +250,7 @@ func TestValidateSchemaWithVPrefix(t *testing.T) {
 // TestValidateSchemaRegex tests validation with regex parser
 func TestValidateSchemaRegex(t *testing.T) {
 	content := []byte(`pkgver=3.1.4`)
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser:  "regex",
 		Pattern: `pkgver=([0-9.]+)`,
 	}
@@ -267,7 +268,7 @@ func TestValidateSchemaRegex(t *testing.T) {
 // TestValidateSchemaHTML tests validation with HTML parser
 func TestValidateSchemaHTML(t *testing.T) {
 	content := []byte(`<html><body><span class="version">2.5.0</span></body></html>`)
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser:   "html",
 		Selector: ".version",
 	}
@@ -287,14 +288,14 @@ func TestTestExtraction(t *testing.T) {
 	tests := []struct {
 		name     string
 		content  []byte
-		schema   *PackageConfig
+		schema   *registry.PackageConfig
 		expected string
 		wantErr  bool
 	}{
 		{
 			name:    "JSON extraction",
 			content: []byte(`{"version": "1.0.0"}`),
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser: "json",
 				Path:   "version",
 			},
@@ -304,7 +305,7 @@ func TestTestExtraction(t *testing.T) {
 		{
 			name:    "Regex extraction",
 			content: []byte(`version=2.0.0`),
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser:  "regex",
 				Pattern: `version=([0-9.]+)`,
 			},
@@ -314,7 +315,7 @@ func TestTestExtraction(t *testing.T) {
 		{
 			name:    "HTML extraction",
 			content: []byte(`<div id="ver">3.0.0</div>`),
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser:   "html",
 				Selector: "#ver",
 			},
@@ -324,7 +325,7 @@ func TestTestExtraction(t *testing.T) {
 		{
 			name:    "Failed extraction",
 			content: []byte(`no version here`),
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser: "json",
 				Path:   "version",
 			},
@@ -384,7 +385,7 @@ func TestValidateSchemaWithFallback(t *testing.T) {
 	// Fallback content that succeeds
 	fallbackContent := []byte(`pkgver=1.0.0`)
 
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		Parser:          "json",
 		Path:            "version",
 		FallbackURL:     "https://fallback.example.com",

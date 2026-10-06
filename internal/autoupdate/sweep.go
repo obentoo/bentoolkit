@@ -14,6 +14,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -64,7 +65,7 @@ type sweeper struct {
 	reporter tui.Reporter
 	// configs is read for the optional [meta] block that drives an
 	// authenticated distfile fetch. A nil map simply disables that path.
-	configs map[string]PackageConfig
+	configs map[string]registry.PackageConfig
 	// distdir and configuredDistdir are the two configurable rungs of
 	// distfiles.Resolve's precedence (S030-D2): the --distdir flag and the
 	// autoupdate.distdir config key. Both are empty today, and two empty
@@ -101,7 +102,7 @@ func withSweeperReporter(r tui.Reporter) sweeperOption {
 	return func(s *sweeper) { s.reporter = r }
 }
 
-func withSweeperConfigs(cfgs map[string]PackageConfig) sweeperOption {
+func withSweeperConfigs(cfgs map[string]registry.PackageConfig) sweeperOption {
 	return func(s *sweeper) { s.configs = cfgs }
 }
 
@@ -338,11 +339,11 @@ func dirMustExist(path string) error {
 // entry still holds its ebuild. Drop "media-plugins/gst-plugins-vpx@dev" while
 // keeping "@stable" and the dev line's ebuild becomes claimed by nobody — so
 // the sweep deletes a maintained release line (S027-G1).
-func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[string]PackageConfig {
+func scopeConfigs(cfgs map[string]registry.PackageConfig, atom, category string) map[string]registry.PackageConfig {
 	if atom == "" && category == "" {
 		return cfgs
 	}
-	scoped := make(map[string]PackageConfig, len(cfgs))
+	scoped := make(map[string]registry.PackageConfig, len(cfgs))
 	for key, cfg := range cfgs {
 		cat, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok {
@@ -368,7 +369,7 @@ func scopeConfigs(cfgs map[string]PackageConfig, atom, category string) map[stri
 //
 // cfg is copied out of the map before the call because IsHeld has a pointer
 // receiver and a map value is not addressable.
-func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
+func atomHasHeldEntry(cfgs map[string]registry.PackageConfig, atom string) bool {
 	for key, cfg := range cfgs {
 		cat, pkgName, ok := ebuilds.SplitPkgAtom(key)
 		if !ok || cat+"/"+pkgName != atom {
@@ -406,7 +407,7 @@ func atomHasHeldEntry(cfgs map[string]PackageConfig, atom string) bool {
 // Nothing here touches the filesystem beyond reading directories.
 //
 // The registry's reconciliation reports what it skips to log; nil discards it.
-func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]PackageConfig, target string) (SweepBatch, error) {
+func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (SweepBatch, error) {
 	atom, category, err := normaliseSweepTarget(overlayPath, target)
 	if err != nil {
 		return SweepBatch{}, err
@@ -1048,7 +1049,7 @@ type sweepOptions struct {
 	concurrency       int
 	execCommand       func(ctx context.Context, name string, arg ...string) *exec.Cmd
 	reporter          tui.Reporter
-	configs           map[string]PackageConfig
+	configs           map[string]registry.PackageConfig
 	distdir           string
 	configuredDistdir string
 	distfilesCache    string
@@ -1081,7 +1082,7 @@ func WithSweepReporter(r tui.Reporter) SweepOption {
 
 // WithSweepPackagesConfig supplies the registry, read only for the [meta] block
 // that drives an authenticated distfile fetch.
-func WithSweepPackagesConfig(cfgs map[string]PackageConfig) SweepOption {
+func WithSweepPackagesConfig(cfgs map[string]registry.PackageConfig) SweepOption {
 	return func(o *sweepOptions) { o.configs = cfgs }
 }
 

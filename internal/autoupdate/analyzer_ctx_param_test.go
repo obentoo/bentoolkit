@@ -16,6 +16,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
 
@@ -41,7 +42,7 @@ func newAnalyzerCtx059(t *testing.T, overlayDir, upstreamURL string, opts ...Ana
 	rl.SetHTTPLimit(domain, rate.Inf, 1)
 	all := append([]AnalyzerOption{
 		WithAnalyzerConfigDir(t.TempDir()),
-		WithAnalyzerPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{}}),
+		WithAnalyzerPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}),
 		WithAnalyzerOpTimeout(10 * time.Second),
 		WithAnalyzerRateLimiter(rl),
 	}, opts...)

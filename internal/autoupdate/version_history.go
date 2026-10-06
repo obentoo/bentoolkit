@@ -10,6 +10,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/antchfx/htmlquery"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // MaxVersionHistoryLimit is the maximum number of versions to extract from history.
@@ -345,7 +346,7 @@ func (e *RegexVersionHistoryExtractor) ExtractVersions(content []byte) ([]string
 // disabled (Limit=-1) so select="max" sees the whole list and is not defeated by
 // truncation of an ascending list. Returns (nil, nil) when the parser cannot
 // produce a list (e.g. "script"); callers then fall back to first-match behavior.
-func newSelectExtractor(cfg *PackageConfig) (VersionHistoryExtractor, error) {
+func newSelectExtractor(cfg *registry.PackageConfig) (VersionHistoryExtractor, error) {
 	switch cfg.Parser {
 	case "json":
 		// JSONVersionHistoryExtractor walks an array; a primary path like
@@ -376,7 +377,7 @@ func newSelectExtractor(cfg *PackageConfig) (VersionHistoryExtractor, error) {
 
 // NewVersionHistoryExtractor creates a version history extractor from a PackageConfig.
 // It uses VersionsPath for JSON parser or VersionsSelector for HTML parser.
-func NewVersionHistoryExtractor(cfg *PackageConfig) (VersionHistoryExtractor, error) {
+func NewVersionHistoryExtractor(cfg *registry.PackageConfig) (VersionHistoryExtractor, error) {
 	// Check if version history is configured
 	if cfg.VersionsPath == "" && cfg.VersionsSelector == "" {
 		return nil, nil // No version history configured
@@ -402,7 +403,7 @@ func NewVersionHistoryExtractor(cfg *PackageConfig) (VersionHistoryExtractor, er
 
 // ExtractVersionHistory extracts version history from content using the configured extractor.
 // Returns nil if no version history is configured.
-func ExtractVersionHistory(content []byte, cfg *PackageConfig) ([]string, error) {
+func ExtractVersionHistory(content []byte, cfg *registry.PackageConfig) ([]string, error) {
 	extractor, err := NewVersionHistoryExtractor(cfg)
 	if err != nil {
 		return nil, err
@@ -416,6 +417,6 @@ func ExtractVersionHistory(content []byte, cfg *PackageConfig) ([]string, error)
 }
 
 // HasVersionHistoryConfig checks if a PackageConfig has version history configuration.
-func HasVersionHistoryConfig(cfg *PackageConfig) bool {
+func HasVersionHistoryConfig(cfg *registry.PackageConfig) bool {
 	return cfg != nil && (cfg.VersionsPath != "" || cfg.VersionsSelector != "")
 }

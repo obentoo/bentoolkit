@@ -41,6 +41,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s060ReconcileOverlay lays out one pinless registry entry and its ebuild: the
@@ -186,7 +187,7 @@ func TestS060ParallelSweepUsesItsOwnPlanner(t *testing.T) {
 	var gotPath, gotTarget string
 	calls := 0
 	d := defaultDeps()
-	d.sweepPlanner = func(_ *slog.Logger, path string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error) {
+	d.sweepPlanner = func(_ *slog.Logger, path string, cfgs map[string]registry.PackageConfig, target string) (autoupdate.SweepBatch, error) {
 		calls++
 		gotPath, gotTarget = path, target
 		if _, ok := cfgs["app-editors/neovim"]; !ok {
@@ -215,12 +216,12 @@ func TestS060ParallelSweepUsesItsOwnPlanner(t *testing.T) {
 func TestS060ParallelDefaultDepsAreIndependent(t *testing.T) {
 	t.Parallel()
 	a, b := defaultDeps(), defaultDeps()
-	a.sweepPlanner = func(*slog.Logger, string, map[string]autoupdate.PackageConfig, string) (autoupdate.SweepBatch, error) {
+	a.sweepPlanner = func(*slog.Logger, string, map[string]registry.PackageConfig, string) (autoupdate.SweepBatch, error) {
 		return autoupdate.SweepBatch{}, nil
 	}
 	a.registryWriter = func(string, map[string]string) error { return nil }
 	if reflect.ValueOf(b.sweepPlanner).Pointer() != reflect.ValueOf(autoupdate.PlanOverlaySweep).Pointer() ||
-		reflect.ValueOf(b.registryWriter).Pointer() != reflect.ValueOf(autoupdate.SetPackageVersions).Pointer() {
+		reflect.ValueOf(b.registryWriter).Pointer() != reflect.ValueOf(registry.SetPackageVersions).Pointer() {
 		t.Error("a substitution in one deps reached another (R6.3)")
 	}
 }

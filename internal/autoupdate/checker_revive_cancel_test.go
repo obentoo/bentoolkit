@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -54,7 +55,7 @@ func TestFindRevivableOrphansStopsOnCancel(t *testing.T) {
 	defer cancel()
 	checker, err := NewChecker(t.TempDir(),
 		WithConfigDir(t.TempDir()),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: {Parser: "json", Path: "version", URL: upstream.URL, Enabled: boolPtr(false)},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),

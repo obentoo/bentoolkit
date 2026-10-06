@@ -1,4 +1,4 @@
-package autoupdate
+package registry
 
 import (
 	"fmt"
@@ -134,7 +134,7 @@ func MarkAutoDisabled(overlayPath string, except []string) ([]string, error) {
 		targets[pkg] = true
 	}
 
-	originAssign := fmt.Sprintf("disabled_by = %q", disabledByAuto)
+	originAssign := fmt.Sprintf("disabled_by = %q", DisabledByAuto)
 
 	var marked []string
 	err = editPackagesConfigSections(overlayPath, targets, func(name string, body []string, inComments []bool) ([]string, bool) {

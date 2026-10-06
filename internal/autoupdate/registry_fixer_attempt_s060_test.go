@@ -46,6 +46,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s060Fixer is a RegistryFixer that records its request and applies edit to
@@ -400,7 +402,7 @@ func TestS060RegistryFixSkipsWithoutWriting(t *testing.T) {
 			t.Errorf("the fixer ran %d time(s) on a registry that does not parse (R3.2)", fixer.calls)
 		}
 		assertStage(t, a, RegistryFixStageLoad)
-		_, loadErr := LoadPackagesConfig(r.overlayDir)
+		_, loadErr := registry.LoadPackagesConfig(r.overlayDir)
 		if loadErr == nil {
 			t.Fatal("fixture defect: the garbage registry loads")
 		}

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s062IsolateAutoupdate points HOME and the XDG dirs at a temp root and clears
@@ -81,7 +83,7 @@ func s062CaptureStderr(t *testing.T, fn func()) string {
 // checker built with no logger goes nowhere.
 func TestCheckerWithoutALoggerWritesNothingToStderr(t *testing.T) {
 	root := s062IsolateAutoupdate(t)
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		"cat-a/s062-one": {URL: "https://example.invalid/a", Parser: "json", Path: "v", LLMPrompt: "extract version"},
 	}}
 

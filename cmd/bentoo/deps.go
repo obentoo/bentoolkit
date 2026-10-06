@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -60,7 +61,7 @@ type deps struct {
 	uiIsTerminal func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
-	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]autoupdate.PackageConfig, target string) (autoupdate.SweepBatch, error)
+	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (autoupdate.SweepBatch, error)
 	sweepExecutor func(ctx context.Context, overlayPath string, batch autoupdate.SweepBatch, opts ...autoupdate.SweepOption) autoupdate.SweepReport
 	confirmSweep  func(prompt string) bool
 
@@ -137,13 +138,13 @@ type deps struct {
 // field of one never reaches another.
 func defaultDeps() *deps {
 	return &deps{
-		registryWriter:              autoupdate.SetPackageVersions,
+		registryWriter:              registry.SetPackageVersions,
 		confirmRegistryWrite:        confirmAction,
 		registryPromptIsInteractive: stdinAndStdoutAreTerminals,
 		checkRegistryFixer:          newConfiguredRegistryFixer,
 		checkInteractive:            stdinIsTerminal,
 		resolveGentooProvider:       resolveGentooProvider,
-		setVersionsForCheck:         autoupdate.SetPackageVersions,
+		setVersionsForCheck:         registry.SetPackageVersions,
 		uiIsTerminal:                output.IsTerminal,
 		sweepPlanner:                autoupdate.PlanOverlaySweep,
 		sweepExecutor:               autoupdate.ExecuteOverlaySweep,

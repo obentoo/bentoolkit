@@ -39,6 +39,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -90,7 +91,7 @@ type RegistryFixRequest struct {
 	// Config is the package's current (broken) autoupdate configuration. Its
 	// structural fields (URL/Parser/Pattern/Path/Selector/...) seed the
 	// instruction so the agent knows what the entry currently tries to do.
-	Config *PackageConfig
+	Config *registry.PackageConfig
 	// FetchError is the error returned by the failed version-extraction attempt
 	// (e.g. "no match for pattern", a 404, a parser error) that motivates the fix.
 	FetchError string
@@ -273,7 +274,7 @@ func NewClaudeCodeRegistryFixer(cfg LLMConfig, opts ...RegistryFixerOption) (*Cl
 func (f *ClaudeCodeRegistryFixer) buildRegistryFixArgs(instruction string, req RegistryFixRequest) ([]string, error) {
 	var urls []string
 	if req.Config != nil {
-		urls = upstreamURLsOf(*req.Config)
+		urls = req.Config.UpstreamURLs()
 	}
 	perms, err := agentPermissionArgs(agentPermissions{
 		agent: "registry fixer",
@@ -341,7 +342,7 @@ func buildRegistryFixInstruction(req RegistryFixRequest) string {
 // do. Only fields that exist on PackageConfig and matter to version extraction are
 // surfaced; empty fields (and a nil cfg) are skipped so the instruction stays
 // terse and never invents a value.
-func writeRegistryConfigFacts(sb *strings.Builder, cfg *PackageConfig) {
+func writeRegistryConfigFacts(sb *strings.Builder, cfg *registry.PackageConfig) {
 	if cfg == nil {
 		sb.WriteString("(no current configuration available)\n")
 		return
@@ -555,7 +556,7 @@ func AttemptRegistryFix(ctx context.Context, overlayPath, pkg string, fetchErr e
 
 	// Load the current (broken) config to seed the fix request. No edit has
 	// happened yet, so a load failure just skips the package.
-	pc, err := LoadPackagesConfig(overlayPath)
+	pc, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		return a.skip(RegistryFixStageLoad, err)
 	}

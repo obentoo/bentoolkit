@@ -8,6 +8,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -941,7 +942,7 @@ func TestNewHTMLParserInvalidRegex(t *testing.T) {
 // TestParseVersionHTML tests ParseVersion with HTML config
 func TestParseVersionHTML(t *testing.T) {
 	content := []byte(`<html><body><div class="version">1.0.0</div></body></html>`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:   "html",
 		Selector: ".version",
 	}
@@ -958,7 +959,7 @@ func TestParseVersionHTML(t *testing.T) {
 // TestParseVersionHTMLWithXPath tests ParseVersion with HTML XPath config
 func TestParseVersionHTMLWithXPath(t *testing.T) {
 	content := []byte(`<html><body><span id="ver">2.0.0</span></body></html>`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser: "html",
 		XPath:  `//*[@id="ver"]`,
 	}
@@ -975,7 +976,7 @@ func TestParseVersionHTMLWithXPath(t *testing.T) {
 // TestParseVersionHTMLWithRegex tests ParseVersion with HTML and regex
 func TestParseVersionHTMLWithRegex(t *testing.T) {
 	content := []byte(`<html><body><div class="version">Version: v3.0.0</div></body></html>`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:   "html",
 		Selector: ".version",
 		Pattern:  `v([0-9]+\.[0-9]+\.[0-9]+)`,
@@ -994,7 +995,7 @@ func TestParseVersionHTMLWithRegex(t *testing.T) {
 func TestParseVersionHTMLFallback(t *testing.T) {
 	// Content that doesn't match JSON but matches HTML
 	content := []byte(`<html><body><div class="version">4.0.0</div></body></html>`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:         "json",
 		Path:           "version",
 		FallbackParser: "html",

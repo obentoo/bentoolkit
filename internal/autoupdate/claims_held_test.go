@@ -3,6 +3,8 @@ package autoupdate
 import (
 	"reflect"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -29,7 +31,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 	tests := []struct {
 		name string
 		dirs map[string][]sweepEbuild
-		cfgs map[string]PackageConfig
+		cfgs map[string]registry.PackageConfig
 		want []Divergence
 	}{
 		{
@@ -41,7 +43,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"dev-lang/ghc": {{version: "9.14.1"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"dev-lang/ghc": heldEntry("", ""),
 			},
 			want: []Divergence{
@@ -58,7 +60,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"dev-build/gn": {{version: "0.2501"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"dev-build/gn": heldEntry("", ""),
 			},
 			want: []Divergence{
@@ -72,7 +74,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"sci-ml/stable-diffusion-cpp": {{version: "0_pre782"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"sci-ml/stable-diffusion-cpp": heldEntry("0_pre782", ""),
 			},
 			want: nil,
@@ -83,7 +85,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 			// cannot erase the pin the entry still carries.
 			name: "a held entry with no ebuild is a no-ebuild divergence (R1.3)",
 			dirs: map[string][]sweepEbuild{},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"dev-build/gn": heldEntry("0.2501", ""),
 			},
 			want: []Divergence{
@@ -99,7 +101,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"net-misc/rclone": {{version: "1.70.0"}, {version: "1.71.1"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-misc/rclone": offEntry("", ""),
 			},
 			want: nil,
@@ -112,7 +114,7 @@ func TestReconcileHeldEntries(t *testing.T) {
 				"net-misc/rclone": {{version: "1.71.1"}},
 				"dev-lang/ghc":    {{version: "9.14.1"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-misc/rclone": offEntry("", ""),
 				"dev-lang/ghc":    heldEntry("", ""),
 			},
@@ -150,7 +152,7 @@ func TestReconcileLeavesHoldAndEnabledAlone(t *testing.T) {
 
 	held := heldEntry("", "")
 	off := offEntry("", "")
-	cfgs := map[string]PackageConfig{
+	cfgs := map[string]registry.PackageConfig{
 		"dev-lang/ghc":    held,
 		"net-misc/rclone": off,
 	}

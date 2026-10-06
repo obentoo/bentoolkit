@@ -17,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // newTestRegistryFixer constructs a ClaudeCodeRegistryFixer with lookPath stubbed
@@ -38,7 +40,7 @@ func sampleRegistryFixRequest(t *testing.T) RegistryFixRequest {
 	configDir := t.TempDir()
 	return RegistryFixRequest{
 		Package:    "media-gfx/inkscape",
-		Config:     &PackageConfig{URL: "https://inkscape.org/release", Parser: "html", Pattern: `(\d+\.\d+)`},
+		Config:     &registry.PackageConfig{URL: "https://inkscape.org/release", Parser: "html", Pattern: `(\d+\.\d+)`},
 		FetchError: "failed to fetch upstream version: no match for pattern",
 		ConfigDir:  configDir,
 	}

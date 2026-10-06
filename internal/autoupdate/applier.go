@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
@@ -380,7 +381,7 @@ type Applier struct {
 	// the slot's `revision`; packages without either follow the normal
 	// pkgdev-from-SRC_URI path with a plain PV. Set via
 	// WithApplierPackagesConfig; nil disables authenticated fetching entirely.
-	configs map[string]PackageConfig
+	configs map[string]registry.PackageConfig
 	// fixer, when non-nil, is invoked when the manifest step fails: it drives an
 	// LLM agent to repair the ebuild (e.g. a SRC_URI whose URL convention changed
 	// between versions) before the Applier re-runs the manifest to confirm. Set
@@ -603,7 +604,7 @@ func WithApplierClean(clean bool) ApplierOption {
 // applier can honour a package's [meta] authenticated-fetch instructions before
 // running the manifest step. A nil config (or one without a matching package)
 // leaves the normal pkgdev-from-SRC_URI behaviour unchanged.
-func WithApplierPackagesConfig(cfg *PackagesConfig) ApplierOption {
+func WithApplierPackagesConfig(cfg *registry.PackagesConfig) ApplierOption {
 	return func(a *Applier) {
 		if cfg != nil {
 			a.configs = cfg.Packages
@@ -831,7 +832,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	// so a caller that never passes WithApplierSetVersionsFunc gets the real
 	// raw-text write into <overlay>/.autoupdate/packages.toml (S021-R2.1).
 	if applier.setVersionsFn == nil {
-		applier.setVersionsFn = SetPackageVersions
+		applier.setVersionsFn = registry.SetPackageVersions
 	}
 
 	// Ensure logs directory exists
@@ -1743,14 +1744,14 @@ func (a *Applier) sweeper() *sweeper {
 // entries are copied by value and only Version is rewritten — so the maps and
 // slices inside an entry are shared with a.configs and, like a.configs, only
 // ever read.
-func (a *Applier) sweepConfigs(pkg, newVersion string) (map[string]PackageConfig, bool) {
+func (a *Applier) sweepConfigs(pkg, newVersion string) (map[string]registry.PackageConfig, bool) {
 	entry, ok := a.configs[pkg] // nil-safe: a nil map yields the zero value and ok == false
 	if !ok {
 		// Nothing to overlay. a.configs is handed over unchanged (planSweep only
 		// reads it) and the caller refuses to delete anything in this case.
 		return a.configs, false
 	}
-	cfgs := make(map[string]PackageConfig, len(a.configs))
+	cfgs := make(map[string]registry.PackageConfig, len(a.configs))
 	for key, cfg := range a.configs {
 		cfgs[key] = cfg
 	}
@@ -2165,7 +2166,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		EbuildPath:    cand.ebuildPath,
 		ManifestError: firstErr.Error(),
 		DistDir:       fixDistdir,
-		UpstreamURLs:  upstreamURLsOf(a.configs[pkg]),
+		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
@@ -3316,7 +3317,7 @@ func (a *Applier) MarkReenabled(pkg string) {
 
 // refusal is refusedBy with the run's re-enables applied.
 func (a *Applier) refusal(pkg string) string {
-	reason := refusedBy(a.configs, pkg)
+	reason := registry.RefusedBy(a.configs, pkg)
 	if reason == "enabled = false" {
 		a.reenabledMu.Lock()
 		defer a.reenabledMu.Unlock()

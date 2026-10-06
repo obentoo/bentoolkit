@@ -1,4 +1,4 @@
-package autoupdate
+package registry
 
 import (
 	"os"
@@ -17,7 +17,7 @@ import (
 // not have, and it read perfectly well. An operator who copies a broken example
 // discovers it as a failed sweep.
 func TestREADMEExampleIsAConfigThisParserAccepts(t *testing.T) {
-	readme, err := os.ReadFile(filepath.Join("..", "..", "README.md"))
+	readme, err := os.ReadFile(filepath.Join("..", "..", "..", "README.md"))
 	if err != nil {
 		t.Fatalf("reading README.md: %v", err)
 	}

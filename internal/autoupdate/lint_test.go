@@ -7,6 +7,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // cleanRecord is one record in the shape the model prescribes: fields, then the
@@ -26,7 +28,7 @@ select=max always returns the latter; suffix_when marks it _pre.
 `
 
 // rules returns the rule identifiers of the reported issues, in report order.
-func rules(issues []LintIssue) []string {
+func rules(issues []registry.LintIssue) []string {
 	out := make([]string, 0, len(issues))
 	for _, i := range issues {
 		out = append(out, i.Rule)
@@ -35,7 +37,7 @@ func rules(issues []LintIssue) []string {
 }
 
 // hasRule reports whether the issue list contains the given rule.
-func hasRule(issues []LintIssue, rule string) bool {
+func hasRule(issues []registry.LintIssue, rule string) bool {
 	for _, i := range issues {
 		if i.Rule == rule {
 			return true
@@ -45,8 +47,8 @@ func hasRule(issues []LintIssue, rule string) bool {
 }
 
 // issuesFor returns every issue reported under the given rule, in report order.
-func issuesFor(issues []LintIssue, rule string) []LintIssue {
-	out := make([]LintIssue, 0, len(issues))
+func issuesFor(issues []registry.LintIssue, rule string) []registry.LintIssue {
+	out := make([]registry.LintIssue, 0, len(issues))
 	for _, i := range issues {
 		if i.Rule == rule {
 			out = append(out, i)
@@ -57,7 +59,7 @@ func issuesFor(issues []LintIssue, rule string) []LintIssue {
 
 // onlyIssueFor returns the single issue reported under the given rule, failing
 // when the count is anything but one.
-func onlyIssueFor(t *testing.T, issues []LintIssue, rule string) LintIssue {
+func onlyIssueFor(t *testing.T, issues []registry.LintIssue, rule string) registry.LintIssue {
 	t.Helper()
 	got := issuesFor(issues, rule)
 	if len(got) != 1 {
@@ -67,7 +69,7 @@ func onlyIssueFor(t *testing.T, issues []LintIssue, rule string) LintIssue {
 }
 
 func TestLintRecordModelClean(t *testing.T) {
-	if issues := lintRecordModel(cleanRecord); len(issues) != 0 {
+	if issues := registry.LintRecordModel(cleanRecord); len(issues) != 0 {
 		t.Fatalf("clean record reported %v", rules(issues))
 	}
 }
@@ -87,7 +89,7 @@ func TestLintRecordModelFileHeader(t *testing.T) {
 
 ` + cleanRecord
 
-	if issues := lintRecordModel(header); len(issues) != 0 {
+	if issues := registry.LintRecordModel(header); len(issues) != 0 {
 		t.Fatalf("file header reported %v", rules(issues))
 	}
 }
@@ -99,8 +101,8 @@ func TestLintRecordModelStrayAfterLastRecord(t *testing.T) {
 	trailing := cleanRecord + `
 # npm registry — a section banner left behind by an old layout.
 `
-	issues := lintRecordModel(trailing)
-	if !hasRule(issues, LintStrayComment) {
+	issues := registry.LintRecordModel(trailing)
+	if !hasRule(issues, registry.LintStrayComment) {
 		t.Fatalf("trailing comment not reported, got %v", rules(issues))
 	}
 }
@@ -121,7 +123,7 @@ comments = """
 x — doc.
 """
 `,
-			want: LintMissingEnd,
+			want: registry.LintMissingEnd,
 		},
 		{
 			name: "record without a comments field",
@@ -131,7 +133,7 @@ parser = "json"
 path = "version"
 # END
 `,
-			want: LintMissingComments,
+			want: registry.LintMissingComments,
 		},
 		{
 			name: "field assigned after comments",
@@ -143,7 +145,7 @@ x — doc.
 parser = "json"
 # END
 `,
-			want: LintCommentsNotLast,
+			want: registry.LintCommentsNotLast,
 		},
 		{
 			name: "comment floating between records",
@@ -163,7 +165,7 @@ y — doc.
 """
 # END
 `,
-			want: LintStrayComment,
+			want: registry.LintStrayComment,
 		},
 		{
 			name: "doc left as a comment inside the record",
@@ -175,7 +177,7 @@ x — doc.
 """
 # END
 `,
-			want: LintInlineComment,
+			want: registry.LintInlineComment,
 		},
 		{
 			name: "comments line that looks like a section header",
@@ -188,13 +190,13 @@ which the raw-text editors would read as a header.
 """
 # END
 `,
-			want: LintBracketInComment,
+			want: registry.LintBracketInComment,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issues := lintRecordModel(tt.content)
+			issues := registry.LintRecordModel(tt.content)
 			if !hasRule(issues, tt.want) {
 				t.Fatalf("got %v, want a %s issue", rules(issues), tt.want)
 			}
@@ -215,7 +217,7 @@ and a shell comment starts with # too.
 """
 # END
 `
-	if issues := lintRecordModel(content); len(issues) != 0 {
+	if issues := registry.LintRecordModel(content); len(issues) != 0 {
 		t.Fatalf("doc content treated as structure: %v", rules(issues))
 	}
 }
@@ -229,7 +231,7 @@ url = "https://example.com"
 comments = "x — npm dist-tags.latest."
 # END
 `
-	if issues := lintRecordModel(content); len(issues) != 0 {
+	if issues := registry.LintRecordModel(content); len(issues) != 0 {
 		t.Fatalf("single-line comments field rejected: %v", rules(issues))
 	}
 }
@@ -237,7 +239,7 @@ comments = "x — npm dist-tags.latest."
 func TestLintPackagesConfig(t *testing.T) {
 	t.Run("clean registry", func(t *testing.T) {
 		dir := writeRegistry(t, cleanRecord)
-		issues, err := LintPackagesConfig(nil, dir)
+		issues, err := registry.LintPackagesConfig(nil, dir)
 		if err != nil {
 			t.Fatalf("lint failed: %v", err)
 		}
@@ -256,17 +258,17 @@ suffix_when = '^1\.'
 comments = "x — doc."
 # END
 `)
-		issues, err := LintPackagesConfig(nil, dir)
+		issues, err := registry.LintPackagesConfig(nil, dir)
 		if err != nil {
 			t.Fatalf("lint failed: %v", err)
 		}
-		if !hasRule(issues, LintInvalidConfig) {
-			t.Fatalf("got %v, want an %s issue", rules(issues), LintInvalidConfig)
+		if !hasRule(issues, registry.LintInvalidConfig) {
+			t.Fatalf("got %v, want an %s issue", rules(issues), registry.LintInvalidConfig)
 		}
 	})
 
 	t.Run("missing registry", func(t *testing.T) {
-		if _, err := LintPackagesConfig(nil, t.TempDir()); !errors.Is(err, ErrPackagesConfigNotFound) {
+		if _, err := registry.LintPackagesConfig(nil, t.TempDir()); !errors.Is(err, registry.ErrPackagesConfigNotFound) {
 			t.Fatalf("got %v, want ErrPackagesConfigNotFound", err)
 		}
 	})
@@ -280,20 +282,20 @@ serie = '^1\.'
 comments = "x — doc."
 # END
 `)
-		issues, err := LintPackagesConfig(nil, dir)
+		issues, err := registry.LintPackagesConfig(nil, dir)
 		// The error stays: the config could not be built, so the semantic checks
 		// below it never ran and the caller must not read a short list as clean.
 		if err == nil {
 			t.Fatal("an unknown key did not fail the load")
 		}
-		var found *LintIssue
+		var found *registry.LintIssue
 		for i := range issues {
-			if issues[i].Rule == LintUnknownField {
+			if issues[i].Rule == registry.LintUnknownField {
 				found = &issues[i]
 			}
 		}
 		if found == nil {
-			t.Fatalf("got %v, want a %s issue", rules(issues), LintUnknownField)
+			t.Fatalf("got %v, want a %s issue", rules(issues), registry.LintUnknownField)
 		}
 		if found.Package != "dev-util/x" {
 			t.Errorf("issue names record %q, want dev-util/x", found.Package)
@@ -314,11 +316,11 @@ binary = true
 comments = "postman-bin — doc."
 # END
 `)
-		issues, err := LintPackagesConfig(nil, dir)
+		issues, err := registry.LintPackagesConfig(nil, dir)
 		if err != nil {
 			t.Fatalf("a retired key broke the lint: %v", err)
 		}
-		if hasRule(issues, LintUnknownField) {
+		if hasRule(issues, registry.LintUnknownField) {
 			t.Fatalf("retired key reported as unknown: %v", rules(issues))
 		}
 	})
@@ -328,11 +330,11 @@ comments = "postman-bin — doc."
 url = "https://example.com
 comments = "x — doc."
 `)
-		issues, err := LintPackagesConfig(nil, dir)
+		issues, err := registry.LintPackagesConfig(nil, dir)
 		if err == nil {
 			t.Fatal("broken TOML accepted")
 		}
-		if !hasRule(issues, LintMissingEnd) {
+		if !hasRule(issues, registry.LintMissingEnd) {
 			t.Fatalf("got %v, want the layout issues to survive the parse error", rules(issues))
 		}
 	})
@@ -360,7 +362,7 @@ func TestSavePackagesConfigRecordModel(t *testing.T) {
 	dir := t.TempDir()
 	a := &Analyzer{
 		overlayPath: dir,
-		config: &PackagesConfig{Packages: map[string]PackageConfig{
+		config: &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			"app-office/libreoffice": {
 				URL:        "https://downloadarchive.documentfoundation.org/libreoffice/old/",
 				Parser:     "regex",
@@ -389,19 +391,19 @@ func TestSavePackagesConfigRecordModel(t *testing.T) {
 	}
 	written := string(raw)
 
-	if n := strings.Count(written, "\n"+recordEndMarker+"\n"); n != 2 {
-		t.Fatalf("want one %q per record, got %d in:\n%s", recordEndMarker, n, written)
+	if n := strings.Count(written, "\n"+registry.RecordEndMarker+"\n"); n != 2 {
+		t.Fatalf("want one %q per record, got %d in:\n%s", registry.RecordEndMarker, n, written)
 	}
 	// The doc must survive as text, not as one escaped line.
 	if !strings.Contains(written, "suffix_when marks the testing one _pre.\n") {
 		t.Fatalf("doc field lost its line breaks:\n%s", written)
 	}
-	if issues := lintRecordModel(written); len(issues) != 0 {
+	if issues := registry.LintRecordModel(written); len(issues) != 0 {
 		t.Fatalf("rewritten registry violates the model %v:\n%s", rules(issues), written)
 	}
 
 	// And it must load back with every field intact.
-	loaded, err := LoadPackagesConfig(dir)
+	loaded, err := registry.LoadPackagesConfig(dir)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -435,7 +437,7 @@ func TestSavePackagesConfigRecordModel(t *testing.T) {
 func TestSavePackagesConfigEveryField(t *testing.T) {
 	dir := t.TempDir()
 	disabled := false
-	saved := PackageConfig{
+	saved := registry.PackageConfig{
 		Enabled:              &disabled,
 		Hold:                 true,
 		Track:                "commit",
@@ -476,8 +478,8 @@ func TestSavePackagesConfigEveryField(t *testing.T) {
 		Comments:             "x — every field the record model knows.\n",
 	}
 
-	a := &Analyzer{overlayPath: dir, config: &PackagesConfig{
-		Packages: map[string]PackageConfig{"dev-util/x": saved},
+	a := &Analyzer{overlayPath: dir, config: &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{"dev-util/x": saved},
 	}}
 	if err := a.savePackagesConfig(); err != nil {
 		t.Fatalf("save: %v", err)
@@ -491,99 +493,16 @@ func TestSavePackagesConfigEveryField(t *testing.T) {
 
 	// A map written as a sub-table would show up here as a second header, and
 	// the record it belongs to would be reported unclosed and undocumented.
-	if issues := lintRecordModel(written); len(issues) != 0 {
+	if issues := registry.LintRecordModel(written); len(issues) != 0 {
 		t.Fatalf("saved record violates the model %v:\n%s", rules(issues), written)
 	}
 
-	loaded, err := LoadPackagesConfig(dir)
+	loaded, err := registry.LoadPackagesConfig(dir)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
 	if got := loaded.Packages["dev-util/x"]; !reflect.DeepEqual(saved, got) {
 		t.Errorf("round trip differs:\nsaved = %+v\ngot   = %+v", saved, got)
-	}
-}
-
-// A note on why this stops at lintRecordModel rather than running the whole of
-// LintPackagesConfig: a record setting all 38 fields is necessarily invalid
-// SEMANTICALLY, because several of them are mutually exclusive by design — this
-// one pairs suffix with track = "commit", which ValidatePackageConfig rejects
-// because a snapshot suffix comes from the current ebuild. That is a real rule
-// working correctly. The scan above covers every rule this sub-task can break
-// (layout, field order, the legacy fields); semantic validity belongs to a
-// fixture that is semantically coherent, and TestSavePackagesConfigRecordModel
-// above is one.
-
-// TestRenderRecordNeverEmitsRedundantEnabled pins the one value a writer must
-// swallow. An absent `enabled` already means enabled, so `enabled = true` is the
-// redundancy the linter reports — a writer emitting it would generate the finding
-// the record was just checked against. `enabled = false` must survive: it is the
-// only way to say disabled.
-func TestRenderRecordNeverEmitsRedundantEnabled(t *testing.T) {
-	base := PackageConfig{
-		URL: "https://e.com", Parser: "json", Path: "v",
-		Comments: "x — doc.\n",
-	}
-
-	on, off := true, false
-
-	withOn := base
-	withOn.Enabled = &on
-	if got := RenderRecord("dev-util/x", &withOn); strings.Contains(got, "enabled") {
-		t.Errorf("enabled = true was emitted:\n%s", got)
-	}
-
-	withOff := base
-	withOff.Enabled = &off
-	if got := RenderRecord("dev-util/x", &withOff); !strings.Contains(got, "enabled = false") {
-		t.Errorf("enabled = false was dropped:\n%s", got)
-	}
-}
-
-// TestFormatCommentsFieldEscaping covers the two ways a doc string could break
-// the file it is written into.
-func TestFormatCommentsFieldEscaping(t *testing.T) {
-	t.Run("a triple quote cannot close the string early", func(t *testing.T) {
-		got := formatCommentsField(`x — upstream writes """ in its changelog.`)
-		if strings.Count(got, `"""`) != 2 {
-			t.Fatalf("unescaped triple quote in:\n%s", got)
-		}
-	})
-
-	t.Run("a bracket line is indented out of header shape", func(t *testing.T) {
-		got := formatCommentsField("x — the path is\n[0].version\nfor this API.")
-		if !strings.Contains(got, "\n [0].version\n") {
-			t.Fatalf("bracket line not indented:\n%s", got)
-		}
-	})
-
-	t.Run("a backslash survives the round trip", func(t *testing.T) {
-		got := formatCommentsField(`x — the pattern is '\d+'.`)
-		if !strings.Contains(got, `'\\d+'`) {
-			t.Fatalf("backslash not escaped:\n%s", got)
-		}
-	})
-}
-
-// TestLintIssueString covers the two shapes a reported issue takes: one anchored
-// to a record and line, and one that belongs to no record.
-func TestLintIssueString(t *testing.T) {
-	withPkg := LintIssue{Line: 42, Package: "app-office/libreoffice", Rule: LintMissingEnd, Message: "not closed"}
-	want := `packages.toml:42: [app-office/libreoffice] missing-end: not closed`
-	if got := withPkg.String(); got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-
-	stray := LintIssue{Line: 3, Rule: LintStrayComment, Message: "floating"}
-	want = `packages.toml:3: stray-comment: floating`
-	if got := stray.String(); got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-
-	noLine := LintIssue{Package: "dev-util/x", Rule: LintInvalidConfig, Message: "bad suffix"}
-	want = `packages.toml: [dev-util/x] invalid-config: bad suffix`
-	if got := noLine.String(); got != want {
-		t.Fatalf("got %q, want %q", got, want)
 	}
 }
 
@@ -624,50 +543,6 @@ x — every field the record model knows, in the order the model prescribes.
 # END
 `
 
-// TestCanonicalFieldOrderCoversPackageConfig is the drift guard the
-// CanonicalFieldOrder doc comment points at. The order rule ranks a field by
-// looking it up in that slice and SKIPS what it cannot rank, so a field added to
-// PackageConfig and forgotten here would not be reported as misplaced — it would
-// stop being ordered at all, silently. Reflection over the toml tags is what
-// makes forgetting impossible.
-func TestCanonicalFieldOrderCoversPackageConfig(t *testing.T) {
-	rt := reflect.TypeOf(PackageConfig{})
-
-	tagged := make(map[string]bool, rt.NumField())
-	for i := 0; i < rt.NumField(); i++ {
-		f := rt.Field(i)
-		tag := f.Tag.Get("toml")
-		if tag == "" || tag == "-" {
-			t.Fatalf("PackageConfig.%s has no toml tag; it can never be ordered", f.Name)
-		}
-		name, _, _ := strings.Cut(tag, ",")
-		tagged[name] = true
-	}
-
-	seen := make(map[string]int, len(CanonicalFieldOrder))
-	for _, field := range CanonicalFieldOrder {
-		seen[field]++
-		if !tagged[field] {
-			t.Errorf("CanonicalFieldOrder lists %q, which no PackageConfig field claims", field)
-		}
-	}
-	for field := range tagged {
-		if seen[field] != 1 {
-			t.Errorf("field %q appears %d time(s) in CanonicalFieldOrder, want exactly 1", field, seen[field])
-		}
-	}
-	if len(CanonicalFieldOrder) != len(tagged) {
-		t.Errorf("CanonicalFieldOrder has %d entries, PackageConfig has %d toml tags",
-			len(CanonicalFieldOrder), len(tagged))
-	}
-	// Explicit, because its absence is a decision rather than an oversight: the
-	// classifier is `type`, and `binary` only survives as a retired key the
-	// repair migrates away (R1.1).
-	if seen["binary"] != 0 {
-		t.Error("CanonicalFieldOrder lists the retired key binary; type is the classifier")
-	}
-}
-
 // TestLintFieldSetRules covers the four rules one fixture at a time, pinning the
 // rule identifier, the line it points at and the repair it declares.
 func TestLintFieldSetRules(t *testing.T) {
@@ -689,7 +564,7 @@ binary = true
 comments = "postman-bin — doc."
 # END
 `,
-			rule: LintLegacyBinary, line: 5, fix: FixBinaryToType,
+			rule: registry.LintLegacyBinary, line: 5, fix: registry.FixBinaryToType,
 		},
 		{
 			// R1.3: type already says it, so the line just goes.
@@ -703,7 +578,7 @@ type = "bin"
 comments = "filezilla-pro — doc."
 # END
 `,
-			rule: LintLegacyBinary, line: 5, fix: FixDropBinary,
+			rule: registry.LintLegacyBinary, line: 5, fix: registry.FixDropBinary,
 		},
 		{
 			// binary = false is the default spelled out; it migrates to nothing.
@@ -716,7 +591,7 @@ binary = false
 comments = "x — doc."
 # END
 `,
-			rule: LintLegacyBinary, line: 5, fix: FixDropBinary,
+			rule: registry.LintLegacyBinary, line: 5, fix: registry.FixDropBinary,
 		},
 		{
 			name: "enabled = true is redundant",
@@ -728,7 +603,7 @@ path = "version"
 comments = "rclone — doc."
 # END
 `,
-			rule: LintRedundantEnabled, line: 2, fix: FixDropEnabled,
+			rule: registry.LintRedundantEnabled, line: 2, fix: registry.FixDropEnabled,
 		},
 		{
 			// The measured deviation: headers sitting inside the base_* block.
@@ -746,7 +621,7 @@ base_tag_pattern = 'vulkan-sdk-([0-9.]+)'
 comments = "vulkan-headers — doc."
 # END
 `,
-			rule: LintFieldOrder, line: 8, fix: FixReorderFields,
+			rule: registry.LintFieldOrder, line: 8, fix: registry.FixReorderFields,
 		},
 		{
 			// R6.1: reported at the track line, and deliberately not repaired.
@@ -760,13 +635,13 @@ commit_sha_path = "0.sha"
 comments = "asus-ec-sensors — doc."
 # END
 `,
-			rule: LintLegacyBase, line: 2, fix: FixNone,
+			rule: registry.LintLegacyBase, line: 2, fix: registry.FixNone,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issues := lintRecordModel(tt.content)
+			issues := registry.LintRecordModel(tt.content)
 			got := onlyIssueFor(t, issues, tt.rule)
 			if got.Line != tt.line {
 				t.Errorf("issue points at line %d, want %d (%s)", got.Line, tt.line, got.String())
@@ -802,7 +677,7 @@ path = "version"
 comments = "x — orphaned, kept for revival."
 # END
 `,
-			absent: LintRedundantEnabled,
+			absent: registry.LintRedundantEnabled,
 		},
 		{
 			// The repaired Khronos shape: base_* grouped, headers after them.
@@ -820,7 +695,7 @@ headers = { Accept = "application/vnd.github+json" }
 comments = "glslang — doc."
 # END
 `,
-			absent: LintLegacyBase,
+			absent: registry.LintLegacyBase,
 		},
 		{
 			// An upstream that publishes no version at all says so, and the rule
@@ -839,12 +714,12 @@ base_from = "none"
 comments = "ik_llama-cpp — upstream publishes no usable release series."
 # END
 `,
-			absent: LintLegacyBase,
+			absent: registry.LintLegacyBase,
 		},
 		{
 			name:    "a record already in canonical order",
 			content: canonicalRecord,
-			absent:  LintFieldOrder,
+			absent:  registry.LintFieldOrder,
 		},
 		{
 			// A record declares a handful of the 38 fields, never all of them. The
@@ -858,13 +733,13 @@ path = "dist-tags.latest"
 comments = "claude-code — npm dist-tags.latest is the stable channel."
 # END
 `,
-			absent: LintFieldOrder,
+			absent: registry.LintFieldOrder,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issues := lintRecordModel(tt.content)
+			issues := registry.LintRecordModel(tt.content)
 			if hasRule(issues, tt.absent) {
 				t.Fatalf("%s fired where it must not: %v", tt.absent, issues)
 			}
@@ -872,7 +747,7 @@ comments = "claude-code — npm dist-tags.latest is the stable channel."
 	}
 
 	t.Run("the canonical record is clean on every rule", func(t *testing.T) {
-		if issues := lintRecordModel(canonicalRecord); len(issues) != 0 {
+		if issues := registry.LintRecordModel(canonicalRecord); len(issues) != 0 {
 			t.Fatalf("canonical record reported %v", issues)
 		}
 	})
@@ -900,20 +775,20 @@ comments = "filezilla-pro — doc."
 # END
 `
 
-	got := issuesFor(lintRecordModel(content), LintLegacyBinary)
+	got := issuesFor(registry.LintRecordModel(content), registry.LintLegacyBinary)
 	if len(got) != 2 {
-		t.Fatalf("want two %s issues, got %d: %v", LintLegacyBinary, len(got), got)
+		t.Fatalf("want two %s issues, got %d: %v", registry.LintLegacyBinary, len(got), got)
 	}
 
-	byPkg := map[string]LintIssue{}
+	byPkg := map[string]registry.LintIssue{}
 	for _, i := range got {
 		byPkg[i.Package] = i
 	}
-	if fix := byPkg["net-misc/postman-bin"].Fix; fix != FixBinaryToType {
-		t.Errorf("record without type declares fix %q, want %q", fix, FixBinaryToType)
+	if fix := byPkg["net-misc/postman-bin"].Fix; fix != registry.FixBinaryToType {
+		t.Errorf("record without type declares fix %q, want %q", fix, registry.FixBinaryToType)
 	}
-	if fix := byPkg["net-ftp/filezilla-pro"].Fix; fix != FixDropBinary {
-		t.Errorf("record with type declares fix %q, want %q", fix, FixDropBinary)
+	if fix := byPkg["net-ftp/filezilla-pro"].Fix; fix != registry.FixDropBinary {
+		t.Errorf("record with type declares fix %q, want %q", fix, registry.FixDropBinary)
 	}
 	// One rule, two repairs: the identifier is shared on purpose so a maintainer
 	// filtering "legacy-binary" sees all 23 records, and only Fix separates them.
@@ -941,8 +816,8 @@ binary = true
 comments = "nxplayer — doc."
 # END
 `
-	issues := lintRecordModel(migrates)
-	order := onlyIssueFor(t, issues, LintFieldOrder)
+	issues := registry.LintRecordModel(migrates)
+	order := onlyIssueFor(t, issues, registry.LintFieldOrder)
 	if order.Line != 7 {
 		t.Errorf("order issue points at line %d, want 7 (the binary line)", order.Line)
 	}
@@ -951,18 +826,18 @@ comments = "nxplayer — doc."
 	if !strings.Contains(order.Message, `"type"`) || !strings.Contains(order.Message, `"binary"`) {
 		t.Errorf("message names neither the ranked field nor the written key: %q", order.Message)
 	}
-	if !hasRule(issues, LintLegacyBinary) {
+	if !hasRule(issues, registry.LintLegacyBinary) {
 		t.Errorf("the binary line itself went unreported: %v", rules(issues))
 	}
 
 	// Same position, but the line is deleted rather than migrated: no deviation.
 	deletes := strings.Replace(migrates, "binary = true", "binary = false", 1)
-	issues = lintRecordModel(deletes)
-	if hasRule(issues, LintFieldOrder) {
+	issues = registry.LintRecordModel(deletes)
+	if hasRule(issues, registry.LintFieldOrder) {
 		t.Errorf("a deleted line manufactured an order deviation: %v", issues)
 	}
-	if fix := onlyIssueFor(t, issues, LintLegacyBinary).Fix; fix != FixDropBinary {
-		t.Errorf("binary = false declares fix %q, want %q", fix, FixDropBinary)
+	if fix := onlyIssueFor(t, issues, registry.LintLegacyBinary).Fix; fix != registry.FixDropBinary {
+		t.Errorf("binary = false declares fix %q, want %q", fix, registry.FixDropBinary)
 	}
 }
 
@@ -979,7 +854,7 @@ path = "version"
 comments = "x — doc."
 # END
 `
-	got := onlyIssueFor(t, lintRecordModel(content), LintFieldOrder)
+	got := onlyIssueFor(t, registry.LintRecordModel(content), registry.LintFieldOrder)
 	if got.Line != 3 {
 		t.Errorf("order issue points at line %d, want 3 (url, the first field out of order)", got.Line)
 	}
@@ -1010,7 +885,7 @@ comments = """
 x — doc.
 """
 `,
-			want: []string{LintMissingEnd},
+			want: []string{registry.LintMissingEnd},
 		},
 		{
 			name: "record without a comments field",
@@ -1020,7 +895,7 @@ parser = "json"
 path = "version"
 # END
 `,
-			want: []string{LintMissingComments},
+			want: []string{registry.LintMissingComments},
 		},
 		{
 			// The one fixture that gains a second finding, and correctly so: a
@@ -1036,7 +911,7 @@ x — doc.
 parser = "json"
 # END
 `,
-			want: []string{LintCommentsNotLast, LintFieldOrder},
+			want: []string{registry.LintCommentsNotLast, registry.LintFieldOrder},
 		},
 		{
 			name: "comment floating between records",
@@ -1056,7 +931,7 @@ y — doc.
 """
 # END
 `,
-			want: []string{LintStrayComment},
+			want: []string{registry.LintStrayComment},
 		},
 		{
 			name: "doc left as a comment inside the record",
@@ -1068,7 +943,7 @@ x — doc.
 """
 # END
 `,
-			want: []string{LintInlineComment},
+			want: []string{registry.LintInlineComment},
 		},
 		{
 			name: "comments line that looks like a section header",
@@ -1081,13 +956,13 @@ which the raw-text editors would read as a header.
 """
 # END
 `,
-			want: []string{LintBracketInComment},
+			want: []string{registry.LintBracketInComment},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			issues := lintRecordModel(tt.content)
+			issues := registry.LintRecordModel(tt.content)
 			got := rules(issues)
 			if len(got) != len(tt.want) {
 				t.Fatalf("got %v, want exactly %v", got, tt.want)
@@ -1100,10 +975,10 @@ which the raw-text editors would read as a header.
 			// The pre-existing rules describe a layout a human has to fix; none of
 			// them claims an automatic repair.
 			for _, issue := range issues {
-				if issue.Rule == LintFieldOrder {
+				if issue.Rule == registry.LintFieldOrder {
 					continue
 				}
-				if issue.Fix != FixNone {
+				if issue.Fix != registry.FixNone {
 					t.Errorf("pre-existing rule %s now declares fix %q", issue.Rule, issue.Fix)
 				}
 			}

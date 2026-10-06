@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -36,7 +37,7 @@ func (e *errProvider) Close() error      { return nil }
 func TestFindRevivableOrphans_InvalidNameSoftError(t *testing.T) {
 	const badKey = "badname" // no slash -> invalid split
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		badKey: {Parser: "json", Path: "version", URL: "http://127.0.0.1:0", Enabled: boolPtr(false)},
 	})
 	prov := &fakeProvider{versions: map[string][]string{}}
@@ -70,7 +71,7 @@ func TestFindRevivableOrphans_UpstreamFetchSoftError(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 	})
 	// Provider would report a gentoo version, but the upstream fetch fails first
@@ -97,7 +98,7 @@ func TestFindRevivableOrphans_GentooLookupSoftError(t *testing.T) {
 	const pkg = "app-editors/lookupfail"
 	srv := jsonVersionServer(t, "3.0.0")
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 	})
 	sentinel := errors.New("boom: gentoo backend unavailable")
@@ -125,7 +126,7 @@ func TestFindRevivableOrphans_GentooMaxEmptySkipped(t *testing.T) {
 	const pkg = "app-editors/junkversions"
 	srv := jsonVersionServer(t, "5.0.0")
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 	})
 	// All entries are unparseable -> maxGentooVersion returns "".

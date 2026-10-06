@@ -9,9 +9,9 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -827,7 +827,7 @@ func prunedRegistryAtoms(results []overlay.PruneResult) []string {
 // names packages the overlay no longer holds, and that is exactly the state the
 // next --check turns into an unexplained disable.
 func removePruneRegistryEntries(overlayPath string, atoms []string) error {
-	if err := autoupdate.RemovePackagesFromConfig(overlayPath, atoms); err != nil {
+	if err := registry.RemovePackagesFromConfig(overlayPath, atoms); err != nil {
 		wrapped := fmt.Errorf("removing %d atom(s) from .autoupdate/packages.toml: %w", len(atoms), err)
 		output.Error.Fprintf(os.Stderr, "  %v\n", wrapped)
 		output.Warning.Fprintln(os.Stderr, "  The package directories are gone and the registry still lists them; delete those entries by hand. An entry whose package directory no longer exists promises an endpoint for something that is not there, and the next --check disables it without saying why.")
@@ -900,7 +900,7 @@ func selectPrunePackages(packages []repo.PackageInfo, target string) ([]repo.Pac
 // Nothing here is sanitised, and nothing needs to be: a key is used as a map key
 // and as text to print, never to build a path. Keep it that way.
 func buildPruneRegistryKeys(overlayPath string) (byAtom map[string][]string, malformed []string, err error) {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		return nil, nil, err
 	}

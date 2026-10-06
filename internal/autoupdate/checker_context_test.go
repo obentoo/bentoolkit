@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // slowServer returns an httptest.Server whose handler blocks until the request
@@ -59,8 +60,8 @@ func newContextTestChecker(t *testing.T, srvURL string, opts ...CheckerOption) *
 	pkgName := "test-cat/test-pkg"
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: srvURL, Parser: "json", Path: "version"},
 		},
 	}

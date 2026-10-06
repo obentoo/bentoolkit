@@ -10,6 +10,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // stubLLMProvider is a minimal LLMProvider for option testing
@@ -73,7 +74,7 @@ func TestWithAnalyzerConfigDir(t *testing.T) {
 // TestAnalyzerConfig tests the Config() accessor
 func TestAnalyzerConfig(t *testing.T) {
 	tmpDir := t.TempDir()
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 
 	analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(cfg))
 	if err != nil {
@@ -299,7 +300,7 @@ func TestLoadAndMergeSchema(t *testing.T) {
 		t.Fatalf("NewAnalyzer: %v", err)
 	}
 
-	schema := &PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
+	schema := &registry.PackageConfig{URL: "https://example.com", Parser: "json", Path: "version"}
 	if err := analyzer.LoadAndMergeSchema("app-misc/hello", schema); err != nil {
 		t.Fatalf("LoadAndMergeSchema: %v", err)
 	}
@@ -315,8 +316,8 @@ func TestLoadAndMergeSchemaMergesExisting(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Pre-populate with existing schema
-	existing := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	existing := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/existing": {URL: "https://existing.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -335,7 +336,7 @@ func TestLoadAndMergeSchemaMergesExisting(t *testing.T) {
 		t.Fatalf("NewAnalyzer2: %v", err)
 	}
 
-	newSchema := &PackageConfig{URL: "https://new.com", Parser: "regex", Pattern: `v(\d+)`}
+	newSchema := &registry.PackageConfig{URL: "https://new.com", Parser: "regex", Pattern: `v(\d+)`}
 	if err := analyzer2.LoadAndMergeSchema("app-misc/new", newSchema); err != nil {
 		t.Fatalf("LoadAndMergeSchema: %v", err)
 	}
@@ -399,7 +400,7 @@ func TestCheckerWithLLMClient(t *testing.T) {
 		t.Fatalf("NewLLMClient: %v", err)
 	}
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 	checker, err := NewChecker(tmpDir, WithPackagesConfig(cfg), WithLLMClient(llmClient))
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)
@@ -415,7 +416,7 @@ func TestCheckerWithHTTPClient(t *testing.T) {
 	tmpDir := t.TempDir()
 	httpClient := fetch.NewRetryableHTTPClient()
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{}}
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{}}
 	checker, err := NewChecker(tmpDir, WithPackagesConfig(cfg), WithHTTPClient(httpClient))
 	if err != nil {
 		t.Fatalf("NewChecker: %v", err)

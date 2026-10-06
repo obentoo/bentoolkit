@@ -15,6 +15,8 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestCheckPackageStripsUpstreamTagPrefix holds the check-result half: a GitHub
@@ -33,8 +35,8 @@ func TestCheckPackageStripsUpstreamTagPrefix(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "tag_name"},
 		},
 	}
@@ -78,8 +80,8 @@ func TestCheckPackageStoresStrippedVersionInPending(t *testing.T) {
 
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: server.URL, Parser: "json", Path: "tag_name"},
 		},
 	}

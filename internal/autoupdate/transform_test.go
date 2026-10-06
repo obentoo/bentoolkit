@@ -1,6 +1,10 @@
 package autoupdate
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+)
 
 func TestApplyTransforms(t *testing.T) {
 	tests := []struct {
@@ -121,7 +125,7 @@ func TestSelectVersion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &PackageConfig{Transform: tt.transform, Select: tt.mode}
+			cfg := &registry.PackageConfig{Transform: tt.transform, Select: tt.mode}
 			if got := selectVersion(nil, tt.cands, cfg); got != tt.want {
 				t.Fatalf("selectVersion(nil, %v, %v, %q) = %q, want %q",
 					tt.cands, tt.transform, tt.mode, got, tt.want)

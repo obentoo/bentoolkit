@@ -1,4 +1,4 @@
-package autoupdate
+package registry
 
 import (
 	"fmt"
@@ -88,7 +88,7 @@ func RenderRecord(pkg string, cfg *PackageConfig) string {
 		b.WriteString(key + " = " + value + "\n")
 	}
 
-	b.WriteString(recordEndMarker + "\n")
+	b.WriteString(RecordEndMarker + "\n")
 	return b.String()
 }
 
@@ -322,4 +322,38 @@ func hasTOMLControlChar(s string) bool {
 		}
 	}
 	return false
+}
+
+// formatCommentsField renders a record's doc text as the TOML multi-line basic
+// string that closes the record, marker line excluded.
+//
+// Three things are escaped or adjusted, all for the same reason — the registry
+// is edited by hand and read back by raw-text tooling, so the output has to be
+// both valid TOML and safe to scan line by line:
+//   - a backslash, and any run of three or more quotes, would either be read as
+//     an escape or close the string early;
+//   - a line starting with "[" looks like a section header to the surgical edit
+//     in setPackagesEnabled, which would cut the record short there, so it is
+//     indented by one space (the lint rejects the same shape in hand-written
+//     records);
+//   - trailing whitespace is dropped so a re-encode is byte-stable.
+func formatCommentsField(s string) string {
+	s = strings.ReplaceAll(s, "\r\n", "\n")
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	// Only a run of three or more quotes can close the string early; escape every
+	// quote in such a run and leave ordinary "quoted" words alone.
+	s = tripleQuoteRegex.ReplaceAllStringFunc(s, func(run string) string {
+		return strings.Repeat(`\"`, len(run))
+	})
+
+	lines := strings.Split(strings.Trim(s, "\n"), "\n")
+	for i, ln := range lines {
+		ln = strings.TrimRight(ln, " \t")
+		if strings.HasPrefix(ln, "[") {
+			ln = " " + ln
+		}
+		lines[i] = ln
+	}
+
+	return "comments = \"\"\"\n" + strings.Join(lines, "\n") + "\n\"\"\"\n"
 }

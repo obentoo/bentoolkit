@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 079, sub-task 6.1: `--apply all` runs a batch in dependency waves.
@@ -275,8 +277,8 @@ func rwHermetic(t *testing.T) string {
 }
 
 // rwRecord is a registry record; only Requires matters to the apply path.
-func rwRecord(requires map[string]RequireSpec) PackageConfig {
-	return PackageConfig{
+func rwRecord(requires map[string]registry.RequireSpec) registry.PackageConfig {
+	return registry.PackageConfig{
 		URL:      "https://example.invalid/releases.json",
 		Parser:   "regex",
 		Pattern:  `"version":\s*"([^"]+)"`,
@@ -284,14 +286,14 @@ func rwRecord(requires map[string]RequireSpec) PackageConfig {
 	}
 }
 
-var rwDartRequire = map[string]RequireSpec{
+var rwDartRequire = map[string]registry.RequireSpec{
 	"dev-lang/dart": {Pattern: `"dart_sdk_version":\s*"([^"]+)"`, Pin: "~"},
 }
 
 // rwApplier builds an Applier over overlay whose external commands run through
 // factory, with an empty ::gentoo and a private distdir.
 func rwApplier(t *testing.T, overlay, configDir, gentoo string, pending *PendingList,
-	records map[string]PackageConfig, factory func(context.Context, string, ...string) *exec.Cmd,
+	records map[string]registry.PackageConfig, factory func(context.Context, string, ...string) *exec.Cmd,
 ) *Applier {
 	t.Helper()
 	applier, err := NewApplier(overlay, configDir,
@@ -299,7 +301,7 @@ func rwApplier(t *testing.T, overlay, configDir, gentoo string, pending *Pending
 		WithExecCommand(factory),
 		WithApplierDistdir(t.TempDir(), ""),
 		WithApplierGentooPath(gentoo),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: records}),
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: records}),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
@@ -375,7 +377,7 @@ func rwApplyAllKeepsResultsAtInputIndices(t *testing.T, concurrency int) {
 	}
 	rwAddPending(t, pending, updates)
 
-	records := map[string]PackageConfig{
+	records := map[string]registry.PackageConfig{
 		"dev-lang/flutter":     rwRecord(rwDartRequire),
 		"app-misc/indep":       rwRecord(nil),
 		"dev-lang/dart@stable": rwRecord(nil),
@@ -435,7 +437,7 @@ func TestRequiresWavesDependentWaitsWhenRequiredFails(t *testing.T) {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
-	records := map[string]PackageConfig{
+	records := map[string]registry.PackageConfig{
 		"dev-lang/flutter":     rwRecord(rwDartRequire),
 		"dev-lang/dart@stable": rwRecord(nil),
 	}
@@ -491,9 +493,9 @@ func TestRequiresWavesDependentWaitsWhenRequiredWaits(t *testing.T) {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
-	records := map[string]PackageConfig{
+	records := map[string]registry.PackageConfig{
 		"dev-lang/flutter": rwRecord(rwDartRequire),
-		"dev-lang/dart@stable": rwRecord(map[string]RequireSpec{
+		"dev-lang/dart@stable": rwRecord(map[string]registry.RequireSpec{
 			"dev-util/dartgen": {Pattern: `"dartgen":\s*"([^"]+)"`, Pin: "~"},
 		}),
 	}
@@ -539,9 +541,9 @@ func TestRequiresWavesCycleAttemptsEveryEntry(t *testing.T) {
 		t.Fatalf("NewPendingList: %v", err)
 	}
 	rwAddPending(t, pending, updates)
-	records := map[string]PackageConfig{
-		"app-misc/aaa": rwRecord(map[string]RequireSpec{"app-misc/bbb": {Pattern: `"b":\s*"([^"]+)"`, Pin: "~"}}),
-		"app-misc/bbb": rwRecord(map[string]RequireSpec{"app-misc/aaa": {Pattern: `"a":\s*"([^"]+)"`, Pin: "~"}}),
+	records := map[string]registry.PackageConfig{
+		"app-misc/aaa": rwRecord(map[string]registry.RequireSpec{"app-misc/bbb": {Pattern: `"b":\s*"([^"]+)"`, Pin: "~"}}),
+		"app-misc/bbb": rwRecord(map[string]registry.RequireSpec{"app-misc/aaa": {Pattern: `"a":\s*"([^"]+)"`, Pin: "~"}}),
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 

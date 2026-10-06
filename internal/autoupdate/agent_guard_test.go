@@ -14,6 +14,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 var wideningKnobWords = []string{"tool", "permission", "allowed", "webfetch", "domain", "bash", "adddir", "add_dir", "sandbox", "disallow"}
@@ -48,7 +50,7 @@ func TestNoConfigKeyWidensAnAgent(t *testing.T) {
 		tp   reflect.Type
 	}{
 		{"LLMConfig", reflect.TypeOf(LLMConfig{})},
-		{"PackageConfig", reflect.TypeOf(PackageConfig{})},
+		{"PackageConfig", reflect.TypeOf(registry.PackageConfig{})},
 	} {
 		if knobs := wideningKnobs(root.tp, root.name, map[reflect.Type]bool{}); len(knobs) > 0 {
 			t.Errorf("%s exposes a key that could widen an agent's tools, hosts or paths (R5.3): %v", root.name, knobs)

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // A minimal ebuild whose SRC_URI basename matches the FileZilla Pro distfile.
@@ -75,7 +76,7 @@ func TestApplyLiveFileZillaPro(t *testing.T) {
 		t.Fatalf("pending.Add: %v", err)
 	}
 
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		pkg: {URL: "https://x.test", Parser: "regex", Pattern: `(\d)`, Meta: map[string]string{
 			fetch.MetaFetchMethod:      "post",
 			fetch.MetaFetchURL:         "https://filezilla-project.org/prodownload.php?beta=0",

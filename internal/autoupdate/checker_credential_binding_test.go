@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 052, sub-task 1.3 — S052-R2.1, R2.2: a refused record fails alone,
@@ -63,7 +64,7 @@ func (h *cbHostTransport) total() int {
 
 // newCBChecker builds a Checker over packages, with each package's ebuild at
 // 1.0.0, a non-blocking rate limiter and the given HTTP client.
-func newCBChecker(t *testing.T, packages map[string]PackageConfig, client *fetch.RetryableHTTPClient, opts ...CheckerOption) *Checker {
+func newCBChecker(t *testing.T, packages map[string]registry.PackageConfig, client *fetch.RetryableHTTPClient, opts ...CheckerOption) *Checker {
 	t.Helper()
 	tmp := t.TempDir()
 	overlay := filepath.Join(tmp, "overlay")
@@ -72,7 +73,7 @@ func newCBChecker(t *testing.T, packages map[string]PackageConfig, client *fetch
 	}
 	all := append([]CheckerOption{
 		WithConfigDir(filepath.Join(tmp, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithHTTPClient(client),
 		WithRateLimiter(&recordingRateLimiter{}),
 	}, opts...)
@@ -83,11 +84,11 @@ func newCBChecker(t *testing.T, packages map[string]PackageConfig, client *fetch
 	return c
 }
 
-func regexPkg(u string, headers map[string]string) PackageConfig {
-	return PackageConfig{URL: u, Parser: "regex", Pattern: cbVersionPattern, Headers: headers}
+func regexPkg(u string, headers map[string]string) registry.PackageConfig {
+	return registry.PackageConfig{URL: u, Parser: "regex", Pattern: cbVersionPattern, Headers: headers}
 }
 
-func withFallback(p PackageConfig, fallback string) PackageConfig {
+func withFallback(p registry.PackageConfig, fallback string) registry.PackageConfig {
 	p.FallbackURL, p.FallbackParser, p.FallbackPattern = fallback, "regex", cbVersionPattern
 	return p
 }
@@ -123,7 +124,7 @@ func TestCheckAll_CredentialMismatchFailsOnlyThatPackage(t *testing.T) {
 
 	client := fetch.NewRetryableHTTPClient()
 	client.SetDelayFunc(func(time.Duration) {})
-	checker := newCBChecker(t, map[string]PackageConfig{
+	checker := newCBChecker(t, map[string]registry.PackageConfig{
 		"app-misc/leak": regexPkg(srv.URL+"/latest", map[string]string{"X-Api-Key": "${GITHUB_TOKEN}"}),
 		"app-misc/fine": regexPkg(srv.URL+"/fine", nil),
 		"app-misc/own":  regexPkg(srv.URL+"/own", map[string]string{"X-Api-Key": "${BENTOO_T}"}),

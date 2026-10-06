@@ -23,6 +23,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -1058,7 +1059,7 @@ func stdinIsTerminal() bool {
 // declined prompt and a failed write all leave the check's exit code alone. The
 // check itself already succeeded; reconciliation is bookkeeping on top of it.
 func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		// Nothing to reconcile against. The check has already reported whatever
 		// this meant for the packages themselves, so this is a debug note, not a
@@ -1297,7 +1298,7 @@ func (ar *autoupdateRun) runList(configDir string) error {
 // With --fix it hands over to runLintFix after the report, which repairs what
 // the rules above can repair and then owns the exit code — see there.
 func (ar *autoupdateRun) runLint(overlayPath string) error {
-	issues, err := autoupdate.LintPackagesConfig(ar.log(), overlayPath)
+	issues, err := registry.LintPackagesConfig(ar.log(), overlayPath)
 	// Issues found by the text scan are printed even when the file then fails to
 	// parse — a missing marker is worth reporting alongside the syntax error.
 	for _, issue := range issues {
@@ -1330,7 +1331,7 @@ func (ar *autoupdateRun) runLint(overlayPath string) error {
 // printLintTally closes the report with a per-rule count: a registry
 // mid-migration reports the same rule hundreds of times, so the detail lines
 // above say WHERE and this says WHAT.
-func printLintTally(issues []autoupdate.LintIssue) {
+func printLintTally(issues []registry.LintIssue) {
 	counts := make(map[string]int, len(issues))
 	rules := make([]string, 0, len(issues))
 	for _, issue := range issues {
@@ -1426,8 +1427,8 @@ func getStatusColor(status autoupdate.UpdateStatus) *color.Color {
 // missing or unparseable config is not fatal to --apply (only serial-gated
 // packages need it), so it logs a debug note and returns nil, leaving the
 // normal pkgdev-from-SRC_URI path intact for every package.
-func loadPackagesConfigForApply(log *slog.Logger, overlayPath string) *autoupdate.PackagesConfig {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+func loadPackagesConfigForApply(log *slog.Logger, overlayPath string) *registry.PackagesConfig {
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		log.Debug("apply: no usable packages.toml; authenticated fetch disabled", "err", err)
 		return nil

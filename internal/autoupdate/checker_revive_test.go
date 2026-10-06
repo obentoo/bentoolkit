@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -37,13 +38,13 @@ func boolPtr(b bool) *bool { return &b }
 // newReviveChecker builds a Checker over the given packages config wired with a
 // no-op rate limiter and isolated temp dirs, mirroring the cursor/buildid test
 // setup. The overlay dir is returned so callers can drop ebuilds if needed.
-func newReviveChecker(t *testing.T, pkgs map[string]PackageConfig) *Checker {
+func newReviveChecker(t *testing.T, pkgs map[string]registry.PackageConfig) *Checker {
 	t.Helper()
 	overlayDir := t.TempDir()
 	configDir := t.TempDir()
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: pkgs}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: pkgs}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -71,7 +72,7 @@ func TestFindRevivableOrphans_UpstreamNewer(t *testing.T) {
 	pkg := "app-editors/orphan"
 	srv := jsonVersionServer(t, "2.0.0")
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 	})
 	prov := &fakeProvider{versions: map[string][]string{
@@ -109,7 +110,7 @@ func TestFindRevivableOrphans_PresentSkipped(t *testing.T) {
 	overlayDir := t.TempDir()
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(t.TempDir()),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),
@@ -138,7 +139,7 @@ func TestFindRevivableOrphans_UpstreamNotNewer(t *testing.T) {
 	pkg := "app-editors/orphan"
 	srv := jsonVersionServer(t, "1.5.0")
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 	})
 	prov := &fakeProvider{versions: map[string][]string{
@@ -164,7 +165,7 @@ func TestFindRevivableOrphans_EnabledSkipped(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(true)},
 	})
 	prov := &fakeProvider{versions: map[string][]string{
@@ -186,7 +187,7 @@ func TestFindRevivableOrphans_NotInGentoo(t *testing.T) {
 	pkg := "app-editors/gone"
 	srv := jsonVersionServer(t, "9.9.9")
 
-	checker := newReviveChecker(t, map[string]PackageConfig{
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
 		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
 	})
 	// Empty version map => provider returns ErrNotFound for every package.
@@ -216,7 +217,7 @@ func TestFindRevivableOrphans_SeriesNoMatchSkipped(t *testing.T) {
 	overlayDir := t.TempDir()
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(t.TempDir()),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg: {
 				Parser:  "json",
 				Path:    "version",
@@ -258,7 +259,7 @@ func TestFindRevivableOrphans_SlotNoMatchSkipped(t *testing.T) {
 	overlayDir := t.TempDir()
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(t.TempDir()),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			key: {
 				Parser:  "json",
 				Path:    "version",

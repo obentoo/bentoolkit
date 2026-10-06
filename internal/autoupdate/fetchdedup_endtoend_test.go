@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sync/atomic"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -62,13 +64,13 @@ func buildDedupRegistry(t *testing.T, srv *dedupCountingServer, sharers int, opt
 	overlayDir := filepath.Join(tmpDir, "overlay")
 	configDir := filepath.Join(tmpDir, "config")
 
-	packages := make(map[string]PackageConfig, sharers+1)
+	packages := make(map[string]registry.PackageConfig, sharers+1)
 	for i := 0; i < sharers; i++ {
 		name := fmt.Sprintf("media-plugins/gst-plugin-%02d", i)
-		packages[name] = PackageConfig{URL: srv.URL + "/shared", Parser: "json", Path: "version"}
+		packages[name] = registry.PackageConfig{URL: srv.URL + "/shared", Parser: "json", Path: "version"}
 		createTestEbuild(t, overlayDir, name, "0.9.0")
 	}
-	packages[dedupAuxPackage] = PackageConfig{
+	packages[dedupAuxPackage] = registry.PackageConfig{
 		URL:        srv.URL + "/aux",
 		Parser:     "json",
 		Path:       "version",
@@ -79,7 +81,7 @@ func buildDedupRegistry(t *testing.T, srv *dedupCountingServer, sharers int, opt
 
 	allOpts := append([]CheckerOption{
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: packages}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: packages}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	}, opts...)
 

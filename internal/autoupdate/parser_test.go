@@ -10,6 +10,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -534,7 +535,7 @@ func TestNewParserRegexNoCaptureGroup(t *testing.T) {
 // TestParseVersionJSON tests ParseVersion with JSON config
 func TestParseVersionJSON(t *testing.T) {
 	content := []byte(`{"version": "1.0.0"}`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "version",
 	}
@@ -551,7 +552,7 @@ func TestParseVersionJSON(t *testing.T) {
 // TestParseVersionRegex tests ParseVersion with regex config
 func TestParseVersionRegex(t *testing.T) {
 	content := []byte(`pkgver=2.0.0`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:  "regex",
 		Pattern: `pkgver=([0-9.]+)`,
 	}
@@ -569,7 +570,7 @@ func TestParseVersionRegex(t *testing.T) {
 func TestParseVersionFallback(t *testing.T) {
 	// Content that doesn't match JSON but matches regex
 	content := []byte(`pkgver=3.0.0`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:          "json",
 		Path:            "version",
 		FallbackParser:  "regex",
@@ -588,7 +589,7 @@ func TestParseVersionFallback(t *testing.T) {
 // TestParseVersionAllFail tests ParseVersion when all parsers fail
 func TestParseVersionAllFail(t *testing.T) {
 	content := []byte(`no version here`)
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:          "json",
 		Path:            "version",
 		FallbackParser:  "regex",

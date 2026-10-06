@@ -3,6 +3,8 @@ package autoupdate
 import (
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Regression guards for the tech review of story 079, group 4.
@@ -12,27 +14,27 @@ import (
 // pins are substitutions. Declaring requires, changing the pin or capturing
 // another version must each change the digest.
 func TestRequiresReviewDigestCoversRequirements(t *testing.T) {
-	spec := func(pin string) map[string]RequireSpec {
-		return map[string]RequireSpec{"dev-lang/dart": {Pattern: `x([0-9.]+)`, Pin: pin}}
+	spec := func(pin string) map[string]registry.RequireSpec {
+		return map[string]registry.RequireSpec{"dev-lang/dart": {Pattern: `x([0-9.]+)`, Pin: pin}}
 	}
 	upd := func(v string) *PendingUpdate {
 		return &PendingUpdate{Requires: map[string]string{"dev-lang/dart": v}}
 	}
-	base := substitutionDigest(PackageConfig{Requires: spec("~")}, upd("3.14.0"))
+	base := substitutionDigest(registry.PackageConfig{Requires: spec("~")}, upd("3.14.0"))
 	if base == "" {
 		t.Fatal("a bump with a requirement digests to nothing")
 	}
 	for name, got := range map[string]string{
-		"requires not declared":  substitutionDigest(PackageConfig{}, &PendingUpdate{}),
-		"pin changed":            substitutionDigest(PackageConfig{Requires: spec(">=")}, upd("3.14.0")),
-		"version changed":        substitutionDigest(PackageConfig{Requires: spec("~")}, upd("3.15.0")),
-		"declared, not captured": substitutionDigest(PackageConfig{Requires: spec("~")}, &PendingUpdate{}),
+		"requires not declared":  substitutionDigest(registry.PackageConfig{}, &PendingUpdate{}),
+		"pin changed":            substitutionDigest(registry.PackageConfig{Requires: spec(">=")}, upd("3.14.0")),
+		"version changed":        substitutionDigest(registry.PackageConfig{Requires: spec("~")}, upd("3.15.0")),
+		"declared, not captured": substitutionDigest(registry.PackageConfig{Requires: spec("~")}, &PendingUpdate{}),
 	} {
 		if got == base {
 			t.Errorf("%s: digest unchanged (%q)", name, got)
 		}
 	}
-	if again := substitutionDigest(PackageConfig{Requires: spec("~")}, upd("3.14.0")); again != base {
+	if again := substitutionDigest(registry.PackageConfig{Requires: spec("~")}, upd("3.14.0")); again != base {
 		t.Errorf("the same requirement digests differently: %q vs %q", again, base)
 	}
 }
@@ -61,7 +63,7 @@ func TestRequiresReviewCaptureRefusesRevisionForTilde(t *testing.T) {
 	page, _ := requiresCaptureServer(t, `{"current_release": {"stable": "3.48.0"},
   "releases": [{"version": "3.48.0", "dart_sdk_version": "3.14.0-r1"}]}`)
 	c := requiresCaptureChecker(t, requiresCaptureConfig(page.URL,
-		map[string]RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
+		map[string]registry.RequireSpec{requiresCaptureAtom: requiresCaptureFlutterSpec()}))
 	result, err := c.CheckPackage(t.Context(), requiresCapturePkg, true)
 	requiresCaptureAssertHeld(t, c, result, err, requiresCapturePkg, requiresCaptureAtom, "3.14.0-r1")
 }

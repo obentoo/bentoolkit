@@ -18,7 +18,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s058OnStderrOnly asserts line is on stderr exactly once and absent from stdout.
@@ -106,8 +106,8 @@ foo — carries a redundant enabled = true.
 """
 # END
 `)
-	registry := filepath.Join(dir, "packages.toml")
-	if err := os.Chmod(registry, 0o444); err != nil {
+	registryPath := filepath.Join(dir, "packages.toml")
+	if err := os.Chmod(registryPath, 0o444); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Chmod(dir, 0o555); err != nil {
@@ -115,13 +115,13 @@ foo — carries a redundant enabled = true.
 	}
 	t.Cleanup(func() {
 		_ = os.Chmod(dir, 0o755)
-		_ = os.Chmod(registry, 0o644)
+		_ = os.Chmod(registryPath, 0o644)
 	})
 
 	stdout, stderr, code := c.Run("overlay", "autoupdate", "--lint", "--fix", "--yes")
 	if code != 1 {
 		t.Errorf("exit %d, want 1", code)
 	}
-	s058OnStdoutOnly(t, stdout, stderr, "[net-misc/foo] "+autoupdate.LintRedundantEnabled)
+	s058OnStdoutOnly(t, stdout, stderr, "[net-misc/foo] "+registry.LintRedundantEnabled)
 	s058OnStderrOnly(t, stdout, stderr, "The registry was NOT repaired:")
 }

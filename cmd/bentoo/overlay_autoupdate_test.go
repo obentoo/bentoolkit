@@ -16,6 +16,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -517,7 +518,7 @@ func (f *reconcileFixture) readRegistry(t *testing.T) []byte {
 // assertion names the entry it is about instead of grepping the whole file.
 func (f *reconcileFixture) pins(t *testing.T) map[string]string {
 	t.Helper()
-	cfg, err := autoupdate.LoadPackagesConfig(f.overlayDir)
+	cfg, err := registry.LoadPackagesConfig(f.overlayDir)
 	if err != nil {
 		t.Fatalf("reload packages.toml: %v", err)
 	}
@@ -533,7 +534,7 @@ func (f *reconcileFixture) pins(t *testing.T) map[string]string {
 // than against a number hard-coded twice.
 func (f *reconcileFixture) divergences(t *testing.T) []autoupdate.Divergence {
 	t.Helper()
-	cfg, err := autoupdate.LoadPackagesConfig(f.overlayDir)
+	cfg, err := registry.LoadPackagesConfig(f.overlayDir)
 	if err != nil {
 		t.Fatalf("load packages.toml: %v", err)
 	}

@@ -1,5 +1,4 @@
-// Package autoupdate provides configuration management for ebuild autoupdate.
-package autoupdate
+package registry
 
 import (
 	"errors"
@@ -592,11 +591,11 @@ func (c *PackageConfig) IsHeld() bool {
 	return c.Hold
 }
 
-// refusedBy names the packages.toml key that keeps pkg out of autoupdate —
+// RefusedBy names the packages.toml key that keeps pkg out of autoupdate —
 // "hold = true" or "enabled = false" — or returns "" when nothing does, including
 // when pkg has no record. Hold is named first because it is the stronger
 // statement: it survives the overlay reconciliation that may clear a disable.
-func refusedBy(configs map[string]PackageConfig, pkg string) string {
+func RefusedBy(configs map[string]PackageConfig, pkg string) string {
 	cfg, ok := configs[pkg]
 	switch {
 	case !ok:
@@ -944,14 +943,14 @@ var enabledAssignRegex = regexp.MustCompile(`^(\s*)enabled\s*=`)
 // can match.
 var disabledByAssignRegex = regexp.MustCompile(`^(\s*)disabled_by\s*=`)
 
-// disabledByAuto is the single value of PackageConfig.DisabledBy that the
+// DisabledByAuto is the single value of PackageConfig.DisabledBy that the
 // overlay reconciliation may clear: the checker wrote the disable because the
 // ebuild had vanished. The writer here and every reader of the field share this
 // constant so the two cannot drift, because the drift would be silent — an
 // origin the reader does not recognise reads as a human decision and is simply
 // left alone, so a typo would strand entries as permanently unrevivable without
 // producing a single error (story 043, R1.1/R1.2).
-const disabledByAuto = "auto"
+const DisabledByAuto = "auto"
 
 // versionAssignRegex matches a `version = ...` assignment line, capturing the
 // indentation so a rewrite preserves it. The `=` must follow `version` after
@@ -1010,7 +1009,7 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 	}
 
 	enabledAssign := fmt.Sprintf("enabled = %t", value)
-	originAssign := fmt.Sprintf("disabled_by = %q", disabledByAuto)
+	originAssign := fmt.Sprintf("disabled_by = %q", DisabledByAuto)
 
 	return editPackagesConfigSections(overlayPath, targets, func(_ string, body []string, inComments []bool) ([]string, bool) {
 		// Whether the record already states an origin decides whether a disable
@@ -1151,7 +1150,7 @@ func SetPackageVersions(overlayPath string, pins map[string]string) error {
 				if inComments[j] {
 					continue
 				}
-				if strings.TrimSpace(line) == recordEndMarker {
+				if strings.TrimSpace(line) == RecordEndMarker {
 					at = j
 					break
 				}
@@ -1680,4 +1679,17 @@ func validateDistinctEntries(pkgs map[string]PackageConfig) error {
 		seen[key] = pkg
 	}
 	return nil
+}
+
+// UpstreamURLs returns cfg's registry URL, FallbackURL, AuxURL and Mirrors,
+// skipping the empty ones (S051-R3.4, S051-R3.5). The zero PackageConfig — no
+// config for the package — yields none.
+func (cfg PackageConfig) UpstreamURLs() []string {
+	var urls []string
+	for _, u := range append([]string{cfg.URL, cfg.FallbackURL, cfg.AuxURL}, cfg.Mirrors...) {
+		if u != "" {
+			urls = append(urls, u)
+		}
+	}
+	return urls
 }

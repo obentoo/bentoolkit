@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestDeriveOpTimeout verifies the per-operation budget is sized to fit every
@@ -38,10 +39,10 @@ func TestOperationTimeout(t *testing.T) {
 	if got := checker.operationTimeout(nil); got != 40*time.Second {
 		t.Errorf("operationTimeout(nil) = %v, want global 40s", got)
 	}
-	if got := checker.operationTimeout(&PackageConfig{}); got != 40*time.Second {
+	if got := checker.operationTimeout(&registry.PackageConfig{}); got != 40*time.Second {
 		t.Errorf("operationTimeout(zero cfg) = %v, want global 40s", got)
 	}
-	if got := checker.operationTimeout(&PackageConfig{Timeout: 90}); got != 90*time.Second {
+	if got := checker.operationTimeout(&registry.PackageConfig{Timeout: 90}); got != 90*time.Second {
 		t.Errorf("operationTimeout(per-package 90) = %v, want 90s", got)
 	}
 }
@@ -128,19 +129,5 @@ func TestFetchContent_RetryRecoversAfterTimeout(t *testing.T) {
 	}
 	if n := atomic.LoadInt32(&attempts); n < 2 {
 		t.Errorf("expected at least 2 attempts (timeout then retry), got %d", n)
-	}
-}
-
-// TestValidatePackageConfig_NegativeTimeout asserts a negative per-package
-// timeout is rejected, while zero (the "use global" sentinel) is accepted.
-func TestValidatePackageConfig_NegativeTimeout(t *testing.T) {
-	bad := &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: "v(.+)", Timeout: -5}
-	if err := ValidatePackageConfig(nil, "cat/pkg", bad); err == nil {
-		t.Error("expected an error for a negative timeout, got nil")
-	}
-
-	ok := &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: "v(.+)", Timeout: 0}
-	if err := ValidatePackageConfig(nil, "cat/pkg", ok); err != nil {
-		t.Errorf("zero timeout should be valid (use global), got: %v", err)
 	}
 }

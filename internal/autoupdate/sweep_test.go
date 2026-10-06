@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -232,7 +234,7 @@ func TestSweeperExecuteHonoursCancelledContext(t *testing.T) {
 // a disabled or held entry — still HOLDS its ebuild, so dropping one would make
 // the sweep delete a maintained release line.
 func TestScopeConfigsKeepsEveryClaimantOfTheAtom(t *testing.T) {
-	cfgs := map[string]PackageConfig{
+	cfgs := map[string]registry.PackageConfig{
 		"media-plugins/gst-vpx@stable": regEntry("1.28.5", ""),
 		"media-plugins/gst-vpx@dev":    regEntry("1.29.2", ""),
 		"net-libs/webkit-gtk:4.1":      regEntry("2.52.5-r411", ""),
@@ -297,7 +299,7 @@ func TestScopeConfigsKeepsEveryClaimantOfTheAtom(t *testing.T) {
 	})
 }
 
-func keysOf(m map[string]PackageConfig) []string {
+func keysOf(m map[string]registry.PackageConfig) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {
 		out = append(out, k)
@@ -312,7 +314,7 @@ func keysOf(m map[string]PackageConfig) []string {
 
 // sweepFixture builds an overlay whose directories cover every case the planner
 // must distinguish, and returns the overlay path with its registry.
-func sweepFixture(t *testing.T) (string, map[string]PackageConfig) {
+func sweepFixture(t *testing.T) (string, map[string]registry.PackageConfig) {
 	t.Helper()
 	overlayDir := filepath.Join(t.TempDir(), "overlay")
 
@@ -331,7 +333,7 @@ func sweepFixture(t *testing.T) (string, map[string]PackageConfig) {
 		}
 	}
 
-	cfgs := map[string]PackageConfig{
+	cfgs := map[string]registry.PackageConfig{
 		"test-cat/residue":  regEntry("2.0.0", ""),
 		"test-cat/clean":    regEntry("2.0.0", ""),
 		"test-cat/blocked":  regEntry("", ""),
@@ -448,7 +450,7 @@ func TestSweepLeavesHeldFallbackOnDisk(t *testing.T) {
 
 	held := regEntry("2.0.0", "")
 	held.Hold = true
-	cfgs := map[string]PackageConfig{
+	cfgs := map[string]registry.PackageConfig{
 		"test-cat/held":    held,
 		"test-cat/residue": regEntry("2.0.0", ""),
 	}
@@ -700,7 +702,7 @@ func TestExecuteOverlaySweepLeavesBlockedDirectoriesAlone(t *testing.T) {
 // allows rather than whatever overlap a sleep happened to produce.
 func TestExecuteOverlaySweepRespectsConcurrencyBound(t *testing.T) {
 	overlayDir := filepath.Join(t.TempDir(), "overlay")
-	cfgs := map[string]PackageConfig{}
+	cfgs := map[string]registry.PackageConfig{}
 	for i := 0; i < 8; i++ {
 		pkg := fmt.Sprintf("test-cat/pkg%d", i)
 		createTestEbuildFile(t, overlayDir, pkg, "1.0.0")
@@ -909,7 +911,7 @@ func TestOverlaySweepIntegration(t *testing.T) {
 	createTestEbuildFile(t, overlayDir, "test-cat/blocked", "1.0.0")
 	createTestEbuildFile(t, overlayDir, "test-cat/blocked", "2.0.0")
 
-	cfgs := map[string]PackageConfig{
+	cfgs := map[string]registry.PackageConfig{
 		"test-cat/residue":         regEntry("2.0.0", ""),
 		"test-cat/siblings@stable": regEntry("1.28.5", ""),
 		"test-cat/siblings@dev":    regEntry("1.29.2", ""),

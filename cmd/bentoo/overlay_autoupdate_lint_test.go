@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // writeLintRegistry creates an overlay whose .autoupdate/packages.toml holds
@@ -339,12 +340,12 @@ func TestAutoupdateLintFixYesWritesWithoutReadingStdin(t *testing.T) {
 	if !strings.Contains(out, "1 finding(s) still need a human") {
 		t.Errorf("the run implied a clean registry while a finding remains; got:\n%s", out)
 	}
-	if !strings.Contains(out, autoupdate.LintLegacyBase) {
+	if !strings.Contains(out, registry.LintLegacyBase) {
 		t.Errorf("the remaining finding is not named; got:\n%s", out)
 	}
 	if at := strings.Index(out, "still need a human"); at >= 0 {
 		tail := out[at:]
-		for _, repaired := range []string{autoupdate.LintLegacyBinary, autoupdate.LintRedundantEnabled, autoupdate.LintFieldOrder} {
+		for _, repaired := range []string{registry.LintLegacyBinary, registry.LintRedundantEnabled, registry.LintFieldOrder} {
 			if strings.Contains(tail, repaired) {
 				t.Errorf("%s is listed as still needing a human, but --fix repairs it; got:\n%s", repaired, out)
 			}
@@ -477,7 +478,7 @@ ik_llama-cpp — commit-tracked, base version left to the ebuild.
 	// Counted on "[pkg] rule:" rather than on the rule name alone, because the
 	// tally block prints the rule name too ("legacy-base  1") — that is a
 	// different statement, not a repetition, and must not make this fail.
-	finding := "[sci-ml/ik_llama-cpp] " + autoupdate.LintLegacyBase + ":"
+	finding := "[sci-ml/ik_llama-cpp] " + registry.LintLegacyBase + ":"
 	if n := strings.Count(out, finding); n != 1 {
 		t.Errorf("the finding line is printed %d time(s), want exactly 1; got:\n%s", n, out)
 	}

@@ -1,9 +1,6 @@
 package autoupdate
 
 import (
-	"errors"
-	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
@@ -43,27 +40,6 @@ func TestSplitPkgAtomRefusesNonElementHalves(t *testing.T) {
 		}
 		if _, err := candidateIn("/overlay", tt.key, "1.0"); err == nil {
 			t.Errorf("candidateIn(/overlay, %q) accepted the key", tt.key)
-		}
-	}
-}
-
-// TestValidatePackageConfigNamesRejectedPathElement pins the report a person
-// reads: the error wraps ErrInvalidPackageKey, names the package key, and
-// names the half that was refused.
-func TestValidatePackageConfigNamesRejectedPathElement(t *testing.T) {
-	for _, tt := range unsafePkgKeys {
-		cfg := PackageConfig{URL: "https://example.com/x", Parser: "json", Path: "version"}
-		err := ValidatePackageConfig(nil, tt.key, &cfg)
-		if !errors.Is(err, ErrInvalidPackageKey) {
-			t.Errorf("ValidatePackageConfig(nil, %q) = %v, want ErrInvalidPackageKey", tt.key, err)
-			continue
-		}
-		msg := err.Error()
-		if !strings.Contains(msg, "package "+tt.key+":") {
-			t.Errorf("ValidatePackageConfig(nil, %q) error %q does not name the package", tt.key, msg)
-		}
-		if !strings.Contains(msg, strconv.Quote(tt.rejected)) {
-			t.Errorf("ValidatePackageConfig(nil, %q) error %q does not name the rejected element %q", tt.key, msg, tt.rejected)
 		}
 	}
 }

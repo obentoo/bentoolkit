@@ -20,6 +20,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	appconfig "github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -111,7 +112,7 @@ type AnalyzeResult struct {
 	// Package is the full package name (category/package)
 	Package string
 	// SuggestedSchema is the schema suggested by analysis
-	SuggestedSchema *PackageConfig
+	SuggestedSchema *registry.PackageConfig
 	// Validated indicates if the schema was validated successfully
 	Validated bool
 	// ExtractedVersion is the version extracted using the schema
@@ -137,7 +138,7 @@ type Analyzer struct {
 	// overlayPath is the path to the overlay directory
 	overlayPath string
 	// config holds the packages configuration
-	config *PackagesConfig
+	config *registry.PackagesConfig
 	// llmClient handles LLM-based analysis
 	llmClient LLMProvider
 	// httpClient handles HTTP requests with retry logic
@@ -226,7 +227,7 @@ func WithAnalyzerConfigDir(dir string) AnalyzerOption {
 }
 
 // WithAnalyzerPackagesConfig sets a custom packages configuration.
-func WithAnalyzerPackagesConfig(config *PackagesConfig) AnalyzerOption {
+func WithAnalyzerPackagesConfig(config *registry.PackagesConfig) AnalyzerOption {
 	return func(a *Analyzer) error {
 		a.config = config
 		return nil
@@ -284,12 +285,12 @@ func NewAnalyzer(overlayPath string, opts ...AnalyzerOption) (*Analyzer, error) 
 
 	// Load packages configuration if not provided
 	if analyzer.config == nil {
-		config, err := LoadPackagesConfig(overlayPath)
+		config, err := registry.LoadPackagesConfig(overlayPath)
 		if err != nil {
 			// If config doesn't exist, create empty one
-			if errors.Is(err, ErrPackagesConfigNotFound) {
-				analyzer.config = &PackagesConfig{
-					Packages: make(map[string]PackageConfig),
+			if errors.Is(err, registry.ErrPackagesConfigNotFound) {
+				analyzer.config = &registry.PackagesConfig{
+					Packages: make(map[string]registry.PackageConfig),
 				}
 			} else {
 				return nil, fmt.Errorf("failed to load packages config: %w", err)
@@ -517,7 +518,7 @@ func (a *Analyzer) fetchContentFromURL(ctx context.Context, url string) ([]byte,
 // analyzeContent analyzes content and generates a schema.
 // The LLM call, and its rate-limit wait, are bounded by a child of the
 // caller's ctx with the configured LLM timeout.
-func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string, source *DataSource) (*PackageConfig, error) {
+func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *ebuilds.EbuildMetadata, hint string, source *DataSource) (*registry.PackageConfig, error) {
 	// If LLM client is available, use it for analysis
 	if a.llmClient != nil {
 		opCtx, cancel := context.WithTimeout(ctx, a.llmTimeout)
@@ -546,8 +547,8 @@ func (a *Analyzer) analyzeContent(ctx context.Context, content []byte, meta *ebu
 }
 
 // schemaFromAnalysis converts LLM analysis to PackageConfig.
-func (a *Analyzer) schemaFromAnalysis(analysis *SchemaAnalysis, source *DataSource) (*PackageConfig, error) {
-	schema := &PackageConfig{
+func (a *Analyzer) schemaFromAnalysis(analysis *SchemaAnalysis, source *DataSource) (*registry.PackageConfig, error) {
+	schema := &registry.PackageConfig{
 		URL:    source.URL,
 		Parser: analysis.ParserType,
 	}
@@ -593,8 +594,8 @@ func (a *Analyzer) schemaFromAnalysis(analysis *SchemaAnalysis, source *DataSour
 }
 
 // generateDefaultSchema generates a default schema based on content type.
-func (a *Analyzer) generateDefaultSchema(content []byte, source *DataSource) (*PackageConfig, error) {
-	schema := &PackageConfig{
+func (a *Analyzer) generateDefaultSchema(content []byte, source *DataSource) (*registry.PackageConfig, error) {
+	schema := &registry.PackageConfig{
 		URL: source.URL,
 	}
 
@@ -843,7 +844,7 @@ func hasEbuilds(dir string) bool {
 }
 
 // SaveSchema saves a validated schema to packages.toml.
-func (a *Analyzer) SaveSchema(pkg string, schema *PackageConfig) error {
+func (a *Analyzer) SaveSchema(pkg string, schema *registry.PackageConfig) error {
 	// Update in-memory config
 	a.config.Packages[pkg] = *schema
 
@@ -884,7 +885,7 @@ func (a *Analyzer) savePackagesConfig() error {
 			buf.WriteString("\n")
 		}
 		cfg := a.config.Packages[pkg]
-		buf.WriteString(RenderRecord(pkg, &cfg))
+		buf.WriteString(registry.RenderRecord(pkg, &cfg))
 	}
 
 	// The registry keeps the mode it already has; a new one is created 0644,
@@ -904,46 +905,12 @@ func (a *Analyzer) savePackagesConfig() error {
 	return nil
 }
 
-// formatCommentsField renders a record's doc text as the TOML multi-line basic
-// string that closes the record, marker line excluded.
-//
-// Three things are escaped or adjusted, all for the same reason — the registry
-// is edited by hand and read back by raw-text tooling, so the output has to be
-// both valid TOML and safe to scan line by line:
-//   - a backslash, and any run of three or more quotes, would either be read as
-//     an escape or close the string early;
-//   - a line starting with "[" looks like a section header to the surgical edit
-//     in setPackagesEnabled, which would cut the record short there, so it is
-//     indented by one space (the lint rejects the same shape in hand-written
-//     records);
-//   - trailing whitespace is dropped so a re-encode is byte-stable.
-func formatCommentsField(s string) string {
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	// Only a run of three or more quotes can close the string early; escape every
-	// quote in such a run and leave ordinary "quoted" words alone.
-	s = tripleQuoteRegex.ReplaceAllStringFunc(s, func(run string) string {
-		return strings.Repeat(`\"`, len(run))
-	})
-
-	lines := strings.Split(strings.Trim(s, "\n"), "\n")
-	for i, ln := range lines {
-		ln = strings.TrimRight(ln, " \t")
-		if strings.HasPrefix(ln, "[") {
-			ln = " " + ln
-		}
-		lines[i] = ln
-	}
-
-	return "comments = \"\"\"\n" + strings.Join(lines, "\n") + "\n\"\"\"\n"
-}
-
 // LoadAndMergeSchema loads existing config, adds/updates a schema, and saves.
 // This ensures existing entries are preserved when adding new schemas.
-func (a *Analyzer) LoadAndMergeSchema(pkg string, schema *PackageConfig) error {
+func (a *Analyzer) LoadAndMergeSchema(pkg string, schema *registry.PackageConfig) error {
 	// Reload config from disk to get latest state
-	existingConfig, err := LoadPackagesConfig(a.overlayPath)
-	if err != nil && !errors.Is(err, ErrPackagesConfigNotFound) {
+	existingConfig, err := registry.LoadPackagesConfig(a.overlayPath)
+	if err != nil && !errors.Is(err, registry.ErrPackagesConfigNotFound) {
 		return fmt.Errorf("failed to load existing config: %w", err)
 	}
 
@@ -965,7 +932,7 @@ func (a *Analyzer) LoadAndMergeSchema(pkg string, schema *PackageConfig) error {
 }
 
 // Config returns the packages configuration.
-func (a *Analyzer) Config() *PackagesConfig {
+func (a *Analyzer) Config() *registry.PackagesConfig {
 	return a.config
 }
 

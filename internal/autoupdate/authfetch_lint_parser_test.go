@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 068, sub-task 2.1 — R2.1-R2.4, R5.1: --lint runs the same
@@ -32,10 +33,10 @@ path = "tag_name"
 
 // s068InvalidConfigIssues returns the invalid-config messages lint reported
 // for pkg.
-func s068InvalidConfigIssues(issues []LintIssue, pkg string) []string {
+func s068InvalidConfigIssues(issues []registry.LintIssue, pkg string) []string {
 	var out []string
 	for _, is := range issues {
-		if is.Package == pkg && is.Rule == LintInvalidConfig {
+		if is.Package == pkg && is.Rule == registry.LintInvalidConfig {
 			out = append(out, is.Message)
 		}
 	}
@@ -63,11 +64,11 @@ func TestLint_ReportsAuthFetchParserErrors(t *testing.T) {
 	toml.WriteString("# END\n")
 	overlay := writeRegistry(t, toml.String())
 
-	cfg, err := LoadPackagesConfig(overlay)
+	cfg, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
-	issues, err := LintPackagesConfig(nil, overlay)
+	issues, err := registry.LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 			s068Record("app-misc/fine", fmt.Sprintf(`fetch_url = %q, fetch_serial_env = "BENTOO_FETCH_OK_068"`, srv.URL+"/fine")+serial)+"\n# END\n",
 		"app-misc/leak/leak-1.0.ebuild", "app-misc/fine/fine-1.0.ebuild")
 
-	cfg, err := LoadPackagesConfig(overlay)
+	cfg, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("LoadPackagesConfig: %v", err)
 	}
@@ -179,7 +180,7 @@ func TestAuthFetchRefusal_SameTextOnEveryPath(t *testing.T) {
 	}
 
 	// --lint.
-	issues, err := LintPackagesConfig(nil, overlay)
+	issues, err := registry.LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}

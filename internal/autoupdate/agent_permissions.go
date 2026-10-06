@@ -280,19 +280,6 @@ func upstreamHosts(log *slog.Logger, pkg string, urls ...string) []string {
 	return hosts
 }
 
-// upstreamURLsOf returns cfg's registry URL, FallbackURL, AuxURL and Mirrors,
-// skipping the empty ones (S051-R3.4, S051-R3.5). The zero PackageConfig — no config for the
-// package — yields none.
-func upstreamURLsOf(cfg PackageConfig) []string {
-	var urls []string
-	for _, u := range append([]string{cfg.URL, cfg.FallbackURL, cfg.AuxURL}, cfg.Mirrors...) {
-		if u != "" {
-			urls = append(urls, u)
-		}
-	}
-	return urls
-}
-
 // RefusedToolsNote renders the tools an agent was refused as the suffix a
 // "still failed" message carries — ` (agent was refused: WebFetch(host), Bash)` —
 // or "" when none were, so a message about a fix that simply did not work names

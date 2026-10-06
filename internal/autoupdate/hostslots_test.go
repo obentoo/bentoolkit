@@ -10,6 +10,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestPerHostConcurrencyCapsInFlightRequests pins the cap: eight packages on one
@@ -34,16 +36,16 @@ func TestPerHostConcurrencyCapsInFlightRequests(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")
-	pkgs := map[string]PackageConfig{}
+	pkgs := map[string]registry.PackageConfig{}
 	for i := range 8 {
 		pkg := fmt.Sprintf("test-cat/pkg%d", i)
 		createTestEbuild(t, overlayDir, pkg, "1.0.0")
 		// A distinct query per package so the body cache cannot fold them.
-		pkgs[pkg] = PackageConfig{URL: fmt.Sprintf("%s/?p=%d", srv.URL, i), Parser: "json", Path: "version"}
+		pkgs[pkg] = registry.PackageConfig{URL: fmt.Sprintf("%s/?p=%d", srv.URL, i), Parser: "json", Path: "version"}
 	}
 	c, err := NewChecker(overlayDir,
 		WithConfigDir(filepath.Join(tmpDir, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: pkgs}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: pkgs}),
 		WithRateLimiter(unlimitedRateLimiter()),
 		WithConcurrency(8),
 		WithPerHostConcurrency(limit),
@@ -108,7 +110,7 @@ func TestScriptRecordsShareOneEvaluation(t *testing.T) {
 
 	tmpDir := t.TempDir()
 	overlayDir := filepath.Join(tmpDir, "overlay")
-	pkgs := map[string]PackageConfig{
+	pkgs := map[string]registry.PackageConfig{
 		"app-office/libreoffice":      {URL: stable, Parser: "script", Script: "pick()"},
 		"app-office/libreoffice-l10n": {URL: stable, Parser: "script", Script: "pick()"},
 		"app-office/libreoffice-bin":  {URL: stable, Parser: "script", Script: "pick()"},
@@ -119,7 +121,7 @@ func TestScriptRecordsShareOneEvaluation(t *testing.T) {
 	}
 	c, err := NewChecker(overlayDir,
 		WithConfigDir(filepath.Join(tmpDir, "config")),
-		WithPackagesConfig(&PackagesConfig{Packages: pkgs}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: pkgs}),
 		WithRateLimiter(unlimitedRateLimiter()),
 		WithConcurrency(4),
 	)

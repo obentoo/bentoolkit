@@ -1,4 +1,4 @@
-package autoupdate
+package registry
 
 import (
 	"errors"

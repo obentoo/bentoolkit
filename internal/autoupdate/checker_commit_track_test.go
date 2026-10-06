@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -60,7 +62,7 @@ func makeGLCommits(entries ...struct{ id, date, title string }) []byte {
 
 // newCommitChecker creates a Checker wired to a static mock HTTP server that
 // always returns body, and an overlay with one ebuild at currentVersion.
-func newCommitChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfig, body []byte) *Checker {
+func newCommitChecker(t *testing.T, pkg, currentVersion string, cfg registry.PackageConfig, body []byte) *Checker {
 	t.Helper()
 	overlayDir := t.TempDir()
 	configDir := t.TempDir()
@@ -75,7 +77,7 @@ func newCommitChecker(t *testing.T, pkg, currentVersion string, cfg PackageConfi
 
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -196,8 +198,8 @@ func TestScanCommitsForVersion(t *testing.T) {
 
 // baseCommitCfg returns a PackageConfig set up for GitHub commit tracking.
 // The caller must set cfg.URL (done by newCommitChecker).
-func baseCommitCfg() PackageConfig {
-	return PackageConfig{
+func baseCommitCfg() registry.PackageConfig {
+	return registry.PackageConfig{
 		Track:         "commit",
 		Parser:        "json",
 		Path:          "[0].commit.committer.date",
@@ -340,7 +342,7 @@ func TestCheckPackageCommitTrack_SkipsCache(t *testing.T) {
 	configDir := t.TempDir()
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 		// The cache this test is about is the ON-DISK version cache, whose TTL
 		// is an hour and which `track = commit` must bypass so a commit-tracked
@@ -398,7 +400,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 		name           string
 		pkg            string
 		currentVersion string
-		cfg            PackageConfig
+		cfg            registry.PackageConfig
 		body           []byte
 		wantVersion    string
 		wantUpdate     bool
@@ -408,7 +410,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "vulkan-headers: base bump 1.4.352→1.4.353",
 			pkg:            "dev-util/vulkan-headers",
 			currentVersion: "1.4.352_p20260515",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -426,7 +428,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "vulkan-headers: already up to date",
 			pkg:            "dev-util/vulkan-headers",
 			currentVersion: "1.4.353_p20260605",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -445,7 +447,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "vulkan-loader: base bump 1.4.352→1.4.353",
 			pkg:            "media-libs/vulkan-loader",
 			currentVersion: "1.4.352_p20260526",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -464,7 +466,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "vulkan-tools: base bump 1.4.352→1.4.353",
 			pkg:            "dev-util/vulkan-tools",
 			currentVersion: "1.4.352_p20260518",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -483,7 +485,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "vulkan-layers: base bump 1.4.352→1.4.353",
 			pkg:            "media-libs/vulkan-layers",
 			currentVersion: "1.4.352_p20260528",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -502,7 +504,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "glslang: vulkan-sdk base bump 1.4.350.0→1.4.351.0",
 			pkg:            "dev-util/glslang",
 			currentVersion: "1.4.350.0_p20260522",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -521,7 +523,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "spirv-headers: vulkan-sdk base bump 1.4.350.0→1.4.351.0",
 			pkg:            "dev-util/spirv-headers",
 			currentVersion: "1.4.350.0_p20260527",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -540,7 +542,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "spirv-tools: vulkan-sdk base bump 1.4.350.0→1.4.351.0",
 			pkg:            "dev-util/spirv-tools",
 			currentVersion: "1.4.350.0_p20260528",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:                "commit",
 				Parser:               "json",
 				Path:                 "[0].commit.committer.date",
@@ -559,7 +561,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "sqlitebrowser: date bump only (no version pattern)",
 			pkg:            "dev-db/sqlitebrowser",
 			currentVersion: "3.13.99_p20260517",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:         "commit",
 				Parser:        "json",
 				Path:          "[0].commit.committer.date",
@@ -576,7 +578,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "modemmanager: date bump via GitLab API",
 			pkg:            "net-misc/modemmanager",
 			currentVersion: "1.25.1_p20260526",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:         "commit",
 				Parser:        "json",
 				Path:          "[0].committed_date",
@@ -592,7 +594,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "zed: _pre date bump on main",
 			pkg:            "app-editors/zed",
 			currentVersion: "1.7.0_pre20260605",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:         "commit",
 				Parser:        "json",
 				Path:          "[0].commit.committer.date",
@@ -608,7 +610,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "mesa: _pre date bump on main (GitLab)",
 			pkg:            "media-libs/mesa",
 			currentVersion: "26.2.0_pre20260529",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:         "commit",
 				Parser:        "json",
 				Path:          "[0].committed_date",
@@ -623,7 +625,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "mesa_clc: _pre date bump on main (GitLab, same repo)",
 			pkg:            "dev-util/mesa_clc",
 			currentVersion: "26.2.0_pre20260529",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:         "commit",
 				Parser:        "json",
 				Path:          "[0].committed_date",
@@ -638,7 +640,7 @@ func TestCheckPackageCommitTrack_AllSnapshotPackages(t *testing.T) {
 			name:           "libqmi: _pre date bump on main (GitLab)",
 			pkg:            "net-libs/libqmi",
 			currentVersion: "1.38.1_pre20260512",
-			cfg: PackageConfig{
+			cfg: registry.PackageConfig{
 				Track:         "commit",
 				Parser:        "json",
 				Path:          "[0].committed_date",
@@ -728,7 +730,7 @@ func TestCheckPackageCommitTrack_GitLabDateFormat(t *testing.T) {
 	pkg := "net-misc/modemmanager"
 	currentVer := "1.25.1_p20260526"
 
-	cfg := PackageConfig{
+	cfg := registry.PackageConfig{
 		Track:         "commit",
 		Parser:        "json",
 		Path:          "[0].committed_date",

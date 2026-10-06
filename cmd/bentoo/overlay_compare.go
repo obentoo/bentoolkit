@@ -8,9 +8,9 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -716,7 +716,7 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 // to build a filesystem path: the verification step builds its path from the
 // scanned directory names instead. Keep it that way.
 func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overlay.Divergence, error) {
-	cfg, err := autoupdate.LoadPackagesConfig(overlayPath)
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
 		return nil, err
 	}

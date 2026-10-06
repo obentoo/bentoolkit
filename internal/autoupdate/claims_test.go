@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // The two GStreamer release lines, told apart the way the project's own entries
@@ -48,8 +50,8 @@ func writeSweepOverlay(t *testing.T, atom string, ebuilds []sweepEbuild) string 
 // regEntry is a registry entry reduced to what a sweep reads: its pin, and the
 // series that tells its ebuilds from its siblings'. An empty version is an
 // entry with no pin.
-func regEntry(version, series string) PackageConfig {
-	return PackageConfig{
+func regEntry(version, series string) registry.PackageConfig {
+	return registry.PackageConfig{
 		URL:     "https://example.invalid/releases",
 		Parser:  "json",
 		Path:    "version",
@@ -70,14 +72,14 @@ func TestResolveClaims(t *testing.T) {
 		name    string
 		atom    string
 		ebuilds []sweepEbuild
-		cfgs    map[string]PackageConfig
+		cfgs    map[string]registry.PackageConfig
 		want    []claim
 	}{
 		{
 			name:    "only entries for this atom claim",
 			atom:    "net-misc/rclone",
 			ebuilds: []sweepEbuild{{version: "1.71.0"}, {version: "1.71.1"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-misc/rclone": regEntry("1.71.1", ""),
 				// Same overlay, different directory: it must not be consulted.
 				"app-misc/hello": regEntry("9.9.9", ""),
@@ -91,7 +93,7 @@ func TestResolveClaims(t *testing.T) {
 				{version: "2.52.4-r411", slot: "4.1/0"},
 				{version: "2.52.5-r601", slot: "6/0"},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""),
 				"net-libs/webkit-gtk:6":   regEntry("2.52.5-r601", ""),
 			},
@@ -107,7 +109,7 @@ func TestResolveClaims(t *testing.T) {
 			name:    "an @label key resolves inside its own series",
 			atom:    "media-plugins/gst-plugins-vpx",
 			ebuilds: []sweepEbuild{{version: "1.28.5"}, {version: "1.29.2"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@stable": regEntry("1.28.5", gstStableSeries),
 				"media-plugins/gst-plugins-vpx@dev":    regEntry("1.29.2", gstDevSeries),
 			},
@@ -122,7 +124,7 @@ func TestResolveClaims(t *testing.T) {
 			ebuilds: []sweepEbuild{
 				{version: "2.52.4-r411", slot: "4.1/0"},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				// ErrSlotNotFound: the package is there, this entry holds nothing
 				// in it. A fact about one entry, not a reason to refuse a plan.
 				"net-libs/webkit-gtk:6": regEntry("2.52.5-r601", ""),
@@ -133,7 +135,7 @@ func TestResolveClaims(t *testing.T) {
 			name:    "a pinless entry claims with an empty pin",
 			atom:    "media-plugins/gst-plugins-vpx",
 			ebuilds: []sweepEbuild{{version: "1.28.5"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@stable": regEntry("", gstStableSeries),
 			},
 			want: []claim{{Key: "media-plugins/gst-plugins-vpx@stable", Pin: "", Version: "1.28.5"}},
@@ -142,9 +144,9 @@ func TestResolveClaims(t *testing.T) {
 			name:    "a disabled entry still claims its ebuild",
 			atom:    "net-misc/rclone",
 			ebuilds: []sweepEbuild{{version: "1.71.1"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				// "stop checking upstream" is not "this ebuild is disposable".
-				"net-misc/rclone": func() PackageConfig {
+				"net-misc/rclone": func() registry.PackageConfig {
 					c := regEntry("1.71.1", "")
 					off := false
 					c.Enabled = &off
@@ -171,7 +173,7 @@ func TestResolveClaims(t *testing.T) {
 		if got := resolveClaims(nil, overlay, nil, "net-misc/rclone"); got != nil {
 			t.Errorf("resolveClaims with a nil registry = %+v, want nil", got)
 		}
-		cfgs := map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")}
+		cfgs := map[string]registry.PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")}
 		if got := resolveClaims(nil, overlay, cfgs, "rclone"); got != nil {
 			t.Errorf("resolveClaims with a malformed atom = %+v, want nil", got)
 		}
@@ -186,7 +188,7 @@ func TestPlanSweep(t *testing.T) {
 		name    string
 		atom    string
 		ebuilds []sweepEbuild
-		cfgs    map[string]PackageConfig
+		cfgs    map[string]registry.PackageConfig
 		// wantWouldRemove is nil on every unblocked case: a caller must never
 		// have to wonder which of the two lists is the live one.
 		wantKeep        map[string]string
@@ -199,7 +201,7 @@ func TestPlanSweep(t *testing.T) {
 			name:    "a: one entry, pin on the newer, the superseded ebuild is removed",
 			atom:    "net-misc/rclone",
 			ebuilds: []sweepEbuild{{version: "1.71.0"}, {version: "1.71.1"}},
-			cfgs:    map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
+			cfgs:    map[string]registry.PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
 			wantKeep: map[string]string{
 				"1.71.1": "net-misc/rclone",
 			},
@@ -212,7 +214,7 @@ func TestPlanSweep(t *testing.T) {
 			name:    "b: two entries by series, both pinned, nothing is removed",
 			atom:    "media-plugins/gst-plugins-vpx",
 			ebuilds: []sweepEbuild{{version: "1.28.5"}, {version: "1.29.2"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@stable": regEntry("1.28.5", gstStableSeries),
 				"media-plugins/gst-plugins-vpx@dev":    regEntry("1.29.2", gstDevSeries),
 			},
@@ -257,7 +259,7 @@ func TestPlanSweep(t *testing.T) {
 				{version: "1.29.2"}, // the release @dev is superseding
 				{version: "1.29.3"}, // built by the @dev apply now running
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				// The pre-run pin, now stale: 1.28.4 was deleted by @stable's
 				// own clean earlier in this very command.
 				"media-plugins/gst-plugins-vpx@stable": regEntry("1.28.4", gstStableSeries),
@@ -281,7 +283,7 @@ func TestPlanSweep(t *testing.T) {
 				{version: "2.52.4-r411", slot: "4.1/0"},
 				{version: "2.52.5-r601", slot: "6/0"},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""),
 				"net-libs/webkit-gtk:6":   regEntry("2.52.5-r601", ""),
 			},
@@ -312,7 +314,7 @@ func TestPlanSweep(t *testing.T) {
 				{version: "2.52.4-r601", slot: "6/0"},   // the revision :6 is superseding
 				{version: "2.52.5-r601", slot: "6/0"},   // built by the :6 apply now running
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""), // pre-run, stale
 				"net-libs/webkit-gtk:6":   regEntry("2.52.5-r601", ""), // fresh
 			},
@@ -328,7 +330,7 @@ func TestPlanSweep(t *testing.T) {
 			name:    "d: one pinless entry blocks the directory and names itself",
 			atom:    "media-plugins/gst-plugins-vpx",
 			ebuilds: []sweepEbuild{{version: "1.28.5"}, {version: "1.29.2"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@stable": regEntry("1.28.5", gstStableSeries),
 				"media-plugins/gst-plugins-vpx@dev":    regEntry("", gstDevSeries),
 			},
@@ -354,7 +356,7 @@ func TestPlanSweep(t *testing.T) {
 			name:    "d2: a blocked plan's candidates respect the floor and exclude -9999",
 			atom:    "media-plugins/gst-plugins-vpx",
 			ebuilds: []sweepEbuild{{version: "1.28.5"}, {version: "1.29.2"}, {version: "9999"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@stable": regEntry("", gstStableSeries),
 				"media-plugins/gst-plugins-vpx@dev":    regEntry("", gstDevSeries),
 			},
@@ -372,7 +374,7 @@ func TestPlanSweep(t *testing.T) {
 			ebuilds: []sweepEbuild{
 				{version: "0.11.0"}, {version: "0.11.1"}, {version: "9999"},
 			},
-			cfgs: map[string]PackageConfig{"app-editors/neovim": regEntry("0.11.1", "")},
+			cfgs: map[string]registry.PackageConfig{"app-editors/neovim": regEntry("0.11.1", "")},
 			wantKeep: map[string]string{
 				"0.11.1": "app-editors/neovim",
 				"9999":   "", // kept by the live rule, claimed by no entry
@@ -385,7 +387,7 @@ func TestPlanSweep(t *testing.T) {
 			name:    "f: the last non-live ebuild is never removed, whatever the pin says",
 			atom:    "app-misc/hello",
 			ebuilds: []sweepEbuild{{version: "1.0.0"}},
-			cfgs:    map[string]PackageConfig{"app-misc/hello": regEntry("2.0.0", "")},
+			cfgs:    map[string]registry.PackageConfig{"app-misc/hello": regEntry("2.0.0", "")},
 			// The entry pins a version that is not there but RESOLVES to 1.0.0,
 			// so rule 4's resolved half keeps it and the report can name who
 			// holds it — strictly more informative than the anonymous keep the
@@ -411,7 +413,7 @@ func TestPlanSweep(t *testing.T) {
 			name:    "f2: the floor still keeps the last ebuild when the entry resolves to nothing at all",
 			atom:    "media-plugins/gst-plugins-vpx",
 			ebuilds: []sweepEbuild{{version: "1.28.5"}},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@dev": regEntry("1.29.2", gstDevSeries),
 			},
 			wantKeep:   map[string]string{"1.28.5": ""},
@@ -425,7 +427,7 @@ func TestPlanSweep(t *testing.T) {
 			ebuilds: []sweepEbuild{
 				{version: "1.9.0"}, {version: "1.10.0"}, {version: "1.71.0"}, {version: "1.71.1"},
 			},
-			cfgs:       map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
+			cfgs:       map[string]registry.PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
 			wantKeep:   map[string]string{"1.71.1": "net-misc/rclone"},
 			wantRemove: []string{"1.9.0", "1.10.0", "1.71.0"},
 		},
@@ -469,7 +471,7 @@ func TestPlanSweep(t *testing.T) {
 		// Restore the mode, or t.TempDir()'s own cleanup cannot remove the tree.
 		t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
 
-		got, err := planSweep(nil, overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")}, atom)
+		got, err := planSweep(nil, overlay, map[string]registry.PackageConfig{atom: regEntry("1.0.0", "")}, atom)
 		if err == nil {
 			t.Fatalf("an unreadable directory produced a plan instead of an error: %+v", got)
 		}
@@ -491,7 +493,7 @@ func TestPlanSweep(t *testing.T) {
 			{version: "2.52.4-r411", slot: "4.1/0"},
 			{version: "2.52.5-r601", slot: "6/0"},
 		})
-		cfgs := map[string]PackageConfig{
+		cfgs := map[string]registry.PackageConfig{
 			"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""),
 			"net-libs/webkit-gtk:6":   regEntry("2.52.5-r601", ""),
 		}
@@ -516,7 +518,7 @@ func TestPlanSweep(t *testing.T) {
 	t.Run("the blocking entry is the first in key order", func(t *testing.T) {
 		atom := "media-plugins/gst-plugins-vpx"
 		overlay := writeSweepOverlay(t, atom, []sweepEbuild{{version: "1.28.5"}, {version: "1.29.2"}})
-		cfgs := map[string]PackageConfig{
+		cfgs := map[string]registry.PackageConfig{
 			atom + "@stable": regEntry("", gstStableSeries),
 			atom + "@dev":    regEntry("", gstDevSeries),
 		}
@@ -552,7 +554,7 @@ func TestPlanSweep(t *testing.T) {
 		overlay := writeSweepOverlay(t, atom, []sweepEbuild{
 			{version: "1.0.0"}, {version: "2.0.0"}, {version: "9999"},
 		})
-		for _, cfgs := range []map[string]PackageConfig{
+		for _, cfgs := range []map[string]registry.PackageConfig{
 			{},  // registry loaded, nothing matches this atom
 			nil, // registry did not load at all
 			{"app-misc/other": regEntry("1.0.0", "")}, // matches, but another directory
@@ -603,7 +605,7 @@ func writeReconcileOverlay(t *testing.T, dirs map[string][]sweepEbuild) string {
 
 // offEntry is a registry entry the checker skips: enabled = false, the state the
 // existing orphan reconciliation writes and owns (R3.5).
-func offEntry(version, series string) PackageConfig {
+func offEntry(version, series string) registry.PackageConfig {
 	c := regEntry(version, series)
 	off := false
 	c.Enabled = &off
@@ -611,7 +613,7 @@ func offEntry(version, series string) PackageConfig {
 }
 
 // heldEntry is a registry entry the maintainer has parked: hold = true.
-func heldEntry(version, series string) PackageConfig {
+func heldEntry(version, series string) registry.PackageConfig {
 	c := regEntry(version, series)
 	c.Hold = true
 	return c
@@ -628,7 +630,7 @@ func TestReconcile(t *testing.T) {
 	tests := []struct {
 		name string
 		dirs map[string][]sweepEbuild
-		cfgs map[string]PackageConfig
+		cfgs map[string]registry.PackageConfig
 		want []Divergence
 	}{
 		{
@@ -638,7 +640,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"net-misc/rclone": {{version: "1.70.0"}, {version: "1.71.0"}, {version: "1.71.1"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-misc/rclone": regEntry("1.71.0", ""),
 				// No directory for it at all: the package was removed from the
 				// overlay. R3.1's third class.
@@ -663,7 +665,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"media-plugins/gst-plugins-vpx": {{version: "1.28.5"}, {version: "1.29.2"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"media-plugins/gst-plugins-vpx@stable": regEntry("", gstStableSeries),
 				"media-plugins/gst-plugins-vpx@dev":    regEntry("", gstDevSeries),
 			},
@@ -686,7 +688,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"net-misc/rclone": {{version: "1.70.0"}, {version: "1.71.1"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-misc/rclone": offEntry("", ""), // stale pin AND residue, both invisible
 			},
 			want: nil,
@@ -703,7 +705,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"app-misc/hello": {{version: "1.0.0"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"app-misc/hello": heldEntry("", ""), // held, and therefore pinned
 			},
 			want: []Divergence{
@@ -723,7 +725,7 @@ func TestReconcile(t *testing.T) {
 					{version: "2.52.5-r601", slot: "6/0"},
 				},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-libs/webkit-gtk:4.1": regEntry("2.52.4-r411", ""),
 				"net-libs/webkit-gtk:6":   offEntry("2.52.5-r601", ""),
 			},
@@ -738,7 +740,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"net-libs/webkit-gtk": {{version: "2.52.4-r411", slot: "4.1/0"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"net-libs/webkit-gtk:6": regEntry("2.52.5-r601", ""),
 			},
 			want: []Divergence{
@@ -759,7 +761,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"net-misc/rclone": {{version: "1.71.1"}},
 			},
-			cfgs: map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1-r0", "")},
+			cfgs: map[string]registry.PackageConfig{"net-misc/rclone": regEntry("1.71.1-r0", "")},
 			want: []Divergence{
 				{Key: "net-misc/rclone", Kind: StalePin, Pin: "1.71.1-r0", Disk: "1.71.1"},
 			},
@@ -773,7 +775,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"app-editors/neovim": {{version: "0.11.0"}, {version: "0.11.1"}, {version: "9999"}},
 			},
-			cfgs: map[string]PackageConfig{
+			cfgs: map[string]registry.PackageConfig{
 				"app-editors/neovim": regEntry("0.11.1", ""),
 			},
 			want: []Divergence{
@@ -787,7 +789,7 @@ func TestReconcile(t *testing.T) {
 			dirs: map[string][]sweepEbuild{
 				"net-misc/rclone": {{version: "1.71.1"}},
 			},
-			cfgs: map[string]PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
+			cfgs: map[string]registry.PackageConfig{"net-misc/rclone": regEntry("1.71.1", "")},
 			want: nil,
 		},
 	}
@@ -811,7 +813,7 @@ func TestReconcile(t *testing.T) {
 		overlay := writeReconcileOverlay(t, map[string][]sweepEbuild{
 			atom: {{version: "1.28.4"}, {version: "1.28.5"}, {version: "1.29.2"}},
 		})
-		cfgs := map[string]PackageConfig{
+		cfgs := map[string]registry.PackageConfig{
 			atom + "@stable": regEntry("1.28.5", gstStableSeries),
 			atom + "@dev":    regEntry("1.29.2", gstDevSeries),
 		}
@@ -843,7 +845,7 @@ func TestReconcile(t *testing.T) {
 		t.Cleanup(func() { _ = os.Chmod(pkgDir, 0o755) })
 
 		lc := captureWarnLogs(t)
-		got := Reconcile(lc.logger(), overlay, map[string]PackageConfig{atom: regEntry("1.0.0", "")})
+		got := Reconcile(lc.logger(), overlay, map[string]registry.PackageConfig{atom: regEntry("1.0.0", "")})
 		if got != nil {
 			t.Fatalf("an unreadable directory produced divergences: %+v", got)
 		}
@@ -863,7 +865,7 @@ func TestReconcile(t *testing.T) {
 			"net-misc/rclone": {{version: "1.71.1"}},
 		})
 		lc := captureWarnLogs(t)
-		if got := Reconcile(lc.logger(), overlay, map[string]PackageConfig{"rclone": regEntry("1.71.1", "")}); got != nil {
+		if got := Reconcile(lc.logger(), overlay, map[string]registry.PackageConfig{"rclone": regEntry("1.71.1", "")}); got != nil {
 			t.Fatalf("a malformed key produced divergences: %+v", got)
 		}
 		if lc.count() == 0 {
@@ -900,7 +902,7 @@ func TestReconcileOrderIsStable(t *testing.T) {
 		"net-misc/rclone":    {{version: "1.9.0"}, {version: "1.10.0"}, {version: "1.71.1"}},
 		"app-editors/neovim": {{version: "0.11.1"}},
 	})
-	cfgs := map[string]PackageConfig{
+	cfgs := map[string]registry.PackageConfig{
 		vpx + "@stable":      regEntry("1.28.5", gstStableSeries),
 		vpx + "@dev":         regEntry("1.29.2", gstDevSeries),
 		"net-misc/rclone":    regEntry("1.71.1", ""),

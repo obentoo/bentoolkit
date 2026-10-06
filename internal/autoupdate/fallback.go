@@ -1,6 +1,8 @@
 // Package autoupdate provides fallback chain logic for parser configuration.
 package autoupdate
 
+import "github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+
 // ParserReliability defines the reliability order of parsers.
 // Lower values indicate higher reliability.
 // Order: JSON (1) > HTML (2) > regex (3) > LLM (4)
@@ -143,7 +145,7 @@ func IsFallbackOrderValid(fallbacks []FallbackSuggestion) bool {
 
 // ApplyFallbackToSchema applies a fallback suggestion to a PackageConfig.
 // It sets the FallbackParser field based on the suggestion.
-func ApplyFallbackToSchema(schema *PackageConfig, fallback *FallbackSuggestion) {
+func ApplyFallbackToSchema(schema *registry.PackageConfig, fallback *FallbackSuggestion) {
 	if schema == nil || fallback == nil {
 		return
 	}
@@ -167,7 +169,7 @@ func ApplyFallbackToSchema(schema *PackageConfig, fallback *FallbackSuggestion) 
 
 // EnhanceSchemaWithFallback adds fallback configuration to a schema based on its primary parser.
 // This is called after LLM analysis to ensure fallback is always configured.
-func EnhanceSchemaWithFallback(schema *PackageConfig) {
+func EnhanceSchemaWithFallback(schema *registry.PackageConfig) {
 	if schema == nil {
 		return
 	}
@@ -187,7 +189,7 @@ func EnhanceSchemaWithFallback(schema *PackageConfig) {
 // ValidateFallbackChain validates that a schema's fallback configuration is valid.
 // It checks that the fallback parser is different from the primary parser
 // and that required fields are set.
-func ValidateFallbackChain(schema *PackageConfig) error {
+func ValidateFallbackChain(schema *registry.PackageConfig) error {
 	if schema == nil {
 		return nil
 	}
@@ -199,7 +201,7 @@ func ValidateFallbackChain(schema *PackageConfig) error {
 
 	// Fallback must be different from primary
 	if schema.FallbackParser == schema.Parser {
-		return ErrInvalidParserType
+		return registry.ErrInvalidParserType
 	}
 
 	// Validate fallback parser type
@@ -207,13 +209,13 @@ func ValidateFallbackChain(schema *PackageConfig) error {
 	case ParserTypeJSON, ParserTypeHTML, ParserTypeRegex, ParserTypeLLM:
 		// Valid parser types
 	default:
-		return ErrInvalidParserType
+		return registry.ErrInvalidParserType
 	}
 
 	// Validate required fields for fallback parser
 	if schema.FallbackParser == ParserTypeRegex {
 		if schema.FallbackPattern == "" {
-			return ErrMissingPattern
+			return registry.ErrMissingPattern
 		}
 	}
 

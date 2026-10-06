@@ -6,6 +6,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -113,7 +114,7 @@ func TestFallbackSuggestion(t *testing.T) {
 	// Property: EnhanceSchemaWithFallback adds fallback to schema without one
 	properties.Property("EnhanceSchemaWithFallback adds fallback to schema without one", prop.ForAll(
 		func(primaryParser string) bool {
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    "https://example.com/api",
 				Parser: primaryParser,
 			}
@@ -129,7 +130,7 @@ func TestFallbackSuggestion(t *testing.T) {
 	// Property: EnhanceSchemaWithFallback does not override existing fallback
 	properties.Property("EnhanceSchemaWithFallback does not override existing fallback", prop.ForAll(
 		func(primaryParser, existingFallback string) bool {
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:            "https://example.com/api",
 				Parser:         primaryParser,
 				FallbackParser: existingFallback,
@@ -414,7 +415,7 @@ func TestApplyFallbackToSchema(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			schema := &PackageConfig{
+			schema := &registry.PackageConfig{
 				URL:    "https://example.com",
 				Parser: ParserTypeJSON,
 			}
@@ -445,7 +446,7 @@ func TestApplyFallbackToSchema(t *testing.T) {
 func TestApplyFallbackToSchemaNil(t *testing.T) {
 	// Should not panic
 	ApplyFallbackToSchema(nil, nil)
-	ApplyFallbackToSchema(&PackageConfig{}, nil)
+	ApplyFallbackToSchema(&registry.PackageConfig{}, nil)
 	ApplyFallbackToSchema(nil, &FallbackSuggestion{})
 }
 
@@ -453,7 +454,7 @@ func TestApplyFallbackToSchemaNil(t *testing.T) {
 func TestValidateFallbackChain(t *testing.T) {
 	tests := []struct {
 		name        string
-		schema      *PackageConfig
+		schema      *registry.PackageConfig
 		expectError bool
 	}{
 		{
@@ -463,14 +464,14 @@ func TestValidateFallbackChain(t *testing.T) {
 		},
 		{
 			name: "no fallback",
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser: ParserTypeJSON,
 			},
 			expectError: false,
 		},
 		{
 			name: "valid fallback",
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser:          ParserTypeJSON,
 				FallbackParser:  ParserTypeRegex,
 				FallbackPattern: `(\d+\.\d+)`,
@@ -479,7 +480,7 @@ func TestValidateFallbackChain(t *testing.T) {
 		},
 		{
 			name: "same as primary",
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser:         ParserTypeJSON,
 				FallbackParser: ParserTypeJSON,
 			},
@@ -487,7 +488,7 @@ func TestValidateFallbackChain(t *testing.T) {
 		},
 		{
 			name: "invalid fallback type",
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser:         ParserTypeJSON,
 				FallbackParser: "invalid",
 			},
@@ -495,7 +496,7 @@ func TestValidateFallbackChain(t *testing.T) {
 		},
 		{
 			name: "regex fallback without pattern",
-			schema: &PackageConfig{
+			schema: &registry.PackageConfig{
 				Parser:         ParserTypeJSON,
 				FallbackParser: ParserTypeRegex,
 			},

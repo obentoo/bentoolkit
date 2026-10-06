@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Error variables for parser errors
@@ -299,15 +301,15 @@ func NewParser(parserType, pathOrPattern string) (Parser, error) {
 		return &RegexParser{Pattern: pathOrPattern, compiled: re}, nil
 	case "html":
 		// HTML parser requires selector or xpath, use NewParserFromConfig
-		return nil, fmt.Errorf("%w: use NewParserFromConfig for html parser", ErrInvalidParserType)
+		return nil, fmt.Errorf("%w: use NewParserFromConfig for html parser", registry.ErrInvalidParserType)
 	default:
-		return nil, fmt.Errorf("%w: got %q", ErrInvalidParserType, parserType)
+		return nil, fmt.Errorf("%w: got %q", registry.ErrInvalidParserType, parserType)
 	}
 }
 
 // NewParserFromConfig creates a parser from a PackageConfig.
 // This supports all parser types including HTML which requires additional fields.
-func NewParserFromConfig(cfg *PackageConfig) (Parser, error) {
+func NewParserFromConfig(cfg *registry.PackageConfig) (Parser, error) {
 	switch cfg.Parser {
 	case "json":
 		return &JSONParser{Path: cfg.Path}, nil
@@ -323,14 +325,14 @@ func NewParserFromConfig(cfg *PackageConfig) (Parser, error) {
 	case "html":
 		return NewHTMLParser(cfg.Selector, cfg.XPath, cfg.Pattern)
 	default:
-		return nil, fmt.Errorf("%w: got %q", ErrInvalidParserType, cfg.Parser)
+		return nil, fmt.Errorf("%w: got %q", registry.ErrInvalidParserType, cfg.Parser)
 	}
 }
 
 // ParseVersion attempts to extract version using configured parsers with fallback logic.
 // It tries the primary parser first, then fallback parser if configured, and returns
 // the first successful result.
-func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
+func ParseVersion(content []byte, cfg *registry.PackageConfig) (string, error) {
 	// Try primary parser
 	parser, err := NewParserFromConfig(cfg)
 	if err != nil {
@@ -346,7 +348,7 @@ func ParseVersion(content []byte, cfg *PackageConfig) (string, error) {
 
 	// Try fallback parser if configured
 	if cfg.FallbackParser != "" {
-		fallbackCfg := &PackageConfig{
+		fallbackCfg := &registry.PackageConfig{
 			Parser:   cfg.FallbackParser,
 			Path:     cfg.Path,
 			Pattern:  cfg.FallbackPattern,

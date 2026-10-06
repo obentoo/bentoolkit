@@ -5,6 +5,8 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // holdServer serves whatever status and body were last set, so one test can
@@ -39,11 +41,11 @@ func (h *holdServer) set(status int, body string) {
 // holdChecker builds a checker over overlayDir/configDir for one package. A new
 // checker over the same directories is how the next `bentoo overlay autoupdate`
 // run sees the world: the version cache and pending.json come from disk.
-func holdChecker(t *testing.T, overlayDir, configDir, pkg string, cfg PackageConfig) *Checker {
+func holdChecker(t *testing.T, overlayDir, configDir, pkg string, cfg registry.PackageConfig) *Checker {
 	t.Helper()
 	c, err := NewChecker(overlayDir,
 		WithConfigDir(configDir),
-		WithPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{pkg: cfg}}),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{pkg: cfg}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
 	if err != nil {
@@ -60,8 +62,8 @@ const (
 	holdPageNoAux   = "<p>Current version: Betterbird 128.7.0</p>"
 )
 
-func holdAuxConfig(url string) PackageConfig {
-	return PackageConfig{
+func holdAuxConfig(url string) registry.PackageConfig {
+	return registry.PackageConfig{
 		Parser:     "regex",
 		Pattern:    `Current version:\s*Betterbird\s*([0-9]+\.[0-9]+\.[0-9]+)`,
 		AuxVar:     "MY_BUILD",
@@ -165,7 +167,7 @@ func TestCheckPackage_HoldsBumpWhenAuxSHAUnresolved(t *testing.T) {
 	srv := newHoldServer(t, http.StatusOK, `{"version":"2.0.0"}`)
 	overlayDir, configDir := t.TempDir(), t.TempDir()
 	createTestEbuild(t, overlayDir, pkg, "1.0.0")
-	cfg := PackageConfig{
+	cfg := registry.PackageConfig{
 		Parser:        "json",
 		Path:          "version",
 		CommitSHAPath: "commitSha",

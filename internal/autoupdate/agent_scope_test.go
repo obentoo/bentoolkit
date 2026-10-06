@@ -17,6 +17,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // assertExactRuleSet compares the allow rules to want as sets, and reports any
@@ -266,7 +268,7 @@ func TestManifestFix_UpstreamHostsFromConfigAndError(t *testing.T) {
 		WithApplierPendingList(pending),
 		WithExecCommand(pkgdevFailsPrinting(pkgdevOut)),
 		WithApplierFixer(fixer),
-		WithApplierPackagesConfig(&PackagesConfig{Packages: map[string]PackageConfig{
+		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 			pkg:            {URL: "https://upstream.example.org/releases.json", Parser: "json", Path: "tag", FallbackURL: "https://fallback.example.net/tags"},
 			"dev-libs/foo": {URL: "https://other-package.example.org/x", Parser: "json", Path: "v"},
 		}}),

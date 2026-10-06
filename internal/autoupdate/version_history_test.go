@@ -8,6 +8,7 @@ import (
 	"github.com/leanovate/gopter"
 	"github.com/leanovate/gopter/gen"
 	"github.com/leanovate/gopter/prop"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -43,7 +44,7 @@ func TestVersionHistoryConfiguration(t *testing.T) {
 			}
 
 			// Create config with versions_path
-			cfg := &PackageConfig{
+			cfg := &registry.PackageConfig{
 				Parser:       "json",
 				Path:         "[0].tag_name",
 				VersionsPath: "[*].tag_name",
@@ -94,7 +95,7 @@ func TestVersionHistoryConfiguration(t *testing.T) {
 			html += "</body></html>"
 
 			// Create config with versions_selector
-			cfg := &PackageConfig{
+			cfg := &registry.PackageConfig{
 				Parser:           "html",
 				Selector:         ".version",
 				VersionsSelector: ".version",
@@ -133,7 +134,7 @@ func TestVersionHistoryConfiguration(t *testing.T) {
 	// Property: Config without version history returns nil extractor
 	properties.Property("Config without version history fields returns nil extractor", prop.ForAll(
 		func(url, path string) bool {
-			cfg := &PackageConfig{
+			cfg := &registry.PackageConfig{
 				URL:    url,
 				Parser: "json",
 				Path:   path,
@@ -491,7 +492,7 @@ func TestXPathVersionHistoryEmptyXPath(t *testing.T) {
 
 // TestNewVersionHistoryExtractorJSON tests factory for JSON extractor
 func TestNewVersionHistoryExtractorJSON(t *testing.T) {
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:       "json",
 		Path:         "[0].tag_name",
 		VersionsPath: "[*].tag_name",
@@ -514,7 +515,7 @@ func TestNewVersionHistoryExtractorJSON(t *testing.T) {
 
 // TestNewVersionHistoryExtractorHTML tests factory for HTML extractor
 func TestNewVersionHistoryExtractorHTML(t *testing.T) {
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser:           "html",
 		Selector:         ".version",
 		VersionsSelector: ".version",
@@ -537,7 +538,7 @@ func TestNewVersionHistoryExtractorHTML(t *testing.T) {
 
 // TestNewVersionHistoryExtractorNone tests factory when no version history configured
 func TestNewVersionHistoryExtractorNone(t *testing.T) {
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "version",
 	}
@@ -556,7 +557,7 @@ func TestNewVersionHistoryExtractorNone(t *testing.T) {
 func TestHasVersionHistoryConfig(t *testing.T) {
 	tests := []struct {
 		name     string
-		cfg      *PackageConfig
+		cfg      *registry.PackageConfig
 		expected bool
 	}{
 		{
@@ -566,7 +567,7 @@ func TestHasVersionHistoryConfig(t *testing.T) {
 		},
 		{
 			name: "no version history",
-			cfg: &PackageConfig{
+			cfg: &registry.PackageConfig{
 				Parser: "json",
 				Path:   "version",
 			},
@@ -574,7 +575,7 @@ func TestHasVersionHistoryConfig(t *testing.T) {
 		},
 		{
 			name: "with versions_path",
-			cfg: &PackageConfig{
+			cfg: &registry.PackageConfig{
 				Parser:       "json",
 				Path:         "[0].tag_name",
 				VersionsPath: "[*].tag_name",
@@ -583,7 +584,7 @@ func TestHasVersionHistoryConfig(t *testing.T) {
 		},
 		{
 			name: "with versions_selector",
-			cfg: &PackageConfig{
+			cfg: &registry.PackageConfig{
 				Parser:           "html",
 				Selector:         ".version",
 				VersionsSelector: ".version",
@@ -604,7 +605,7 @@ func TestHasVersionHistoryConfig(t *testing.T) {
 
 // TestExtractVersionHistoryNoConfig tests ExtractVersionHistory with no config
 func TestExtractVersionHistoryNoConfig(t *testing.T) {
-	cfg := &PackageConfig{
+	cfg := &registry.PackageConfig{
 		Parser: "json",
 		Path:   "version",
 	}

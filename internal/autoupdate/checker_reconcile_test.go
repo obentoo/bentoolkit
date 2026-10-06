@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // hasItem reports whether the batch result contains a CheckResult for pkg.
@@ -64,7 +66,7 @@ path = "version"
 	if strings.Contains(string(got), "enabled") {
 		t.Errorf("expected the enabled assignment to be gone, got:\n%s", got)
 	}
-	cfg, err := LoadPackagesConfig(overlay)
+	cfg, err := registry.LoadPackagesConfig(overlay)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}

@@ -1,4 +1,4 @@
-package autoupdate
+package registry
 
 import (
 	"errors"
@@ -13,13 +13,13 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
-// recordEndMarker closes every record in packages.toml. TOML has no block
+// RecordEndMarker closes every record in packages.toml. TOML has no block
 // delimiter, and a bare [END] table would not be one: it would parse as a
 // package named "END" — and, repeated once per record, as a duplicate-table
 // error that stops the whole file from loading. A comment on the record's last
 // line is the closest valid equivalent, and unlike a floating comment it belongs
 // to the record it terminates.
-const recordEndMarker = "# END"
+const RecordEndMarker = "# END"
 
 // CanonicalFieldOrder is the sequence in which a packages.toml record assigns
 // its fields. It is the single source of that order: the linter checks against
@@ -193,7 +193,7 @@ func LintPackagesConfig(log *slog.Logger, overlayPath string) ([]LintIssue, erro
 		return nil, fmt.Errorf("failed to read packages.toml: %w", err)
 	}
 
-	issues := lintRecordModel(string(data))
+	issues := LintRecordModel(string(data))
 
 	// Semantic validation needs the parsed config; a parse failure is fatal
 	// because the structural issues above were found by text scan alone and say
@@ -397,7 +397,7 @@ type recordLintState struct {
 	fields        []recordField // every assignment, in file order, for lintRecordFields
 }
 
-// lintRecordModel scans the raw file text for record-model violations.
+// LintRecordModel scans the raw file text for record-model violations.
 //
 // It works on text rather than on the parsed config because every rule here is
 // about layout the TOML parser discards: where a comment sits, whether the doc
@@ -406,7 +406,7 @@ type recordLintState struct {
 // inside the documentation is not mistaken for file structure.
 //
 // The comment block that opens the file is exempt: see seenRecord below.
-func lintRecordModel(content string) []LintIssue {
+func LintRecordModel(content string) []LintIssue {
 	var issues []LintIssue
 	var cur *recordLintState
 	inComments := false
@@ -426,7 +426,7 @@ func lintRecordModel(content string) []LintIssue {
 		if !cur.closed {
 			issues = append(issues, LintIssue{
 				Line: cur.headerLine, Package: cur.name, Rule: LintMissingEnd,
-				Message: fmt.Sprintf("record is not closed by a %q line", recordEndMarker),
+				Message: fmt.Sprintf("record is not closed by a %q line", RecordEndMarker),
 			})
 		}
 		if !cur.hasComments {
@@ -488,7 +488,7 @@ func lintRecordModel(content string) []LintIssue {
 					Line: lineNo, Rule: LintStrayComment,
 					Message: "comment outside any record; move it into the comments field of the record it describes",
 				})
-			case trimmed == recordEndMarker:
+			case trimmed == RecordEndMarker:
 				cur.closed = true
 			default:
 				issues = append(issues, LintIssue{

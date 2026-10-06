@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Error variables for validation errors
@@ -45,7 +47,7 @@ type ValidationResult struct {
 //   - ebuildVersion: The current version from the ebuild file
 //
 // Returns a ValidationResult with the validation outcome.
-func ValidateSchema(content []byte, schema *PackageConfig, ebuildVersion string) *ValidationResult {
+func ValidateSchema(content []byte, schema *registry.PackageConfig, ebuildVersion string) *ValidationResult {
 	result := &ValidationResult{
 		EbuildVersion: ebuildVersion,
 	}
@@ -81,7 +83,7 @@ func ValidateSchema(content []byte, schema *PackageConfig, ebuildVersion string)
 //   - schema: The PackageConfig defining how to extract the version
 //
 // Returns the extracted version string or an error if extraction fails.
-func TestExtraction(content []byte, schema *PackageConfig) (string, error) {
+func TestExtraction(content []byte, schema *registry.PackageConfig) (string, error) {
 	// Use ParseVersion which handles primary and fallback parsers
 	version, err := ParseVersion(content, schema)
 	if err != nil {
@@ -162,7 +164,7 @@ func stripVersionPrefix(version string) string {
 //   - ebuildVersion: The current version from the ebuild file
 //
 // Returns a ValidationResult with the validation outcome.
-func ValidateSchemaWithFallback(primaryContent, fallbackContent []byte, schema *PackageConfig, ebuildVersion string) *ValidationResult {
+func ValidateSchemaWithFallback(primaryContent, fallbackContent []byte, schema *registry.PackageConfig, ebuildVersion string) *ValidationResult {
 	// Try primary first
 	result := ValidateSchema(primaryContent, schema, ebuildVersion)
 	if result.Valid {
@@ -171,7 +173,7 @@ func ValidateSchemaWithFallback(primaryContent, fallbackContent []byte, schema *
 
 	// If primary failed and we have fallback content, try fallback
 	if fallbackContent != nil && schema.FallbackURL != "" && schema.FallbackParser != "" {
-		fallbackSchema := &PackageConfig{
+		fallbackSchema := &registry.PackageConfig{
 			URL:     schema.FallbackURL,
 			Parser:  schema.FallbackParser,
 			Path:    schema.Path,

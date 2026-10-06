@@ -22,6 +22,7 @@ import (
 	"github.com/leanovate/gopter/prop"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"golang.org/x/time/rate"
 )
 
@@ -256,7 +257,7 @@ func TestBatchModeFiltering(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create packages with schemas
-			packagesWithSchema := make(map[string]PackageConfig)
+			packagesWithSchema := make(map[string]registry.PackageConfig)
 			for i := 0; i < numWithSchema; i++ {
 				pkgName := "app-misc/with-schema-" + string(rune('a'+i))
 				pkgDir := filepath.Join(tmpDir, "app-misc", "with-schema-"+string(rune('a'+i)))
@@ -265,7 +266,7 @@ func TestBatchModeFiltering(t *testing.T) {
 EAPI=8
 HOMEPAGE="https://example.com"
 `), 0644)
-				packagesWithSchema[pkgName] = PackageConfig{
+				packagesWithSchema[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api",
 					Parser: "json",
 					Path:   "version",
@@ -283,7 +284,7 @@ HOMEPAGE="https://example.com"
 			}
 
 			// Create analyzer with existing schemas
-			config := &PackagesConfig{Packages: packagesWithSchema}
+			config := &registry.PackagesConfig{Packages: packagesWithSchema}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				return false
@@ -317,8 +318,8 @@ HOMEPAGE="https://example.com"
 `), 0644)
 
 			// Create analyzer with existing schema for this package
-			config := &PackagesConfig{
-				Packages: map[string]PackageConfig{
+			config := &registry.PackagesConfig{
+				Packages: map[string]registry.PackageConfig{
 					"app-misc/test": {
 						URL:    "https://example.com/api",
 						Parser: "json",
@@ -572,8 +573,8 @@ func TestNewAnalyzerCreatesComponents(t *testing.T) {
 func TestNewAnalyzerWithOptions(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	customConfig := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	customConfig := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/test": {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -601,8 +602,8 @@ HOMEPAGE="https://example.com"
 `), 0644)
 
 	// Create analyzer with existing schema
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/test": {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -644,8 +645,8 @@ HOMEPAGE="https://example.com"
 `), 0644)
 
 	// Create analyzer with existing schema and fast rate limiter
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/test": {URL: "https://old.example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -761,8 +762,8 @@ HOMEPAGE="https://example.com"
 	}
 
 	// Create analyzer with one schema
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			"app-misc/with-schema": {URL: "https://example.com", Parser: "json", Path: "version"},
 		},
 	}
@@ -799,7 +800,7 @@ func TestSaveSchema(t *testing.T) {
 		t.Fatalf("NewAnalyzer failed: %v", err)
 	}
 
-	schema := &PackageConfig{
+	schema := &registry.PackageConfig{
 		URL:    "https://example.com/api",
 		Parser: "json",
 		Path:   "version",
@@ -1313,10 +1314,10 @@ func TestSchemaPreservation(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create existing schemas
-			existingSchemas := make(map[string]PackageConfig)
+			existingSchemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numExisting; i++ {
 				pkgName := "app-misc/existing-" + string(rune('a'+i))
-				existingSchemas[pkgName] = PackageConfig{
+				existingSchemas[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1324,7 +1325,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Create analyzer with existing schemas
-			config := &PackagesConfig{Packages: existingSchemas}
+			config := &registry.PackagesConfig{Packages: existingSchemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1332,7 +1333,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Save a new schema
-			newSchema := &PackageConfig{
+			newSchema := &registry.PackageConfig{
 				URL:    "https://example.com/new",
 				Parser: "json",
 				Path:   "tag_name",
@@ -1343,7 +1344,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1396,10 +1397,10 @@ func TestSchemaPreservation(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create existing schemas
-			existingSchemas := make(map[string]PackageConfig)
+			existingSchemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numExisting; i++ {
 				pkgName := "app-misc/existing-" + string(rune('a'+i))
-				existingSchemas[pkgName] = PackageConfig{
+				existingSchemas[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1407,7 +1408,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Create analyzer with existing schemas
-			config := &PackagesConfig{Packages: existingSchemas}
+			config := &registry.PackagesConfig{Packages: existingSchemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1415,7 +1416,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Update the first schema
-			updatedSchema := &PackageConfig{
+			updatedSchema := &registry.PackageConfig{
 				URL:     "https://example.com/updated",
 				Parser:  "regex",
 				Pattern: `v(\d+\.\d+\.\d+)`,
@@ -1426,7 +1427,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1491,10 +1492,10 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Save multiple schemas one by one
-			savedSchemas := make(map[string]PackageConfig)
+			savedSchemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numSaves; i++ {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
-				schema := &PackageConfig{
+				schema := &registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1507,7 +1508,7 @@ func TestSchemaPreservation(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1562,14 +1563,14 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create schemas with various configurations
-			schemas := make(map[string]PackageConfig)
+			schemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numPackages; i++ {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
 				switch i % 3 {
 				case 0:
 					// JSON parser. The classifier alternates so the round-trip
 					// covers both an explicit type and an absent one.
-					jsonCfg := PackageConfig{
+					jsonCfg := registry.PackageConfig{
 						URL:    "https://example.com/api/" + string(rune('a'+i)),
 						Parser: "json",
 						Path:   "version",
@@ -1580,14 +1581,14 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 					schemas[pkgName] = jsonCfg
 				case 1:
 					// Regex parser
-					schemas[pkgName] = PackageConfig{
+					schemas[pkgName] = registry.PackageConfig{
 						URL:     "https://example.com/releases/" + string(rune('a'+i)),
 						Parser:  "regex",
 						Pattern: `v(\d+\.\d+\.\d+)`,
 					}
 				case 2:
 					// HTML parser
-					schemas[pkgName] = PackageConfig{
+					schemas[pkgName] = registry.PackageConfig{
 						URL:      "https://example.com/download/" + string(rune('a'+i)),
 						Parser:   "html",
 						Selector: ".version",
@@ -1596,7 +1597,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Create analyzer with schemas
-			config := &PackagesConfig{Packages: schemas}
+			config := &registry.PackagesConfig{Packages: schemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1613,7 +1614,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Reload config from disk
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1662,10 +1663,10 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create schemas
-			schemas := make(map[string]PackageConfig)
+			schemas := make(map[string]registry.PackageConfig)
 			for i := 0; i < numPackages; i++ {
 				pkgName := "app-misc/pkg-" + string(rune('a'+i))
-				schemas[pkgName] = PackageConfig{
+				schemas[pkgName] = registry.PackageConfig{
 					URL:    "https://example.com/api/" + string(rune('a'+i)),
 					Parser: "json",
 					Path:   "version",
@@ -1673,7 +1674,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Create analyzer with schemas
-			config := &PackagesConfig{Packages: schemas}
+			config := &registry.PackagesConfig{Packages: schemas}
 			analyzer, err := NewAnalyzer(tmpDir, WithAnalyzerPackagesConfig(config))
 			if err != nil {
 				t.Logf("Failed to create analyzer: %v", err)
@@ -1698,7 +1699,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Reload and save again
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1728,7 +1729,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 
 			// Content should be identical (or at least equivalent when parsed)
 			// Note: TOML encoding may produce different ordering, so we compare parsed content
-			var firstParsed, secondParsed map[string]PackageConfig
+			var firstParsed, secondParsed map[string]registry.PackageConfig
 			if _, err := toml.Decode(string(firstContent), &firstParsed); err != nil {
 				t.Logf("Failed to parse first content: %v", err)
 				return false
@@ -1770,7 +1771,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			tmpDir := t.TempDir()
 
 			// Create a complex schema with all fields
-			complexSchema := PackageConfig{
+			complexSchema := registry.PackageConfig{
 				URL:             "https://api.github.com/repos/test/test/releases",
 				Parser:          "json",
 				Path:            "[0].tag_name",
@@ -1800,7 +1801,7 @@ func TestTOMLFormattingConsistency(t *testing.T) {
 			}
 
 			// Reload config
-			reloadedConfig, err := LoadPackagesConfig(tmpDir)
+			reloadedConfig, err := registry.LoadPackagesConfig(tmpDir)
 			if err != nil {
 				t.Logf("Failed to reload config: %v", err)
 				return false
@@ -1869,7 +1870,7 @@ func TestCacheWriteFailure_LogsDebugAndReturnsResult(t *testing.T) {
 	defer os.Chmod(cacheDir, 0755)
 
 	// Verify Set() actually fails (confirms test premise)
-	schema := &PackageConfig{Parser: "json", Path: "tag_name"}
+	schema := &registry.PackageConfig{Parser: "json", Path: "tag_name"}
 	setErr := cache.Set("test-pkg", schema, "https://example.com")
 	if setErr == nil {
 		t.Skip("cannot make cache.Set fail in this environment (may be root or different OS)")
@@ -2132,7 +2133,7 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 	// reaches the store as an older build would have written it.
 	const pkg = "app-misc/legacy"
 	cache.Entries[pkg] = AnalysisCacheEntry{
-		Schema:    &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+)\1`},
+		Schema:    &registry.PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+)\1`},
 		Timestamp: time.Now(),
 		URL:       "https://example.com",
 	}
@@ -2142,7 +2143,7 @@ func TestAnalysisCache_LazyRevalidation(t *testing.T) {
 
 	// Sanity: a sound entry must survive Get unaffected.
 	cache.Entries["app-misc/good"] = AnalysisCacheEntry{
-		Schema:    &PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+\.\d+)`},
+		Schema:    &registry.PackageConfig{URL: "https://example.com", Parser: "regex", Pattern: `(\d+\.\d+)`},
 		Timestamp: time.Now(),
 		URL:       "https://example.com",
 	}

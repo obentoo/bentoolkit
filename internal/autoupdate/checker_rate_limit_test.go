@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // =============================================================================
@@ -79,8 +80,8 @@ func newRateLimitTestChecker(t *testing.T, pkgURL string, opts ...CheckerOption)
 	pkgName := "test-cat/test-pkg"
 	createTestEbuild(t, overlayDir, pkgName, "1.0.0")
 
-	config := &PackagesConfig{
-		Packages: map[string]PackageConfig{
+	config := &registry.PackagesConfig{
+		Packages: map[string]registry.PackageConfig{
 			pkgName: {URL: pkgURL, Parser: "json", Path: "version"},
 		},
 	}

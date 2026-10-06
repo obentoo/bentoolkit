@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/sony/gobreaker"
 )
 
@@ -43,7 +44,7 @@ func TestFallbackKeepsRecordFields(t *testing.T) {
 	pkg := "net-dns/bind-tools"
 	createTestEbuild(t, overlayDir, pkg, "1.8.3")
 
-	cfg := PackageConfig{
+	cfg := registry.PackageConfig{
 		URL:             primary.URL,
 		Parser:          "json",
 		Path:            "version",
@@ -74,7 +75,7 @@ func TestFallbackKeepsRecordFields(t *testing.T) {
 }
 
 func TestFallbackConfigKeepsTimeoutAndSuffix(t *testing.T) {
-	cfg := &PackageConfig{Timeout: 90, Suffix: "_beta", SuffixWhen: `^2\.`, FallbackParser: "regex"}
+	cfg := &registry.PackageConfig{Timeout: 90, Suffix: "_beta", SuffixWhen: `^2\.`, FallbackParser: "regex"}
 	got := fallbackConfig(cfg, "x")
 	if got.Timeout != 90 || got.Suffix != "_beta" || got.SuffixWhen != `^2\.` {
 		t.Errorf("fallbackConfig dropped fields: %+v", *got)

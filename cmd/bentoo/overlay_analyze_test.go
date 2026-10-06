@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // TestAnalyzeCmd_HasRunFunction verifies that the analyze command has a Run or RunE function set.
@@ -96,12 +96,12 @@ func TestAnalyzeCmd_IsRegisteredUnderOverlay(t *testing.T) {
 func TestAnalyzeSuggestedSchemaClassifiesWithType(t *testing.T) {
 	tests := []struct {
 		name       string
-		schema     *autoupdate.PackageConfig
+		schema     *registry.PackageConfig
 		wantTypeIn bool
 	}{
 		{
 			name: "binary package is suggested as type = bin",
-			schema: &autoupdate.PackageConfig{
+			schema: &registry.PackageConfig{
 				URL:    "https://example.com/releases.json",
 				Parser: "json",
 				Path:   "version",
@@ -111,7 +111,7 @@ func TestAnalyzeSuggestedSchemaClassifiesWithType(t *testing.T) {
 		},
 		{
 			name: "unclassified package emits no type key at all",
-			schema: &autoupdate.PackageConfig{
+			schema: &registry.PackageConfig{
 				URL:    "https://example.com/releases.json",
 				Parser: "json",
 				Path:   "version",

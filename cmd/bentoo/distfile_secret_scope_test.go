@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // Story 068, sub-task 2.1 — R2.2, R2.4 through the real command: `bentoo
@@ -99,13 +100,13 @@ comments = """the story's reproduction"""
 	if !strings.Contains(errOut, fetchErr.Error()) {
 		t.Errorf("stderr does not carry the refusal text %q; stderr: %s", fetchErr.Error(), errOut)
 	}
-	issues, err := autoupdate.LintPackagesConfig(nil, overlay)
+	issues, err := registry.LintPackagesConfig(nil, overlay)
 	if err != nil {
 		t.Fatalf("LintPackagesConfig: %v", err)
 	}
 	found := false
 	for _, is := range issues {
-		if is.Package == "app-misc/leak" && is.Rule == autoupdate.LintInvalidConfig && strings.Contains(is.Message, fetchErr.Error()) {
+		if is.Package == "app-misc/leak" && is.Rule == registry.LintInvalidConfig && strings.Contains(is.Message, fetchErr.Error()) {
 			found = true
 		}
 	}

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
 // s062Recorder is a debug-level JSON logger whose records the test can read.
@@ -95,7 +97,7 @@ func s062WarnsNaming(t *testing.T, recs []map[string]any, sub string) []map[stri
 // attribute — and nothing reaches stderr.
 func TestCheckerLogsToTheInjectedLogger(t *testing.T) {
 	root := s062IsolateAutoupdate(t)
-	cfg := &PackagesConfig{Packages: map[string]PackageConfig{
+	cfg := &registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
 		"cat-a/s062-one": {URL: "https://example.invalid/a", Parser: "json", Path: "v", LLMPrompt: "extract version"},
 		"cat-b/s062-two": {URL: "https://example.invalid/b", Parser: "json", Path: "v"},
 	}}

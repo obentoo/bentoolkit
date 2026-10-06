@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 )
 
@@ -223,7 +224,7 @@ func shellCodeEnd(line []byte, quote *byte) int {
 // pending entry of that package will, missing otherwise. A presence scan that
 // cannot read a repository is joined into result.Error and that requirement
 // gets no state.
-func (c *Checker) settleRequirements(pkg string, cfg *PackageConfig, reqs map[string]string, result *CheckResult) {
+func (c *Checker) settleRequirements(pkg string, cfg *registry.PackageConfig, reqs map[string]string, result *CheckResult) {
 	if len(reqs) == 0 {
 		return
 	}

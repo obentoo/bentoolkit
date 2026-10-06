@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
@@ -53,7 +54,7 @@ var existingSuffixRegex = regexp.MustCompile(`_(alpha|beta|pre|rc|p)[0-9]*(-r[0-
 // A malformed suffix_when is warned and ignored rather than fatal: the record is
 // rejected up front by ValidatePackageConfig, and a check that got this far must
 // not die on the annotation. The warning goes to log; nil discards it.
-func applySuffix(log *slog.Logger, v string, cfg *PackageConfig) string {
+func applySuffix(log *slog.Logger, v string, cfg *registry.PackageConfig) string {
 	if cfg == nil || cfg.Suffix == "" || v == "" {
 		return v
 	}
@@ -87,7 +88,7 @@ func applySuffix(log *slog.Logger, v string, cfg *PackageConfig) string {
 // Non-comparable candidates (per ebuild.IsValidVersion, after transform and
 // prefix stripping) are skipped. Returns "" when no candidate is comparable.
 // A malformed rule is warned about to log; nil discards the warning.
-func selectVersion(log *slog.Logger, cands []string, cfg *PackageConfig) string {
+func selectVersion(log *slog.Logger, cands []string, cfg *registry.PackageConfig) string {
 	var transform [][]string
 	mode, series := "", ""
 	if cfg != nil {
