@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-10-06
+
 ### Added
 
 - **A JSON log file, and `BENTOO_LOG_LEVEL`.** Every run appends its
@@ -1202,7 +1204,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/obentoo/bentoolkit/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/obentoo/bentoolkit/compare/v0.31.1...v0.32.0
 [0.31.1]: https://github.com/obentoo/bentoolkit/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/obentoo/bentoolkit/compare/v0.30.3...v0.31.0
