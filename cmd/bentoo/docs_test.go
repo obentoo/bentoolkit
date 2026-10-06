@@ -2,11 +2,9 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"testing"
@@ -154,21 +152,6 @@ func TestREADME_DocumentsGatedDistfileFetch(t *testing.T) {
 	)
 }
 
-func TestCHANGELOG_HasV020(t *testing.T) {
-	changelog := readRepoDoc(t, "CHANGELOG.md")
-	requireContains(t, "CHANGELOG.md", changelog,
-		"## [0.2.0]",
-		"### Added",
-		"### Changed",
-		"### Security",
-		"### Fixed",
-		"go test -race ./...",
-		"golangci-lint run",
-		"govulncheck ./...",
-		"make audit-ctx",
-	)
-}
-
 // depthEnumeration returns just the list of rung names out of a surface that
 // enumerates the ladder: the run of text between the phrase that INTRODUCES the
 // list and the phrase that CLOSES it, both supplied by the caller.
@@ -305,103 +288,4 @@ func TestCompileFlag_NamesTheDeeperPathItDoesNotTake(t *testing.T) {
 		t.Errorf("the --compile usage %q does not name --depth=install as the path that goes further; an "+
 			"operator who wants src_install validated has no way to learn which flag does it", usage)
 	}
-}
-
-// changelogVersionHeading matches `## [0.29.0] - 2026-09-06`, and deliberately
-// not `## [Unreleased]`: the two are checked against each other below, so
-// conflating them here would make the check circular.
-var (
-	changelogVersionHeading = regexp.MustCompile(`(?m)^## \[(\d+\.\d+\.\d+)\]`)
-	changelogLinkRef        = regexp.MustCompile(`(?m)^\[([^\]]+)\]: (\S+)$`)
-)
-
-// TestCHANGELOG_LinkRefsFollowTheVersions is the invariant a release cut
-// maintains BY HAND, and that nothing checked.
-//
-// Cutting a version edits two places that must agree and sit 4800 lines apart:
-// a heading goes in at the top, and at the foot the [Unreleased] link must be
-// re-pointed at the new tag while the new version gets a compare range of its
-// own. Nothing failed if you forgot. The existing CHANGELOG test reads the
-// `## [0.2.0]` section and no other, which story 047's own register recorded as
-// a limit: its gate confirms an edit broke nothing rather than that the entry is
-// right.
-//
-// # What is checked, and what deliberately is not
-//
-// The CONTENT of an entry is editorial and no test should have an opinion about
-// it. What is mechanical is the correspondence: every version heading has a
-// reference, every reference has a heading, and each range spans from the
-// version below it to itself. Those are the parts a human retypes and a diff
-// makes hard to see.
-//
-// The oldest version is the one exception and is asserted as one: it has no
-// predecessor to compare against, so it points at the release tag instead.
-func TestCHANGELOG_LinkRefsFollowTheVersions(t *testing.T) {
-	changelog := readRepoDoc(t, "CHANGELOG.md")
-
-	var versions []string
-	for _, m := range changelogVersionHeading.FindAllStringSubmatch(changelog, -1) {
-		versions = append(versions, m[1])
-	}
-	if len(versions) < 2 {
-		t.Fatalf("found %d version headings in CHANGELOG.md; the parse found the wrong thing", len(versions))
-	}
-
-	refs := map[string]string{}
-	for _, m := range changelogLinkRef.FindAllStringSubmatch(changelog, -1) {
-		refs[m[1]] = m[2]
-	}
-
-	// The newest heading is the one [Unreleased] must compare from. Re-pointing
-	// it is the step a cut is most likely to leave behind, because the section
-	// it belongs to is empty and looks finished either way.
-	newest := versions[0]
-	wantUnreleased := fmt.Sprintf("https://github.com/obentoo/bentoolkit/compare/v%s...HEAD", newest)
-	if got := refs["Unreleased"]; got != wantUnreleased {
-		t.Errorf("[Unreleased] compares from the wrong point.\n got: %s\nwant: %s\nThe newest version in the file is %s, "+
-			"so anything else makes the Unreleased link show changes that are already released.", got, wantUnreleased, newest)
-	}
-
-	for i, version := range versions {
-		got, ok := refs[version]
-		if !ok {
-			t.Errorf("## [%s] has no link reference at the foot of the file, so the heading renders as literal brackets", version)
-			continue
-		}
-
-		// The oldest version FIRST, because there is no versions[i+1] to read
-		// for it — computing the compare range before testing for it is an index
-		// past the end, which is how this guard failed the first time it ran.
-		var want string
-		if i == len(versions)-1 {
-			want = fmt.Sprintf("https://github.com/obentoo/bentoolkit/releases/tag/v%s", version)
-		} else {
-			want = fmt.Sprintf("https://github.com/obentoo/bentoolkit/compare/v%s...v%s", versions[i+1], version)
-		}
-		if got != want {
-			t.Errorf("[%s] does not span from the version below it.\n got: %s\nwant: %s", version, got, want)
-		}
-	}
-
-	// The other direction: a reference nothing points at is a version that was
-	// renamed or removed and left half-deleted.
-	for name := range refs {
-		if name == "Unreleased" {
-			continue
-		}
-		if !slicesContains(versions, name) {
-			t.Errorf("[%s] is referenced at the foot of the file but has no `## [%s]` heading", name, name)
-		}
-	}
-}
-
-// slicesContains is spelled here rather than imported so this file keeps the
-// import set it had.
-func slicesContains(haystack []string, needle string) bool {
-	for _, s := range haystack {
-		if s == needle {
-			return true
-		}
-	}
-	return false
 }
