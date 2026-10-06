@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
@@ -41,7 +42,7 @@ import (
 //
 // in is the prompt source (os.Stdin in production, a strings.Reader in tests);
 // newChecker constructs a fresh Checker over the same overlay on each call.
-func promptRegistryFixes(ctx context.Context, overlayPath string, fixer autoupdate.RegistryFixer, failures map[string]error, in io.Reader, newChecker func() (*autoupdate.Checker, error)) error {
+func promptRegistryFixes(ctx context.Context, overlayPath string, registryFixer fixer.RegistryFixer, failures map[string]error, in io.Reader, newChecker func() (*autoupdate.Checker, error)) error {
 	pkgs := autoupdate.RepairableFetchFailures(failures)
 	if len(pkgs) == 0 {
 		return nil
@@ -75,7 +76,7 @@ loop:
 			}
 		}
 
-		a := autoupdate.AttemptRegistryFix(ctx, overlayPath, pkg, failures[pkg], fixer, newChecker)
+		a := autoupdate.AttemptRegistryFix(ctx, overlayPath, pkg, failures[pkg], registryFixer, newChecker)
 		switch a.Status {
 		case autoupdate.RegistryFixSkipped:
 			fmt.Printf("  skipping %s: %s: %v\n", pkg, registryFixStageLine(a.Stage), a.Err)
@@ -93,7 +94,7 @@ loop:
 			// alias ..." when the configured model was an alias, because an
 			// alias resolves to a different model over time (S030-R4.1/R4.2).
 			fmt.Printf("✔ %s fixed using %s: %s (resolved upstream %s)\n",
-				pkg, autoupdate.FormatModelUsed(a.Result.Model), a.Result.Summary, a.Recheck.UpstreamVersion)
+				pkg, fixer.FormatModelUsed(a.Result.Model), a.Result.Summary, a.Recheck.UpstreamVersion)
 			if a.Recheck.NotComparable {
 				fmt.Printf("  warning: %s extracted version %q is not orderable against the current version; the parser may need more work\n", pkg, a.Recheck.UpstreamVersion)
 			}
@@ -105,7 +106,7 @@ loop:
 			// back to (S030-R4.1). It also names the tools the agent was refused,
 			// the likeliest reason its fix fell short, never their input (S051-R5.2).
 			fmt.Printf("  %s still failing after fix using %s: %s%s\n  error: %v\n",
-				pkg, autoupdate.FormatModelUsed(a.Result.Model), a.Result.Summary, llm.RefusedToolsNote(a.Result.DeniedTools), a.RecheckErr)
+				pkg, fixer.FormatModelUsed(a.Result.Model), a.Result.Summary, llm.RefusedToolsNote(a.Result.DeniedTools), a.RecheckErr)
 			fmt.Print("Keep the edit anyway? [y/N] ")
 			if readAnswer(reader) == "y" {
 				// User chose to keep a still-failing edit (R5.3).

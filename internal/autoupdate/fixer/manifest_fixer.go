@@ -1,5 +1,5 @@
-// Package autoupdate provides LLM integration for version extraction and schema analysis.
-//
+package fixer
+
 // manifest_fixer.go implements ManifestFixer, an *agentic* counterpart to the
 // sandboxed ClaudeCodeClient (claude_code.go). Where that client runs the local
 // `claude` CLI tool-free (--allowedTools "") and feeds it page content on stdin,
@@ -12,7 +12,6 @@
 // The authoritative success check is NOT the agent's self-report: after the fixer
 // returns, the Applier re-runs its own `pkgdev manifest` step and only treats the
 // apply as recovered if THAT succeeds (see runManifestWithFix in applier.go).
-package autoupdate
 
 import (
 	"bytes"
@@ -656,4 +655,15 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 		ModelIsAlias: isModelAlias(f.model),
 		DeniedTools:  llm.RefusedToolLabels(env.PermissionDenials),
 	}, nil
+}
+
+// lookPath is the seam used to detect the `claude` binary. It defaults to
+// exec.LookPath and is overridable in tests so construction is deterministic
+// regardless of the host PATH.
+var lookPath = exec.LookPath
+
+// claudeAvailable reports whether the `claude` CLI is resolvable on PATH (S003-R6.1).
+func claudeAvailable() bool {
+	_, err := lookPath("claude")
+	return err == nil
 }

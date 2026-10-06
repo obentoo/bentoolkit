@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
@@ -388,14 +389,14 @@ type Applier struct {
 	// LLM agent to repair the ebuild (e.g. a SRC_URI whose URL convention changed
 	// between versions) before the Applier re-runs the manifest to confirm. Set
 	// via WithApplierFixer; nil keeps the original fail-fast behaviour.
-	fixer ManifestFixer
+	fixer fixer.ManifestFixer
 	// buildFixer, when non-nil, is invoked when the build gate fails for a reason
 	// attributable to the ebuild (a patch that no longer applies, a configure
 	// option upstream dropped): it drives an LLM agent to repair the STAGED ebuild,
 	// after which the applier re-runs the same gate and that re-run — never the
 	// agent's self-report — decides the outcome (S033-R8.1, S033-R8.2). Set via
 	// WithApplierBuildFixer; nil keeps the original fail-fast behaviour.
-	buildFixer BuildFixer
+	buildFixer fixer.BuildFixer
 	// reporter is the progress sink Apply emits its lifecycle to (TaskStart →
 	// TaskStage → TaskDone). Set via WithApplierReporter; defaults to tui.Noop()
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
@@ -456,7 +457,7 @@ type Applier struct {
 	// R7.5). Its proposal is advisory and one-way: validate.Escalate combines it
 	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
 	// nil skips the review entirely.
-	reviewer BumpReviewer
+	reviewer fixer.BumpReviewer
 	// lookPath answers "is this tool installed at all" for the build gates,
 	// which ask it before spawning so an absent Portage is reported as a named
 	// SKIP rather than as an opaque failure. It defaults to exec.LookPath and is
@@ -617,7 +618,7 @@ func WithApplierPackagesConfig(cfg *registry.PackagesConfig) ApplierOption {
 // WithApplierFixer wires an LLM manifest fixer into the applier. When the manifest
 // step fails, the applier asks the fixer to repair the ebuild and then re-runs the
 // manifest to confirm. A nil fixer is ignored, preserving the fail-fast behaviour.
-func WithApplierFixer(fixer ManifestFixer) ApplierOption {
+func WithApplierFixer(fixer fixer.ManifestFixer) ApplierOption {
 	return func(a *Applier) {
 		if fixer != nil {
 			a.fixer = fixer
@@ -635,7 +636,7 @@ func WithApplierFixer(fixer ManifestFixer) ApplierOption {
 // provider that could not be constructed leaves the applier exactly as it was
 // rather than half-configured, so "no LLM was asked for" and "the LLM could not
 // be built" produce the same, predictable run.
-func WithApplierBuildFixer(fixer BuildFixer) ApplierOption {
+func WithApplierBuildFixer(fixer fixer.BuildFixer) ApplierOption {
 	return func(a *Applier) {
 		if fixer != nil {
 			a.buildFixer = fixer
@@ -767,7 +768,7 @@ func WithApplierRequireProof(require bool) ApplierOption {
 // for the same reason: a provider that could not be constructed leaves the
 // applier as it was rather than half-configured, so "no LLM was asked for" and
 // "the LLM could not be built" produce the same, predictable run.
-func WithApplierBumpReviewer(reviewer BumpReviewer) ApplierOption {
+func WithApplierBumpReviewer(reviewer fixer.BumpReviewer) ApplierOption {
 	return func(a *Applier) {
 		if reviewer != nil {
 			a.reviewer = reviewer
@@ -2161,7 +2162,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	a.reporter.TaskStage(pkg, "llm-fix")
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
-	fixRes, fixErr := a.fixer.FixManifest(ctx, ManifestFixRequest{
+	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
 		Package:       pkg,
 		Version:       version,
 		PkgDir:        pkgDir,
@@ -2212,9 +2213,9 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// word as a pinned identity. One string feeds both sinks so the operator's
 	// log and the TUI report can never drift apart.
 	fixLine := fmt.Sprintf("LLM fixer repaired %s-%s using %s: %s",
-		pkg, version, FormatModelUsed(fixRes.Model), fixRes.Summary)
+		pkg, version, fixer.FormatModelUsed(fixRes.Model), fixRes.Summary)
 	a.logger().Info("LLM fixer repaired the ebuild",
-		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
+		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
 	a.reporter.Log("info", fixLine)
 
 	// Advisory QA gate: the manifest re-run proves the distfile fetches and
@@ -2972,7 +2973,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
-	fixRes, fixErr := a.buildFixer.FixBuild(ctx, BuildFixRequest{
+	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
 		Gate:       compileGatePhase,
@@ -2984,7 +2985,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		Attempt: 1,
 	})
 	switch {
-	case errors.Is(fixErr, ErrBuildFixAttemptsExhausted):
+	case errors.Is(fixErr, fixer.ErrBuildFixAttemptsExhausted):
 		// "We stopped on purpose" is different news from "the agent failed", and
 		// the operator acts on it differently: nothing is wrong with the machine.
 		return first.logPath, fmt.Errorf("%w (the build fixer stopped on purpose: %w)", first.err, fixErr)
@@ -3026,9 +3027,9 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	// (S030-R4.1/R4.2) — the same one string into both sinks that the manifest fix
 	// path uses, so the operator's log and the TUI report cannot drift apart.
 	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s",
-		pkg, version, FormatModelUsed(fixRes.Model), summary)
+		pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
 	a.logger().Info("LLM build fixer repaired the staged ebuild",
-		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", summary)
+		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", summary)
 	a.reporter.Log("info", repaired)
 	return "", nil
 }

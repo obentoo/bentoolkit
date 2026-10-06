@@ -20,7 +20,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
@@ -49,8 +49,8 @@ func runRegistryFixLoop(t *testing.T, envelope string) string {
 		spawns++
 		return exec.CommandContext(ctx, "/bin/sh", "-c", "printf '%s' '"+envelope+"'")
 	}
-	fixer, err := autoupdate.NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"},
-		autoupdate.WithRegistryFixerExecCommand(seam))
+	fixer, err := fixer.NewClaudeCodeRegistryFixer(llm.LLMConfig{Provider: "claude-code", Bare: "false"},
+		fixer.WithRegistryFixerExecCommand(seam))
 	if err != nil {
 		t.Fatalf("NewClaudeCodeRegistryFixer: %v", err)
 	}

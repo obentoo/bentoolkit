@@ -1,14 +1,8 @@
-package autoupdate
+package fixer
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 )
-
-// =============================================================================
-// Test harness (scripted exec seam — no real `claude` is ever invoked)
-// =============================================================================
 
 // stubLookPathFound forces claudeAvailable() to succeed regardless of the host
 // PATH, so ClaudeCodeClient construction is deterministic. Restored via
@@ -19,14 +13,24 @@ func stubLookPathFound(t *testing.T) {
 	orig := lookPath
 	lookPath = func(string) (string, error) { return "/usr/bin/claude", nil }
 	t.Cleanup(func() { lookPath = orig })
-	// The fixers moved to internal/autoupdate/fixer, whose own lookPath this
-	// variable no longer reaches: a fake claude on PATH satisfies its check.
-	// Tests drive the fixers through their exec seam, so it never runs (story 061).
-	bin := t.TempDir()
-	if err := os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
-		t.Fatalf("staging a fake claude: %v", err)
+}
+
+// capturedExec records the argv handed to the exec seam for the most recent
+// call, so tests can assert what landed in argv (and what did NOT — e.g. page
+// content or the API key).
+type capturedExec struct {
+	name string
+	args []string
+}
+
+// argsContain reports whether any element of args equals target.
+func argsContain(args []string, target string) bool {
+	for _, a := range args {
+		if a == target {
+			return true
+		}
 	}
-	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return false
 }
 
 // flagValue returns the element immediately following the first occurrence of

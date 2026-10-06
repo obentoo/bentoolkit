@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
@@ -456,7 +457,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 
 	a.reporter.TaskStage(pkg, "review")
 	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
-	report, err := a.reviewer.ReviewBump(ctx, BumpReviewRequest{
+	report, err := a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
 		Package:    pkg,
 		OldVersion: oldVersion,
 		NewVersion: newVersion,
@@ -830,7 +831,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	a.reporter.TaskStage(pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
-	fixRes, fixErr := a.buildFixer.FixBuild(ctx, BuildFixRequest{
+	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
 		Gate:       gate,
@@ -867,9 +868,9 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 
 	result.Fixed = true
 	result.FixSummary = summary
-	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s", pkg, version, FormatModelUsed(fixRes.Model), summary)
+	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s", pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
 	a.logger().Info("LLM build fixer repaired the staged ebuild",
-		"package", pkg, "version", version, "model", FormatModelUsed(fixRes.Model), "summary", summary)
+		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", summary)
 	a.reporter.Log("info", repaired)
 	return gates, nil
 }

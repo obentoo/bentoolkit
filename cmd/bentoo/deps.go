@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -46,7 +47,7 @@ type deps struct {
 	// checkInteractive asks whether stdin is interactive. Without them the
 	// registry-fix loop, and the overlay lock it must run under (S056-R4.6),
 	// could only be reached from a terminal with a configured claude CLI.
-	checkRegistryFixer func(log *slog.Logger, llmCfg config.LLMConfig) (autoupdate.RegistryFixer, error)
+	checkRegistryFixer func(log *slog.Logger, llmCfg config.LLMConfig) (fixer.RegistryFixer, error)
 	checkInteractive   func() bool
 	// resolveGentooProvider obtains the ::gentoo provider for the revive flows
 	// and for prune, so they can be driven with an on-disk fake.

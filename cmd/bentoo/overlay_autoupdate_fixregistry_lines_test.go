@@ -30,23 +30,24 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 )
 
 // linesFixer is a RegistryFixer whose edit runs before it answers.
 type linesFixer struct {
 	edit func()
-	res  autoupdate.RegistryFixResult
+	res  fixer.RegistryFixResult
 	err  error
 }
 
-func (f *linesFixer) FixRegistry(_ context.Context, _ autoupdate.RegistryFixRequest) (autoupdate.RegistryFixResult, error) {
+func (f *linesFixer) FixRegistry(_ context.Context, _ fixer.RegistryFixRequest) (fixer.RegistryFixResult, error) {
 	if f.edit != nil {
 		f.edit()
 	}
 	return f.res, f.err
 }
 
-var _ autoupdate.RegistryFixer = (*linesFixer)(nil)
+var _ fixer.RegistryFixer = (*linesFixer)(nil)
 
 // linesReader hands out one answer per Read call and runs hook just before
 // the answer at index hookAt, so a test can act between two prompts.
@@ -157,10 +158,10 @@ const (
 // compares the whole of stdout with the lines the command printed before
 // story 060 (U3).
 func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
-	pinned := autoupdate.RegistryFixResult{Summary: "tried", Model: "claude-sonnet-4-5"}
-	alias := autoupdate.RegistryFixResult{Summary: "path repaired", Model: "sonnet", DeniedTools: []string{"WebFetch(example.com)"}}
+	pinned := fixer.RegistryFixResult{Summary: "tried", Model: "claude-sonnet-4-5"}
+	alias := fixer.RegistryFixResult{Summary: "path repaired", Model: "sonnet", DeniedTools: []string{"WebFetch(example.com)"}}
 
-	type setup func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error))
+	type setup func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error))
 	cases := []struct {
 		name  string
 		setup setup
@@ -168,7 +169,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 	}{
 		{
 			name: "snapshot failure skips",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				if err := os.Remove(o.configPath); err != nil {
 					t.Fatal(err)
 				}
@@ -180,7 +181,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "load failure skips",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				if err := os.WriteFile(o.configPath, []byte("[[[ not toml\n"), 0o644); err != nil {
 					t.Fatal(err)
 				}
@@ -192,7 +193,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "fixer error reverts",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: o.editTo(t, "halfway"), err: errors.New("agent crashed")}, linesFailures(), answers("y\n"), o.newChecker
 			},
 			want: linesPrompt +
@@ -201,7 +202,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "fixer error whose restore fails warns",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: func() { o.breakRestore(t) }, err: errors.New("agent crashed")}, linesFailures(), answers("y\n"), o.newChecker
 			},
 			want: linesPrompt +
@@ -211,7 +212,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "checker error reverts",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: o.editTo(t, "version"), res: alias}, linesFailures(), answers("y\n"),
 					func() (*autoupdate.Checker, error) { return nil, errors.New("checker init failed") }
 			},
@@ -221,7 +222,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "pass keeps the edit",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: o.editTo(t, "version"), res: alias}, linesFailures(), answers("y\n"), o.newChecker
 			},
 			want: linesPrompt +
@@ -230,7 +231,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "pass with a version that cannot be ordered warns",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: o.editTo(t, "nightly"), res: pinned}, linesFailures(), answers("y\n"), o.newChecker
 			},
 			want: linesPrompt +
@@ -240,7 +241,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "still failing, kept",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: o.editTo(t, "wrong"), res: alias}, linesFailures(), answers("y\n", "y\n"), o.newChecker
 			},
 			want: linesPrompt +
@@ -250,14 +251,14 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "still failing, reverted",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{edit: o.editTo(t, "wrong"), res: pinned}, linesFailures(), answers("y\n", "N\n"), o.newChecker
 			},
 			want: linesPrompt + linesStillWrong + linesKeep + "fixed 0 · reverted 1 · skipped 0\n",
 		},
 		{
 			name: "still failing, revert whose restore fails warns",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				in := &linesReader{answers: []string{"y\n", "N\n"}, hookAt: 1, hook: func() { o.breakRestore(t) }}
 				return &linesFixer{edit: o.editTo(t, "wrong"), res: pinned}, linesFailures(), in, o.newChecker
 			},
@@ -265,7 +266,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "n then a over several packages, non-fetch failures never offered",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				f := linesFailures("app-misc/aaa", "app-misc/bbb")
 				f["zzz-misc/plain"] = errors.New("timeout")
 				return &linesFixer{edit: o.editTo(t, "version"), res: alias}, f, answers("n\n", "a\n", "N\n"), o.newChecker
@@ -280,14 +281,14 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "q stops before the remaining packages",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{res: pinned}, linesFailures("app-misc/aaa"), answers("q\n"), o.newChecker
 			},
 			want: "Fix registry for app-misc/aaa with LLM? [y/N/a/q] fixed 0 · reverted 0 · skipped 0\n",
 		},
 		{
 			name: "unrecognized answer skips, then EOF stops",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{res: pinned}, linesFailures("app-misc/aaa", "app-misc/bbb"), answers("maybe\n"), o.newChecker
 			},
 			want: "Fix registry for app-misc/aaa with LLM? [y/N/a/q] " +
@@ -296,7 +297,7 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		},
 		{
 			name: "no fetch failure prints nothing",
-			setup: func(t *testing.T, o *linesOverlay) (autoupdate.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
+			setup: func(t *testing.T, o *linesOverlay) (fixer.RegistryFixer, map[string]error, io.Reader, func() (*autoupdate.Checker, error)) {
 				return &linesFixer{res: pinned}, map[string]error{linesPkg: errors.New("timeout")}, answers("y\n"), o.newChecker
 			},
 			want: "",

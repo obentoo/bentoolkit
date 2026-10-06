@@ -1,5 +1,5 @@
-// Package autoupdate provides LLM integration for version extraction and schema analysis.
-//
+package fixer
+
 // build_fixer.go implements BuildFixer, the third agentic fixer beside
 // ManifestFixer (manifest_fixer.go) and RegistryFixer (registry_fixer.go). Where
 // the manifest fixer repairs a SRC_URI/manifest breakage in the OVERLAY and the
@@ -21,7 +21,6 @@
 // As with the other two, a nil error is NOT proof the build now passes: the
 // authoritative answer is the caller's own re-run of the same gate (R8.2), never
 // the agent's self-report.
-package autoupdate
 
 import (
 	"bytes"

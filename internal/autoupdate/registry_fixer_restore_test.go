@@ -112,7 +112,7 @@ func TestRegistryFixRevert_KeepsModeDespiteStaleTmp(t *testing.T) {
 // no os.Rename, os.WriteFile, os.Create or os.CreateTemp, spells no ".tmp"
 // literal, and calls fileutil.WriteFileAtomic.
 func TestRegistryFixRevert_HasNoTempRenameOfItsOwn(t *testing.T) {
-	const src = "registry_fixer.go"
+	const src = "registry_fix_attempt.go"
 	fset := token.NewFileSet()
 	file, err := parser.ParseFile(fset, src, nil, parser.SkipObjectResolution)
 	if err != nil {

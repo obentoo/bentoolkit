@@ -1,0 +1,603 @@
+package fixer
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+	"unicode/utf8"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+)
+
+// exitErrWithCode runs a trivial `sh -c "exit N"` to manufacture a real
+// *exec.ExitError carrying the given code, so formatFixerError's errors.As/
+// ExitCode() extraction (AD5) is exercised without invoking the real claude CLI.
+func exitErrWithCode(t *testing.T, code int) error {
+	t.Helper()
+	err := exec.Command("sh", "-c", fmt.Sprintf("exit %d", code)).Run()
+	if err == nil {
+		t.Fatalf("expected a non-nil exit error for code %d", code)
+	}
+	return err
+}
+
+// newTestFixer constructs a ClaudeCodeFixer with lookPath stubbed to "find"
+// claude and the given options applied.
+func newTestFixer(t *testing.T, cfg llm.LLMConfig, opts ...ClaudeCodeFixerOption) *ClaudeCodeFixer {
+	t.Helper()
+	stubLookPathFound(t)
+	f, err := NewClaudeCodeFixer(cfg, opts...)
+	if err != nil {
+		t.Fatalf("NewClaudeCodeFixer: unexpected error: %v", err)
+	}
+	return f
+}
+
+// fixerSeam is like scriptedSeam but also retains a pointer to the most recently
+// returned *exec.Cmd so the test can inspect fields FixManifest sets after the
+// factory returns (notably cmd.Dir).
+func fixerSeam(script string) (func(ctx context.Context, name string, arg ...string) *exec.Cmd, *capturedExec, **exec.Cmd) {
+	cap := &capturedExec{}
+	var last *exec.Cmd
+	factory := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		cap.name = name
+		cap.args = append([]string(nil), arg...)
+		cmd := exec.CommandContext(ctx, "sh", "-c", script)
+		last = cmd
+		return cmd
+	}
+	return factory, cap, &last
+}
+
+// sampleFixRequest builds a request whose PkgDir is a real temp directory, so the
+// spawned child (which chdirs into PkgDir) can start.
+func sampleFixRequest(t *testing.T) ManifestFixRequest {
+	t.Helper()
+	pkgDir := t.TempDir()
+	return ManifestFixRequest{
+		Package:       "dev-games/godot",
+		Version:       "4.7",
+		PkgDir:        pkgDir,
+		EbuildPath:    filepath.Join(pkgDir, "godot-4.7.ebuild"),
+		ManifestError: "404 Not Found: https://example.com/godot-4.7.tar.xz",
+		DistDir:       filepath.Join(pkgDir, "distdir"),
+	}
+}
+
+func TestNewClaudeCodeFixer_Defaults(t *testing.T) {
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"})
+	if f.execCommand == nil {
+		t.Error("expected execCommand to default to a non-nil factory")
+	}
+	if f.timeout != DefaultManifestFixTimeout {
+		t.Errorf("expected default timeout == %v, got %v", DefaultManifestFixTimeout, f.timeout)
+	}
+	if f.model != llm.DefaultClaudeCodeModel {
+		t.Errorf("expected default model %q, got %q", llm.DefaultClaudeCodeModel, f.model)
+	}
+}
+
+func TestNewClaudeCodeFixer_UnavailableCLI(t *testing.T) {
+	orig := lookPath
+	lookPath = func(string) (string, error) { return "", exec.ErrNotFound }
+	t.Cleanup(func() { lookPath = orig })
+
+	_, err := NewClaudeCodeFixer(llm.LLMConfig{Provider: "claude-code"})
+	if err == nil {
+		t.Fatal("expected ErrClaudeCodeUnavailable when claude CLI is absent")
+	}
+}
+
+// TestFixManifest_AgenticArgvAndCwd verifies the agentic invocation shape: the
+// scoped allowlist, --add-dir == PkgDir, --max-turns, cwd == PkgDir, and that the
+// dangerous bypass flag is NEVER used.
+func TestFixManifest_AgenticArgvAndCwd(t *testing.T) {
+	// A valid envelope so FixManifest returns success.
+	envelope := `{"type":"result","is_error":false,"result":"changed SRC_URI to the -stable asset","total_cost_usd":0.02}`
+	factory, cap, last := fixerSeam("printf '%s' '" + envelope + "'")
+
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	req := sampleFixRequest(t)
+	res, err := f.FixManifest(context.Background(), req)
+	if err != nil {
+		t.Fatalf("FixManifest: unexpected error: %v", err)
+	}
+	if res.Summary != "changed SRC_URI to the -stable asset" {
+		t.Errorf("Summary = %q, want the envelope result", res.Summary)
+	}
+	if res.CostUSD != 0.02 {
+		t.Errorf("CostUSD = %v, want 0.02", res.CostUSD)
+	}
+
+	if cap.name != "claude" {
+		t.Errorf("exec name = %q, want claude", cap.name)
+	}
+
+	addDir, ok := flagValue(cap.args, "--add-dir")
+	if !ok || addDir != req.PkgDir {
+		t.Errorf("--add-dir = %q (found=%v), want %q", addDir, ok, req.PkgDir)
+	}
+
+	turns, ok := flagValue(cap.args, "--max-turns")
+	if !ok || turns != "30" {
+		t.Errorf("--max-turns = %q (found=%v), want 30", turns, ok)
+	}
+
+	// The allow list is variadic, one rule per element (S051-R2.7), so it is
+	// read with flagValues rather than as one joined string. Edit is scoped to
+	// the package directory, pkgdev is the only Bash rule, and WebFetch reaches
+	// named hosts only (S051-R2.3, S051-R3.1..R3.3).
+	allowed := flagValues(cap.args, "--allowedTools")
+	if len(allowed) == 0 {
+		t.Fatal("expected --allowedTools rules")
+	}
+	for _, want := range []string{"Bash(pkgdev *)", "Edit(/" + req.PkgDir + "/**)", "WebFetch(domain:github.com)"} {
+		if !containsRule(allowed, want) {
+			t.Errorf("--allowedTools %q missing %q", allowed, want)
+		}
+	}
+	for _, banned := range []string{"Bash(wget *)", "Bash(cat *)", "Bash(ls *)", "WebFetch", "Read"} {
+		if containsRule(allowed, banned) {
+			t.Errorf("--allowedTools %q grants %q (S051-R3.1, S051-R2.3)", allowed, banned)
+		}
+	}
+
+	if argsContain(cap.args, "--dangerously-skip-permissions") ||
+		argsContain(cap.args, "--allow-dangerously-skip-permissions") {
+		t.Error("fixer must NOT bypass permissions")
+	}
+
+	// The bentoo ebuild QA knowledge (gotchas) must be injected via the system
+	// prompt so the fix is QA-aware even in --bare mode.
+	sysPrompt, ok := flagValue(cap.args, "--append-system-prompt")
+	if !ok {
+		t.Fatal("expected --append-system-prompt with the ebuild QA guidance")
+	}
+	for _, want := range []string{"eapply_user", "thin-manifests", "MY_PN"} {
+		if !strings.Contains(sysPrompt, want) {
+			t.Errorf("system prompt missing gotcha marker %q", want)
+		}
+	}
+
+	if *last == nil {
+		t.Fatal("expected the seam to capture the spawned *exec.Cmd")
+	}
+	if (*last).Dir != req.PkgDir {
+		t.Errorf("cmd.Dir = %q, want PkgDir %q", (*last).Dir, req.PkgDir)
+	}
+}
+
+// TestFixManifest_InstructionCarriesContext checks the per-package facts land in
+// the -p instruction (not page content on stdin), so the agent knows what to fix.
+func TestFixManifest_InstructionCarriesContext(t *testing.T) {
+	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	req := sampleFixRequest(t)
+	if _, err := f.FixManifest(context.Background(), req); err != nil {
+		t.Fatalf("FixManifest: %v", err)
+	}
+
+	instruction, ok := flagValue(cap.args, "-p")
+	if !ok {
+		t.Fatal("expected -p instruction")
+	}
+	for _, want := range []string{req.Package, req.Version, req.EbuildPath, req.ManifestError, req.DistDir} {
+		if !strings.Contains(instruction, want) {
+			t.Errorf("instruction missing %q", want)
+		}
+	}
+	if !strings.Contains(instruction, "/bentoo") {
+		t.Error("instruction should offer the /bentoo skill when available")
+	}
+}
+
+// TestFixManifest_BareModeKeyNeverInArgv asserts that in bare mode the API key is
+// injected only via the child environment and never appears in argv.
+func TestFixManifest_BareModeKeyNeverInArgv(t *testing.T) {
+	const keyEnv = "TEST_FIXER_KEY"
+	const secret = "sk-super-secret-value"
+	t.Setenv(keyEnv, secret)
+
+	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", APIKeyEnv: keyEnv, Bare: "true"},
+		WithFixerExecCommand(factory))
+
+	if _, err := f.FixManifest(context.Background(), sampleFixRequest(t)); err != nil {
+		t.Fatalf("FixManifest: %v", err)
+	}
+
+	if !f.bareMode {
+		t.Fatal("expected bareMode true for Bare=\"true\"")
+	}
+	if !argsContain(cap.args, "--bare") {
+		t.Error("expected --bare in argv for bare mode")
+	}
+	for _, a := range cap.args {
+		if strings.Contains(a, secret) {
+			t.Fatalf("API key leaked into argv: %q", a)
+		}
+	}
+}
+
+// TestFixManifest_ErrorEnvelope verifies a structured error envelope surfaces as an
+// error without leaking internals.
+func TestFixManifest_ErrorEnvelope(t *testing.T) {
+	factory, _, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":true,"subtype":"max_turns","errors":["ran out of turns"]}'`)
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err == nil {
+		t.Fatal("expected an error for an is_error envelope")
+	}
+	if !strings.Contains(err.Error(), "max_turns") {
+		t.Errorf("error %v should mention the subtype", err)
+	}
+}
+
+// TestFixManifest_NonZeroExit verifies a non-zero CLI exit yields an error.
+func TestFixManifest_NonZeroExit(t *testing.T) {
+	factory, _, _ := fixerSeam("echo boom 1>&2; exit 3")
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	if _, err := f.FixManifest(context.Background(), sampleFixRequest(t)); err == nil {
+		t.Fatal("expected an error for a non-zero CLI exit")
+	}
+}
+
+// TestFixManifest_BudgetFlag verifies a positive MaxBudgetUSD is forwarded.
+func TestFixManifest_BudgetFlag(t *testing.T) {
+	factory, cap, _ := fixerSeam(`printf '%s' '{"type":"result","is_error":false,"result":"ok"}'`)
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code", MaxBudgetUSD: 1.5},
+		WithFixerExecCommand(factory))
+
+	if _, err := f.FixManifest(context.Background(), sampleFixRequest(t)); err != nil {
+		t.Fatalf("FixManifest: %v", err)
+	}
+	v, ok := flagValue(cap.args, "--max-budget-usd")
+	if !ok || v != "1.5" {
+		t.Errorf("--max-budget-usd = %q (found=%v), want 1.5", v, ok)
+	}
+}
+
+// TestFixManifest_TimeoutHonored confirms the configured timeout bounds the call.
+// The seam uses `exec sleep` so the shell replaces itself with sleep rather than
+// forking a child that would keep the stdout pipe open after the kill — otherwise
+// cmd.Wait blocks on the orphaned pipe (observed hanging for minutes under dash on
+// CI, where bash's single-command exec optimisation does not apply).
+func TestFixManifest_TimeoutHonored(t *testing.T) {
+	factory, _, _ := fixerSeam("exec sleep 3600")
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"},
+		WithFixerExecCommand(factory), WithFixerTimeout(150*time.Millisecond))
+
+	start := time.Now()
+	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("FixManifest did not honor the timeout (took %v)", elapsed)
+	}
+}
+
+// TestFixManifest_ContradictoryExit is the end-to-end regression for the headline
+// bug: a non-zero CLI exit paired with a self-reported success envelope must
+// surface the exit code, the subtype, the result text, and contradiction framing
+// through the rewired terminal branch — never the old empty "(success): " tail.
+func TestFixManifest_ContradictoryExit(t *testing.T) {
+	env := `{"type":"result","subtype":"success","is_error":false,"result":"renamed asset not found upstream","errors":[]}`
+	factory, _, _ := fixerSeam("printf '%s' '" + env + "'; exit 1")
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err == nil {
+		t.Fatal("expected an error for a non-zero exit with a success envelope")
+	}
+	msg := err.Error()
+	for _, want := range []string{"1", "success", "renamed asset not found upstream", "reported success"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q missing %q", msg, want)
+		}
+	}
+	if strings.HasSuffix(strings.TrimRight(msg, " "), ":") {
+		t.Errorf("message has an empty tail after the colon: %q", msg)
+	}
+	if !errors.Is(err, llm.ErrLLMRequestFailed) {
+		t.Error("error must wrap ErrLLMRequestFailed")
+	}
+}
+
+// TestFixManifest_NonJSONStdout covers R1.4: a non-zero exit with unparseable
+// stdout surfaces the raw stdout (bounded) plus stderr.
+func TestFixManifest_NonJSONStdout(t *testing.T) {
+	factory, _, _ := fixerSeam(`printf 'boom\npartial'; printf 'panic: x' 1>&2; exit 1`)
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err == nil {
+		t.Fatal("expected an error for non-JSON stdout on a non-zero exit")
+	}
+	msg := err.Error()
+	for _, want := range []string{"boom", "partial", "panic: x"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q missing %q", msg, want)
+		}
+	}
+}
+
+// TestFixManifest_IsErrorEnvelopeOnExit covers R1.5: a non-zero exit with an
+// is_error envelope surfaces subtype, errors, and result.
+func TestFixManifest_IsErrorEnvelopeOnExit(t *testing.T) {
+	env := `{"type":"result","subtype":"error_during_execution","is_error":true,"errors":["tool denied"],"result":"stopped"}`
+	factory, _, _ := fixerSeam("printf '%s' '" + env + "'; exit 1")
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err == nil {
+		t.Fatal("expected an error for an is_error envelope")
+	}
+	msg := err.Error()
+	for _, want := range []string{"error_during_execution", "tool denied", "stopped"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q missing %q", msg, want)
+		}
+	}
+}
+
+// TestFixManifest_CancellationNamed covers R1.3: a call killed by an elapsed
+// context reports the timeout/cancellation, not a bare CLI failure.
+func TestFixManifest_CancellationNamed(t *testing.T) {
+	factory, _, _ := fixerSeam("exec sleep 3600")
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"},
+		WithFixerExecCommand(factory), WithFixerTimeout(150*time.Millisecond))
+
+	_, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err == nil {
+		t.Fatal("expected a timeout error")
+	}
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "deadline") && !strings.Contains(msg, "timeout") && !strings.Contains(msg, "cancel") {
+		t.Errorf("message %q should name the timeout/cancellation", msg)
+	}
+}
+
+// TestFixManifest_SuccessPathUnchanged covers UB1: a clean exit with a valid
+// success envelope returns the result/cost with a nil error and no diagnostics.
+func TestFixManifest_SuccessPathUnchanged(t *testing.T) {
+	env := `{"type":"result","is_error":false,"result":"changed SRC_URI","total_cost_usd":0.05}`
+	factory, _, _ := fixerSeam("printf '%s' '" + env + "'")
+	f := newTestFixer(t, llm.LLMConfig{Provider: "claude-code"}, WithFixerExecCommand(factory))
+
+	res, err := f.FixManifest(context.Background(), sampleFixRequest(t))
+	if err != nil {
+		t.Fatalf("success path must return nil error, got %v", err)
+	}
+	if res.Summary != "changed SRC_URI" || res.CostUSD != 0.05 {
+		t.Errorf("unexpected result %+v", res)
+	}
+}
+
+// TestTruncateManifestError verifies the head+tail bounding that keeps the agent's
+// -p instruction under Linux's MAX_ARG_STRLEN.
+func TestTruncateManifestError(t *testing.T) {
+	// Short input passes through verbatim.
+	short := "404 Not Found: https://example.com/foo-1.2.tar.xz"
+	if got := truncateManifestError(short); got != short {
+		t.Errorf("short input was altered: got %q", got)
+	}
+
+	// A realistic bloated error: the failing URI at the head, a multi-megabyte
+	// wget progress dump in the middle, and the final diagnostic at the tail.
+	head := "command failed: exit status 1\nOutput: fetching https://example.com/big-1.4.8.tar.xz\n"
+	tail := "\n * failed fetching file: big-1.4.8.tar.xz\npkgdev manifest: error: failed fetching required distfiles"
+	noise := strings.Repeat("137750K .......... .......... .......... 99% 58.7M 0s\n", 100000)
+	big := head + noise + tail
+
+	got := truncateManifestError(big)
+	if len(got) > manifestErrorBudget+128 {
+		t.Errorf("truncated length %d exceeds budget %d (+marker)", len(got), manifestErrorBudget)
+	}
+	if !strings.Contains(got, "big-1.4.8.tar.xz") {
+		t.Error("truncation dropped the failing URI at the head")
+	}
+	if !strings.Contains(got, "failed fetching required distfiles") {
+		t.Error("truncation dropped the final diagnostic at the tail")
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Error("expected an elision marker in the truncated output")
+	}
+}
+
+// TestTruncateDiagnostic verifies the head+tail bounding applied to captured
+// diagnostic streams (result/stderr/stdout) embedded in a fixer error.
+func TestTruncateDiagnostic(t *testing.T) {
+	// Input within budget passes through verbatim.
+	short := "could not locate the renamed vcpkg asset"
+	if got := truncateDiagnostic(short); got != short {
+		t.Errorf("short input was altered: got %q", got)
+	}
+
+	// Oversized input is bounded, keeps head and tail, and marks the elision.
+	head := "HEAD-START "
+	tail := " TAIL-END"
+	big := head + strings.Repeat("x", diagnosticsBudget*2) + tail
+	got := truncateDiagnostic(big)
+	if len(got) > diagnosticsBudget+128 {
+		t.Errorf("truncated length %d exceeds budget %d (+marker)", len(got), diagnosticsBudget)
+	}
+	if !strings.HasPrefix(got, head) {
+		t.Errorf("truncation dropped the original head: %q", got[:min(len(got), 20)])
+	}
+	if !strings.HasSuffix(got, tail) {
+		t.Errorf("truncation dropped the original tail")
+	}
+	if !strings.Contains(got, "truncated") {
+		t.Error("expected an elision marker in the truncated output")
+	}
+
+	// A multi-byte rune straddling either cut boundary must not yield invalid UTF-8.
+	multibyte := strings.Repeat("世", diagnosticsBudget) // 3 bytes per rune, well over budget
+	if out := truncateDiagnostic(multibyte); !utf8.ValidString(out) {
+		t.Error("truncateDiagnostic produced invalid UTF-8 at a rune boundary")
+	}
+}
+
+// TestTruncateManifestError_UnchangedBudget guards UB5: generalizing the helper
+// must keep the 16 KiB instruction-path behavior and its marker text identical.
+func TestTruncateManifestError_UnchangedBudget(t *testing.T) {
+	big := strings.Repeat("a", manifestErrorBudget*2)
+	got := truncateManifestError(big)
+	if len(got) > manifestErrorBudget+128 {
+		t.Errorf("manifest truncation length %d exceeds budget %d", len(got), manifestErrorBudget)
+	}
+	if !strings.Contains(got, "manifest output truncated") {
+		t.Error("manifest marker text changed (UB5 violation)")
+	}
+}
+
+// TestFormatFixerError_Contradiction covers the headline bug: a non-zero exit
+// paired with a self-reported success envelope must surface the exit code, the
+// subtype, the result text, and explicit contradiction framing — never an empty
+// tail (R1.1, R1.2; AD3).
+func TestFormatFixerError_Contradiction(t *testing.T) {
+	env := llm.ClaudeCodeEnvelope{Subtype: "success", IsError: false, Result: "could not locate the renamed vcpkg asset", Errors: nil}
+	err := formatFixerError(nil, exitErrWithCode(t, 1), env, nil, "", "")
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	msg := err.Error()
+	for _, want := range []string{"1", "success", "could not locate the renamed vcpkg asset", "reported success"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q missing %q", msg, want)
+		}
+	}
+	if strings.HasSuffix(strings.TrimRight(msg, " "), ":") {
+		t.Errorf("message has an empty tail after the colon: %q", msg)
+	}
+	if !errors.Is(err, llm.ErrLLMRequestFailed) {
+		t.Error("error must wrap ErrLLMRequestFailed")
+	}
+}
+
+// TestFormatFixerError_TimeoutPrecedence covers R1.3/AD4: a cancelled or expired
+// context is reported as timeout/cancellation, taking precedence over exit framing.
+func TestFormatFixerError_Timeout(t *testing.T) {
+	err := formatFixerError(context.DeadlineExceeded, exitErrWithCode(t, 1),
+		llm.ClaudeCodeEnvelope{Subtype: "success"}, nil, "", "")
+	msg := strings.ToLower(err.Error())
+	if !strings.Contains(msg, "deadline") && !strings.Contains(msg, "timeout") && !strings.Contains(msg, "cancel") {
+		t.Errorf("message %q should name the timeout/cancellation", msg)
+	}
+	if strings.Contains(msg, "reported success") {
+		t.Errorf("ctx error must take precedence over exit/contradiction framing: %q", msg)
+	}
+	if !errors.Is(err, llm.ErrLLMRequestFailed) {
+		t.Error("error must wrap ErrLLMRequestFailed")
+	}
+}
+
+// TestFormatFixerError_IsError covers R1.5: an explicit error envelope surfaces
+// subtype, errors, result, and stderr together.
+func TestFormatFixerError_IsError(t *testing.T) {
+	env := llm.ClaudeCodeEnvelope{Subtype: "error_max_turns", IsError: true, Result: "stopped mid-edit", Errors: []string{"ran out of turns"}}
+	err := formatFixerError(nil, nil, env, nil, "", "panic: boom")
+	msg := err.Error()
+	for _, want := range []string{"error_max_turns", "ran out of turns", "stopped mid-edit", "panic: boom"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message %q missing %q", msg, want)
+		}
+	}
+}
+
+// TestFormatFixerError_Bounded covers R2.1: oversized diagnostics are truncated
+// with the elision marker and stay within budget.
+func TestFormatFixerError_Bounded(t *testing.T) {
+	bigResult := strings.Repeat("R", diagnosticsBudget*2)
+	bigStderr := strings.Repeat("E", diagnosticsBudget*2)
+	env := llm.ClaudeCodeEnvelope{Subtype: "success", Result: bigResult}
+	err := formatFixerError(nil, exitErrWithCode(t, 1), env, nil, "", bigStderr)
+	msg := err.Error()
+	// Each embedded stream is independently bounded; the whole message stays well
+	// under 2*budget + framing.
+	if len(msg) > 2*diagnosticsBudget+1024 {
+		t.Errorf("message length %d not bounded", len(msg))
+	}
+	if !strings.Contains(msg, "truncated") {
+		t.Error("expected an elision marker for the oversized diagnostics")
+	}
+}
+
+// TestFormatFixerError_NoKeyLeak covers R2.2: the formatter never has access to
+// the API key, so no representative secret passed via its inputs leaks.
+func TestFormatFixerError_NoKeyLeak(t *testing.T) {
+	const secret = "sk-super-secret-value"
+	// The key is never an input; assert it is absent for a representative secret
+	// even when diagnostics are present.
+	env := llm.ClaudeCodeEnvelope{Subtype: "success", Result: "done"}
+	err := formatFixerError(nil, exitErrWithCode(t, 1), env, nil, "stdout-noise", "stderr-noise")
+	if strings.Contains(err.Error(), secret) {
+		t.Fatal("formatter output must never contain the API key value")
+	}
+}
+
+// TestBuildFixInstruction_BoundsArgvSize is a regression guard for the E2BIG
+// ("argument list too long") failure: a manifest error bloated by a wget progress
+// dump must not push the -p instruction past the per-argument kernel limit.
+func TestBuildFixInstruction_BoundsArgvSize(t *testing.T) {
+	req := sampleFixRequest(t)
+	req.ManifestError = strings.Repeat("137750K .......... .......... 99% 58.7M 0s\n", 200000)
+
+	instruction := buildManifestFixInstruction(req)
+
+	// MAX_ARG_STRLEN on Linux is 128 KiB per single argv element; stay well under.
+	const maxArgStrlen = 128 * 1024
+	if len(instruction) >= maxArgStrlen {
+		t.Errorf("instruction length %d would exceed MAX_ARG_STRLEN %d", len(instruction), maxArgStrlen)
+	}
+}
+
+// TestFormatFixerError_AStartFailureIsSaidAsOne is story 040's R5.6: a fixer
+// command that could not start is reported distinctly from one that exited with
+// a code. Measured in the field (2026-08-19): a chdir-ENOENT start failure was
+// rendered as `claude fixer failed: exit chdir …/zed-bin@preview/…: no such
+// file or directory` — a whole error printed where a number was promised, which
+// an operator reads as a garbled exit code rather than as what it was.
+func TestFormatFixerError_AStartFailureIsSaidAsOne(t *testing.T) {
+	cmd := exec.Command("true")
+	cmd.Dir = filepath.Join(t.TempDir(), "vanished")
+	startErr := cmd.Run()
+	if startErr == nil {
+		t.Fatalf("instrument: running in a nonexistent directory succeeded; no start failure to render")
+	}
+
+	got := formatFixerError(nil, startErr, llm.ClaudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
+	if !strings.Contains(got, "could not start") {
+		t.Errorf("a start failure is rendered as %q; it must say the command could not start rather than "+
+			"framing the raw error as an exit code", got)
+	}
+	if !strings.Contains(got, "vanished") {
+		t.Errorf("the rendered failure %q lost the cause; the operator still needs to read WHAT could "+
+			"not start and why", got)
+	}
+}
+
+// TestFormatFixerError_AnExitFailureKeepsItsCode is R5.6's other half: the
+// numeric rendering of a command that ran and exited non-zero is unchanged.
+func TestFormatFixerError_AnExitFailureKeepsItsCode(t *testing.T) {
+	exitErr := exec.Command("false").Run()
+	if exitErr == nil {
+		t.Fatalf("instrument: `false` exited zero; no exit failure to render")
+	}
+
+	got := formatFixerError(nil, exitErr, llm.ClaudeCodeEnvelope{}, errors.New("no stdout to parse"), "", "").Error()
+	if !strings.Contains(got, "exit 1") {
+		t.Errorf("a non-zero exit is rendered as %q; the numeric code is the contract today's operators "+
+			"and tests read, and the start-failure fix must not reword it", got)
+	}
+}

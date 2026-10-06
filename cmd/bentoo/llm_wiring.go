@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
@@ -79,11 +80,11 @@ func newConfiguredLLMProvider(log *slog.Logger, c config.LLMConfig) (llm.LLMProv
 // original fail-fast manifest behaviour. A configured-but-unconstructable
 // claude-code fixer (e.g. the `claude` CLI is absent) returns (nil, err) so the
 // caller can Warn and continue.
-func newConfiguredManifestFixer(log *slog.Logger, c config.LLMConfig) (autoupdate.ManifestFixer, error) {
+func newConfiguredManifestFixer(log *slog.Logger, c config.LLMConfig) (fixer.ManifestFixer, error) {
 	if c.Provider != "claude-code" {
 		return nil, nil
 	}
-	return autoupdate.NewClaudeCodeFixer(llmConfigToAutoupdate(c), autoupdate.WithFixerLogger(log))
+	return fixer.NewClaudeCodeFixer(llmConfigToAutoupdate(c), fixer.WithFixerLogger(log))
 }
 
 // newConfiguredRegistryFixer builds an LLM registry fixer from the CLI config for
@@ -95,11 +96,11 @@ func newConfiguredManifestFixer(log *slog.Logger, c config.LLMConfig) (autoupdat
 // `fixer != nil` gate stays honest and the repair prompt never appears (AD9 / R7.1).
 // A configured-but-unconstructable claude-code fixer (e.g. the `claude` CLI is
 // absent) returns (nil, err) so the caller can Warn and continue with no prompt.
-func newConfiguredRegistryFixer(log *slog.Logger, c config.LLMConfig) (autoupdate.RegistryFixer, error) {
+func newConfiguredRegistryFixer(log *slog.Logger, c config.LLMConfig) (fixer.RegistryFixer, error) {
 	if c.Provider != "claude-code" {
 		return nil, nil
 	}
-	return autoupdate.NewClaudeCodeRegistryFixer(llmConfigToAutoupdate(c), autoupdate.WithRegistryFixerLogger(log))
+	return fixer.NewClaudeCodeRegistryFixer(llmConfigToAutoupdate(c), fixer.WithRegistryFixerLogger(log))
 }
 
 // newConfiguredBuildFixer builds the LLM build fixer for the staged compile gate
@@ -125,11 +126,11 @@ func newConfiguredRegistryFixer(log *slog.Logger, c config.LLMConfig) (autoupdat
 // by applierFixerOption in overlay_autoupdate.go. The variadic options exist so
 // the caller can pass the operator's `autoupdate.validate.timeout` through
 // WithBuildFixerTimeout, which is that key's only consumer on the fixer side.
-func newConfiguredBuildFixer(log *slog.Logger, c config.LLMConfig, opts ...autoupdate.BuildFixerOption) (autoupdate.BuildFixer, error) {
+func newConfiguredBuildFixer(log *slog.Logger, c config.LLMConfig, opts ...fixer.BuildFixerOption) (fixer.BuildFixer, error) {
 	if c.Provider != "claude-code" {
 		return nil, nil
 	}
-	fixer, err := autoupdate.NewClaudeCodeBuildFixer(llmConfigToAutoupdate(c), append([]autoupdate.BuildFixerOption{autoupdate.WithBuildFixerLogger(log)}, opts...)...)
+	fixer, err := fixer.NewClaudeCodeBuildFixer(llmConfigToAutoupdate(c), append([]fixer.BuildFixerOption{fixer.WithBuildFixerLogger(log)}, opts...)...)
 	if err != nil {
 		// Discard the returned pointer deliberately: it is nil, and boxing it into
 		// the interface is the exact bug documented above.
@@ -150,11 +151,11 @@ func newConfiguredBuildFixer(log *slog.Logger, c config.LLMConfig, opts ...autou
 //
 // The variadic options carry `autoupdate.validate.timeout` in through
 // WithBumpReviewerTimeout, the key's only consumer on the review side.
-func newConfiguredBumpReviewer(log *slog.Logger, c config.LLMConfig, opts ...autoupdate.BumpReviewerOption) (autoupdate.BumpReviewer, error) {
+func newConfiguredBumpReviewer(log *slog.Logger, c config.LLMConfig, opts ...fixer.BumpReviewerOption) (fixer.BumpReviewer, error) {
 	if c.Provider != "claude-code" {
 		return nil, nil
 	}
-	reviewer, err := autoupdate.NewClaudeCodeBumpReviewer(llmConfigToAutoupdate(c), append([]autoupdate.BumpReviewerOption{autoupdate.WithBumpReviewerLogger(log)}, opts...)...)
+	reviewer, err := fixer.NewClaudeCodeBumpReviewer(llmConfigToAutoupdate(c), append([]fixer.BumpReviewerOption{fixer.WithBumpReviewerLogger(log)}, opts...)...)
 	if err != nil {
 		return nil, fmt.Errorf("bump reviewer: %w", err)
 	}
@@ -210,7 +211,7 @@ func applierLLMOptions(log *slog.Logger, llm bool, llmCfg config.LLMConfig, v co
 	budget := v.GetTimeout()
 
 	if review {
-		reviewer, err := newConfiguredBumpReviewer(log, llmCfg, autoupdate.WithBumpReviewerTimeout(budget))
+		reviewer, err := newConfiguredBumpReviewer(log, llmCfg, fixer.WithBumpReviewerTimeout(budget))
 		switch {
 		case err != nil:
 			log.Warn("LLM bump reviewer unavailable; this run validates to the depth the policy chose", "err", err)
@@ -222,7 +223,7 @@ func applierLLMOptions(log *slog.Logger, llm bool, llmCfg config.LLMConfig, v co
 	}
 
 	if fix {
-		fixer, err := newConfiguredBuildFixer(log, llmCfg, autoupdate.WithBuildFixerTimeout(budget))
+		fixer, err := newConfiguredBuildFixer(log, llmCfg, fixer.WithBuildFixerTimeout(budget))
 		switch {
 		case err != nil:
 			log.Warn("LLM build fixer unavailable; a failed build stays failed", "err", err)

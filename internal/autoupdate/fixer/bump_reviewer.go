@@ -1,5 +1,5 @@
-// Package autoupdate provides LLM integration for version extraction and schema analysis.
-//
+package fixer
+
 // bump_reviewer.go implements BumpReviewer, the fourth and NARROWEST agentic
 // capability in this package, beside ManifestFixer (manifest_fixer.go),
 // RegistryFixer (registry_fixer.go) and BuildFixer (build_fixer.go). The other
@@ -39,7 +39,6 @@
 // resolution, the bare/key-injection discipline (childEnv), the exec seam, the
 // envelope (claudeCodeEnvelope), formatFixerError, the wait delay, and the
 // argv-size guard (truncateMiddle).
-package autoupdate
 
 import (
 	"bytes"

@@ -1,4 +1,4 @@
-package autoupdate
+package fixer
 
 // Authored for story 051 (llm-agent-least-privilege), sub-task 7.1 — a refused
 // WebFetch to an IPv4-literal host keeps its host in the refusal label

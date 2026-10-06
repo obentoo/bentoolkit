@@ -1,4 +1,4 @@
-package autoupdate
+package fixer
 
 // fixer_model_test.go — story 030, sub-task 5.3 (S030-R4.1/R4.2/R4.3).
 //

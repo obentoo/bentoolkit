@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 )
 
 // Story 054, R3.3-R3.5 (B2): the privileged compile keeps sudo in the terminal's
@@ -42,9 +44,9 @@ const failingCompile = compileTranscript + `; exit 1`
 
 type countingBuildFixer struct{ calls atomic.Int32 }
 
-func (f *countingBuildFixer) FixBuild(context.Context, BuildFixRequest) (BuildFixResult, error) {
+func (f *countingBuildFixer) FixBuild(context.Context, fixer.BuildFixRequest) (fixer.BuildFixResult, error) {
 	f.calls.Add(1)
-	return BuildFixResult{}, errors.New("counting fixer: no change")
+	return fixer.BuildFixResult{}, errors.New("counting fixer: no change")
 }
 
 type compileHarness struct {
