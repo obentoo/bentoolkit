@@ -1,0 +1,51 @@
+name: Bug report
+description: bentoo or bentoo-tray did something it should not have.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A **security** problem goes through SECURITY.md, not here.
+        Before pasting output or logs, check them for tokens, passwords and private paths.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `bentoo version` (or `bentoo-tray --version`).
+      placeholder: bentoo version 0.33.1
+    validations:
+      required: true
+  - type: textarea
+    id: command
+    attributes:
+      label: What you ran
+      description: The exact command and flags.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened instead
+      description: Include the full terminal output.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log
+      description: |
+        Rerun with `BENTOO_LOG_LEVEL=debug` and paste the relevant lines of
+        `~/.local/state/bentoo/logs/bentoo.log`. Known secrets are redacted, but check anyway.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Distribution and profile, how bentoolkit was installed (ebuild, make install), and anything unusual (btrfs layout, desktop for the tray).
