@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Security
+
+- **Built with Go 1.26.9 and `golang.org/x/net` v0.60.0** (GO-2026-6617,
+  CVE-2026-97032: an HTTP/2 server crash from a race in the HPACK encoder of
+  `net/http`). bentoolkit and `bentoo-tray` only act as HTTP clients, so the
+  crash path is a server one, but `govulncheck` reaches the affected
+  `net/http` code from the HTTP client paths and the toolchain in `go.mod`
+  decides what a release links against. Both fixes were taken on the day
+  they were published, ahead of the usual seven-day wait for new
+  dependencies, because they are the Go team's own security releases.
+
 ### Fixed
 
 - **`bentoo-tray` stopped while starting exits 0.** A SIGINT, SIGTERM or
