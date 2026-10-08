@@ -82,7 +82,7 @@ func run(args []string, stderr io.Writer, getenv func(string) string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer stop()
 
-	return exitCode(log, start(ctx, log, getenv))
+	return exitCode(ctx, log, start(ctx, log, getenv))
 }
 
 // parseLevel maps BENTOO_TRAY_LOG_LEVEL to a level. Empty is info; an unknown
@@ -102,11 +102,17 @@ func parseLevel(v string) (lvl slog.Level, bad bool) {
 	}
 }
 
-// exitCode logs how the App ended and maps it to the exit code.
-func exitCode(log *slog.Logger, err error) int {
+// exitCode logs how the App ended and maps it to the exit code. ctx is the
+// signal context: a startup cut short by a stop signal is a stop, not a
+// failure, so it exits 0 at INFO. A timeout is not a signal, and neither is a
+// cancellation while ctx is still live; both stay failures.
+func exitCode(ctx context.Context, log *slog.Logger, err error) int {
 	switch {
 	case err == nil:
 		return exitOK // the App logged the stop
+	case ctx.Err() != nil && errors.Is(err, context.Canceled):
+		log.Info("bentoo-tray was stopped while starting", "error", err)
+		return exitOK
 	case errors.Is(err, tray.ErrAlreadyRunning):
 		log.Info("bentoo-tray is already running in this session; exiting", "bus_name", dbusx.BusName)
 		return exitOK

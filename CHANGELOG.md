@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bentoo-tray` stopped while starting exits 0.** A SIGINT, SIGTERM or
+  SIGHUP that reached the tray while it was starting made it log
+  `bentoo-tray could not start` and exit `1` — also at the moment the session
+  bus had already granted it its name but not yet answered, which made the
+  tray's signal test fail intermittently. The name request now runs to its
+  answer (bounded by 2 s), and a stop signal during startup stops the tray
+  cleanly: the state is saved, the name released, and the exit code is `0`
+  with an INFO line. The tray's version is 0.1.1.
+
 ## [0.33.2] - 2026-10-08
 
 ### Fixed
