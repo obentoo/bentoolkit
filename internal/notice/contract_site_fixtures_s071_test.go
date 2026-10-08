@@ -27,7 +27,7 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 type contractFixtureS071 struct {

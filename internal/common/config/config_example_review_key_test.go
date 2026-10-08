@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // S048-R3.5 asks the shipped example to DOCUMENT autoupdate.review.timeout, in

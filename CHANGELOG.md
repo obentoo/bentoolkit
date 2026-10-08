@@ -16,6 +16,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   the code was, strictly, all rights reserved. The MIT text is now at the
   root.
 
+### Changed
+
+- **YAML comes from `go.yaml.in/yaml/v3`, not `gopkg.in/yaml.v3`.** The old
+  module was archived upstream on 2025-04-01 and will receive no further
+  fixes; `go.yaml.in/yaml/v3` is its maintained continuation, with the same
+  API. Output is unchanged: the notices feed's golden files pass untouched. A
+  `depguard` rule keeps the old import from coming back.
+
 ## [0.33.1] - 2026-10-06
 
 ### Changed

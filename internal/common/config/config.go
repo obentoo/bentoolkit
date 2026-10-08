@@ -12,7 +12,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 var (

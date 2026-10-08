@@ -21,6 +21,7 @@ linters:
     - nolintlint
     - gochecknoglobals
     - sloglint
+    - depguard
 
   settings:
     errcheck:
@@ -39,6 +40,15 @@ linters:
         - (*github.com/spf13/cobra.Command).GenFishCompletion
         - (*github.com/spf13/cobra.Command).GenPowerShellCompletionWithDesc
 
+    depguard:
+      rules:
+        # Imports that must not come back once removed. A module can stay in
+        # go.sum through a dependency's tests; this rule only stops our code
+        # from linking it again.
+        retired:
+          deny:
+            - pkg: gopkg.in/yaml.v3
+              desc: archived upstream (2025-04-01) and unmaintained; use go.yaml.in/yaml/v3, its maintained continuation
     nolintlint:
       require-explanation: true
       require-specific: true
