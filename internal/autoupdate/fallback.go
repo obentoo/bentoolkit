@@ -1,4 +1,3 @@
-// Package autoupdate provides fallback chain logic for parser configuration.
 package autoupdate
 
 import "github.com/obentoo/bentoolkit/internal/autoupdate/registry"

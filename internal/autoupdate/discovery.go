@@ -1,4 +1,3 @@
-// Package autoupdate provides data source discovery for ebuild autoupdate analysis.
 package autoupdate
 
 import (

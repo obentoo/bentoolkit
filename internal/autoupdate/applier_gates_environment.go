@@ -1,44 +1,21 @@
 // applier_gates_environment.go holds both halves of the unmet-precondition
-// record.
+// record. Recording: once build_failure.go has classified a failed build as the
+// machine's (ErrBuildEnvironment), it names WHAT the machine lacked and writes
+// that against the package in cache.json. Re-checking: on a later run, before
+// any child is spawned, it asks as the BUILD USER (not the caller's own stat)
+// whether that still holds, and either declines the gate or clears the record.
+// Without the record, one host fault (a key file the portage uid could not
+// read) re-ran the same doomed build thirteen times over two days.
 //
-// The RECORDING half is at the top: once build_failure.go has decided that a
-// failed build belongs to the machine (ErrBuildEnvironment), this file answers
-// the follow-up question — WHAT did the machine not have — and writes the answer
-// against the package in cache.json.
+// Fail open is a direction, not defensive coding. Recording nothing costs a
+// retried build, which is the old behaviour and the floor; recording the wrong
+// path would suppress the package forever on a failed parse. So a message this
+// file does not understand yields "", never a placeholder.
 //
-// The RE-CHECKING half is at the bottom: on a later run, before any child is
-// spawned, it asks whether that answer still holds — as the BUILD USER, which is
-// a different question from the one the caller's own `stat` answers — and either
-// declines the gate or clears the record and lets it run.
-//
-// Without the record that answer was thrown away thirteen times over two days:
-// mt7927-dkms and edk2 failed in pkg_setup on a key file the `portage` uid could
-// not read, the failure was correctly classified as the host's, and the next run
-// started the same build again because nothing survived to say what was missing.
-//
-// # Fail open is a DIRECTION, not defensive coding
-//
-// Everything below refuses to answer far more readily than it answers, and that
-// asymmetry is the whole design. The two outcomes are not symmetric:
-//
-//   - Record nothing when something was missing → the package is retried, which
-//     costs a build that was going to be spent anyway. That is today's behaviour,
-//     exactly, and it is the floor this change cannot fall below.
-//   - Record the WRONG thing → the re-check asks about a path that
-//     nothing on the host will ever satisfy, and the package is suppressed
-//     FOREVER, silently, on the strength of a parse that failed.
-//
-// So a message this file does not understand yields "", never a placeholder. The
-// direction is the one build_failure.go inherited from the manifest path,
-// pointed at a different cost: a wrong classification must cost a wasted
-// invocation, never a lost repair. Here, a wrong extraction must cost a wasted
-// build, never a lost package.
-//
-// # Reading a log is brittle, and it is admitted rather than hidden
-//
-// Portage's messages are the ebuild author's prose. A wording change breaks the
-// extraction, and when it does, the extraction returns "" and the feature simply
-// stops helping — it does not start lying. That trade is accepted explicitly.
+// Reading Portage's log is brittle, and that is admitted: when an ebuild's
+// wording changes, extraction returns "" and the feature stops helping instead
+// of lying.
+
 package autoupdate
 
 import (

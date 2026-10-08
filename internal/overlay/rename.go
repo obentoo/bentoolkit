@@ -1,4 +1,3 @@
-// Package overlay provides business logic for overlay management operations.
 package overlay
 
 import (

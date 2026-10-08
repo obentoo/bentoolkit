@@ -48,7 +48,8 @@ lint() {
   "${LINT[@]}" run ./... &&
     "${LINT[@]}" run --build-tags chromedp ./... &&
     make audit-ctx &&
-    make audit-comments
+    make audit-comments &&
+    make audit-pkgdoc
 }
 
 test_job() {

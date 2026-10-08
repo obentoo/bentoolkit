@@ -1,38 +1,21 @@
-// build_failure.go decides, after a staged build has exited non-zero, whether
-// the failure belongs to the machine or to the ebuild. It is the gate that keeps
-// a machine fault away from the build fixer, and it is the sibling of
-// manifest_failure.go, which answers the same question about `pkgdev manifest`.
+// build_failure.go decides, after a staged build exits non-zero, whether the
+// failure belongs to the machine or to the ebuild: the gate that keeps a
+// machine fault away from the build fixer. manifest_failure.go answers the same
+// question for `pkgdev manifest`.
 //
-// # Why environmentVerdict is NOT reused, and must not be "simplified" back into
+// environmentVerdict (applier.go) must not be reused here. It keys on
+// distfiles.ErrDistdirNotWritable, ErrDistfileLocked and *manifestRunError; a
+// failed build carries none of them, so it would answer "repairable" even for
+// a compile that died on a full disk, reinstating a defect the manifest path
+// removed. What is reused is that path's lesson: mark the PHASE, do not
+// enumerate causes, because the cause somebody forgets to list is the one that
+// spends an agent invocation on a correct ebuild.
 //
-// applier.go's environmentVerdict answers this question for the manifest
-// step, and it cannot answer it here. It keys on three things — distfiles.
-// ErrDistdirNotWritable, distfiles.ErrDistfileLocked and *manifestRunError — and
-// a failed BUILD carries none of them: it carries an exit status and a
-// transcript. Handed one, environmentVerdict matches nothing and falls straight
-// through to nil, which means "repairable" — INCLUDING for a compile that died
-// because the build device filled up. That is precisely the answer that was
-// removed from the manifest path, so routing build failures through it would
-// reinstate the defect on a new path while looking like tidy code reuse.
-//
-// What IS reused is the manifest path's recorded lesson: mark the PHASE, do not
-// enumerate causes. An enumeration means every future way a build
-// can die on the host is a clause somebody must remember to add, and the clause
-// that gets forgotten is the one that spends an agent invocation on a correct
-// ebuild.
-//
-// # Observation where it is possible, the transcript where it is not
-//
-// manifest_failure.go reads no message at all, on the grounds that a message is
-// locale-dependent and therefore not evidence. Three of the four rungs below keep
-// that discipline: dependencies are Portage's own answer, and PORTAGE_TMPDIR's
-// writability is a probe that either writes or does not.
-//
-// Rung 3a is the exception and it is a deliberate one. An out-of-space build
-// cannot be observed after the fact: the failing build's own aborted writes and
-// Portage's cleanup give the space back, so by the time anything could statfs the
-// device it has room again, and the only surviving evidence is what the child
-// printed. The cost of the compromise is stated plainly at reportsNoSpaceLeft.
+// Dependencies and PORTAGE_TMPDIR writability are observed, not read from
+// messages. Rung 3a is the deliberate exception: out-of-space cannot be
+// observed afterwards (the aborted writes free the space), so the transcript
+// is the only evidence; its cost is stated at reportsNoSpaceLeft.
+
 package autoupdate
 
 import (

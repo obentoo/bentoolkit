@@ -1,4 +1,3 @@
-// Package autoupdate provides analysis caching for LLM-generated schemas.
 package autoupdate
 
 import (

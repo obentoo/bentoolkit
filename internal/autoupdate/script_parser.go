@@ -1,5 +1,3 @@
-// Package autoupdate provides a headless-browser ("script") version parser for
-// cases that need a rendered DOM, multi-step navigation, or arbitrary JS logic.
 package autoupdate
 
 import (
