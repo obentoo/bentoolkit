@@ -24,6 +24,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -104,7 +105,11 @@ func s081AttrInt(v slog.Value) (int64, bool) {
 	case slog.KindInt64:
 		return v.Int64(), true
 	case slog.KindUint64:
-		return int64(v.Uint64()), true //nolint:gosec // G115: test counts are tiny
+		u := v.Uint64()
+		if u > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(u), true
 	default:
 		return 0, false
 	}
