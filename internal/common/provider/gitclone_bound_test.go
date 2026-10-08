@@ -228,8 +228,9 @@ func TestUpdateRepoFailureNamesTheRepository(t *testing.T) {
 }
 
 // Every argv the provider builds keeps names apart from options: the ref
-// reaches fetch and reset after --end-of-options, and the clone's URL and
-// path come after "--" (S054-R8.11). The names here begin with "-", which
+// reaches fetch after --end-of-options, reset gets "origin/<branch>" (which
+// cannot begin with "-") followed by "--", and the clone's URL and path come
+// after "--" (S054-R8.11). The names here begin with "-", which
 // NewGitCloneProvider would refuse, but a struct literal can still carry them.
 func TestGitArgvSeparatesNamesFromOptions(t *testing.T) {
 	var argvs [][]string
@@ -254,7 +255,7 @@ func TestGitArgvSeparatesNamesFromOptions(t *testing.T) {
 	want := [][]string{
 		{"git", "-C", dir, "pull", "--ff-only"},
 		{"git", "-C", dir, "fetch", "--end-of-options", "origin", "-x"},
-		{"git", "-C", dir, "reset", "--hard", "--end-of-options", "origin/-x"},
+		{"git", "-C", dir, "reset", "--hard", "origin/-x", "--"},
 		{"git", "clone", "--depth", "1", "--single-branch", "--branch", "-x", "--", "-u", dest},
 	}
 	if !reflect.DeepEqual(argvs, want) {
