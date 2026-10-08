@@ -757,7 +757,7 @@ func seamFetchStagedArchives(stagedPkgDir, sharedDistdir string, arg []string) {
 		}
 		dst := filepath.Join(distdir, fields[1])
 		_ = os.Remove(dst)
-		_ = os.WriteFile(dst, archive, 0o644) //nolint:gosec // G306: a test archive, read back by the gate
+		_ = os.WriteFile(dst, archive, 0o600)
 	}
 }
 
