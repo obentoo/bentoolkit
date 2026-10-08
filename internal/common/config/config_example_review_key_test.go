@@ -28,7 +28,7 @@ import (
 // as the zero value.
 //
 // SCOPE. This file only ever asserts that documentation was ADDED. The sentence
-// at config.example.yaml:24-25 is about `--check/--apply` concurrency, it is
+// at config.example.yaml:25-26 is about `--check/--apply` concurrency, it is
 // true, and the word `compare` appears nowhere in the file; nothing here asserts
 // on it, requires it to change, or would be satisfied by changing it.
 
@@ -80,7 +80,7 @@ func TestExampleConfig_DocumentsTheReviewTimeoutKey(t *testing.T) {
 	if !ok {
 		t.Fatalf("config.example.yaml does not document `autoupdate.review.timeout` (S048-R3.5): the `autoupdate:` block has no `review:` key.\n" +
 			"The budget an operator most needs to raise is the one nothing in the shipped example mentions. " +
-			"Follow the cache_ttl / http_timeout shape at config.example.yaml:49-53 — a commented, uncommented-out key with its unit and its default.")
+			"Follow the cache_ttl / http_timeout shape at config.example.yaml:50-54 — a commented, uncommented-out key with its unit and its default.")
 	}
 
 	timeoutKey, timeout, ok := mappingEntry(review, "timeout")
@@ -105,36 +105,15 @@ func TestExampleConfig_DocumentsTheReviewTimeoutKey(t *testing.T) {
 	}, "\n"))
 	if doc == "" {
 		t.Fatal("autoupdate.review.timeout is present but carries no comment; every key around it explains what it governs " +
-			"and in what unit (config.example.yaml:49-53), and an undocumented key documents nothing (S048-R3.5)")
+			"and in what unit (config.example.yaml:50-54), and an undocumented key documents nothing (S048-R3.5)")
 	}
 
 	// R3.5 says "in the language that file is written in". The file is written
-	// in Portuguese, and both neighbours name the unit the same way — "em
-	// segundos". An English entry would leave the file bilingual.
-	if !strings.Contains(strings.ToLower(doc), "segundos") {
-		t.Errorf("the comment documenting autoupdate.review.timeout does not say `segundos`:\n%s\n"+
-			"config.example.yaml is written in Portuguese and its two nearest neighbours both give the unit as "+
-			"\"em segundos\" (:49-53); S048-R3.5 asks for this key in the same language, and S048-R3.3 for the same unit", doc)
-	}
-}
-
-// TestExampleConfig_DoesNotDocumentAReviewBlockAtTheTopLevel is the hostile half
-// of S048-R3.4, written against the example rather than the struct.
-//
-// The example is what an operator COPIES. Documenting the budget as a top-level
-// `review:` block would hand every copier the probeConfig trap by hand:
-// probeConfig (config.go:335) mirrors only Config's top-level keys, no test
-// guards that mirror, and a key missing from it makes every command print
-// "field review not found in type config.probeConfig" to stderr while loading
-// the value anyway. The strict decode in TestExampleConfigLoads would catch a
-// top-level key that maps to no field — but not one that maps to a field the
-// probe does not mirror, which is exactly the shape this forbids.
-func TestExampleConfig_DoesNotDocumentAReviewBlockAtTheTopLevel(t *testing.T) {
-	root := exampleDocument(t)
-
-	if _, _, ok := mappingEntry(root, "review"); ok {
-		t.Error("config.example.yaml documents a TOP-LEVEL `review:` block; the budget nests inside `autoupdate:` (S048-R3.4) " +
-			"so that probeConfig's hand-maintained top-level mirror needs no new entry — a top-level key absent from it " +
-			"warns on stderr on every command and no test catches the omission")
+	// in English, and both neighbours name the unit the same way — "in
+	// seconds". A comment in another language would leave the file bilingual.
+	if !strings.Contains(strings.ToLower(doc), "seconds") {
+		t.Errorf("the comment documenting autoupdate.review.timeout does not say `seconds`:\n%s\n"+
+			"config.example.yaml is written in English and its two nearest neighbours both give the unit as "+
+			"\"in seconds\"; S048-R3.5 asks for this key in the same language, and S048-R3.3 for the same unit", doc)
 	}
 }

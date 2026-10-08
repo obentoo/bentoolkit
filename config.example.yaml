@@ -1,163 +1,220 @@
 # ============================================================================
-# bentoo — arquivo de configuração de exemplo
+# bentoo — example configuration file
 # ============================================================================
 #
-# Copie este arquivo para um destes caminhos (ordem de prioridade de leitura):
+# Copy this file to one of these paths (read in priority order):
 #
-#   1. ~/.config/bentoo/config.yaml        (padrão XDG — recomendado)
-#   2. ~/.bentoo/config.yaml               (fallback legado)
+#   1. ~/.config/bentoo/config.yaml        (XDG default — recommended)
+#   2. ~/.bentoo/config.yaml               (legacy fallback)
 #
-# Se $XDG_CONFIG_HOME estiver definido, o caminho 1 passa a ser
+# When $XDG_CONFIG_HOME is set, path 1 becomes
 # $XDG_CONFIG_HOME/bentoo/config.yaml.
 #
-# Instalação rápida:
+# Quick install:
 #   mkdir -p ~/.config/bentoo
 #   cp config.example.yaml ~/.config/bentoo/config.yaml
 #
-# Notas:
-#   - Chaves desconhecidas NÃO impedem o carregamento, mas geram um aviso em
-#     stderr — útil para pegar erros de digitação ou campo na seção errada.
-#   - O único campo necessário para a maioria dos comandos de overlay é
-#     overlay.path. Todo o resto tem default ou é opcional.
-#   - O bentoo grava este arquivo com permissão 0600 por precaução; segredos
-#     agora vão no arquivo ~/.config/bentoo/secrets (formato NAME=valor), não aqui.
-#   - A concorrência de --check/--apply NÃO é configurada aqui: é o flag de linha
-#     de comando `--concurrency N` (default: 10).
+# Notes:
+#   - Unknown keys do NOT stop the file from loading, but each one prints a
+#     warning on stderr — useful for catching typos and keys in the wrong
+#     section.
+#   - The only key most overlay commands need is overlay.path. Everything else
+#     has a default or is optional.
+#   - bentoo writes this file with mode 0600 as a precaution, but secrets do
+#     not belong here: they go in ~/.config/bentoo/secrets (NAME=value lines).
+#   - --check/--apply concurrency is NOT configured here: it is the
+#     `--concurrency N` command-line flag (default: 10).
 
 # ----------------------------------------------------------------------------
-# overlay — o overlay Gentoo gerenciado pelo bentoo
+# overlay — the Gentoo overlay bentoo manages
 # ----------------------------------------------------------------------------
 overlay:
-  # Raiz do overlay. Aceita "~" para o home. Deve conter profiles/ e metadata/
-  # (gere a estrutura com `bentoo overlay init` se ainda não existir).
-  path: ~/overlays/meu-overlay
-  # Remote git usado por `bentoo overlay push` / `sync` (default: origin).
+  # Overlay root. "~" expands to the home directory. It must contain profiles/
+  # and metadata/ (create them with `bentoo overlay init` if they are missing).
+  path: ~/overlays/my-overlay
+  # Git remote used by `bentoo overlay push` / `sync` (default: origin).
   remote: origin
 
 # ----------------------------------------------------------------------------
-# git — identidade usada nos commits que o bentoo cria.
-# Se omitido, o bentoo tenta ler user.name/user.email de ~/.gitconfig.
+# git — the identity on the commits bentoo creates.
+# When omitted, bentoo reads user.name/user.email from ~/.gitconfig.
 # ----------------------------------------------------------------------------
 git:
-  user: "Seu Nome"
-  email: "voce@example.com"
+  user: "Your Name"
+  email: "you@example.com"
 
 # ----------------------------------------------------------------------------
-# autoupdate — comportamento de `bentoo overlay autoupdate`
+# autoupdate — behaviour of `bentoo overlay autoupdate`
 # ----------------------------------------------------------------------------
 autoupdate:
-  # TTL do cache de resultados de --check, em segundos (default: 3600 = 1h).
+  # TTL of the --check result cache, in seconds (default: 3600 = 1h).
   cache_ttl: 3600
-  # Timeout por requisição HTTP em --check, em segundos (default: 30).
-  # Também ajustável pontualmente via o flag `--timeout` na linha de comando.
+  # Per-request HTTP timeout during --check, in seconds (default: 30).
+  # Also adjustable for one run with the `--timeout` command-line flag.
   http_timeout: 30
 
+  # Directory handed to `pkgdev manifest` as --distdir on the autoupdate path —
+  # the same meaning `overlay manifest --distdir` has. Unset (the default)
+  # means the host's own DISTDIR, as `portageq distdir` reports it.
+  # distdir: /var/cache/distfiles
+
+  # Read-only distfiles cache consulted before a download (default:
+  # /var/cache/distfiles). Files are symlinked into the working distdir and
+  # never written back.
+  # distfiles_cache: /var/cache/distfiles
+
   # --------------------------------------------------------------------------
-  # review — limite de tempo da revisão de divergências do
-  # `bentoo overlay compare`.
+  # review — time limit of one `bentoo overlay compare` divergence review.
   #
-  # O ajuste é do `compare`, mas mora dentro de `autoupdate` de propósito:
-  # chaves de nível superior precisam ser listadas à mão no carregador, e uma
-  # chave nova esquecida nessa lista faz todos os comandos imprimirem um aviso
-  # em stderr. Aninhada aqui, ela já entra nessa lista.
+  # The setting belongs to `compare`, but it lives inside `autoupdate` on
+  # purpose: top-level keys have to be listed by hand in the loader, and a new
+  # key missing from that list makes every command print a warning on stderr.
+  # Nested here, it is already on that list.
   # --------------------------------------------------------------------------
   review:
-    # Timeout de UMA revisão de divergência, em segundos (default: 300).
-    # NÃO existe flag para ele: o `--timeout` do `overlay compare` é o das
-    # requisições HTTP, e esta chave é o único jeito de ajustar o da revisão.
+    # Timeout of ONE divergence review, in seconds (default: 300).
+    # There is NO flag for it: `overlay compare --timeout` is the HTTP request
+    # timeout, and this key is the only way to set the review's.
     timeout: 300
 
   # --------------------------------------------------------------------------
-  # llm — provedor de IA usado pelos reparos automáticos:
-  #   * auto-fix de Manifest no --apply (SRC_URI/manifest quebrado)
-  #   * reparo de entradas de registry ao final do --check
+  # validate — how much of a staged bump is checked before it is published.
   #
-  # Dois provedores possíveis:
+  # Every key is optional; the commented values below are the defaults.
+  # Depth rungs, shallowest first, each including the ones before it:
+  #   none | options | patches | configure | compile | install
+  # `compile` is never a default: ask for it with --depth/--compile or with a
+  # per-package override that states its reason.
+  # --------------------------------------------------------------------------
+  # validate:
+  #   # Depth per bump class.
+  #   depths:
+  #     revision: options      # -r1 -> -r2
+  #     patch: options         # 1.2.3 -> 1.2.4
+  #     series: configure      # 1.2.x -> 1.3.0
+  #     major: configure       # 1.x -> 2.0
   #
-  #   provider: claude-code   ← RECOMENDADO para os reparos automáticos.
-  #       Usa o CLI `claude` local e a SUA sessão de assinatura (não consome
-  #       créditos de API). É o ÚNICO provider que habilita os reparos agênticos
-  #       (editar o ebuild + rodar pkgdev). Requer o CLI `claude` instalado e
-  #       autenticado. NÃO use api_key_env com este provider.
+  #   # Skip a compile gate instead of running it without network isolation,
+  #   # so a pass never claims more than it proved. Off by default because
+  #   # `unshare --net` is denied on ordinary hosts.
+  #   require_isolation: false
   #
-  #   provider: claude        ← provider HTTP via API Anthropic (paga por token).
-  #       Usado por fluxos de descoberta/análise, NÃO pelos reparos agênticos.
-  #       Requer api_key_env apontando para a env var que contém a chave.
+  #   # Refuse to publish a bump whose validation could not reach the depth
+  #   # asked for. The unreached depth is reported either way.
+  #   require_proof: false
   #
-  # Deixe a seção llm inteira comentada/omitida para desabilitar todo uso de LLM.
+  #   # The two LLM capabilities are switched ON by the --llm flag; these keys
+  #   # can only switch them back OFF. Leave them unset to follow the flag —
+  #   # writing `false` disables the capability even when --llm is given.
+  #   # review: false
+  #   # fix_on_failure: false
+  #
+  #   # Time limit of one agent run (reviewer or build fixer), in seconds
+  #   # (default: 3600).
+  #   timeout: 3600
+  #
+  #   # Per-package overrides, keyed by category/name. `reason` is required:
+  #   # an override is the one input that can quietly reduce how much a bump
+  #   # is checked. These entries are added to the shipped ones
+  #   # (www-client/chromium, app-office/libreoffice, net-libs/webkit-gtk and
+  #   # dev-lang/ghc at `none`); writing one of those keys replaces it.
+  #   packages:
+  #     dev-libs/example:
+  #       depth: compile
+  #       reason: carries a local patch that only a build exercises
+
+  # --------------------------------------------------------------------------
+  # llm — AI provider used by the automatic repairs:
+  #   * Manifest auto-fix during --apply (broken SRC_URI/Manifest)
+  #   * registry entry repair at the end of --check
+  #
+  # Two providers are available:
+  #
+  #   provider: claude-code   <- RECOMMENDED for the automatic repairs.
+  #       Uses the local `claude` CLI and YOUR subscription session (it spends
+  #       no API credits). It is the ONLY provider that enables the agentic
+  #       repairs (editing the ebuild and running pkgdev). Needs the `claude`
+  #       CLI installed and signed in. Do NOT set api_key_env with it.
+  #
+  #   provider: claude        <- HTTP provider over the Anthropic API (billed
+  #       per token). Used by the discovery/analysis flows, NOT by the agentic
+  #       repairs. Needs api_key_env naming the variable that holds the key.
+  #
+  # Omit the whole llm section (or comment it out) to disable every LLM use.
   # --------------------------------------------------------------------------
   llm:
     provider: claude-code
-    # model: ""                # modelo específico (vazio = padrão do provider)
-    bare: auto                 # bare-mode do CLI: auto | true | false
-    # max_budget_usd: 5.0      # teto de gasto opcional repassado ao CLI (--max-budget-usd)
-    # api_key_env: ANTHROPIC_API_KEY   # necessário APENAS para provider: claude (API)
+    # model: ""                # specific model (empty = the provider's default)
+    bare: auto                 # CLI bare mode: auto | true | false
+    # max_budget_usd: 5.0      # optional spend cap passed to the CLI (--max-budget-usd)
+    # api_key_env: ANTHROPIC_API_KEY   # needed ONLY for provider: claude (API)
 
   # --------------------------------------------------------------------------
-  # search — provedor de busca opcional para fluxos de descoberta.
+  # search — optional search provider for the discovery flows.
   # --------------------------------------------------------------------------
   # search:
   #   provider: perplexity
   #   api_key_env: PERPLEXITY_API_KEY
 
 # ----------------------------------------------------------------------------
-# repositories — fontes extras usadas por `revive` e comparações (opcional).
-# Chave = nome lógico; provider ∈ github | gitlab | git | local.
+# repositories — extra sources used by `revive` and comparisons (optional).
+# Key = logical name; provider is one of github | gitlab | git | local.
 # ----------------------------------------------------------------------------
 # repositories:
 #   gentoo:
-#     provider: local          # árvore em disco, lida no lugar (sem clone)
+#     provider: local          # on-disk tree, read in place (no clone)
 #     path: /var/db/repos/gentoo
-#   meu-fork:
+#   my-fork:
 #     provider: github
-#     url: usuario/repo         # "org/repo" ou URL completa
-#     branch: main              # default: master/main
-#   # Token do repositório: NÃO vai aqui. Defina BENTOO_REPO_MEU_FORK_TOKEN no
-#   # arquivo ~/.config/bentoo/secrets (chmod 600) ou como variável de ambiente.
+#     url: user/repo           # "org/repo" or a full URL
+#     branch: main             # default: master/main
+#   # The repository token does NOT go here. Set BENTOO_REPO_MY_FORK_TOKEN in
+#   # ~/.config/bentoo/secrets (chmod 600) or in the environment.
 
 # ----------------------------------------------------------------------------
-# ui — como os comandos longos (autoupdate, overlay manifest) se desenham.
+# ui — how the long-running commands (autoupdate, overlay manifest) draw.
 #
-# Modos aceitos: auto | plain | inline | fullscreen
-#   auto        decide sozinho: inline num terminal, plain num pipe/CI.
-#   plain       linha a linha, sem controle de cursor — pipe, log, CI.
-#   inline      redesenha no lugar, dentro do scrollback normal.
-#   fullscreen  toma o terminal inteiro durante a execução (nunca automático).
+# Accepted modes: auto | plain | inline | fullscreen
+#   auto        decides by itself: inline on a terminal, plain on a pipe/CI.
+#   plain       line by line, no cursor control — pipes, logs, CI.
+#   inline      redraws in place, inside the normal scrollback.
+#   fullscreen  takes over the whole terminal while running (never automatic).
 #
-# A chave vem COMENTADA de propósito: ausente NÃO é o mesmo que `auto`. Sem
-# ela, os comandos se comportam exatamente como antes desta opção existir
-# (o resultado prático coincide com `auto`, mas escrever a chave é uma escolha
-# explícita, e é isso que o código consegue distinguir).
+# The key ships COMMENTED on purpose: absent is NOT the same as `auto`.
+# Without it, commands behave exactly as they did before this option existed
+# (in practice the result matches `auto`, but writing the key is an explicit
+# choice, and that is what the code can tell apart).
 #
-# Precedência: `--ui <modo>` > BENTOO_UI > ui.mode > auto.
-# `--no-tui`, BENTOO_NO_TUI e NO_COLOR equivalem a plain e vencem os três.
+# Precedence: `--ui <mode>` > BENTOO_UI > ui.mode > auto.
+# `--no-tui`, BENTOO_NO_TUI and NO_COLOR mean plain and win over all three.
 # ----------------------------------------------------------------------------
 # ui:
 #   mode: auto
 
 # ----------------------------------------------------------------------------
-# notice — onde `bentoo notice new|revise` grava a metade "site" de um aviso.
+# notice — where `bentoo notice new|revise` writes the "site" half of a notice.
 #
-# site_path é a raiz do repositório do site; o YAML do aviso vai para
-# <site_path>/src/content/notices/<id>.yaml. Um `~/` no início é expandido
-# para o diretório home. Sem a chave, o comando grava só o news item no
-# overlay e imprime o YAML na saída padrão.
+# site_path is the root of the website repository; the notice YAML goes to
+# <site_path>/src/content/notices/<id>.yaml. A leading `~/` expands to the
+# home directory. Without the key, the command writes only the news item into
+# the overlay and prints the YAML on standard output.
 # ----------------------------------------------------------------------------
 # notice:
-#   site_path: ~/Projetos/obentoo.org/coming-soon
+#   site_path: ~/Projects/obentoo.org/coming-soon
 
 # ----------------------------------------------------------------------------
-# tray — o notificador de desktop bentoo-tray.
+# tray — the bentoo-tray desktop notifier.
 #
-# interval            intervalo entre verificações do feed (padrão 6h; mínimo
-#                     1h — um valor menor vira 1h com um aviso).
-# feed_url            o feed de avisos (padrão https://obentoo.org/notices.json;
-#                     só https é aceito).
-# mute                tipos que ficam marcados como não lidos, mas sem
-#                     notificação: release, news, announcement. `security`
-#                     nunca pode ser silenciado e é ignorado com um aviso.
-# downgrade_critical  envia avisos críticos com urgência normal (padrão false).
-# skip_metered        não verifica o feed em conexão tarifada (padrão true).
+# interval            time between feed checks (default 6h; minimum 1h — a
+#                     smaller value becomes 1h with a warning).
+# feed_url            the notices feed (default https://obentoo.org/notices.json;
+#                     only https is accepted).
+# mute                types that are marked unread but raise no notification:
+#                     release, news, announcement. `security` can never be
+#                     muted and is ignored with a warning.
+# downgrade_critical  send critical notices with normal urgency (default false).
+# skip_metered        do not check the feed on a metered connection
+#                     (default true).
 # ----------------------------------------------------------------------------
 # tray:
 #   interval: 6h

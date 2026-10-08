@@ -17,11 +17,10 @@ To load completions:
 
 Bash:
   $ source <(bentoo completion bash)
-  # To load completions for each session, execute once:
-  # Linux:
-  $ bentoo completion bash > /etc/bash_completion.d/bentoo
-  # macOS:
-  $ bentoo completion bash > $(brew --prefix)/etc/bash_completion.d/bentoo
+  # To load completions for each session, execute once (needs
+  # app-shells/bash-completion):
+  $ mkdir -p ~/.local/share/bash-completion/completions
+  $ bentoo completion bash > ~/.local/share/bash-completion/completions/bentoo
 
 Zsh:
   # If shell completion is not already enabled in your environment,
