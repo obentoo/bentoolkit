@@ -1,0 +1,8 @@
+# CodeQL results judged not to be defects: one per line, tab-separated:
+#   rule<TAB>path<TAB>fingerprint (partialFingerprints.primaryLocationLineHash)<TAB>reason
+# The gate fails on a result not listed here and on an entry that no longer
+# matches a result, so this list only shrinks. Brought over from the alerts
+# dismissed on GitHub (#5, #6, #7) when CodeQL moved into the local gate.
+go/clear-text-logging	cmd/bentoo/overlay_analyze.go	9e4894f68e194a99:1	false positive: the logged error carries only the NAME of the API-key environment variable (APIKeyEnv), never its value
+go/clear-text-logging	cmd/bentoo/overlay_autoupdate.go	4299511d1b999ef:1	false positive: the logged error carries only the NAME of the API-key environment variable (APIKeyEnv), never its value
+go/clear-text-logging	cmd/bentoo/overlay_autoupdate.go	f7ba144ded3dbeba:1	false positive: the logged error carries only the NAME of the API-key environment variable (APIKeyEnv), never its value

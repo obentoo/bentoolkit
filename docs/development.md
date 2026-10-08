@@ -21,9 +21,10 @@ while you work; before a pull request, run the gate below.
 caches. Before a pull request, run the gate, which reproduces every job of
 `.github/workflows/ci.yml` on a clean checkout. The gate is the project's CI:
 `ci.yml` no longer runs on push or pull request, only by hand from the Actions
-tab, and GitHub runs only what has no local substitute (CodeQL, through the
-repository's default setup). Say in the pull request which gate run it rests
-on; a Dependabot pull request is gated the same way, by its branch.
+tab. GitHub keeps only what is a service rather than a check: Dependabot,
+secret scanning with push protection, and private vulnerability reports. Say
+in the pull request which gate run it rests on; a Dependabot pull request is
+gated the same way, by its branch.
 
 ```bash
 ./scripts/ci-vm-gate.sh            # gate HEAD (committed work only)
@@ -32,9 +33,16 @@ on; a Dependabot pull request is gated the same way, by its branch.
 
 - **In a KVM guest** (Ubuntu 24.04, as the hosted runner, as a non-root user):
   Test with `-race -shuffle=on` and the 80% coverage floor, Audit, Lint for both
-  tag sets at the pinned golangci-lint, and Build.
+  tag sets at the pinned golangci-lint, Build, and CodeQL for Go and GitHub
+  Actions with the suites GitHub's default setup runs.
 - **On the host**, in a clean worktree of the same commit: gitleaks, OSV-Scanner,
   zizmor and the changelog rule.
+
+CodeQL fails on any result not listed in `scripts/codeql-dismissed.tsv`
+(rule, path, fingerprint and the reason it is not a defect), and on an entry
+that no longer matches a result, so the list only shrinks. To dismiss a false
+positive, add its line from the log with the reason; the SARIF files are kept
+with the logs.
 
 It prints one PASS/FAIL line per job and keeps every log under
 `~/.local/share/bentoolkit-ci/logs/`. `--status` also posts the verdict on the

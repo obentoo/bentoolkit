@@ -125,6 +125,7 @@ does not reimplement them.
 - golangci-lint runs with a strict configuration whose reasons are written next
   to each rule. Debt that existed when a rule was enabled is listed by name, and
   those lists only shrink.
-- The project's CI runs locally: `scripts/ci-vm-gate.sh` reproduces every job
-  on a clean checkout in a KVM guest. GitHub runs only what has no local
-  substitute (CodeQL). See [docs/development.md](docs/development.md).
+- The project's CI runs locally: `scripts/ci-vm-gate.sh` reproduces every job,
+  CodeQL included, on a clean checkout in a KVM guest. GitHub keeps only its
+  services (Dependabot, secret scanning). See
+  [docs/development.md](docs/development.md).
