@@ -5,7 +5,7 @@ Back to the [README](../README.md).
 ### Checks
 
 `make check` runs the whole local suite: `lint`, `test` and `audit`. Run it
-before pushing; CI runs the same steps.
+while you work; before a pull request, run the gate below.
 
 | Target | What it runs |
 |---|---|
@@ -14,6 +14,44 @@ before pushing; CI runs the same steps.
 | `make coverage` | `make test` plus `coverage.out` and an HTML report. CI fails below 80%. |
 | `make fuzz` | Every `Fuzz*` target for `FUZZTIME` each (default `30s`). |
 | `make audit` | `audit-ctx`, `audit-comments`, `go mod verify` and `govulncheck`. |
+
+### Local CI gate
+
+`make check` runs on your machine, with your git, your `/tmp` and your
+caches. Before a pull request, run the gate, which reproduces every job of
+`.github/workflows/ci.yml` on a clean checkout:
+
+```bash
+./scripts/ci-vm-gate.sh            # gate HEAD (committed work only)
+./scripts/ci-vm-gate.sh <ref>      # gate a branch or commit, e.g. a Dependabot PR
+```
+
+- **In a KVM guest** (Ubuntu 24.04, as the hosted runner, as a non-root user):
+  Test with `-race -shuffle=on` and the 80% coverage floor, Audit, Lint for both
+  tag sets at the pinned golangci-lint, and Build.
+- **On the host**, in a clean worktree of the same commit: gitleaks, OSV-Scanner,
+  zizmor and the changelog rule.
+
+It prints one PASS/FAIL line per job and keeps every log under
+`~/.local/share/bentoolkit-ci/logs/`. `--status` also posts the verdict on the
+commit as a `local-gate` status.
+
+Create the guest once from an Ubuntu 24.04 cloud image (no root needed, only
+the `libvirt` group):
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/ci_runner   # if you have no key yet
+./scripts/ci-vm-create.sh noble-server-cloudimg-amd64.img
+```
+
+The guest shuts down 30 s after each gate; `touch
+~/.local/share/bentoolkit-ci/hold` keeps it running. Two deliberate
+differences from the hosted runner, both explained in the scripts:
+
+- Tests write their temporary files to tmpfs (`TMPDIR=/dev/shm/...`), because
+  `fsync` on the guest's disk image is about 27 ms.
+- git is the distribution's 2.43, older than the runner's. That is how a
+  `git reset` incompatibility with 2.43 was found.
 
 ### Security Audit
 
