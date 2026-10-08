@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.33.2] - 2026-10-08
+
 ### Fixed
 
 - **The LLM manifest repair reuses what the first attempt downloaded.** When
@@ -1237,7 +1239,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.33.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.33.2...HEAD
+[0.33.2]: https://github.com/obentoo/bentoolkit/compare/v0.33.1...v0.33.2
 [0.33.1]: https://github.com/obentoo/bentoolkit/compare/v0.33.0...v0.33.1
 [0.33.0]: https://github.com/obentoo/bentoolkit/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/obentoo/bentoolkit/compare/v0.31.1...v0.32.0
