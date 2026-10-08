@@ -18,6 +18,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Changed
 
+- **CI runs locally; GitHub runs only what cannot.** `.github/workflows/ci.yml`
+  no longer starts on push or pull request. Every one of its jobs runs in the
+  local gate (`scripts/ci-vm-gate.sh`), whose result is what a pull request
+  rests on. The workflow stays as the definition the gate mirrors and as a
+  kill switch (manual runs, or restore its triggers). CodeQL keeps running on
+  GitHub through the repository's default setup.
+
 - **YAML comes from `go.yaml.in/yaml/v3`, not `gopkg.in/yaml.v3`.** The old
   module was archived upstream on 2025-04-01 and will receive no further
   fixes; `go.yaml.in/yaml/v3` is its maintained continuation, with the same
