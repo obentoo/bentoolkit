@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **The LLM manifest repair reuses what the first attempt downloaded.** When
+  the manifest step of a staged `overlay autoupdate --apply` failed, the
+  repair started from an empty distdir and the first attempt's downloads were
+  deleted, so every distfile was fetched again: a host that went down in
+  between (download.documentfoundation.org on 2026-10-02) failed the repair
+  too, and a large package paid the download twice. The first attempt's
+  completed files now move into the repair's distdir; partial downloads
+  (`.__download__`) and links into the distfiles cache are left behind.
+
 ## [0.33.1] - 2026-10-06
 
 ### Changed

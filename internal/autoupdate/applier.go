@@ -2069,6 +2069,27 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		return distdir, fmt.Errorf("%w (manifest fix skipped: failed to create temp distdir: %v)", firstErr, err) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
+	// The first distdir's completed downloads move into fixDistdir before it is
+	// removed below: they are this version's real bytes, and discarding them made
+	// the repair depend on the upstream host a second time. Only regular files
+	// move. Its symlinks into the distfiles cache are dropped, not carried: the
+	// manifest fixer holds Write, and a link in its directory would let it
+	// overwrite the cache entry. Both directories live under fixSandboxRoot, so
+	// the move is a rename, not a copy.
+	if cand.staged && distdir != "" {
+		carried, carryErrs := distfiles.CarryOver(distdir, fixDistdir)
+		for _, e := range carryErrs {
+			a.logger().Warn("manifest fix: could not carry a downloaded distfile over",
+				"package", pkg, "version", version, "file", e.Name, "error", e.Err)
+		}
+		a.logger().Info("manifest fix: distdir prepared",
+			"package", pkg, "version", version, "carried", carried)
+		if carried > 0 {
+			a.reporter.Log("info", fmt.Sprintf("reusing %d distfile(s) the first attempt downloaded for the %s-%s repair",
+				carried, pkg, version))
+		}
+	}
+
 	// THE TRANSFER. From this line the agent's directory is what
 	// this function returns, on every path below including the failing ones, and
 	// the caller's `defer removeStagedDistdir` is what takes it back — the same
