@@ -14,6 +14,7 @@ linters:
     - bodyclose
     - contextcheck
     - containedctx
+    - noctx
     - errorlint
     - usetesting
     - tparallel
@@ -114,6 +115,9 @@ linters:
         linters:
           - errcheck
           - gosec
+          # httptest servers, fake commands and listeners live and die with
+          # the test; a context on each adds nothing the test does not bound.
+          - noctx
           # R5.5 binds production diagnostics; a test logs hostile, built
           # messages and attributes on purpose (the redaction tests).
           - sloglint
