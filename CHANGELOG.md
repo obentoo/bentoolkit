@@ -20,6 +20,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   completed files now move into the repair's distdir; partial downloads
   (`.__download__`) and links into the distfiles cache are left behind.
 
+- **A staged apply reuses distfiles already in the distfiles cache.** The
+  staged tree holds the candidate ebuild alone, so a staged
+  `overlay autoupdate --apply` could not name the distfiles the new version
+  needs and downloaded them again even when the distfiles cache or the host
+  DISTDIR already had them. The names now come from the published package's
+  Manifest and ebuilds: the manifest step links the cached files in, and the
+  LLM manifest repair receives copies of them (copies, never links, since
+  the repair's agent can write to its directory).
+
 ## [0.33.1] - 2026-10-06
 
 ### Changed
