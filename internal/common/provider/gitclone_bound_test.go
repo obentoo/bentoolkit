@@ -220,8 +220,12 @@ func TestUpdateRepoFailureNamesTheRepository(t *testing.T) {
 			if !strings.HasSuffix(err.Error(), "PULL-TAIL-7Q\n") {
 				t.Errorf("updateRepo error ends %q, want the pull output's last line", err.Error()[max(0, len(err.Error())-40):])
 			}
-			if n := len(err.Error()); n > 65536+200 {
-				t.Errorf("updateRepo error is %d bytes, want at most the last 65536 bytes of output plus the message (S054-R7.2)", n)
+			// The bound is the message prefix, which carries the temp dir's path
+			// and so grows with TMPDIR, plus the rest of the truncation line
+			// ("134478 earlier bytes dropped ...]\n", under 64 bytes) and the
+			// 65536-byte output tail.
+			if n, limit := len(err.Error()), len(wantPrefix)+64+65536; n > limit {
+				t.Errorf("updateRepo error is %d bytes, want at most %d: the message plus the last 65536 bytes of output (S054-R7.2)", n, limit)
 			}
 		})
 	}
