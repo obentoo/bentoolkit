@@ -9,6 +9,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **A `LICENSE` file.** The README has always said MIT, but the repository
+  shipped no license text, so GitHub reported the project as unlicensed and
+  the code was, strictly, all rights reserved. The MIT text is now at the
+  root.
+
 ## [0.33.1] - 2026-10-06
 
 ### Changed
