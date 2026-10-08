@@ -727,6 +727,40 @@ func seamFindStagedPkgDir(stagingRoot, ebuildName string) string {
 	return found
 }
 
+// seamFetchStagedArchives does what the real `pkgdev manifest` does with the
+// staged Manifest a hook wrote: every archive it names lands in the --distdir
+// pkgdev was handed, taken from the shared distdir. The private distdir can
+// already hold cache links seeded from the published package before pkgdev
+// runs, so "empty" no longer stands for "pkgdev fetched nothing": a seam that
+// writes a staged Manifest must also fetch what it names, or the gate reads the
+// seeded links instead. An existing entry is replaced, as a real fetch does.
+func seamFetchStagedArchives(stagedPkgDir, sharedDistdir string, arg []string) {
+	distdir := ""
+	for i, a := range arg {
+		if a == "--distdir" && i+1 < len(arg) {
+			distdir = arg[i+1]
+			break
+		}
+	}
+	body, err := os.ReadFile(filepath.Join(stagedPkgDir, "Manifest"))
+	if distdir == "" || err != nil {
+		return
+	}
+	for _, line := range strings.Split(string(body), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 2 || fields[0] != "DIST" {
+			continue
+		}
+		archive, err := os.ReadFile(filepath.Join(sharedDistdir, fields[1]))
+		if err != nil {
+			continue
+		}
+		dst := filepath.Join(distdir, fields[1])
+		_ = os.Remove(dst)
+		_ = os.WriteFile(dst, archive, 0o644) //nolint:gosec // G306: a test archive, read back by the gate
+	}
+}
+
 // seamGoldenBumpFixture lays out the golden bump — 1.28.6 published, 1.29.2
 // pending, the published Manifest naming both archives, the shared distdir
 // holding both (1.29.2's declares only qt6, so its option gate has a FAILED to
@@ -768,6 +802,7 @@ func seamGoldenBumpFixture(t *testing.T, hook func(stagedPkgDir, sharedDistdir s
 		if name == "pkgdev" && hook != nil {
 			if dir := seamFindStagedPkgDir(staging, "gst-plugins-qt6-1.29.2.ebuild"); dir != "" {
 				hook(dir, distdir)
+				seamFetchStagedArchives(dir, distdir, arg)
 			}
 		}
 		return exec.CommandContext(ctx, "true")
@@ -963,6 +998,7 @@ func TestStaticGates_TheStagedManifestDecidesWhichArchiveIsRead(t *testing.T) {
 			if dir := seamFindStagedPkgDir(staging, "gst-plugins-qt6-1.29.2.ebuild"); dir != "" {
 				_ = os.WriteFile(filepath.Join(dir, "Manifest"),
 					[]byte("DIST seam-proof-1.29.2.tar.gz 100 BLAKE2B ab SHA512 cd\n"), 0o600)
+				seamFetchStagedArchives(dir, distdir, arg)
 			}
 		}
 		return exec.CommandContext(ctx, "true")
