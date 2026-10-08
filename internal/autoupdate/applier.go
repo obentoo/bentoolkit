@@ -2084,6 +2084,27 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// the re-check is computed against fixDistdir, and the gates read what this
 	// returns. Removing it now keeps a superseded copy of a 6 MB archive off the
 	// scratch filesystem for the agent's whole run, not merely for the QA scan.
+	//
+	// Its completed downloads move into fixDistdir first (story 081): they are
+	// this version's real bytes, fetched minutes ago, and throwing them away made
+	// the repair depend on the upstream host a second time. Only regular files
+	// move. The first distdir's symlinks into the distfiles cache are dropped,
+	// not carried: the manifest fixer holds Write, and a link in its directory
+	// would let it overwrite the cache entry. Both directories live under
+	// fixSandboxRoot, so the move is a rename, not a copy.
+	if cand.staged && distdir != "" {
+		carried, carryErrs := distfiles.CarryOver(distdir, fixDistdir)
+		for _, e := range carryErrs {
+			a.logger().Warn("manifest fix: could not carry a downloaded distfile over",
+				"package", pkg, "version", version, "file", e.Name, "error", e.Err)
+		}
+		a.logger().Info("manifest fix: distdir prepared",
+			"package", pkg, "version", version, "carried", carried)
+		if carried > 0 {
+			a.reporter.Log("info", fmt.Sprintf("reusing %d distfile(s) the first attempt downloaded for the %s-%s repair",
+				carried, pkg, version))
+		}
+	}
 	removeStagedDistdir(a.logger(), distdir)
 	distdir = fixDistdir
 
