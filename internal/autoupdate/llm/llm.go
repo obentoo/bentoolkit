@@ -24,8 +24,12 @@ import (
 const defaultHTTPTimeout = 30 * time.Second
 
 const (
-	// DefaultClaudeModel is the default Claude model used when none is specified.
-	DefaultClaudeModel = "claude-3-haiku-20240307"
+	// DefaultClaudeModel is the default Claude model used when none is
+	// specified: the current Haiku, for short extraction calls. It is the
+	// alias rather than a dated ID, so it follows Haiku 4.5 snapshots; the
+	// dated claude-3-haiku-20240307 used before was retired on 2026-04-19,
+	// and every request that relied on the default failed from then on.
+	DefaultClaudeModel = "claude-haiku-4-5"
 	// DefaultClaudeEndpoint is the default Claude API endpoint.
 	DefaultClaudeEndpoint = "https://api.anthropic.com/v1/messages"
 	// DefaultRequestTimeout is the default timeout for LLM HTTP requests.
@@ -93,7 +97,7 @@ type LLMConfig struct {
 	Provider string
 	// APIKeyEnv is the environment variable name containing the API key
 	APIKeyEnv string
-	// Model is the specific model to use (e.g., "claude-3-haiku-20240307")
+	// Model is the specific model to use (e.g., "claude-haiku-4-5")
 	Model string
 	// BaseURL is the base URL for the API (used by Ollama)
 	BaseURL string
