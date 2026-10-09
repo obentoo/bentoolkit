@@ -896,7 +896,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	}
 
 	// Fetch upstream version
-	upstreamVersion, err := c.fetchUpstreamVersion(ctx, pkg, &pkgConfig)
+	upstreamVersion, err := c.fetchUpstreamVersion(ctx, &pkgConfig)
 	if err != nil {
 		result.Error = fetchFailure(err)
 		return result, result.Error
@@ -1165,7 +1165,7 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 
 		// Best-effort upstream fetch; a failure just drops this package from the
 		// report (it remains disabled, exactly as before).
-		upstream, err := c.fetchUpstreamVersion(ctx, pkg, &cfg)
+		upstream, err := c.fetchUpstreamVersion(ctx, &cfg)
 		if err != nil {
 			notes = append(notes, fmt.Sprintf("%s: upstream fetch failed: %v", pkg, err))
 			continue
@@ -1802,8 +1802,8 @@ func scanCommitsForVersion(content []byte, messageRelPath, versionPattern string
 // version for a record that declares a development channel. selectVersion also
 // applies it per candidate so "max" orders the final values; applySuffix is
 // idempotent, so the second pass is a no-op.
-func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *registry.PackageConfig) (string, error) {
-	version, err := c.fetchUpstreamVersionRaw(ctx, pkg, cfg)
+func (c *Checker) fetchUpstreamVersion(ctx context.Context, cfg *registry.PackageConfig) (string, error) {
+	version, err := c.fetchUpstreamVersionRaw(ctx, cfg)
 	if err != nil {
 		return "", err
 	}
@@ -1835,7 +1835,7 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, pkg string, cfg *reg
 
 // fetchUpstreamVersionRaw fetches and parses the upstream version for a package.
 // It tries the primary URL/parser first, then fallback if configured, then LLM if available.
-func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, pkg string, cfg *registry.PackageConfig) (string, error) {
+func (c *Checker) fetchUpstreamVersionRaw(ctx context.Context, cfg *registry.PackageConfig) (string, error) {
 	// The script parser drives a headless browser itself, so it bypasses
 	// fetchContent/fetchAndParse entirely (and therefore transform/select, which
 	// the script handles in JS — see ValidatePackageConfig). It has no fallback
@@ -2351,7 +2351,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 		total    = uint64(len(pkgs))
 	)
 
-	for name, pkg := range pkgs {
+	for name := range pkgs {
 		// A select with both cases ready picks at random, so check the context
 		// deterministically first: an already-cancelled context must mark
 		// EVERY remaining package as a failure, not just roughly half of them.
@@ -2373,7 +2373,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 		}
 
 		wg.Add(1)
-		go func(n string, p registry.PackageConfig) {
+		go func(n string) {
 			defer wg.Done()
 			defer func() { <-sem }()
 			// A panic in CheckPackage (or anything it calls) must not crash
@@ -2407,7 +2407,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 			if c.progressCallback != nil {
 				c.progressCallback(progress.Add(1), total)
 			}
-		}(name, pkg)
+		}(name)
 	}
 
 	// Join every worker before touching the shared state so the BatchResult is

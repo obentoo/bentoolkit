@@ -410,12 +410,12 @@ func TestS082StagedTheSuppliedDistdirGuardFixtureExpectsAName(t *testing.T) {
 	published := filepath.Join(env.sweeper.overlayPath, "media-plugins", "gst-plugins-qt6")
 	publishedBefore := hashDistdirTree(t, published)
 
-	distdir, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	distdir, err := env.sweeper.runStagedManifestIn(t.Context(), "", env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 	if distdir != "" {
 		t.Cleanup(func() { removeStagedDistdir(nil, distdir) })
 	}
 	if err != nil {
-		t.Fatalf("runStagedManifest: %v", err)
+		t.Fatalf("runStagedManifestIn: %v", err)
 	}
 
 	link := filepath.Join(distdir, "gst-plugins-good-1.29.2.tar.xz")

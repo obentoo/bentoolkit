@@ -97,7 +97,7 @@ func (r *s053RunOnlyRunner) Run(context.Context, string, []string, []byte) ([]by
 func TestRunPipe_RefusesNonPiper(t *testing.T) {
 	r := &s053RunOnlyRunner{}
 	stages := archivePipeStages(Snapshot{ID: "42", Subvolume: "/home", Path: "/p"}, "", "r:bkt", "")
-	_, err := runPipe(t.Context(), r, stages)
+	err := runPipe(t.Context(), r, stages)
 	if err == nil || !strings.Contains(err.Error(), "s053RunOnlyRunner") {
 		t.Errorf("runPipe = %v, want an error naming the runner type s053RunOnlyRunner", err)
 	}

@@ -10,6 +10,7 @@ linters:
     - gosec
     - gocritic
     - ineffassign
+    - unparam
     - misspell
     - bodyclose
     - exhaustive
@@ -122,6 +123,9 @@ linters:
         linters:
           - errcheck
           - gosec
+          # A test helper often takes a parameter its current callers all pass
+          # the same way; that is the test's choice, not dead code.
+          - unparam
           # httptest servers, fake commands and listeners live and die with
           # the test; a context on each adds nothing the test does not bound.
           - noctx
