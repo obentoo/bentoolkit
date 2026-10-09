@@ -115,8 +115,9 @@ Set the level with `BENTOO_TRAY_LOG_LEVEL` (`debug`, `info` — the default —,
 BENTOO_TRAY_LOG_LEVEL=debug bentoo-tray
 ```
 
-Exit codes: `0` on a clean stop (SIGINT, SIGTERM, SIGHUP or Quit) and when an
-instance is already running; `1` on a startup failure (session bus unreachable,
+Exit codes: `0` on a clean stop (SIGINT, SIGTERM, SIGHUP or Quit), including a
+stop signal received while the tray is still starting, and when an instance is
+already running; `1` on a startup failure (session bus unreachable,
 unreadable state file); `2` when the session bus is lost while running.
 
 ### Running the D-Bus tests
