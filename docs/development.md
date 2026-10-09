@@ -19,7 +19,11 @@ while you work; before a pull request, run the gate below.
 
 `make check` runs on your machine, with your git, your `/tmp` and your
 caches. Before a pull request, run the gate, which reproduces every job of
-`.github/workflows/ci.yml` on a clean checkout:
+`.github/workflows/ci.yml` on a clean checkout. The gate is the project's CI:
+`ci.yml` no longer runs on push or pull request, only by hand from the Actions
+tab, and GitHub runs only what has no local substitute (CodeQL, through the
+repository's default setup). Say in the pull request which gate run it rests
+on; a Dependabot pull request is gated the same way, by its branch.
 
 ```bash
 ./scripts/ci-vm-gate.sh            # gate HEAD (committed work only)
