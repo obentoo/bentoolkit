@@ -43,6 +43,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -522,16 +523,20 @@ func manifestDistFilenames(body []byte) []string {
 			return
 		}
 		name := fields[1]
-		// Reject path traversal: filenames in Manifest are basenames by
-		// spec — anything else means the file is malformed (or hostile).
-		// "." and ".." carry no separator yet, joined onto the distdir, name
-		// the distdir itself or its parent.
-		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/\\") {
+		if !isManifestFilename(name) {
 			return
 		}
 		names = append(names, name)
 	})
 	return names
+}
+
+// isManifestFilename reports whether name can be a Manifest DIST filename.
+// Filenames in a Manifest are basenames by spec, so anything else means the
+// file is malformed (or hostile). "." and ".." carry no separator yet, joined
+// onto the distdir, name the distdir itself or its parent.
+func isManifestFilename(name string) bool {
+	return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, "/\\")
 }
 
 // ParseManifestDistFilenames extracts the filenames listed on `DIST <name> ...`
@@ -620,4 +625,58 @@ func ManifestDistLines(body []byte) []byte {
 		return nil
 	}
 	return []byte(strings.Join(kept, "\n") + "\n")
+}
+
+// ManifestMerge counts what MergeManifestDist did: published records kept,
+// staged records written, published records displaced by a staged record of
+// the same filename, and published records dropped for having no usable
+// filename.
+type ManifestMerge struct {
+	Kept, Written, Replaced, Dropped int
+}
+
+// MergeManifestDist returns the DIST records of staged plus those of published
+// whose filename staged does not declare, ordered by filename, each line
+// exactly as read. A filename published declares twice keeps its first record.
+// Non-DIST records are written from neither side; nil means no record at all.
+func MergeManifestDist(published, staged []byte) ([]byte, ManifestMerge) {
+	type record struct{ name, line string }
+	var (
+		merge   ManifestMerge
+		records []record
+	)
+	declared := map[string]bool{}
+	eachManifestDistRecord(staged, func(line string, fields []string) {
+		name := ""
+		if len(fields) > 1 {
+			name = fields[1]
+		}
+		declared[name] = true
+		records = append(records, record{name, line})
+		merge.Written++
+	})
+	seen := map[string]bool{}
+	eachManifestDistRecord(published, func(line string, fields []string) {
+		switch {
+		case len(fields) < 2 || !isManifestFilename(fields[1]):
+			merge.Dropped++
+		case declared[fields[1]]:
+			merge.Replaced++
+		case seen[fields[1]]:
+		default:
+			seen[fields[1]] = true
+			records = append(records, record{fields[1], line})
+			merge.Kept++
+		}
+	})
+	if len(records) == 0 {
+		return nil, merge
+	}
+	sort.SliceStable(records, func(i, j int) bool { return records[i].name < records[j].name })
+	var b strings.Builder
+	for _, r := range records {
+		b.WriteString(r.line)
+		b.WriteByte('\n')
+	}
+	return []byte(b.String()), merge
 }
