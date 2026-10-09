@@ -632,6 +632,9 @@ func (c *ClaudeCodeClient) run(ctx context.Context, instruction string, content 
 			// unreachable working directory — and it is the opposite of the
 			// deadline's, which is why the two sentences must not be one.
 			return "", withClaudeOutcome(fmt.Errorf("%w: claude CLI could not start: %w", ErrLLMRequestFailed, runErr), ErrClaudeCouldNotStart)
+		case ClaudeExitedNonZero, claudeRanToCompletion:
+			// Handled below. runErr is set, so a run reported as complete is
+			// framed as an exit as well, never as a success.
 		}
 
 		// claudeExitedNonZero: the process ran and exited with a status. Its

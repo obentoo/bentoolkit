@@ -141,6 +141,8 @@ func (r EbuildResult) WorstOutcome() Outcome {
 			return OutcomeFailed
 		case OutcomePass:
 			passes++
+		case OutcomeSkipped:
+			// Decides, but neither fails the run nor counts as a pass.
 		}
 	}
 	if deciding > 0 && passes == deciding {

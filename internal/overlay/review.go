@@ -459,6 +459,8 @@ func (f ReviewFailure) String() string {
 		return "ebuild unreadable"
 	case ReviewOther:
 		return "other"
+	case ReviewFailureNone:
+		return ""
 	}
 	return ""
 }
