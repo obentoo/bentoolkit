@@ -16,7 +16,19 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   the code was, strictly, all rights reserved. The MIT text is now at the
   root.
 
+- **A local CI gate, `scripts/ci-vm-gate.sh`.** It reproduces every CI job
+  on a clean checkout of a commit: the Go jobs in a KVM guest (Ubuntu 24.04,
+  as the hosted runner, non-root) and the scanners on the host. One PASS/FAIL
+  line per job, logs kept. `scripts/ci-vm-create.sh` creates the guest from a
+  cloud image without root. See docs/development.md.
+
 ### Changed
+
+- **Building bentoolkit needs Go 1.27.** `go.mod` declares `go 1.27.0` and
+  pins `toolchain go1.27.2`, which carries the standard-library fixes open
+  against go1.27.1 (GO-2026-6599 to GO-2026-6617). Go 1.26 is no longer a
+  supported build toolchain. The bentoo overlay already builds with
+  `>=dev-lang/go-1.27.2`.
 
 - **CI runs locally; GitHub runs only what cannot.** `.github/workflows/ci.yml`
   no longer starts on push or pull request. Every one of its jobs runs in the
@@ -40,24 +52,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   their defaults. A new test fails when the code reads a key the example
   does not mention, the direction the existing strict-decode test could not
   see.
+
 - **`docs/development.md` describes the project as it is.** Its tree listed
   eight files and a `logger/` package that no longer exist and left out the
   tray, snapshot, notice and desktop packages. It now maps every package and
   every `make` check, and it no longer tells you to `go install`
   govulncheck, which `go.mod` already provides as a tool.
+
 - **`bentoo completion --help` gives Linux instructions.** The macOS/Homebrew
   line is gone, and the bash example writes to the per-user
   bash-completion directory instead of `/etc`, which needs root.
-
-### Added
-
-- **A local CI gate, `scripts/ci-vm-gate.sh`.** It reproduces every CI job
-  on a clean checkout of a commit: the Go jobs in a KVM guest (Ubuntu 24.04,
-  as the hosted runner, non-root) and the scanners on the host. One PASS/FAIL
-  line per job, logs kept. `scripts/ci-vm-create.sh` creates the guest from a
-  cloud image without root. See docs/development.md.
-
-### Fixed
 
 - **Refreshing a cloned repository works with git 2.43.** When `git pull
   --ff-only` fails, the git-clone provider falls back to a fetch and a
