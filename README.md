@@ -1,120 +1,86 @@
 # Bentoolkit
 
-CLI tools for Bentoo Linux distribution maintainers and developers.
+[![Release](https://img.shields.io/github/v/release/obentoo/bentoolkit)](https://github.com/obentoo/bentoolkit/releases)
+[![Go](https://img.shields.io/github/go-mod/go-version/obentoo/bentoolkit)](go.mod)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
+Command-line tools for maintainers of the [Bentoo](https://github.com/obentoo/bentoo)
+Gentoo overlay: keep its ebuilds current with upstream, validate every bump
+before it ships, publish notices, and protect the machine with btrfs snapshots.
 
 ## Modules
 
-- **overlay**: Bentoo overlay commit management, version comparison, and automated updates
-- **snapshot**: declarative btrfs snapshot management orchestrating `btrbk` (snapshot + ssh replication), `snapper` (timeline + system rollback), and `systemd` timers
-- **bentoo-tray**: a desktop notifier for the overlay's notices — security advisories, releases and news that concern the packages you have installed (see [Desktop Notifications](docs/tray.md#desktop-notifications-bentoo-tray))
+| Command | What for |
+|---|---|
+| `bentoo overlay` | The overlay's git workflow (`status`, `add`, `commit` with a generated message, `push`, `pull`), `compare` against `::gentoo`, `prune` what `::gentoo` already ships identically, `manifest`, `rename` |
+| `bentoo overlay autoupdate` | Read each package's upstream version (`--check`), then stage, validate and commit the bump (`--apply`); `packages.toml` says where each version is read |
+| `bentoo overlay validate` | Check that an ebuild still matches the source it points at, on a ladder of depths from build options to a full install |
+| `bentoo distfile fetch` | Download a distfile Portage cannot fetch by itself (behind a registration form or a POST) into `DISTDIR` |
+| `bentoo notice` | Write a notice once, as a GLEP 42 news item in the overlay and an entry in the website's feed |
+| `bentoo snapshot` | Declarative btrfs snapshots: btrbk and snapper, cloud copies with restic or rclone, systemd timers, rollback |
+| `bentoo-tray` | A desktop notifier that announces the notices that concern the packages you have installed |
 
 ## Installation
 
-### Prerequisites
+Add the Bentoo overlay, then install the packages:
 
-First, add the Bentoo overlay to your Gentoo/Bentoo system:
-
-**Option 1: Using eselect-repository**
 ```bash
-eselect repository add bentoo git https://github.com/lucascouts/bentoo.git
+eselect repository add bentoo git https://github.com/obentoo/bentoo.git
 emerge --sync bentoo
+emerge --ask app-portage/bentoolkit    # bentoo
+emerge --ask app-portage/bentoo-tray   # optional: the desktop notifier
 ```
 
-**Option 2: Manual configuration**
-
-Create `/etc/portage/repos.conf/bentoo.conf`:
-```ini
-[bentoo]
-location = /var/db/repos/bentoo
-sync-type = git
-sync-uri = https://github.com/lucascouts/bentoo.git
-priority = 99
-```
-
-Then sync:
-```bash
-emerge --sync bentoo
-```
-
-### Install bentoolkit
-
-```bash
-emerge --ask app-portage/bentoolkit
-```
-
-### Manual Build
+Or build from source. Go comes from the `toolchain` line in `go.mod`, which
+`go` downloads on first use:
 
 ```bash
 git clone https://github.com/obentoo/bentoolkit.git
 cd bentoolkit
-make build
-sudo make install
+make build                # build/bentoo and build/bentoo-tray
+sudo make install         # into /usr/local, with the tray's desktop entry and user unit
 ```
 
-### Build Targets
+Builds are reproducible: `-trimpath`, and a build date taken from
+`SOURCE_DATE_EPOCH` or the last commit.
+
+## Quick start
 
 ```bash
-make build           # Build bentoo and bentoo-tray
-make install         # Install both to /usr/local/bin, plus bentoo-tray's desktop entry, user unit and icons
-make install-config  # Copy config.example.yaml to ~/.config/bentoo/ (no overwrite)
-make test            # Run tests
-make coverage        # Run tests with coverage report
-make audit           # Run security audit (go mod verify + govulncheck)
-make clean           # Remove build artifacts
-make build-all       # Cross-compile for linux amd64 and arm64
-make checksums       # Write build/SHA256SUMS over the binaries in build/
-make check           # Run lint, test, and audit
-make help            # Show all available targets
+make install-config       # or copy config.example.yaml to ~/.config/bentoo/config.yaml
+$EDITOR ~/.config/bentoo/config.yaml      # set overlay.path to your checkout
+
+bentoo overlay status                      # what changed in the overlay
+bentoo overlay autoupdate --check          # which packages have a newer upstream
+bentoo overlay autoupdate --list           # the updates found, waiting to be applied
+bentoo overlay autoupdate --apply all      # stage, validate and commit them
 ```
 
-Builds are reproducible: binaries are built with `-trimpath`, and the build
-date they report is the time in `SOURCE_DATE_EPOCH`, else the last commit's, so
-two builds of one commit from clean checkouts are byte-identical wherever the
-tree was cloned.
-
-## Usage
-
-`bentoo --help` lists every command, and `bentoo <command> --help` describes
-one. Each command family is documented in its own page under `docs/`; see
-[Documentation](#documentation).
-
-## Development
-
-### Running Tests
-
-```bash
-# Run all tests, with the race detector, in random order
-make test
-
-# Replay the order of a failing run (the seed is printed as -test.shuffle <seed>)
-make test SHUFFLE=1790618260127275631
-
-# Run tests with coverage (also -race, random order)
-make coverage
-
-# Run every fuzz target for FUZZTIME each (default 30s)
-make fuzz
-make fuzz FUZZTIME=5m
-
-# Run specific package tests
-go test -v ./internal/overlay/...
-go test -v ./internal/autoupdate/...
-```
-
-The security audit and the project structure are in
-[Development](docs/development.md).
+`bentoo --help` lists every command, and `bentoo <command> --help` explains one.
+Secrets (API tokens) never go in the config file; see
+[Configuration](docs/configuration.md).
 
 ## Documentation
 
-- [Configuration](docs/configuration.md): the config file, its options, the secrets file and logging
-- [Overlay commands](docs/overlay.md): `bentoo overlay`, from status to prune, and a typical workflow
-- [Distfiles](docs/distfiles.md): fetching gated distfiles, and where updates download distfiles
-- [Notices](docs/notices.md): `bentoo notice`, one notice written as a news item and a site page
+- [Configuration](docs/configuration.md): the config file, the secrets file and logging
+- [Overlay commands](docs/overlay.md): from status to prune, with a typical workflow
 - [Autoupdate](docs/autoupdate.md): `packages.toml`, the record model and the LLM providers
-- [Runtime behaviour](docs/behaviour.md): exit codes, live output, concurrency, timeouts, headers, HTTP/2 and filesystem assumptions
-- [Snapshots](docs/snapshot.md): `bentoo snapshot`, btrbk, snapper, cloud backup and rollback
+- [Distfiles](docs/distfiles.md): gated distfiles, and where updates download them
+- [Notices](docs/notices.md): one notice as a news item and a site entry
+- [Snapshots](docs/snapshot.md): btrbk, snapper, cloud copies and rollback
 - [Desktop notifications](docs/tray.md): installing and configuring `bentoo-tray`
-- [Development](docs/development.md): security audit and project structure
+- [Runtime behaviour](docs/behaviour.md): exit codes, live output, concurrency and timeouts
+- [Development](docs/development.md): the checks, the local CI gate and the project layout
+- [Architecture](ARCHITECTURE.md): how the code is put together, and why
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short: `make check` while you work
+(`make test` for the tests alone), then `./scripts/ci-vm-gate.sh`, which runs
+the whole CI (tests, linters, CodeQL, scanners) on a clean checkout in a local
+VM.
+
+Report security problems privately, as [SECURITY.md](SECURITY.md) describes.
 
 ## License
 
