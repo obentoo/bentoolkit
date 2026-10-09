@@ -616,6 +616,8 @@ func lookupCauseWord(c LookupCause) string {
 		return "not found upstream"
 	case LookupOther:
 		return "other"
+	case LookupCauseNone:
+		return ""
 	}
 	return ""
 }

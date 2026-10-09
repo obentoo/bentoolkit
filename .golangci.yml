@@ -13,9 +13,12 @@ linters:
     - unparam
     - misspell
     - bodyclose
+    - exhaustive
     - contextcheck
     - containedctx
+    - noctx
     - errorlint
+    - nilerr
     - usetesting
     - tparallel
     - forbidigo
@@ -53,6 +56,11 @@ linters:
       # Resolve the package behind an identifier, so a renamed import of os
       # (`import osx "os"`) cannot hide an os.Exit from the rule above.
       analyze-types: true
+    exhaustive:
+      # A default clause counts as handling the rest; a switch without one must
+      # name every value, so a value added later fails the lint where it is
+      # not handled instead of falling through in silence.
+      default-signifies-exhaustive: true
     sloglint:
       # Story 062 (R5.4, R5.5): no package-level slog logger, constant
       # messages, key-value pairs only, snake_case keys.
@@ -118,11 +126,20 @@ linters:
           # A test helper often takes a parameter its current callers all pass
           # the same way; that is the test's choice, not dead code.
           - unparam
+          # httptest servers, fake commands and listeners live and die with
+          # the test; a context on each adds nothing the test does not bound.
+          - noctx
+          # A test switches over the cases it builds, not over every value.
+          - exhaustive
           # R5.5 binds production diagnostics; a test logs hostile, built
           # messages and attributes on purpose (the redaction tests).
           - sloglint
           # A test table carrying a context per case is idiomatic.
           - containedctx
+          # A test's filepath.Walk callback skips an unreadable entry, and a
+          # seam that has already called t.Error returns nil to let the run
+          # finish; both are deliberate in every test that does it.
+          - nilerr
 
 formatters:
   enable:
