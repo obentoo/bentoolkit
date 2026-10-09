@@ -160,14 +160,27 @@ func stagedManifestFixture(t *testing.T, fail bool) *stagedManifestEnv {
 	}
 
 	// The staged package directory as Stage leaves it: the candidate ebuild and
-	// a Manifest that does NOT yet name the new distfile. That gap is the whole
-	// hazard — quarantine keys on this file.
+	// nothing else — no Manifest and no other version travels.
 	if err := os.WriteFile(filepath.Join(stagedPkg, "gst-plugins-qt6-1.29.2.ebuild"), []byte("EAPI=8\n"), 0o644); err != nil {
 		t.Fatalf("writing the staged candidate: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(stagedPkg, "Manifest"),
+
+	// The published package directory as promotion has not yet touched it: the
+	// current ebuild and a Manifest that does NOT name the new distfile. That gap
+	// is the whole hazard — quarantine keys on the package directory's Manifest —
+	// and the staged step derives its expected names from these two files, so a
+	// fixture keeping them in the staged directory would let a guard pass for the
+	// wrong reason.
+	publishedPkg := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6")
+	if err := os.MkdirAll(publishedPkg, 0o750); err != nil {
+		t.Fatalf("creating %q: %v", publishedPkg, err)
+	}
+	if err := os.WriteFile(filepath.Join(publishedPkg, "gst-plugins-qt6-1.28.6.ebuild"), []byte("EAPI=8\n"), 0o644); err != nil {
+		t.Fatalf("writing the published ebuild: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(publishedPkg, "Manifest"),
 		[]byte("DIST gst-plugins-good-1.28.6.tar.xz 100 BLAKE2B ab SHA512 cd\n"), 0o644); err != nil {
-		t.Fatalf("writing the staged Manifest: %v", err)
+		t.Fatalf("writing the published Manifest: %v", err)
 	}
 
 	// The host's real distfiles, including the NEW version's — the file
