@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-10-09
+
 ### Added
 
 - **A `LICENSE` file.** The README has always said MIT, but the repository
@@ -40,8 +42,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   no longer starts on push or pull request. Every one of its jobs runs in the
   local gate (`scripts/ci-vm-gate.sh`), whose result is what a pull request
   rests on. The workflow stays as the definition the gate mirrors and as a
-  kill switch (manual runs, or restore its triggers). CodeQL keeps running on
-  GitHub through the repository's default setup.
+  kill switch (manual runs, or restore its triggers). CodeQL runs in the gate
+  too, so the repository's CodeQL default setup is switched off.
 
 - **YAML comes from `go.yaml.in/yaml/v3`, not `gopkg.in/yaml.v3`.** The old
   module was archived upstream on 2025-04-01 and will receive no further
@@ -50,6 +52,12 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `depguard` rule keeps the old import from coming back.
 
 ### Fixed
+
+- **The `claude` LLM provider works again with no `model` set.** Its default
+  was `claude-3-haiku-20240307`, which Anthropic retired on 2026-04-19, so
+  every request that relied on the default has failed since. The default is
+  now `claude-haiku-4-5`. A config that names the retired model must change
+  it the same way.
 
 - **`overlay autoupdate --apply` no longer makes the package's other versions
   lose their Manifest entries.** Promotion wrote the candidate's Manifest,
@@ -111,14 +119,6 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   with an INFO line. The tray's version is 0.1.1.
 
 ## [0.33.2] - 2026-10-08
-
-### Fixed
-
-- **The `claude` LLM provider works again with no `model` set.** Its default
-  was `claude-3-haiku-20240307`, which Anthropic retired on 2026-04-19, so
-  every request that relied on the default has failed since. The default is
-  now `claude-haiku-4-5`. A config that names the retired model must change
-  it the same way.
 
 ### Fixed
 
@@ -1348,7 +1348,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.33.3...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/obentoo/bentoolkit/compare/v0.33.3...v0.34.0
 [0.33.3]: https://github.com/obentoo/bentoolkit/compare/v0.33.2...v0.33.3
 [0.33.2]: https://github.com/obentoo/bentoolkit/compare/v0.33.1...v0.33.2
 [0.33.1]: https://github.com/obentoo/bentoolkit/compare/v0.33.0...v0.33.1

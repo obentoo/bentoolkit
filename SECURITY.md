@@ -7,8 +7,8 @@ latest released minor only; please upgrade before reporting.
 
 | Version | Supported          |
 | ------- | ------------------ |
-| 0.33.x  | :white_check_mark: |
-| < 0.33  | :x:                |
+| 0.34.x  | :white_check_mark: |
+| < 0.34  | :x:                |
 
 ## Reporting a Vulnerability
 
