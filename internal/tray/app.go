@@ -37,9 +37,12 @@ var (
 // the context they are given, and a peer that never answers would otherwise
 // stall the loop.
 var (
-	// callTimeout bounds one D-Bus call made from the loop: Acquire,
-	// Allowed and Send.
+	// callTimeout bounds one D-Bus call made from the loop: Allowed and Send.
 	callTimeout = 5 * time.Second
+	// nameRequestTimeout bounds the bus name request at startup. A stop
+	// signal does not cut that request short, so this bound is also how long
+	// a signal during it can wait before the tray stops.
+	nameRequestTimeout = 2 * time.Second
 	// fetchTimeout bounds one feed fetch; the fetcher's own client already
 	// stops at feed.Timeout.
 	fetchTimeout = feed.Timeout + 5*time.Second
@@ -286,7 +289,11 @@ func (a *App) Run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	acquireCtx, cancelAcquire := context.WithTimeout(ctx, callTimeout)
+	// The name request runs to its answer even when a stop signal arrives:
+	// the bus may already have granted the name, and abandoning the reply
+	// turned that stop into a startup failure. The signal is honoured once
+	// the state is loaded, below.
+	acquireCtx, cancelAcquire := context.WithTimeout(context.WithoutCancel(ctx), nameRequestTimeout)
 	acquired, err := a.d.Bus.Acquire(acquireCtx)
 	cancelAcquire()
 	if err != nil {
@@ -308,6 +315,13 @@ func (a *App) Run(ctx context.Context) error {
 		st.Notices = map[string]state.Record{}
 	}
 	a.st = st
+
+	// The name is ours. A stop signal that came while it was being requested
+	// is a stop like any other, and the state is loaded, so stop saves the
+	// real state rather than an empty one.
+	if ctx.Err() != nil {
+		return a.stop()
+	}
 
 	// The icon's context is its lifetime: sni keeps tracking the watcher
 	// with it, so it is not bounded by a call deadline (Start bounds its own
