@@ -1,4 +1,3 @@
-// Package autoupdate provides intelligent package analysis using LLM to generate update schemas.
 package autoupdate
 
 import (

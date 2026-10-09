@@ -13,7 +13,7 @@ while you work; before a pull request, run the gate below.
 | `make test` | `go test -race -shuffle=on ./...` |
 | `make coverage` | `make test` plus `coverage.out` and an HTML report. CI fails below 80%. |
 | `make fuzz` | Every `Fuzz*` target for `FUZZTIME` each (default `30s`). |
-| `make audit` | `audit-ctx`, `audit-comments`, `go mod verify` and `govulncheck`. |
+| `make audit` | `audit-ctx`, `audit-comments`, `audit-pkgdoc`, `go mod verify` and `govulncheck`. |
 
 ### Local CI gate
 

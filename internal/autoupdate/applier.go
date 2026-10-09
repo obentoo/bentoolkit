@@ -1,4 +1,3 @@
-// Package autoupdate provides update application functionality for ebuild autoupdate.
 package autoupdate
 
 import (

@@ -10,6 +10,7 @@
 //
 //	go build -tags chromedp ./...
 //	go test  -tags chromedp ./internal/autoupdate/ -run Integration
+
 package autoupdate
 
 import (

@@ -217,9 +217,36 @@ audit-comments:
 	fi; \
 	echo "audit-comments: no tracker IDs and no comment block of $(AUDIT_COMMENTS_MAX_BLOCK)+ lines in $(AUDIT_COMMENTS_DIRS)"
 
+# Package docs: every package has one, and exactly one file carries it. A
+# comment directly above `package` in a second file is merged into the doc,
+# in file-name order, and the first line `go doc` shows becomes whichever
+# file sorts first. A file comment needs a blank line before `package`.
+# (awk runs END even after exit, so the verdict is carried in a variable.)
+.PHONY: audit-pkgdoc
+audit-pkgdoc:
+	@set -eu; \
+	missing="$$($(GO) list -f '{{if not .Doc}}{{.ImportPath}}{{end}}' ./... | grep -v '^$$' || true)"; \
+	extra=""; \
+	for dir in $$($(GO) list -f '{{.Dir}}' ./...); do \
+		n=0; files=""; \
+		for f in "$$dir"/*.go; do \
+			case "$$f" in *_test.go) continue ;; esac; \
+			if awk '/^package /{ found = (prev ~ /^\/\//); exit } { prev = $$0 } END { exit !found }' "$$f"; then \
+				n=$$((n + 1)); files="$$files $${f#$(CURDIR)/}"; \
+			fi; \
+		done; \
+		if [ "$$n" -gt 1 ]; then extra="$$extra$${extra:+\n}more than one package doc:$$files"; fi; \
+	done; \
+	if [ -n "$$missing$$extra" ]; then \
+		[ -z "$$missing" ] || printf 'no package doc: %s\n' $$missing; \
+		[ -z "$$extra" ] || printf '%b\n' "$$extra"; \
+		exit 1; \
+	fi; \
+	echo "audit-pkgdoc: every package has exactly one package doc"
+
 # Security audit
 .PHONY: audit
-audit: audit-ctx audit-comments
+audit: audit-ctx audit-comments audit-pkgdoc
 	$(GOMOD) verify
 	@echo "Module verification passed"
 	@# govulncheck is supplied by the `tool` directive in go.mod, so it lives in
@@ -337,7 +364,8 @@ help:
 	@echo "  coverage        Run tests with coverage report (-race, shuffled)"
 	@echo "  fuzz            Run every fuzz target for FUZZTIME each (default 30s)"
 	@echo "  audit-ctx       Verify no naked context.Background() in internal/autoupdate, internal/overlay"
-	@echo "  audit           Run security audit (audit-ctx + go mod verify + govulncheck)"
+	@echo "  audit-pkgdoc    Verify every package has exactly one package doc comment"
+	@echo "  audit           Run audit-ctx, audit-comments, audit-pkgdoc, go mod verify and govulncheck"
 	@echo "  clean           Remove build artifacts"
 	@echo "  build-all       Cross-compile for linux amd64 and arm64"
 	@echo "  checksums       Write build/SHA256SUMS over the binaries in build/"

@@ -1,4 +1,3 @@
-// Package autoupdate provides version checking functionality for ebuild autoupdate.
 package autoupdate
 
 import (

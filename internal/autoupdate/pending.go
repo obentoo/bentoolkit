@@ -1,4 +1,3 @@
-// Package autoupdate provides pending updates management for ebuild version updates.
 package autoupdate
 
 import (

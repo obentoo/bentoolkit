@@ -48,7 +48,10 @@ lint() {
   "${LINT[@]}" run ./... &&
     "${LINT[@]}" run --build-tags chromedp ./... &&
     make audit-ctx &&
-    make audit-comments
+    make audit-comments &&
+    # A gated commit older than the audit-pkgdoc target has no such rule;
+    # gating it must not fail on the script's own age.
+    if make -n audit-pkgdoc >/dev/null 2>&1; then make audit-pkgdoc; fi
 }
 
 test_job() {
