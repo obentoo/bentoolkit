@@ -13,7 +13,7 @@ func TestMockRunner_PipeRecordsStages(t *testing.T) {
 	markerRunner(t, mr, map[string][]byte{"btrfs": []byte("B"), "zstd": []byte("Z"), "rclone": []byte("R")})
 	stages := archivePipeStages(Snapshot{ID: "42", Subvolume: "/home", Path: "/home/.snapshots/42/snapshot"}, "", "r:bkt", "")
 	for i := 0; i < 2; i++ {
-		if _, err := runPipe(t.Context(), mr, stages); err != nil {
+		if err := runPipe(t.Context(), mr, stages); err != nil {
 			t.Fatalf("runPipe #%d: %v", i+1, err)
 		}
 	}

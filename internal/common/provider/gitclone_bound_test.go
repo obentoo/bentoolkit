@@ -220,16 +220,21 @@ func TestUpdateRepoFailureNamesTheRepository(t *testing.T) {
 			if !strings.HasSuffix(err.Error(), "PULL-TAIL-7Q\n") {
 				t.Errorf("updateRepo error ends %q, want the pull output's last line", err.Error()[max(0, len(err.Error())-40):])
 			}
-			if n := len(err.Error()); n > 65536+200 {
-				t.Errorf("updateRepo error is %d bytes, want at most the last 65536 bytes of output plus the message (S054-R7.2)", n)
+			// The bound is the message prefix, which carries the temp dir's path
+			// and so grows with TMPDIR, plus the rest of the truncation line
+			// ("134478 earlier bytes dropped ...]\n", under 64 bytes) and the
+			// 65536-byte output tail.
+			if n, limit := len(err.Error()), len(wantPrefix)+64+65536; n > limit {
+				t.Errorf("updateRepo error is %d bytes, want at most %d: the message plus the last 65536 bytes of output (S054-R7.2)", n, limit)
 			}
 		})
 	}
 }
 
 // Every argv the provider builds keeps names apart from options: the ref
-// reaches fetch and reset after --end-of-options, and the clone's URL and
-// path come after "--" (S054-R8.11). The names here begin with "-", which
+// reaches fetch after --end-of-options, reset gets "origin/<branch>" (which
+// cannot begin with "-") followed by "--", and the clone's URL and path come
+// after "--" (S054-R8.11). The names here begin with "-", which
 // NewGitCloneProvider would refuse, but a struct literal can still carry them.
 func TestGitArgvSeparatesNamesFromOptions(t *testing.T) {
 	var argvs [][]string
@@ -254,7 +259,7 @@ func TestGitArgvSeparatesNamesFromOptions(t *testing.T) {
 	want := [][]string{
 		{"git", "-C", dir, "pull", "--ff-only"},
 		{"git", "-C", dir, "fetch", "--end-of-options", "origin", "-x"},
-		{"git", "-C", dir, "reset", "--hard", "--end-of-options", "origin/-x"},
+		{"git", "-C", dir, "reset", "--hard", "origin/-x", "--"},
 		{"git", "clone", "--depth", "1", "--single-branch", "--branch", "-x", "--", "-u", dest},
 	}
 	if !reflect.DeepEqual(argvs, want) {

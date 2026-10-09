@@ -317,10 +317,10 @@ func (p *GitCloneProvider) cloneRepo(ctx context.Context) error {
 // returns at once with an error naming the git operation that was running and
 // wrapping the context's error; it never starts the next command.
 //
-// p.Branch reaches git after --end-of-options, so git reads it as a ref even
-// if it begins with "-" (git 2.24 and later), on top of the ValidateBranch
-// check in NewGitCloneProvider. p.LocalPath is the value of -C, which git
-// never parses as an option; it is a cache path the provider derives itself.
+// p.Branch reaches fetch after --end-of-options, on top of ValidateBranch.
+// reset gets "origin/<branch>", which cannot begin with "-", then "--" so it
+// is never read as a path; git 2.43 rejects --end-of-options after --hard.
+// p.LocalPath is the value of -C, which git never parses as an option.
 func (p *GitCloneProvider) updateRepo(ctx context.Context) error {
 	runCtx, cancel := context.WithTimeout(ctx, gitTimeout)
 	defer cancel()
@@ -352,7 +352,7 @@ func (p *GitCloneProvider) updateRepo(ctx context.Context) error {
 			p.LocalPath, err, fetchErr, tui.Tail(string(output)))
 	}
 
-	reset := gitCommand(runCtx, "-C", p.LocalPath, "reset", "--hard", "--end-of-options", "origin/"+p.Branch)
+	reset := gitCommand(runCtx, "-C", p.LocalPath, "reset", "--hard", "origin/"+p.Branch, "--")
 	if resetErr := procgroup.Result(reset, reset.Run()); resetErr != nil {
 		if stop := stopped("reset"); stop != nil {
 			return stop

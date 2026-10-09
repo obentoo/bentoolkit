@@ -166,10 +166,8 @@ func TestPromptRegistryFixes_KeepOnPassingRecheck(t *testing.T) {
 	// because the re-check passes (no keep/revert prompt).
 	in := strings.NewReader("y\n")
 
-	if err := promptRegistryFixes(context.Background(), h.overlayDir, fixer,
-		h.failuresForFetchError(), in, h.newChecker); err != nil {
-		t.Fatalf("promptRegistryFixes: %v", err)
-	}
+	promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		h.failuresForFetchError(), in, h.newChecker)
 
 	if fixer.called != 1 {
 		t.Errorf("fixer called %d times, want 1", fixer.called)
@@ -217,10 +215,8 @@ func TestPromptRegistryFixes_RevertOnFailingRecheck(t *testing.T) {
 	// "y" to fix, then "N" to the keep/revert prompt on the failing re-check.
 	in := strings.NewReader("y\nN\n")
 
-	if err := promptRegistryFixes(context.Background(), h.overlayDir, fixer,
-		h.failuresForFetchError(), in, h.newChecker); err != nil {
-		t.Fatalf("promptRegistryFixes: %v", err)
-	}
+	promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		h.failuresForFetchError(), in, h.newChecker)
 
 	if fixer.called != 1 {
 		t.Errorf("fixer called %d times, want 1", fixer.called)
@@ -251,10 +247,8 @@ func TestPromptRegistryFixes_SkipsNonFetchFailures(t *testing.T) {
 	}
 
 	in := strings.NewReader("y\n") // would answer yes IF anything were offered
-	if err := promptRegistryFixes(context.Background(), h.overlayDir, fixer,
-		failures, in, h.newChecker); err != nil {
-		t.Fatalf("promptRegistryFixes: %v", err)
-	}
+	promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		failures, in, h.newChecker)
 	if fixer.called != 0 {
 		t.Errorf("fixer called %d times for a non-ErrFetchFailed failure, want 0", fixer.called)
 	}
@@ -273,10 +267,8 @@ func TestPromptRegistryFixes_SkipsUnreachableUpstream(t *testing.T) {
 	}
 
 	in := strings.NewReader("y\n") // would answer yes IF anything were offered
-	if err := promptRegistryFixes(context.Background(), h.overlayDir, fixer,
-		failures, in, h.newChecker); err != nil {
-		t.Fatalf("promptRegistryFixes: %v", err)
-	}
+	promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		failures, in, h.newChecker)
 	if fixer.called != 0 {
 		t.Errorf("fixer called %d times for an unreachable upstream, want 0", fixer.called)
 	}
@@ -302,10 +294,10 @@ func TestPromptRegistryFixes_FixerErrorRestoresAndContinues(t *testing.T) {
 	}
 
 	in := strings.NewReader("y\n")
-	if err := promptRegistryFixes(context.Background(), h.overlayDir, fixer,
-		h.failuresForFetchError(), in, h.newChecker); err != nil {
-		t.Fatalf("promptRegistryFixes should not fail on a per-package fixer error: %v", err)
-	}
+	// A per-package fixer error is not fatal: promptRegistryFixes returns no
+	// error at all, so the type says what this test used to check.
+	promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		h.failuresForFetchError(), in, h.newChecker)
 
 	postErr, err := os.ReadFile(h.configPath)
 	if err != nil {
