@@ -276,59 +276,19 @@ func lintUntrackedReleaseLines(overlayPath string, pkgs map[string]PackageConfig
 	var issues []LintIssue
 
 	for _, pkg := range sortedKeys(pkgs) {
-		cfg := pkgs[pkg]
-		// A disabled entry tracks nothing, and a slot- or series-qualified one has
-		// already said which line it means.
-		if cfg.Enabled != nil && !*cfg.Enabled {
-			continue
-		}
-		if cfg.Series != "" {
-			continue
-		}
-		if _, slot := ebuilds.SplitPkgSlot(pkg); slot != "" {
+		if declaresReleaseLine(pkg, pkgs[pkg]) {
 			continue
 		}
 
-		dir := ebuilds.PkgDirFor(overlayPath, pkg)
-		if dir == "" {
-			continue
-		}
-		paths, err := ebuilds.FindEbuilds(dir)
-		if err != nil || len(paths) < 2 {
-			continue
-		}
-
-		lines := make(map[string]string, 2) // release line → one example version
-		for _, p := range paths {
-			v := ebuilds.ExtractVersionFromFilename(filepath.Base(p))
-			if v == "" {
-				continue
-			}
-			if line := releaseLineOf(v); line != "" {
-				lines[line] = v
-			}
-		}
+		lines := releaseLinesOnDisk(overlayPath, pkg)
 		if len(lines) < 2 {
 			continue
 		}
 
-		// Only a stable/unstable pair counts: one line marked as a pre-release
-		// and another that is not. Successive versions of one line carry no such
-		// marker and are left alone.
-		var withPre, withoutPre bool
-		examples := make([]string, 0, len(lines))
-		for _, v := range lines {
-			if prereleaseSuffixRegex.MatchString(v) {
-				withPre = true
-			} else {
-				withoutPre = true
-			}
-			examples = append(examples, v)
-		}
-		if !withPre || !withoutPre {
+		examples, mixed := mixedStabilityExamples(lines)
+		if !mixed {
 			continue
 		}
-		sort.Strings(examples)
 
 		issues = append(issues, LintIssue{
 			Package: pkg,
@@ -341,6 +301,70 @@ func lintUntrackedReleaseLines(overlayPath string, pkgs map[string]PackageConfig
 	}
 
 	return issues
+}
+
+// declaresReleaseLine reports whether lintUntrackedReleaseLines must skip an
+// entry. A disabled entry tracks nothing, and a slot- or series-qualified one
+// has already said which line it means.
+func declaresReleaseLine(pkg string, cfg PackageConfig) bool {
+	if cfg.Enabled != nil && !*cfg.Enabled {
+		return true
+	}
+	if cfg.Series != "" {
+		return true
+	}
+	_, slot := ebuilds.SplitPkgSlot(pkg)
+	return slot != ""
+}
+
+// releaseLinesOnDisk maps each release line found among the package's ebuilds
+// to one example version. It returns nil when the directory cannot be resolved
+// or read, or holds fewer than two ebuilds.
+func releaseLinesOnDisk(overlayPath, pkg string) map[string]string {
+	dir := ebuilds.PkgDirFor(overlayPath, pkg)
+	if dir == "" {
+		return nil
+	}
+	paths, err := ebuilds.FindEbuilds(dir)
+	if err != nil || len(paths) < 2 {
+		return nil
+	}
+
+	lines := make(map[string]string, 2) // release line → one example version
+	for _, p := range paths {
+		v := ebuilds.ExtractVersionFromFilename(filepath.Base(p))
+		if v == "" {
+			continue
+		}
+		if line := releaseLineOf(v); line != "" {
+			lines[line] = v
+		}
+	}
+	return lines
+}
+
+// mixedStabilityExamples returns the sorted example versions of lines, and
+// whether they form a stable/unstable pair.
+//
+// Only a stable/unstable pair counts: one line marked as a pre-release and
+// another that is not. Successive versions of one line carry no such marker
+// and are left alone.
+func mixedStabilityExamples(lines map[string]string) ([]string, bool) {
+	var withPre, withoutPre bool
+	examples := make([]string, 0, len(lines))
+	for _, v := range lines {
+		if prereleaseSuffixRegex.MatchString(v) {
+			withPre = true
+		} else {
+			withoutPre = true
+		}
+		examples = append(examples, v)
+	}
+	if !withPre || !withoutPre {
+		return nil, false
+	}
+	sort.Strings(examples)
+	return examples, true
 }
 
 // recordField is one key/value assignment of a record, as written.
@@ -369,11 +393,22 @@ type recordLintState struct {
 // string opened by `comments = """` so that a `#` line or a `[`-prefixed line
 // inside the documentation is not mistaken for file structure.
 //
-// The comment block that opens the file is exempt: see seenRecord below.
+// The comment block that opens the file is exempt: see recordModelScanner.seenRecord.
 func LintRecordModel(content string) []LintIssue {
-	var issues []LintIssue
-	var cur *recordLintState
-	inComments := false
+	s := &recordModelScanner{}
+	for idx, line := range strings.Split(content, "\n") {
+		s.scanLine(idx+1, line)
+	}
+	s.closeRecord()
+
+	return s.issues
+}
+
+// recordModelScanner is the state LintRecordModel carries from line to line.
+type recordModelScanner struct {
+	issues     []LintIssue
+	cur        *recordLintState
+	inComments bool
 	// seenRecord turns the stray-comment rule on. Everything before the first
 	// record header is the file header — the text that documents the record
 	// model itself (field order, enabled vs hold, the traps a new record has to
@@ -381,122 +416,138 @@ func LintRecordModel(content string) []LintIssue {
 	// flagging it would push maintainers to delete the one thing that makes the
 	// file editable by hand. Once a record has been seen, a floating comment is
 	// documentation stranded between records, which is what the rule is for.
-	seenRecord := false
+	seenRecord bool
+}
 
-	closeRecord := func() {
-		if cur == nil {
-			return
-		}
-		if !cur.closed {
-			issues = append(issues, LintIssue{
-				Line: cur.headerLine, Package: cur.name, Rule: LintMissingEnd,
-				Message: fmt.Sprintf("record is not closed by a %q line", RecordEndMarker),
-			})
-		}
-		if !cur.hasComments {
-			issues = append(issues, LintIssue{
-				Line: cur.headerLine, Package: cur.name, Rule: LintMissingComments,
-				Message: "record has no comments field documenting why this source and parser",
-			})
-		} else if cur.fieldsAfterCm > 0 {
-			issues = append(issues, LintIssue{
-				Line: cur.commentsLine, Package: cur.name, Rule: LintCommentsNotLast,
-				Message: fmt.Sprintf("comments must be the last field, but %d field(s) follow it", cur.fieldsAfterCm),
-			})
-		}
-		issues = append(issues, lintRecordFields(cur)...)
-		cur = nil
+// closeRecord reports the record-level rules of the record being scanned, if
+// any, and forgets it.
+func (s *recordModelScanner) closeRecord() {
+	cur := s.cur
+	if cur == nil {
+		return
 	}
-
-	for idx, line := range strings.Split(content, "\n") {
-		lineNo := idx + 1
-		trimmed := strings.TrimSpace(line)
-
-		// Inside the doc string: only look for its terminator, and flag a line
-		// that the raw-text section scanner elsewhere would read as a header.
-		if inComments {
-			if strings.Contains(line, `"""`) {
-				inComments = false
-				continue
-			}
-			if strings.HasPrefix(trimmed, "[") && cur != nil {
-				issues = append(issues, LintIssue{
-					Line: lineNo, Package: cur.name, Rule: LintBracketInComment,
-					Message: `a comments line starting with "[" is read as a section header by the raw-text editors; indent it`,
-				})
-			}
-			continue
-		}
-
-		if name, isHeader := tomlTableName(line); isHeader {
-			closeRecord()
-			cur = &recordLintState{name: name, headerLine: lineNo}
-			seenRecord = true
-			continue
-		}
-
-		if trimmed == "" {
-			continue
-		}
-
-		// A comment line. Before the first record it is the file header, which
-		// the model allows. Inside an open record it is either the end marker or
-		// a leftover doc line that belongs in comments; between records it is the
-		// floating comment the record model forbids.
-		if strings.HasPrefix(trimmed, "#") {
-			switch {
-			case !seenRecord:
-				// File header — allowed, see seenRecord.
-			case cur == nil || cur.closed:
-				issues = append(issues, LintIssue{
-					Line: lineNo, Rule: LintStrayComment,
-					Message: "comment outside any record; move it into the comments field of the record it describes",
-				})
-			case trimmed == RecordEndMarker:
-				cur.closed = true
-			default:
-				issues = append(issues, LintIssue{
-					Line: lineNo, Package: cur.name, Rule: LintInlineComment,
-					Message: "comment inside a record; the documentation belongs in the comments field",
-				})
-			}
-			continue
-		}
-
-		if cur == nil {
-			continue
-		}
-
-		m := keyAssignRegex.FindStringSubmatch(line)
-		if m == nil {
-			continue
-		}
-		// Every assignment is recorded, comments included, because the field-set
-		// and field-order rules need the whole sequence. m[0] ends at the "=", so
-		// the remainder is the value even when the value itself contains one
-		// (pattern = 'a=b').
-		cur.fields = append(cur.fields, recordField{
-			key:   m[1],
-			value: strings.TrimSpace(line[len(m[0]):]),
-			line:  lineNo,
+	if !cur.closed {
+		s.issues = append(s.issues, LintIssue{
+			Line: cur.headerLine, Package: cur.name, Rule: LintMissingEnd,
+			Message: fmt.Sprintf("record is not closed by a %q line", RecordEndMarker),
 		})
-		if m[1] == "comments" {
-			cur.hasComments = true
-			cur.commentsLine = lineNo
-			// A multi-line string stays open unless it also closes on this line.
-			if commentsOpenRegex.MatchString(line) {
-				rest := line[strings.Index(line, `"""`)+3:]
-				inComments = !strings.Contains(rest, `"""`)
-			}
-			continue
-		}
-		if cur.hasComments {
-			cur.fieldsAfterCm++
-		}
 	}
-	closeRecord()
+	if !cur.hasComments {
+		s.issues = append(s.issues, LintIssue{
+			Line: cur.headerLine, Package: cur.name, Rule: LintMissingComments,
+			Message: "record has no comments field documenting why this source and parser",
+		})
+	} else if cur.fieldsAfterCm > 0 {
+		s.issues = append(s.issues, LintIssue{
+			Line: cur.commentsLine, Package: cur.name, Rule: LintCommentsNotLast,
+			Message: fmt.Sprintf("comments must be the last field, but %d field(s) follow it", cur.fieldsAfterCm),
+		})
+	}
+	s.issues = append(s.issues, lintRecordFields(cur)...)
+	s.cur = nil
+}
 
-	return issues
+// scanLine applies the record-model rules to one line of the file.
+func (s *recordModelScanner) scanLine(lineNo int, line string) {
+	trimmed := strings.TrimSpace(line)
+
+	if s.inComments {
+		s.scanCommentsBody(lineNo, line, trimmed)
+		return
+	}
+
+	if name, isHeader := tomlTableName(line); isHeader {
+		s.closeRecord()
+		s.cur = &recordLintState{name: name, headerLine: lineNo}
+		s.seenRecord = true
+		return
+	}
+
+	if trimmed == "" {
+		return
+	}
+
+	if strings.HasPrefix(trimmed, "#") {
+		s.scanCommentLine(lineNo, trimmed)
+		return
+	}
+
+	if s.cur == nil {
+		return
+	}
+
+	s.scanAssignment(lineNo, line)
+}
+
+// scanCommentsBody handles a line inside the doc string: it only looks for the
+// terminator, and flags a line that the raw-text section scanner elsewhere
+// would read as a header.
+func (s *recordModelScanner) scanCommentsBody(lineNo int, line, trimmed string) {
+	if strings.Contains(line, `"""`) {
+		s.inComments = false
+		return
+	}
+	if strings.HasPrefix(trimmed, "[") && s.cur != nil {
+		s.issues = append(s.issues, LintIssue{
+			Line: lineNo, Package: s.cur.name, Rule: LintBracketInComment,
+			Message: `a comments line starting with "[" is read as a section header by the raw-text editors; indent it`,
+		})
+	}
+}
+
+// scanCommentLine handles a comment line. Before the first record it is the
+// file header, which the model allows. Inside an open record it is either the
+// end marker or a leftover doc line that belongs in comments; between records
+// it is the floating comment the record model forbids.
+func (s *recordModelScanner) scanCommentLine(lineNo int, trimmed string) {
+	switch {
+	case !s.seenRecord:
+		// File header — allowed, see seenRecord.
+	case s.cur == nil || s.cur.closed:
+		s.issues = append(s.issues, LintIssue{
+			Line: lineNo, Rule: LintStrayComment,
+			Message: "comment outside any record; move it into the comments field of the record it describes",
+		})
+	case trimmed == RecordEndMarker:
+		s.cur.closed = true
+	default:
+		s.issues = append(s.issues, LintIssue{
+			Line: lineNo, Package: s.cur.name, Rule: LintInlineComment,
+			Message: "comment inside a record; the documentation belongs in the comments field",
+		})
+	}
+}
+
+// scanAssignment records a key/value assignment of the open record, and opens
+// the doc string when the assignment is a multi-line comments field.
+func (s *recordModelScanner) scanAssignment(lineNo int, line string) {
+	cur := s.cur
+	m := keyAssignRegex.FindStringSubmatch(line)
+	if m == nil {
+		return
+	}
+	// Every assignment is recorded, comments included, because the field-set
+	// and field-order rules need the whole sequence. m[0] ends at the "=", so
+	// the remainder is the value even when the value itself contains one
+	// (pattern = 'a=b').
+	cur.fields = append(cur.fields, recordField{
+		key:   m[1],
+		value: strings.TrimSpace(line[len(m[0]):]),
+		line:  lineNo,
+	})
+	if m[1] == "comments" {
+		cur.hasComments = true
+		cur.commentsLine = lineNo
+		// A multi-line string stays open unless it also closes on this line.
+		if commentsOpenRegex.MatchString(line) {
+			rest := line[strings.Index(line, `"""`)+3:]
+			s.inComments = !strings.Contains(rest, `"""`)
+		}
+		return
+	}
+	if cur.hasComments {
+		cur.fieldsAfterCm++
+	}
 }
 
 // orderedField is one field as the record will carry it AFTER repair: canonical
@@ -531,53 +582,78 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 		return nil
 	}
 
-	var hasType bool
-	var typeValue string
-	var hasBaseFrom bool
-	var trackCommitLine int
-	for _, f := range rec.fields {
+	facts := collectRecordFieldFacts(rec.fields)
+	issues, effective := lintFieldSet(rec, facts)
+
+	if issue, ok := fieldOrderIssue(rec.name, effective); ok {
+		issues = append(issues, issue)
+	}
+
+	// No repair is offered on purpose: which source applies depends on
+	// where upstream versions itself, which only a human reading that upstream
+	// knows.
+	//
+	// Any declared value silences this, `none` included — an upstream that does
+	// not version itself at all is a real case, and one the rule would otherwise
+	// report forever with no action its reader could take. Naming `none` in the
+	// message is what keeps that from reading as a rule to be ignored.
+	if facts.trackCommitLine > 0 && !facts.hasBaseFrom {
+		issues = append(issues, LintIssue{
+			Line: facts.trackCommitLine, Package: rec.name, Rule: LintLegacyBase, Fix: FixNone,
+			Message: `track = "commit" without base_from: the base version is whatever the ebuild already carries and can freeze there unnoticed; declare base_from = "file", "tag" or "commit_message" — or "none" when upstream publishes no version at all`,
+		})
+	}
+
+	// Emitted in line order so the report reads down the file, the way runLint
+	// prints it. Stable, so two issues on one line keep the order above.
+	sort.SliceStable(issues, func(i, j int) bool { return issues[i].Line < issues[j].Line })
+	return issues
+}
+
+// recordFieldFacts is what lintRecordFields needs to know about the whole
+// record before it judges any single field.
+type recordFieldFacts struct {
+	hasType         bool
+	typeValue       string
+	hasBaseFrom     bool
+	trackCommitLine int
+}
+
+// collectRecordFieldFacts scans a record's assignments for the facts the
+// field-set rules depend on.
+func collectRecordFieldFacts(fields []recordField) recordFieldFacts {
+	var facts recordFieldFacts
+	for _, f := range fields {
 		switch f.key {
 		case "type":
-			hasType = true
-			typeValue = tomlStringValue(f.value)
+			facts.hasType = true
+			facts.typeValue = tomlStringValue(f.value)
 		case "base_from":
-			hasBaseFrom = true
+			facts.hasBaseFrom = true
 		case "track":
 			if tomlStringValue(f.value) == "commit" {
-				trackCommitLine = f.line
+				facts.trackCommitLine = f.line
 			}
 		}
 	}
+	return facts
+}
 
+// lintFieldSet applies the per-field rules (`binary`, redundant `enabled`) to a
+// record and returns their issues, in field order, together with the effective
+// field list the order check ranks.
+func lintFieldSet(rec *recordLintState, facts recordFieldFacts) ([]LintIssue, []orderedField) {
 	var issues []LintIssue
 	effective := make([]orderedField, 0, len(rec.fields))
 
 	for _, f := range rec.fields {
 		switch f.key {
 		case "binary":
-			// The classifier is `type`. Which repair applies depends on whether
-			// the record already declares one — carried in Fix, not in the prose.
-			if on, isBool := tomlBoolValue(f.value); isBool && on && !hasType {
-				issues = append(issues, LintIssue{
-					Line: f.line, Package: rec.name, Rule: LintLegacyBinary, Fix: FixBinaryToType,
-					Message: `binary is retired: the record declares no type, so it becomes type = "bin"`,
-				})
+			issue, becomesType := lintBinaryField(rec.name, f, facts)
+			issues = append(issues, issue)
+			if becomesType {
 				effective = append(effective, orderedField{canonical: "type", written: f.key, line: f.line})
-				continue
 			}
-			detail := "the record already declares type"
-			if typeValue != "" {
-				detail = fmt.Sprintf("the record already declares type = %q", typeValue)
-			}
-			if !hasType {
-				// binary = false: the default classification spelled out. It says
-				// nothing `type` would not say better, so the line just goes.
-				detail = "it says nothing, auto-detection is the default"
-			}
-			issues = append(issues, LintIssue{
-				Line: f.line, Package: rec.name, Rule: LintLegacyBinary, Fix: FixDropBinary,
-				Message: fmt.Sprintf("binary is retired: %s, so the line is deleted", detail),
-			})
 
 		case "enabled":
 			// Only `true` is redundant. `enabled = false` is the bookkeeping that
@@ -597,11 +673,44 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 			}
 		}
 	}
+	return issues, effective
+}
 
-	// The rule is that the record's fields form a SUBSEQUENCE of the canonical
-	// order — each rank strictly greater than the one before. Demanding anything
-	// stronger, contiguity for instance, would flag all 411 records: no record
-	// declares more than a fraction of the 38 fields.
+// lintBinaryField reports the retired `binary` key of one record, and whether
+// the repair turns the line into `type` (true) or deletes it (false).
+func lintBinaryField(pkg string, f recordField, facts recordFieldFacts) (LintIssue, bool) {
+	// The classifier is `type`. Which repair applies depends on whether
+	// the record already declares one — carried in Fix, not in the prose.
+	if on, isBool := tomlBoolValue(f.value); isBool && on && !facts.hasType {
+		return LintIssue{
+			Line: f.line, Package: pkg, Rule: LintLegacyBinary, Fix: FixBinaryToType,
+			Message: `binary is retired: the record declares no type, so it becomes type = "bin"`,
+		}, true
+	}
+	detail := "the record already declares type"
+	if facts.typeValue != "" {
+		detail = fmt.Sprintf("the record already declares type = %q", facts.typeValue)
+	}
+	if !facts.hasType {
+		// binary = false: the default classification spelled out. It says
+		// nothing `type` would not say better, so the line just goes.
+		detail = "it says nothing, auto-detection is the default"
+	}
+	return LintIssue{
+		Line: f.line, Package: pkg, Rule: LintLegacyBinary, Fix: FixDropBinary,
+		Message: fmt.Sprintf("binary is retired: %s, so the line is deleted", detail),
+	}, false
+}
+
+// fieldOrderIssue reports the first field of effective that breaks the
+// canonical order, if any.
+//
+// The rule is that the record's fields form a SUBSEQUENCE of the canonical
+// order — each rank strictly greater than the one before. Demanding anything
+// stronger, contiguity for instance, would flag all 411 records: no record
+// declares more than a fraction of the 38 fields. One issue per record: the
+// first offending field is what to look at.
+func fieldOrderIssue(pkg string, effective []orderedField) (LintIssue, bool) {
 	prevRank := -1
 	prevName := ""
 	for _, f := range effective {
@@ -612,35 +721,15 @@ func lintRecordFields(rec *recordLintState) []LintIssue {
 				msg = fmt.Sprintf("field %q (written as the retired %q) is out of canonical order: it belongs before %q",
 					f.canonical, f.written, prevName)
 			}
-			issues = append(issues, LintIssue{
-				Line: f.line, Package: rec.name, Rule: LintFieldOrder, Fix: FixReorderFields,
+			return LintIssue{
+				Line: f.line, Package: pkg, Rule: LintFieldOrder, Fix: FixReorderFields,
 				Message: msg,
-			})
-			break // one issue per record: the first offending field is what to look at
+			}, true
 		}
 		prevRank = rank
 		prevName = f.canonical
 	}
-
-	// No repair is offered on purpose: which source applies depends on
-	// where upstream versions itself, which only a human reading that upstream
-	// knows.
-	//
-	// Any declared value silences this, `none` included — an upstream that does
-	// not version itself at all is a real case, and one the rule would otherwise
-	// report forever with no action its reader could take. Naming `none` in the
-	// message is what keeps that from reading as a rule to be ignored.
-	if trackCommitLine > 0 && !hasBaseFrom {
-		issues = append(issues, LintIssue{
-			Line: trackCommitLine, Package: rec.name, Rule: LintLegacyBase, Fix: FixNone,
-			Message: `track = "commit" without base_from: the base version is whatever the ebuild already carries and can freeze there unnoticed; declare base_from = "file", "tag" or "commit_message" — or "none" when upstream publishes no version at all`,
-		})
-	}
-
-	// Emitted in line order so the report reads down the file, the way runLint
-	// prints it. Stable, so two issues on one line keep the order above.
-	sort.SliceStable(issues, func(i, j int) bool { return issues[i].Line < issues[j].Line })
-	return issues
+	return LintIssue{}, false
 }
 
 // tomlBoolValue reports the boolean an assignment's right-hand side holds, and

@@ -916,75 +916,99 @@ func setPackagesEnabled(overlayPath string, pkgs []string, value, insertIfAbsent
 		targets[p] = true
 	}
 
-	enabledAssign := fmt.Sprintf("enabled = %t", value)
-	originAssign := fmt.Sprintf("disabled_by = %q", DisabledByAuto)
+	editor := enabledPairEditor{
+		value:          value,
+		insertIfAbsent: insertIfAbsent,
+		enabledAssign:  fmt.Sprintf("enabled = %t", value),
+		originAssign:   fmt.Sprintf("disabled_by = %q", DisabledByAuto),
+	}
+	return editPackagesConfigSections(overlayPath, targets, editor.edit)
+}
 
-	return editPackagesConfigSections(overlayPath, targets, func(_ string, body []string, inComments []bool) ([]string, bool) {
-		// Whether the record already states an origin decides whether a disable
-		// introduces one at all: an existing origin is left untouched wherever it
-		// stands, and only a record carrying none gets `disabled_by = "auto"`
-		// below `enabled`. It has to be known before the walk reaches the
-		// `enabled` line, because the origin may sit after it — a record edited
-		// by hand is under no obligation to be in canonical order.
-		hasOrigin := false
-		for j, line := range body {
-			if !inComments[j] && disabledByAssignRegex.MatchString(line) {
-				hasOrigin = true
-				break
-			}
+// enabledPairEditor carries one direction of setPackagesEnabled — the value to
+// write, whether an absent assignment is inserted, and the two rendered lines
+// of the disabled pair — so its edit method is the sectionBodyEditor.
+type enabledPairEditor struct {
+	value          bool
+	insertIfAbsent bool
+	enabledAssign  string
+	originAssign   string
+}
+
+// edit applies the enabled-pair policy of setPackagesEnabled to one section
+// body.
+func (e enabledPairEditor) edit(_ string, body []string, inComments []bool) ([]string, bool) {
+	// Whether the record already states an origin decides whether a disable
+	// introduces one at all: an existing origin is left untouched wherever it
+	// stands, and only a record carrying none gets `disabled_by = "auto"`
+	// below `enabled`. It has to be known before the walk reaches the
+	// `enabled` line, because the origin may sit after it — a record edited
+	// by hand is under no obligation to be in canonical order.
+	hasOrigin := bodyHasOrigin(body, inComments)
+
+	out := make([]string, 0, len(body)+2)
+	changed := false
+	foundEnabled := false
+	for j, line := range body {
+		if inComments[j] {
+			out = append(out, line)
+			continue
 		}
-
-		out := make([]string, 0, len(body)+2)
-		changed := false
-		foundEnabled := false
-		for j, line := range body {
-			if !inComments[j] {
-				if m := enabledAssignRegex.FindStringSubmatch(line); m != nil {
-					foundEnabled = true
-					changed = true
-					// Enabling drops the line; disabling rewrites it in place,
-					// keeping the original indentation, and states the origin
-					// right below it when the record carries none yet.
-					if !value {
-						out = append(out, m[1]+enabledAssign)
-						if !hasOrigin {
-							out = append(out, m[1]+originAssign)
-						}
-					}
-					continue
+		if m := enabledAssignRegex.FindStringSubmatch(line); m != nil {
+			foundEnabled = true
+			changed = true
+			// Enabling drops the line; disabling rewrites it in place,
+			// keeping the original indentation, and states the origin
+			// right below it when the record carries none yet.
+			if !e.value {
+				out = append(out, m[1]+e.enabledAssign)
+				if !hasOrigin {
+					out = append(out, m[1]+e.originAssign)
 				}
-				if disabledByAssignRegex.MatchString(line) {
-					// The same asymmetry, in its safe direction: enabling DELETES
-					// the origin, disabling leaves it exactly as it stands.
-					//
-					// Restating it as "auto" here would be the writer inventing
-					// the answer the reader is about to trust: a record that
-					// already names who disabled it is stating an intent, and
-					// stamping the automatic origin over it hands the entry back
-					// to the very reconciliation the origin exists to keep it
-					// away from. A record with NO origin is stamped
-					// at the `enabled` line above, which is the only site that
-					// may introduce one.
-					if value {
-						changed = true
-						continue
-					}
-					out = append(out, line)
-					continue
-				}
+			}
+			continue
+		}
+		if disabledByAssignRegex.MatchString(line) {
+			// The same asymmetry, in its safe direction: enabling DELETES
+			// the origin, disabling leaves it exactly as it stands.
+			//
+			// Restating it as "auto" here would be the writer inventing
+			// the answer the reader is about to trust: a record that
+			// already names who disabled it is stating an intent, and
+			// stamping the automatic origin over it hands the entry back
+			// to the very reconciliation the origin exists to keep it
+			// away from. A record with NO origin is stamped
+			// at the `enabled` line above, which is the only site that
+			// may introduce one.
+			if e.value {
+				changed = true
+				continue
 			}
 			out = append(out, line)
+			continue
 		}
-		if !foundEnabled && insertIfAbsent {
-			head := []string{enabledAssign}
-			if !hasOrigin {
-				head = append(head, originAssign)
-			}
-			out = append(append(make([]string, 0, len(body)+len(head)), head...), out...)
-			changed = true
+		out = append(out, line)
+	}
+	if !foundEnabled && e.insertIfAbsent {
+		head := []string{e.enabledAssign}
+		if !hasOrigin {
+			head = append(head, e.originAssign)
 		}
-		return out, changed
-	})
+		out = append(append(make([]string, 0, len(body)+len(head)), head...), out...)
+		changed = true
+	}
+	return out, changed
+}
+
+// bodyHasOrigin reports whether a section body carries a `disabled_by`
+// assignment outside its comments doc string.
+func bodyHasOrigin(body []string, inComments []bool) bool {
+	for j, line := range body {
+		if !inComments[j] && disabledByAssignRegex.MatchString(line) {
+			return true
+		}
+	}
+	return false
 }
 
 // SetPackageVersions writes `version = "<v>"` for each key in pins, editing the
@@ -1017,67 +1041,83 @@ func SetPackageVersions(overlayPath string, pins map[string]string) error {
 	return editPackagesConfigSections(overlayPath, targets, func(name string, body []string, inComments []bool) ([]string, bool) {
 		assign := fmt.Sprintf("version = %q", pins[name])
 
-		// An existing assignment is rewritten in place, keeping its indentation;
-		// nothing else moves. Only a rewrite that actually alters the text marks
-		// the batch as changed, so re-pinning the already-pinned value stays a
-		// full no-op (no write, same mtime).
-		found := false
-		changed := false
-		out := make([]string, len(body))
-		copy(out, body)
-		for j, line := range body {
-			if inComments[j] {
-				continue
-			}
-			if m := versionAssignRegex.FindStringSubmatch(line); m != nil {
-				found = true
-				if newLine := m[1] + assign; newLine != line {
-					out[j] = newLine
-					changed = true
-				}
-			}
-		}
-		if found {
+		if out, found, changed := rewriteVersionAssign(body, inComments, assign); found {
 			return out, changed
 		}
 
 		// No version key yet: insert before the comments assignment, falling
 		// back to the `# END` marker, then to after the last non-blank line.
-		at := -1
-		for j, line := range body {
-			if inComments[j] {
-				continue
-			}
-			if m := keyAssignRegex.FindStringSubmatch(line); m != nil && m[1] == "comments" {
-				at = j
-				break
-			}
-		}
-		if at < 0 {
-			for j, line := range body {
-				if inComments[j] {
-					continue
-				}
-				if strings.TrimSpace(line) == RecordEndMarker {
-					at = j
-					break
-				}
-			}
-		}
-		if at < 0 {
-			at = 0
-			for j, line := range body {
-				if strings.TrimSpace(line) != "" {
-					at = j + 1
-				}
-			}
-		}
-		out = make([]string, 0, len(body)+1)
+		at := versionInsertionPoint(body, inComments)
+		out := make([]string, 0, len(body)+1)
 		out = append(out, body[:at]...)
 		out = append(out, assign)
 		out = append(out, body[at:]...)
 		return out, true
 	})
+}
+
+// rewriteVersionAssign rewrites every existing `version = ...` assignment of a
+// section body to assign, returning the new body, whether any assignment was
+// found, and whether the text changed.
+//
+// An existing assignment is rewritten in place, keeping its indentation;
+// nothing else moves. Only a rewrite that actually alters the text marks the
+// batch as changed, so re-pinning the already-pinned value stays a full no-op
+// (no write, same mtime).
+func rewriteVersionAssign(body []string, inComments []bool, assign string) (out []string, found, changed bool) {
+	out = make([]string, len(body))
+	copy(out, body)
+	for j, line := range body {
+		if inComments[j] {
+			continue
+		}
+		if m := versionAssignRegex.FindStringSubmatch(line); m != nil {
+			found = true
+			if newLine := m[1] + assign; newLine != line {
+				out[j] = newLine
+				changed = true
+			}
+		}
+	}
+	return out, found, changed
+}
+
+// versionInsertionPoint returns the index at which SetPackageVersions inserts a
+// missing `version` assignment: the comments assignment, else the `# END`
+// marker, else just after the last non-blank line (0 for a blank body).
+func versionInsertionPoint(body []string, inComments []bool) int {
+	at := indexOutsideComments(body, inComments, func(line string) bool {
+		m := keyAssignRegex.FindStringSubmatch(line)
+		return m != nil && m[1] == "comments"
+	})
+	if at < 0 {
+		at = indexOutsideComments(body, inComments, func(line string) bool {
+			return strings.TrimSpace(line) == RecordEndMarker
+		})
+	}
+	if at < 0 {
+		at = 0
+		for j, line := range body {
+			if strings.TrimSpace(line) != "" {
+				at = j + 1
+			}
+		}
+	}
+	return at
+}
+
+// indexOutsideComments returns the index of the first body line outside the
+// comments doc string that satisfies match, or -1 when none does.
+func indexOutsideComments(body []string, inComments []bool, match func(line string) bool) int {
+	for j, line := range body {
+		if inComments[j] {
+			continue
+		}
+		if match(line) {
+			return j
+		}
+	}
+	return -1
 }
 
 // sectionBodyEditor rewrites the body of one target section of packages.toml.
@@ -1215,9 +1255,75 @@ func commentsBodyMask(lines []string) []bool {
 
 // ValidatePackageConfig validates a single package configuration.
 // It checks for required fields and valid parser types.
+//
+// The checks run in a fixed order and the first failure wins; warnings are
+// logged along the way, so a later check's warnings appear only when every
+// earlier check passed.
 func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) error {
 	log = logging.OrDiscard(log)
-	// Check required fields
+	if err := validateRequiredFields(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validatePackageKey(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateParserFields(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateEnumFields(pkg, cfg); err != nil {
+		return err
+	}
+	warnBadTransforms(log, pkg, cfg)
+	if err := validateSuffixAndSeries(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validatePinnedVersion(log, pkg, cfg); err != nil {
+		return err
+	}
+	// track="commit" derives its own _p<date>/_pre<date> suffix from the current
+	// ebuild (see extractSnapshotSuffix), so a declared suffix would either be
+	// ignored or stack into a nonsense PV. Fail rather than pick one silently.
+	if cfg.Suffix != "" && cfg.Track == "commit" {
+		return fmt.Errorf("package %s: suffix cannot be combined with track=\"commit\" (the snapshot suffix comes from the current ebuild)", pkg)
+	}
+	warnScriptIgnoredFields(log, pkg, cfg)
+	if err := validateTrackFields(log, pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateBaseFrom(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateAuxPattern(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateRequires(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateAuxURL(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateMirrors(pkg, cfg); err != nil {
+		return err
+	}
+	if err := validateFallback(pkg, cfg); err != nil {
+		return err
+	}
+
+	// The [meta] map is free-form except for the fetch_* namespace, which the
+	// applier reads as a typed sub-schema. Every key inside a map[string]string
+	// is claimed by the map, so the decoder's unknown-key check cannot see into
+	// it — this sub-validator is the only thing standing between a typo there and
+	// an authenticated download that never runs.
+	if err := fetch.ValidateMetaFetch(pkg, cfg.Meta); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// validateRequiredFields checks the fields every entry must carry, and the
+// per-package timeout.
+func validateRequiredFields(pkg string, cfg *PackageConfig) error {
 	if cfg.URL == "" {
 		return fmt.Errorf("package %s: %w", pkg, ErrMissingURL)
 	}
@@ -1231,7 +1337,12 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if cfg.Timeout < 0 {
 		return fmt.Errorf("package %s: timeout must be >= 0 seconds, got %d", pkg, cfg.Timeout)
 	}
+	return nil
+}
 
+// validatePackageKey checks the entry's key and its revision, the two parts
+// of the name the bumped ebuild is written under.
+func validatePackageKey(pkg string, cfg *PackageConfig) error {
 	// The key must be a well-formed atom, optionally slot- and label-suffixed. A
 	// malformed key would otherwise surface much later as a path built from
 	// nonsense — or, for a "../x" key, as a path outside the overlay.
@@ -1249,8 +1360,12 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if cfg.Revision < 0 {
 		return fmt.Errorf("package %s: revision must be >= 0, got %d", pkg, cfg.Revision)
 	}
+	return nil
+}
 
-	// Validate parser type and required fields
+// validateParserFields checks the parser type and the field that parser
+// requires.
+func validateParserFields(pkg string, cfg *PackageConfig) error {
 	switch cfg.Parser {
 	case "json":
 		if cfg.Path == "" {
@@ -1271,7 +1386,12 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	default:
 		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidParserType, cfg.Parser)
 	}
+	return nil
+}
 
+// validateEnumFields checks the closed-vocabulary fields select and type, and
+// the patched declaration.
+func validateEnumFields(pkg string, cfg *PackageConfig) error {
 	// Validate the select field. An unrecognized value is almost certainly a
 	// typo in packages.toml, so fail hard rather than silently fall back.
 	switch cfg.Select {
@@ -1301,10 +1421,14 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if cfg.Patched != "" && strings.TrimSpace(cfg.Patched) == "" {
 		return fmt.Errorf("package %s: %w", pkg, ErrEmptyPatchedReason)
 	}
+	return nil
+}
 
-	// Validate transform rules. A malformed rule (wrong arity or uncompilable
-	// regex) is warned and ignored at apply time (applyTransforms does the same),
-	// so we warn here rather than fail — a bad rule must not block the whole run.
+// warnBadTransforms warns about each malformed transform rule. A malformed
+// rule (wrong arity or uncompilable regex) is warned and ignored at apply time
+// (applyTransforms does the same), so we warn here rather than fail — a bad
+// rule must not block the whole run.
+func warnBadTransforms(log *slog.Logger, pkg string, cfg *PackageConfig) {
 	for i, r := range cfg.Transform {
 		if len(r) != 2 {
 			log.Warn("package transform rule has the wrong number of elements, want 2 ([regex, repl]); it will be ignored", "package", pkg, "rule", i, "elements", len(r))
@@ -1314,7 +1438,11 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 			log.Warn("package transform rule has bad regex; it will be ignored", "package", pkg, "rule", i, "regex", r[0], "err", err)
 		}
 	}
+}
 
+// validateSuffixAndSeries checks the pre-release suffix, its suffix_when
+// condition and the release-line filter.
+func validateSuffixAndSeries(pkg string, cfg *PackageConfig) error {
 	// Validate the pre-release suffix. A typo here would be written straight into
 	// an ebuild filename, so reject anything that is not a Gentoo suffix rather
 	// than emitting a PV no package manager can order.
@@ -1337,42 +1465,47 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 			return fmt.Errorf("package %s: invalid series %q: %w", pkg, cfg.Series, err)
 		}
 	}
+	return nil
+}
 
-	// Validate the pinned version. A pin that is not a well-formed Gentoo
-	// version can never name an ebuild, and one outside the entry's own series
-	// claims an ebuild the entry can never select — both are config mistakes
-	// the sweep would otherwise act on, so fail hard. Checked after the series
-	// compile check above, so newSeriesMatcher below can never hit its
-	// warn-and-pass-everything fallback for a bad regex.
-	if cfg.Version != "" {
-		if !ebuild.IsValidVersion(cfg.Version) {
-			return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidVersion, cfg.Version)
-		}
-		if cfg.Series != "" && !ebuilds.NewSeriesMatcher(log, cfg.Series).Matches(cfg.Version) {
-			return fmt.Errorf("package %s: %w: got %q (series %q)", pkg, ErrVersionOutsideSeries, cfg.Version, cfg.Series)
-		}
+// validatePinnedVersion checks the pinned version. A pin that is not a
+// well-formed Gentoo version can never name an ebuild, and one outside the
+// entry's own series claims an ebuild the entry can never select — both are
+// config mistakes the sweep would otherwise act on, so fail hard. It must run
+// after validateSuffixAndSeries has compiled the series, so newSeriesMatcher
+// below can never hit its warn-and-pass-everything fallback for a bad regex.
+func validatePinnedVersion(log *slog.Logger, pkg string, cfg *PackageConfig) error {
+	if cfg.Version == "" {
+		return nil
 	}
-
-	// track="commit" derives its own _p<date>/_pre<date> suffix from the current
-	// ebuild (see extractSnapshotSuffix), so a declared suffix would either be
-	// ignored or stack into a nonsense PV. Fail rather than pick one silently.
-	if cfg.Suffix != "" && cfg.Track == "commit" {
-		return fmt.Errorf("package %s: suffix cannot be combined with track=\"commit\" (the snapshot suffix comes from the current ebuild)", pkg)
+	if !ebuild.IsValidVersion(cfg.Version) {
+		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidVersion, cfg.Version)
 	}
-
-	// transform/select do not apply to the script parser: that branch bypasses
-	// fetchAndParse and the JS is responsible for all normalization. Warn so the
-	// config author is not misled into thinking they take effect.
-	if cfg.Parser == "script" {
-		if len(cfg.Transform) > 0 {
-			log.Warn("package transform is ignored for parser=\"script\" (the script must normalize the version itself)", "package", pkg)
-		}
-		if cfg.Select != "" && cfg.Select != "first" {
-			log.Warn("package select is ignored for parser=\"script\" (the script must select the version itself)", "package", pkg, "select", cfg.Select)
-		}
+	if cfg.Series != "" && !ebuilds.NewSeriesMatcher(log, cfg.Series).Matches(cfg.Version) {
+		return fmt.Errorf("package %s: %w: got %q (series %q)", pkg, ErrVersionOutsideSeries, cfg.Version, cfg.Series)
 	}
+	return nil
+}
 
-	// Validate track field and its dependencies.
+// warnScriptIgnoredFields warns when transform or select is set on a script
+// entry. They do not apply to the script parser: that branch bypasses
+// fetchAndParse and the JS is responsible for all normalization. Warn so the
+// config author is not misled into thinking they take effect.
+func warnScriptIgnoredFields(log *slog.Logger, pkg string, cfg *PackageConfig) {
+	if cfg.Parser != "script" {
+		return
+	}
+	if len(cfg.Transform) > 0 {
+		log.Warn("package transform is ignored for parser=\"script\" (the script must normalize the version itself)", "package", pkg)
+	}
+	if cfg.Select != "" && cfg.Select != "first" {
+		log.Warn("package select is ignored for parser=\"script\" (the script must select the version itself)", "package", pkg, "select", cfg.Select)
+	}
+}
+
+// validateTrackFields checks the track field and the commit_* fields that
+// depend on it, warning about those that track!="commit" ignores.
+func validateTrackFields(log *slog.Logger, pkg string, cfg *PackageConfig) error {
 	switch cfg.Track {
 	case "", "commit":
 		// valid
@@ -1408,10 +1541,14 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if cfg.CommitMessagePath != "" && cfg.Track != "commit" {
 		log.Warn("package commit_message_path is set but track!=\"commit\"; it will be ignored", "package", pkg)
 	}
+	return nil
+}
 
-	// Validate the declared base-version source. Every failure here is fatal
-	// rather than a warning: the whole point of the field is to replace a silent
-	// fallback with a stated source, so a half-declared one must not load.
+// validateBaseFrom checks the declared base-version source. Every failure here
+// is fatal rather than a warning: the whole point of the field is to replace a
+// silent fallback with a stated source, so a half-declared one must not load.
+func validateBaseFrom(pkg string, cfg *PackageConfig) error {
+	var err error
 	switch cfg.BaseFrom {
 	case "":
 		// Not declared — legacy behaviour. base_url/base_pattern would be dead
@@ -1420,78 +1557,109 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 			return fmt.Errorf("package %s: base_url/base_pattern require base_from", pkg)
 		}
 	case "file":
-		if cfg.Track != "commit" {
-			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
-		}
-		if cfg.BaseURL == "" || cfg.BasePattern == "" {
-			return fmt.Errorf("package %s: base_from=\"file\" requires base_url and base_pattern", pkg)
-		}
-		re, err := regexp.Compile(cfg.BasePattern)
-		if err != nil {
-			return fmt.Errorf("package %s: invalid base_pattern %q: %w", pkg, cfg.BasePattern, err)
-		}
-		// One capture group exactly. Zero means the pattern can never yield a
-		// version; more than one is almost always an unescaped group in a regex
-		// whose author expected the first one to win.
-		if n := re.NumSubexp(); n != 1 {
-			return fmt.Errorf("package %s: base_pattern %q must have exactly one capture group, got %d",
-				pkg, cfg.BasePattern, n)
-		}
+		err = validateBaseFromFile(pkg, cfg)
 	case "tag":
-		if cfg.Track != "commit" {
-			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
-		}
-		if cfg.BaseURL == "" || cfg.BaseTagPattern == "" {
-			return fmt.Errorf("package %s: base_from=\"tag\" requires base_url and base_tag_pattern", pkg)
-		}
-		re, err := regexp.Compile(cfg.BaseTagPattern)
-		if err != nil {
-			return fmt.Errorf("package %s: invalid base_tag_pattern %q: %w", pkg, cfg.BaseTagPattern, err)
-		}
-		if n := re.NumSubexp(); n != 1 {
-			return fmt.Errorf("package %s: base_tag_pattern %q must have exactly one capture group, got %d",
-				pkg, cfg.BaseTagPattern, n)
-		}
+		err = validateBaseFromTag(pkg, cfg)
 	case "commit_message":
-		if cfg.Track != "commit" {
-			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
-		}
-		if cfg.CommitVersionPattern == "" || cfg.CommitMessagePath == "" {
-			return fmt.Errorf("package %s: base_from=\"commit_message\" requires commit_version_pattern and commit_message_path", pkg)
-		}
+		err = validateBaseFromCommitMessage(pkg, cfg)
 	case "none":
-		// The upstream does not version itself at all: no usable tag, no version
-		// in-tree, nothing in the commit titles. The PV base is a constant the
-		// maintainer chose (conventionally "0") and only the snapshot suffix
-		// moves.
-		//
-		// This is a DECLARATION, not the absence of one, and that distinction is
-		// the whole point. An absent base_from is ambiguous — it reads equally as
-		// "nobody got round to declaring the source" and as "there is no source
-		// to declare" — so the lint rule that reports the first cannot help
-		// firing on the second. Saying "none" out loud separates them: the rule
-		// goes quiet here and stays useful everywhere else.
-		//
-		// Unlike the other three it resolves nothing at check time, so declaring
-		// a source alongside it is a contradiction rather than dead weight.
-		if cfg.Track != "commit" {
-			return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
-		}
-		if cfg.BaseURL != "" || cfg.BasePattern != "" || cfg.BaseTagPattern != "" || cfg.CommitVersionPattern != "" {
-			return fmt.Errorf("package %s: base_from=\"none\" declares there is no base source, "+
-				"so base_url, base_pattern, base_tag_pattern and commit_version_pattern must all be absent", pkg)
-		}
+		err = validateBaseFromNone(pkg, cfg)
 	default:
 		return fmt.Errorf("package %s: invalid base_from %q: must be \"file\", \"tag\", \"commit_message\" or \"none\"", pkg, cfg.BaseFrom)
+	}
+	if err != nil {
+		return err
 	}
 	if cfg.BaseTagPattern != "" && cfg.BaseFrom != "tag" {
 		return fmt.Errorf("package %s: base_tag_pattern requires base_from=\"tag\"", pkg)
 	}
+	return nil
+}
 
-	// Validate the auxiliary free-text variable substitution. Both fields are
-	// mutually required, and aux_pattern must compile. Deliberately parser-
-	// agnostic: this is the whole point of the feature (regex/html sources whose
-	// auxiliary value is not a SHA, e.g. betterbird's MY_BUILD / nomachine's MY_P).
+// validateBaseFromFile checks base_from="file".
+func validateBaseFromFile(pkg string, cfg *PackageConfig) error {
+	if cfg.Track != "commit" {
+		return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+	}
+	if cfg.BaseURL == "" || cfg.BasePattern == "" {
+		return fmt.Errorf("package %s: base_from=\"file\" requires base_url and base_pattern", pkg)
+	}
+	re, err := regexp.Compile(cfg.BasePattern)
+	if err != nil {
+		return fmt.Errorf("package %s: invalid base_pattern %q: %w", pkg, cfg.BasePattern, err)
+	}
+	// One capture group exactly. Zero means the pattern can never yield a
+	// version; more than one is almost always an unescaped group in a regex
+	// whose author expected the first one to win.
+	if n := re.NumSubexp(); n != 1 {
+		return fmt.Errorf("package %s: base_pattern %q must have exactly one capture group, got %d",
+			pkg, cfg.BasePattern, n)
+	}
+	return nil
+}
+
+// validateBaseFromTag checks base_from="tag".
+func validateBaseFromTag(pkg string, cfg *PackageConfig) error {
+	if cfg.Track != "commit" {
+		return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+	}
+	if cfg.BaseURL == "" || cfg.BaseTagPattern == "" {
+		return fmt.Errorf("package %s: base_from=\"tag\" requires base_url and base_tag_pattern", pkg)
+	}
+	re, err := regexp.Compile(cfg.BaseTagPattern)
+	if err != nil {
+		return fmt.Errorf("package %s: invalid base_tag_pattern %q: %w", pkg, cfg.BaseTagPattern, err)
+	}
+	if n := re.NumSubexp(); n != 1 {
+		return fmt.Errorf("package %s: base_tag_pattern %q must have exactly one capture group, got %d",
+			pkg, cfg.BaseTagPattern, n)
+	}
+	return nil
+}
+
+// validateBaseFromCommitMessage checks base_from="commit_message".
+func validateBaseFromCommitMessage(pkg string, cfg *PackageConfig) error {
+	if cfg.Track != "commit" {
+		return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+	}
+	if cfg.CommitVersionPattern == "" || cfg.CommitMessagePath == "" {
+		return fmt.Errorf("package %s: base_from=\"commit_message\" requires commit_version_pattern and commit_message_path", pkg)
+	}
+	return nil
+}
+
+// validateBaseFromNone checks base_from="none".
+//
+// The upstream does not version itself at all: no usable tag, no version
+// in-tree, nothing in the commit titles. The PV base is a constant the
+// maintainer chose (conventionally "0") and only the snapshot suffix moves.
+//
+// This is a DECLARATION, not the absence of one, and that distinction is the
+// whole point. An absent base_from is ambiguous — it reads equally as "nobody
+// got round to declaring the source" and as "there is no source to declare" —
+// so the lint rule that reports the first cannot help firing on the second.
+// Saying "none" out loud separates them: the rule goes quiet here and stays
+// useful everywhere else.
+//
+// Unlike the other three it resolves nothing at check time, so declaring a
+// source alongside it is a contradiction rather than dead weight.
+func validateBaseFromNone(pkg string, cfg *PackageConfig) error {
+	if cfg.Track != "commit" {
+		return fmt.Errorf("package %s: base_from requires track=\"commit\"", pkg)
+	}
+	if cfg.BaseURL != "" || cfg.BasePattern != "" || cfg.BaseTagPattern != "" || cfg.CommitVersionPattern != "" {
+		return fmt.Errorf("package %s: base_from=\"none\" declares there is no base source, "+
+			"so base_url, base_pattern, base_tag_pattern and commit_version_pattern must all be absent", pkg)
+	}
+	return nil
+}
+
+// validateAuxPattern checks the auxiliary free-text variable substitution.
+// Both fields are mutually required, and aux_pattern must compile.
+// Deliberately parser-agnostic: this is the whole point of the feature
+// (regex/html sources whose auxiliary value is not a SHA, e.g. betterbird's
+// MY_BUILD / nomachine's MY_P).
+func validateAuxPattern(pkg string, cfg *PackageConfig) error {
 	if (cfg.AuxVar != "") != (cfg.AuxPattern != "") {
 		return fmt.Errorf("package %s: aux_var and aux_pattern must be set together", pkg)
 	}
@@ -1500,21 +1668,29 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 			return fmt.Errorf("package %s: invalid aux_pattern %q: %w", pkg, cfg.AuxPattern, err)
 		}
 	}
-	if err := validateRequires(pkg, cfg); err != nil {
-		return err
-	}
-	if cfg.AuxURL != "" {
-		if cfg.AuxPattern == "" {
-			return fmt.Errorf("package %s: aux_url requires aux_var and aux_pattern", pkg)
-		}
-		switch fetch.URLTemplateFault(cfg.AuxURL) {
-		case fetch.TemplateNotHTTP:
-			return fmt.Errorf("package %s: aux_url %q is not an absolute http(s) URL with a host", pkg, cfg.AuxURL)
-		case fetch.TemplatePlaceholderInHost:
-			return fmt.Errorf("package %s: aux_url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, cfg.AuxURL)
-		}
-	}
+	return nil
+}
 
+// validateAuxURL checks the URL the auxiliary value is fetched from.
+func validateAuxURL(pkg string, cfg *PackageConfig) error {
+	if cfg.AuxURL == "" {
+		return nil
+	}
+	if cfg.AuxPattern == "" {
+		return fmt.Errorf("package %s: aux_url requires aux_var and aux_pattern", pkg)
+	}
+	switch fetch.URLTemplateFault(cfg.AuxURL) {
+	case fetch.TemplateNotHTTP:
+		return fmt.Errorf("package %s: aux_url %q is not an absolute http(s) URL with a host", pkg, cfg.AuxURL)
+	case fetch.TemplatePlaceholderInHost:
+		return fmt.Errorf("package %s: aux_url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, cfg.AuxURL)
+	}
+	return nil
+}
+
+// validateMirrors checks that every mirror is an absolute http(s) URL other
+// than the entry's own url.
+func validateMirrors(pkg string, cfg *PackageConfig) error {
 	for _, m := range cfg.Mirrors {
 		u, err := url.Parse(m)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
@@ -1524,32 +1700,26 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 			return fmt.Errorf("package %s: mirror %q repeats url", pkg, m)
 		}
 	}
+	return nil
+}
 
-	// Validate fallback configuration if present
-	if cfg.FallbackURL != "" && cfg.FallbackParser != "" {
-		switch cfg.FallbackParser {
-		case "json":
-			// JSON fallback doesn't require pattern, uses Path from main config or FallbackPattern
-		case "regex":
-			if cfg.FallbackPattern == "" {
-				return fmt.Errorf("package %s: fallback_pattern required for regex fallback parser", pkg)
-			}
-		case "html":
-			// HTML fallback uses Selector or XPath from main config
-		default:
-			return fmt.Errorf("package %s: invalid fallback_parser type: %q", pkg, cfg.FallbackParser)
+// validateFallback checks the fallback configuration if present.
+func validateFallback(pkg string, cfg *PackageConfig) error {
+	if cfg.FallbackURL == "" || cfg.FallbackParser == "" {
+		return nil
+	}
+	switch cfg.FallbackParser {
+	case "json":
+		// JSON fallback doesn't require pattern, uses Path from main config or FallbackPattern
+	case "regex":
+		if cfg.FallbackPattern == "" {
+			return fmt.Errorf("package %s: fallback_pattern required for regex fallback parser", pkg)
 		}
+	case "html":
+		// HTML fallback uses Selector or XPath from main config
+	default:
+		return fmt.Errorf("package %s: invalid fallback_parser type: %q", pkg, cfg.FallbackParser)
 	}
-
-	// The [meta] map is free-form except for the fetch_* namespace, which the
-	// applier reads as a typed sub-schema. Every key inside a map[string]string
-	// is claimed by the map, so the decoder's unknown-key check cannot see into
-	// it — this sub-validator is the only thing standing between a typo there and
-	// an authenticated download that never runs.
-	if err := fetch.ValidateMetaFetch(pkg, cfg.Meta); err != nil {
-		return err
-	}
-
 	return nil
 }
 
