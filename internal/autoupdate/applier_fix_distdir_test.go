@@ -60,9 +60,9 @@ func TestStagedManifestForcesOnlyWithASuppliedDistdir(t *testing.T) {
 	t.Run("not supplied", func(t *testing.T) {
 		env := stagedManifestFixture(t, false)
 
-		got, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+		got, err := env.sweeper.runStagedManifestIn(t.Context(), "", env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 		if err != nil {
-			t.Fatalf("runStagedManifest: %v", err)
+			t.Fatalf("runStagedManifestIn: %v", err)
 		}
 		if got == "" {
 			t.Fatal("the ordinary path returned no distdir")
@@ -142,9 +142,9 @@ func TestStagedManifestWithoutASuppliedDistdirIsUnchanged(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 	before := hashDistdirTree(t, env.hostDistdir)
 
-	distdir, err := env.sweeper.runStagedManifest(t.Context(), env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	distdir, err := env.sweeper.runStagedManifestIn(t.Context(), "", env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
 	if err != nil {
-		t.Fatalf("runStagedManifest: %v", err)
+		t.Fatalf("runStagedManifestIn: %v", err)
 	}
 
 	if !filepathHasPrefix(distdir, env.sandboxRoot) {

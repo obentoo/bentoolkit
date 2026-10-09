@@ -42,6 +42,7 @@ func checkFetchURLTemplate(key, template string) error {
 	case TemplatePlaceholderInHost:
 		return fmt.Errorf("%w: %s=%q puts a placeholder in the scheme or host; %s and %s may appear only in the path or query, where an upstream value cannot choose the host",
 			ErrAuthFetchFailed, key, template, idPlaceholder, VersionPlaceholder)
+	case templateOK:
 	}
 	return nil
 }

@@ -246,7 +246,7 @@ func Restore(ctx context.Context, id, target string, opts RestoreOptions) error 
 
 	switch opts.Driver {
 	case "archive":
-		return restoreArchive(ctx, id, target, opts)
+		return restoreArchive(ctx, target, opts)
 	case "restic":
 		return restoreRestic(ctx, id, target, opts)
 	default:
@@ -290,7 +290,7 @@ func validateChain(chain []chainLink) error {
 // object reaches receive as a partial stream, which leaves a partial, writable
 // subvolume at the target, and the retry then fails because it already exists.
 // The price is that a link is held in memory, as it always was here.
-func restoreArchive(ctx context.Context, id, target string, opts RestoreOptions) error {
+func restoreArchive(ctx context.Context, target string, opts RestoreOptions) error {
 	if err := validateChain(opts.Chain); err != nil {
 		return err // refuse BEFORE any btrfs receive
 	}

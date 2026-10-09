@@ -42,6 +42,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   line is gone, and the bash example writes to the per-user
   bash-completion directory instead of `/etc`, which needs root.
 
+### Fixed
+
+- **Refreshing a cloned repository works with git 2.43.** When `git pull
+  --ff-only` fails, the git-clone provider falls back to a fetch and a
+  `git reset --hard` to the fetched branch. That reset was written as
+  `git reset --hard --end-of-options origin/<branch>`, which git 2.43 (the
+  version Ubuntu 24.04 ships) rejects, so on such a system the fallback
+  always failed. It is now `git reset --hard origin/<branch> --`: the ref
+  still cannot be read as an option, since it always begins with `origin/`,
+  and the trailing `--` keeps it from being read as a path.
+
 ## [0.33.3] - 2026-10-08
 
 ### Security
@@ -67,6 +78,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   with an INFO line. The tray's version is 0.1.1.
 
 ## [0.33.2] - 2026-10-08
+
+### Fixed
+
+- **The `claude` LLM provider works again with no `model` set.** Its default
+  was `claude-3-haiku-20240307`, which Anthropic retired on 2026-04-19, so
+  every request that relied on the default has failed since. The default is
+  now `claude-haiku-4-5`. A config that names the retired model must change
+  it the same way.
 
 ### Fixed
 

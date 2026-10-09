@@ -37,7 +37,7 @@ func TestExecRunner_PipeStreamsBoundedMemory(t *testing.T) {
 	runtime.GC()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	_, err := runPipe(t.Context(), execRunner{}, stages)
+	err := runPipe(t.Context(), execRunner{}, stages)
 	runtime.ReadMemStats(&after)
 	if err != nil {
 		t.Fatalf("runPipe: %v", err)
@@ -64,7 +64,7 @@ func TestExecRunner_PipeStageFailureNamesStage(t *testing.T) {
 		{Name: "cat"},
 	}
 	start := time.Now()
-	_, err := runPipe(ctx, execRunner{}, stages)
+	err := runPipe(ctx, execRunner{}, stages)
 	elapsed := time.Since(start)
 	if err == nil {
 		t.Fatalf("runPipe = nil, want the gzip stage's failure")
@@ -90,7 +90,7 @@ func TestExecRunner_PipeCtxCancelKills(t *testing.T) {
 	timer := time.AfterFunc(200*time.Millisecond, cancel)
 	defer timer.Stop()
 	start := time.Now()
-	_, err := runPipe(ctx, execRunner{}, stages)
+	err := runPipe(ctx, execRunner{}, stages)
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("err = %v, want errors.Is(err, context.Canceled)", err)
 	}

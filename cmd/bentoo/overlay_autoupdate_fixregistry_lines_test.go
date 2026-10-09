@@ -308,13 +308,9 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			o := newLinesOverlay(t)
 			fixer, failures, in, newChecker := tc.setup(t, o)
-			var loopErr error
 			out := captureStdout(t, func() {
-				loopErr = promptRegistryFixes(context.Background(), o.dir, fixer, failures, in, newChecker)
+				promptRegistryFixes(context.Background(), o.dir, fixer, failures, in, newChecker)
 			})
-			if loopErr != nil {
-				t.Fatalf("promptRegistryFixes returned %v; a per-package outcome is never fatal", loopErr)
-			}
 			out = strings.ReplaceAll(out, o.dir, "<OVERLAY>")
 			out = linesTempSuffix.ReplaceAllString(out, "bentoo-<PID>-<RAND>")
 			if out != tc.want {

@@ -176,7 +176,7 @@ func readPendingFileForMerge(path string) (pendingFile, error) {
 		return pf, fmt.Errorf("re-reading %s before saving: %w", path, err)
 	}
 	if json.Unmarshal(data, &pf) != nil {
-		return pendingFile{}, nil
+		return pendingFile{}, nil //nolint:nilerr // a corrupted file reads as empty, as documented above: the merge then keeps this process's state
 	}
 	return pf, nil
 }
