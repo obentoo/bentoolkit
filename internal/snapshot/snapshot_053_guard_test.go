@@ -84,7 +84,7 @@ func TestExecRunner_PipeByteIdenticalToSequential(t *testing.T) {
 		}
 	}
 	pipeOut, seqOut := filepath.Join(dir, "pipe.gz"), filepath.Join(dir, "seq.gz")
-	if _, err := runPipe(t.Context(), execRunner{}, stages(pipeOut)); err != nil {
+	if err := runPipe(t.Context(), execRunner{}, stages(pipeOut)); err != nil {
 		t.Fatalf("runPipe: %v", err)
 	}
 	var prev []byte

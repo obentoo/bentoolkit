@@ -354,7 +354,7 @@ func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions)
 			result.SuggestedSchema = cachedSchema
 			result.FromCache = true
 			// Still need to validate the cached schema
-			return a.validateResult(ctx, result, opts)
+			return a.validateResult(ctx, result)
 		}
 	}
 
@@ -412,7 +412,7 @@ func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions)
 		}
 
 		// Validate the schema
-		return a.validateResult(ctx, result, opts)
+		return a.validateResult(ctx, result)
 	}
 
 	// All sources failed
@@ -425,7 +425,7 @@ func (a *Analyzer) Analyze(ctx context.Context, pkg string, opts AnalyzeOptions)
 }
 
 // validateResult validates the suggested schema against the ebuild version.
-func (a *Analyzer) validateResult(ctx context.Context, result *AnalyzeResult, opts AnalyzeOptions) (*AnalyzeResult, error) {
+func (a *Analyzer) validateResult(ctx context.Context, result *AnalyzeResult) (*AnalyzeResult, error) {
 	if result.SuggestedSchema == nil {
 		return result, result.Error
 	}
