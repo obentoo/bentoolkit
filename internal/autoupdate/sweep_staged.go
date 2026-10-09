@@ -50,8 +50,7 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	// path it IS "", byte for byte what they always returned, and on the supplied
 	// path the directory is known before the first check runs, so there is no
 	// return here that could lose it.
-	_, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
-	if !ok {
+	if _, _, ok := ebuilds.SplitPkgAtom(pkg); !ok {
 		return suppliedDistdir, fmt.Errorf("%w: invalid package name format: %s", ErrManifestFailed, pkg)
 	}
 	if stagedPkgDir == "" {
@@ -80,9 +79,9 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	// tarball would fill the scratch filesystem — it just happens in the caller,
 	// after the gates have read.
 
-	// The names this version is expected to need, derived from the STAGED
-	// Manifest and the STAGED directory's ebuilds — the same derivation the apply
-	// path uses, asked of the tree actually being manifested. It is legitimately
+	// The names this version is expected to need, derived from the PUBLISHED
+	// package (see stagedExpectedDistfiles): the staged tree holds the candidate
+	// ebuild alone, so it has nothing to derive from. The list is legitimately
 	// empty (an upstream that renames its archive gives nothing to guess from),
 	// and empty simply means nothing to reuse: pkgdev downloads as it would have.
 	//
@@ -90,8 +89,7 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	// seeding it would plant a symlink beside the bytes — a second claim that
 	// dangles once its cache entry goes — rather than supply an answer.
 	if !supplied {
-		manifestNames := distfiles.ParseManifestDistFilenames(filepath.Join(stagedPkgDir, "Manifest"))
-		expected := s.expectedDistfiles(pkg, stagedPkgDir, pkgName, manifestNames, []string{version})
+		expected := s.stagedExpectedDistfiles(pkg, version)
 		if len(expected) > 0 {
 			for _, src := range s.stagedDistfileSources(ctx, distdir) {
 				s.reportPrepopulated(pkg, src, distfiles.PrepopulateFromCache(distdir, src, expected))
@@ -159,6 +157,27 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 			ErrManifestFailed, pkg, version, stagedPkgDir, runErr, sc.Captured())
 	}
 	return distdir, nil
+}
+
+// stagedExpectedDistfiles names the distfiles a staged candidate of pkg at
+// version is expected to need. It asks expectedDistfiles of the PUBLISHED
+// package directory, never of the staged one: validate.Stage carries the
+// candidate ebuild alone, so the staged tree has no Manifest and no older
+// version to substitute from, and would yield nothing but the authenticated
+// fetch's filename. The published directory is read, never written, and still
+// holds the current version until promotion.
+//
+// An atom that does not split, or a published directory with no Manifest or no
+// ebuild, yields what expectedDistfiles yields for it: at most the
+// authenticated fetch's filename.
+func (s *sweeper) stagedExpectedDistfiles(pkg, version string) []string {
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
+	if !ok {
+		return nil
+	}
+	publishedDir := filepath.Join(s.overlayPath, category, pkgName)
+	manifestNames := distfiles.ParseManifestDistFilenames(filepath.Join(publishedDir, "Manifest"))
+	return s.expectedDistfiles(pkg, publishedDir, pkgName, manifestNames, []string{version})
 }
 
 // stagedDistfileSources lists the directories a staged manifest may READ already

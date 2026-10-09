@@ -227,7 +227,10 @@ func mockPkgdevFetchesInto(archive string) func(ctx context.Context, name string
 		}
 		// `cp` and not a Go copy: the seam hands back an *exec.Cmd, and the point
 		// is that a CHILD PROCESS puts the file there — exactly as pkgdev does.
-		return exec.CommandContext(ctx, "cp", archive, distdir+string(os.PathSeparator))
+		// --remove-destination because the private distdir may already hold a
+		// cache link under this name, seeded before pkgdev runs; a real fetch
+		// replaces it, and a plain cp onto a link to the same file refuses.
+		return exec.CommandContext(ctx, "cp", "--remove-destination", archive, distdir+string(os.PathSeparator))
 	}
 }
 
