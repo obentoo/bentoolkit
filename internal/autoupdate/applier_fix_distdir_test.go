@@ -85,21 +85,16 @@ func TestStagedManifestForcesOnlyWithASuppliedDistdir(t *testing.T) {
 func TestStagedManifestDoesNotSeedASuppliedDistdir(t *testing.T) {
 	env := stagedManifestFixture(t, false)
 
-	// THE FIXTURE HAS TO BE ABLE TO REACH THE ASSERTION, and the shipped one
-	// cannot: expectedDistfiles derives a name only by substituting the version of
-	// ANOTHER ebuild in the staged directory into the Manifest's DIST names, and
-	// stagedManifestFixture puts exactly one ebuild there — the version being
-	// manifested. So `expected` comes back empty, PrepopulateFromCache is never
-	// called on either path, and a guard written without this line PASSES with the
-	// seeding mutated back in. It was written without it, and the mutation proof
-	// is what caught it.
-	//
-	// A second ebuild gives the derivation something to substitute, so `expected`
-	// becomes ["gst-plugins-good-1.29.2.tar.xz"] — a name the fixture's cache
-	// holds, and therefore a seed that would really happen.
-	if err := os.WriteFile(filepath.Join(env.stagedPkg, "gst-plugins-qt6-1.28.6.ebuild"), []byte("EAPI=8\n"), 0o644); err != nil {
-		t.Fatalf("writing the second staged ebuild: %v", err)
-	}
+	// THE FIXTURE HAS TO BE ABLE TO REACH THE ASSERTION. stagedManifestFixture
+	// keeps the staged directory as validate.Stage leaves it — the candidate ebuild
+	// only — and puts the Manifest and gst-plugins-qt6-1.28.6.ebuild in the
+	// PUBLISHED directory, which is where the staged step derives its expected
+	// names from. So `expected` is ["gst-plugins-good-1.29.2.tar.xz"] through the
+	// production path — a name the fixture's cache holds, and therefore a seed
+	// that would really happen. A second ebuild planted in the staged directory
+	// used to stand in for this, and production never has one there.
+	// TestS082StagedTheSuppliedDistdirGuardFixtureExpectsAName fails if this
+	// fixture stops yielding that name.
 
 	// The supplied directory as the fixer would leave it: the bytes it fetched,
 	// and nothing else. Its name is deliberately NOT one of the expected names —
