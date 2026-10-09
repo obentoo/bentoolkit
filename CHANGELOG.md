@@ -9,6 +9,39 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **A `LICENSE` file.** The README has always said MIT, but the repository
+  shipped no license text, so GitHub reported the project as unlicensed and
+  the code was, strictly, all rights reserved. The MIT text is now at the
+  root.
+
+### Changed
+
+- **YAML comes from `go.yaml.in/yaml/v3`, not `gopkg.in/yaml.v3`.** The old
+  module was archived upstream on 2025-04-01 and will receive no further
+  fixes; `go.yaml.in/yaml/v3` is its maintained continuation, with the same
+  API. Output is unchanged: the notices feed's golden files pass untouched. A
+  `depguard` rule keeps the old import from coming back.
+
+### Fixed
+
+- **`config.example.yaml` documents every key, in English.** It was the one
+  Portuguese file in the repository and it never mentioned
+  `autoupdate.distdir`, `autoupdate.distfiles_cache` or any of the
+  `autoupdate.validate` block. All three are now there, commented out with
+  their defaults. A new test fails when the code reads a key the example
+  does not mention, the direction the existing strict-decode test could not
+  see.
+- **`docs/development.md` describes the project as it is.** Its tree listed
+  eight files and a `logger/` package that no longer exist and left out the
+  tray, snapshot, notice and desktop packages. It now maps every package and
+  every `make` check, and it no longer tells you to `go install`
+  govulncheck, which `go.mod` already provides as a tool.
+- **`bentoo completion --help` gives Linux instructions.** The macOS/Homebrew
+  line is gone, and the bash example writes to the per-user
+  bash-completion directory instead of `/etc`, which needs root.
+
 ### Fixed
 
 - **Refreshing a cloned repository works with git 2.43.** When `git pull

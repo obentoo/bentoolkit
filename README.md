@@ -118,4 +118,4 @@ The security audit and the project structure are in
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

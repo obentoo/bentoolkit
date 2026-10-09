@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite the golden files under testdata/")

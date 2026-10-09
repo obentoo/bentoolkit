@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	yaml "go.yaml.in/yaml/v3"
 )
 
 // exampleConfigPath locates config.example.yaml at the repo root relative to this
