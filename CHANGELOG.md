@@ -50,6 +50,52 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   line per job, logs kept. `scripts/ci-vm-create.sh` creates the guest from a
   cloud image without root. See docs/development.md.
 
+## [0.33.3] - 2026-10-08
+
+### Security
+
+- **Built with Go 1.26.9 and `golang.org/x/net` v0.60.0** (GO-2026-6617,
+  CVE-2026-97032: an HTTP/2 server crash from a race in the HPACK encoder of
+  `net/http`). bentoolkit and `bentoo-tray` only act as HTTP clients, so the
+  crash path is a server one, but `govulncheck` reaches the affected
+  `net/http` code from the HTTP client paths and the toolchain in `go.mod`
+  decides what a release links against. Both fixes were taken on the day
+  they were published, ahead of the usual seven-day wait for new
+  dependencies, because they are the Go team's own security releases.
+
+### Fixed
+
+- **`bentoo-tray` stopped while starting exits 0.** A SIGINT, SIGTERM or
+  SIGHUP that reached the tray while it was starting made it log
+  `bentoo-tray could not start` and exit `1` — also at the moment the session
+  bus had already granted it its name but not yet answered, which made the
+  tray's signal test fail intermittently. The name request now runs to its
+  answer (bounded by 2 s), and a stop signal during startup stops the tray
+  cleanly: the state is saved, the name released, and the exit code is `0`
+  with an INFO line. The tray's version is 0.1.1.
+
+## [0.33.2] - 2026-10-08
+
+### Fixed
+
+- **The LLM manifest repair reuses what the first attempt downloaded.** When
+  the manifest step of a staged `overlay autoupdate --apply` failed, the
+  repair started from an empty distdir and the first attempt's downloads were
+  deleted, so every distfile was fetched again: a host that went down in
+  between (download.documentfoundation.org on 2026-10-02) failed the repair
+  too, and a large package paid the download twice. The first attempt's
+  completed files now move into the repair's distdir; partial downloads
+  (`.__download__`) and links into the distfiles cache are left behind.
+
+- **A staged apply reuses distfiles already in the distfiles cache.** The
+  staged tree holds the candidate ebuild alone, so a staged
+  `overlay autoupdate --apply` could not name the distfiles the new version
+  needs and downloaded them again even when the distfiles cache or the host
+  DISTDIR already had them. The names now come from the published package's
+  Manifest and ebuilds: the manifest step links the cached files in, and the
+  LLM manifest repair receives copies of them (copies, never links, since
+  the repair's agent can write to its directory).
+
 ## [0.33.1] - 2026-10-06
 
 ### Changed
@@ -1258,7 +1304,9 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.33.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.33.3...HEAD
+[0.33.3]: https://github.com/obentoo/bentoolkit/compare/v0.33.2...v0.33.3
+[0.33.2]: https://github.com/obentoo/bentoolkit/compare/v0.33.1...v0.33.2
 [0.33.1]: https://github.com/obentoo/bentoolkit/compare/v0.33.0...v0.33.1
 [0.33.0]: https://github.com/obentoo/bentoolkit/compare/v0.32.0...v0.33.0
 [0.32.0]: https://github.com/obentoo/bentoolkit/compare/v0.31.1...v0.32.0
