@@ -24,10 +24,12 @@ dist=${3:-}
 [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die 2 "version $(printf '%q' "$version") is not of the form X.Y.Z"
 [[ -n $dist ]] || die 2 "dist-dir is empty"
 tag="v$version"
-git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null || die 2 "tag $tag does not exist"
-for t in git go tar xz syft cosign sha256sum; do
+tools=(git go tar xz cosign sha256sum)
+[[ $mode == generate ]] && tools+=(syft)
+for t in "${tools[@]}"; do
 	command -v "$t" >/dev/null 2>&1 || die 2 "required tool $t is not on PATH"
 done
+git rev-parse -q --verify "refs/tags/$tag^{commit}" >/dev/null || die 2 "tag $tag does not exist"
 tar --sort=name -cf /dev/null --files-from /dev/null 2>/dev/null || die 2 "tar does not support --sort=name (GNU tar >= 1.28 needed)"
 
 top=$(git rev-parse --show-toplevel)
@@ -39,13 +41,13 @@ outputs=("$tarball" "$sbom" "$sums" "$tarball.sigstore.json" "$sbom.sigstore.jso
 
 if [[ $mode == generate ]]; then
 	key=${COSIGN_KEY:-$HOME/.config/bentoolkit-release/cosign.key}
-	[[ -f $key ]] || die 2 "key $key does not exist; create it with: cosign generate-key-pair --output-key-prefix ${key%.key}"
+	[[ -f $key ]] || die 2 "key $(printf '%q' "$key") does not exist; create it with: cosign generate-key-pair --output-key-prefix $(printf '%q' "${key%.key}")"
 	rkey=$(realpath -e -- "$key")
 	rtop=$(realpath -e -- "$top")
-	[[ $rkey != "$rtop"/* ]] || die 2 "key $key is inside the repository; keep it outside"
+	[[ $rkey != "$rtop"/* ]] || die 2 "key $(printf '%q' "$key") is inside the repository; keep it outside"
 	if [[ ${FORCE:-} != 1 ]]; then
 		for o in "${outputs[@]}"; do
-			[[ ! -e $dist/$o ]] || die 2 "$dist/$o already exists; set FORCE=1 to overwrite"
+			[[ ! -e $dist/$o ]] || die 2 "$(printf '%q' "$dist/$o") already exists; set FORCE=1 to overwrite"
 		done
 	fi
 else
@@ -61,7 +63,7 @@ trap cleanup EXIT
 
 build_tarball() { # $1 = output path
 	mkdir -p "$tmp/src"
-	git archive --prefix="$name/" "$tag" | tar -x -C "$tmp/src"
+	git archive --prefix="$name/" "$tag" | tar -x -C "$tmp/src" || die 1 "git archive of $tag failed"
 	local gomod="$tmp/src/$name/go.mod" tc
 	tc=$(sed -n 's/^toolchain[[:space:]]\{1,\}\(go[^[:space:]]*\).*/\1/p' "$gomod" | head -n1)
 	if [[ -z $tc ]]; then
@@ -74,7 +76,7 @@ build_tarball() { # $1 = output path
 	local epoch
 	epoch=$(git log -1 --format=%ct "$tag^{commit}")
 	LC_ALL=C tar -C "$tmp/src" --sort=name --mtime="@$epoch" --owner=0 --group=0 --numeric-owner \
-		--mode=u=rwX,go=rX --format=gnu -cf - "$name/vendor" | xz -9 -T1 >"$1"
+		--mode=u=rwX,go=rX --format=gnu -cf - "$name/vendor" | xz -9 -T1 >"$1" || die 1 "tar or xz failed building $tarball"
 	log "step=tar sha256=$(sha256sum <"$1" | cut -d' ' -f1) bytes=$(stat -c %s "$1")"
 }
 
@@ -82,7 +84,7 @@ if [[ $mode == generate ]]; then
 	mkdir -p -- "$dist"
 	build_tarball "$dist/.release-deps.tar"
 	SYFT_CHECK_FOR_APP_UPDATE=false syft scan "dir:$tmp/src/$name" --source-name bentoolkit \
-		--source-version "$version" -q -o "spdx-json=$dist/.release-deps.spdx"
+		--source-version "$version" -q -o "spdx-json=$dist/.release-deps.spdx" || die 1 "syft failed writing $sbom"
 	log "step=sbom file=$sbom"
 	# cosign 3 uploads to the public Rekor log by default, even with --key; a
 	# signing config that lists no log is the supported way to keep it local.
@@ -97,11 +99,13 @@ if [[ $mode == generate ]]; then
 			|| die 1 "cosign sign-blob failed for ${pair#*:}"
 		log "step=sign file=${pair#*:}"
 	done
-	mv -f -- "$dist/.release-deps.tar" "$dist/$tarball"
-	mv -f -- "$dist/.release-deps.spdx" "$dist/$sbom"
-	mv -f -- "$dist/.release-deps.tar.bundle" "$dist/$tarball.sigstore.json"
-	mv -f -- "$dist/.release-deps.spdx.bundle" "$dist/$sbom.sigstore.json"
-	mv -f -- "$dist/.release-deps.sums" "$dist/$sums"
+	if ! { mv -f -- "$dist/.release-deps.tar" "$dist/$tarball" &&
+		mv -f -- "$dist/.release-deps.spdx" "$dist/$sbom" &&
+		mv -f -- "$dist/.release-deps.tar.bundle" "$dist/$tarball.sigstore.json" &&
+		mv -f -- "$dist/.release-deps.spdx.bundle" "$dist/$sbom.sigstore.json" &&
+		mv -f -- "$dist/.release-deps.sums" "$dist/$sums"; }; then
+		die 1 "moving the outputs into $(printf '%q' "$dist") failed"
+	fi
 	exit 0
 fi
 
