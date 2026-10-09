@@ -198,8 +198,8 @@ func TestNewLLMClientDefaultModel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if client.GetModel() != "claude-3-haiku-20240307" {
-		t.Errorf("Expected default model 'claude-3-haiku-20240307', got %q", client.GetModel())
+	if client.GetModel() != "claude-haiku-4-5" {
+		t.Errorf("Expected default model 'claude-haiku-4-5', got %q", client.GetModel())
 	}
 }
 
@@ -1077,8 +1077,8 @@ func TestModelConfiguration(t *testing.T) {
 				return false
 			}
 
-			// Default model should be claude-3-haiku-20240307
-			return client.GetModel() == "claude-3-haiku-20240307"
+			// Default model should be claude-haiku-4-5
+			return client.GetModel() == "claude-haiku-4-5"
 		},
 		gen.OneConstOf(
 			"test-key-1",

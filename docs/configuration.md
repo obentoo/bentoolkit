@@ -32,7 +32,7 @@ autoupdate:
   llm:
     provider: claude        # claude, claude-code, openai, or ollama
     api_key_env: ANTHROPIC_API_KEY
-    model: claude-3-haiku-20240307
+    model: claude-haiku-4-5
     # claude-code only (drives the local `claude` CLI):
     bare: auto              # auto (default) | true | false
     max_budget_usd: 0.50    # optional per-call spend cap
@@ -48,7 +48,7 @@ autoupdate:
 | `repositories.<name>` | Custom repository definitions for the compare command | No |
 | `llm.provider` | LLM provider for autoupdate: `claude`, `claude-code`, `openai`, or `ollama` | No |
 | `llm.api_key_env` | Name of the variable holding the LLM API key, resolved via env or the secrets file | No |
-| `llm.model` | Model name (e.g. `claude-3-haiku-20240307`, `gpt-4o-mini`; `claude-code` defaults to the `sonnet` alias) | No |
+| `llm.model` | Model name (e.g. `claude-haiku-4-5`, `gpt-4o-mini`; `claude-code` defaults to the `sonnet` alias) | No |
 | `llm.bare` | `claude-code` only: `auto` (default — `--bare`+API key when `api_key_env` resolves to a non-empty key via env or the secrets file, else the CLI login), `true` (force `--bare`+key), or `false` (force login/subscription) | No |
 | `llm.max_budget_usd` | `claude-code` only: optional per-call spend cap passed to `claude --max-budget-usd` (unset = no cap) | No |
 | `notice.site_path` | Root of the site repository `bentoo notice` writes `src/content/notices/<id>.yaml` into. A leading `~/` is expanded. Unset: only the news item is written and the site YAML is printed | No |

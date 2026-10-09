@@ -56,14 +56,10 @@ func runRegistryFixLoop(t *testing.T, envelope string) string {
 	}
 
 	h := newRegfixHarness(t)
-	var loopErr error
 	out := captureStdout(t, func() {
-		loopErr = promptRegistryFixes(context.Background(), h.overlayDir, fixer,
+		promptRegistryFixes(context.Background(), h.overlayDir, fixer,
 			h.failuresForFetchError(), strings.NewReader("y\nN\n"), h.newChecker)
 	})
-	if loopErr != nil {
-		t.Fatalf("promptRegistryFixes: %v", loopErr)
-	}
 	if spawns != 1 {
 		t.Fatalf("the registry fixer spawned %d agents, want 1", spawns)
 	}

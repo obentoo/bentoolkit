@@ -32,7 +32,7 @@ func TestExecRunner_PipeCapsStderr(t *testing.T) {
 		{Name: "sh", Args: []string{"-c", `head -c 300000 /dev/zero | tr '\0' a >&2; printf END-OF-STDERR >&2; exit 1`}},
 		{Name: "cat"},
 	}
-	_, err := runPipe(t.Context(), execRunner{}, stages)
+	err := runPipe(t.Context(), execRunner{}, stages)
 	if err == nil {
 		t.Fatal("runPipe = nil, want the failing stage's error")
 	}

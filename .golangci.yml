@@ -10,11 +10,16 @@ linters:
     - gosec
     - gocritic
     - ineffassign
+    - gocognit
+    - unparam
     - misspell
     - bodyclose
+    - exhaustive
     - contextcheck
     - containedctx
+    - noctx
     - errorlint
+    - nilerr
     - usetesting
     - tparallel
     - forbidigo
@@ -62,6 +67,15 @@ linters:
       # Resolve the package behind an identifier, so a renamed import of os
       # (`import osx "os"`) cannot hide an os.Exit from the rule above.
       analyze-types: true
+    gocognit:
+      # The linter's own default. A function above it is hard to follow and to
+      # change safely; split it instead of raising this number.
+      min-complexity: 30
+    exhaustive:
+      # A default clause counts as handling the rest; a switch without one must
+      # name every value, so a value added later fails the lint where it is
+      # not handled instead of falling through in silence.
+      default-signifies-exhaustive: true
     sloglint:
       # Story 062 (R5.4, R5.5): no package-level slog logger, constant
       # messages, key-value pairs only, snake_case keys.
@@ -120,15 +134,41 @@ linters:
         linters:
           - gochecknoglobals
         text: '^(addCmd|analyzeAll|analyzeCmd|analyzeDryRun|analyzeForce|analyzeHint|analyzeNoCache|analyzeURL|autoupdateAll|autoupdateExport|autoupdateUI|commitCmd|commitDryRun|commitMessage|commitYes|compareCacheDir|compareCauseOrder|compareClone|compareCmd|compareConcurrency|compareDepth|compareNoCache|compareNoReview|compareOnlyOutdated|compareOnlyPatched|compareOnlyRedundant|compareRealign|compareSync|compareTimeout|compareToken|compareYes|completionCmd|diffCmd|diffStaged|distfileCmd|distfileFetchCmd|distfileFetchDistdir|distfileFetchVersion|exitCleanupNext|exitCleanups|exitCleanupsMu|initCmd|logCmd|logCount|logOneline|manifestCmd|manifestFlags|noColor|overlayCmd|processSignals|pruneApply|pruneIncludePatched|pruneKeepRegistry|pruneYes|pullCmd|pullDryRun|pullMerge|pullRebase|pushCmd|pushDryRun|quiet|renameCmd|renameFlags|rootCmd|snapshotApplyCmd|snapshotApplyDryRun|snapshotCmd|snapshotConfigPath|snapshotHookCmd|snapshotHookInstall|snapshotHookUninstall|snapshotListCmd|snapshotListRemote|snapshotPruneCmd|snapshotPruneDryRun|snapshotPruneShip|snapshotRestoreCmd|snapshotRestoreDryRun|snapshotRestoreShip|snapshotRestoreSubvolume|snapshotRestoreTarget|snapshotRestoreYes|snapshotRollbackCmd|snapshotRollbackDryRun|snapshotRollbackYes|snapshotRunCmd|snapshotRunDryRun|snapshotStatusCmd|stagedCleanYes|statusCmd|uiDowngradeReported|verbose|versionCmd) is a global variable$'
+      # The baseline: the production functions already above 30 when gocognit
+      # was enabled, each pinned to its score then. A function that grows, or
+      # a new one above 30, fails the lint. One that shrinks fails too, until
+      # its entry is lowered here, or removed once it is at or below 30: the
+      # list ONLY SHRINKS, and the progress is recorded in review. Re-derive
+      # it with
+      #   golangci-lint run --enable-only gocognit ./...
+      # after deleting this rule.
+      - linters:
+          - gocognit
+        text: '^cognitive complexity (35 of func `\(\*App\)\.loop`|61 of func `\(\*Applier\)\.Apply`|41 of func `\(\*Checker\)\.CheckAll`|56 of func `\(\*Checker\)\.CheckPackage`|36 of func `\(\*JSONVersionHistoryExtractor\)\.extractVersionsFromPath`|37 of func `\(\*RetryableHTTPClient\)\.DoWithContext`|32 of func `AnnotateRealignVerdicts`|38 of func `FormatRenameResult`|38 of func `LintRecordModel`|35 of func `NewChecker`|47 of func `SetPackageVersions`|126 of func `ValidatePackageConfig`|35 of func `applyWaves`|37 of func `detectVersionBumps`|32 of func `displaySweepPlan`|36 of func `lintRecordFields`|32 of func `lintUntrackedReleaseLines`|43 of func `parseJSONPath`|40 of func `planSweep`|35 of func `renderValidateText`|57 of func `runCompare`|35 of func `sendMailBounded`|43 of func `setPackagesEnabled`) is high'
+      - path: _test\.go
+        linters:
+          - gocognit
       - path: _test\.go
         linters:
           - errcheck
           - gosec
+          # A test helper often takes a parameter its current callers all pass
+          # the same way; that is the test's choice, not dead code.
+          - unparam
+          # httptest servers, fake commands and listeners live and die with
+          # the test; a context on each adds nothing the test does not bound.
+          - noctx
+          # A test switches over the cases it builds, not over every value.
+          - exhaustive
           # R5.5 binds production diagnostics; a test logs hostile, built
           # messages and attributes on purpose (the redaction tests).
           - sloglint
           # A test table carrying a context per case is idiomatic.
           - containedctx
+          # A test's filepath.Walk callback skips an unreadable entry, and a
+          # seam that has already called t.Error returns nil to let the run
+          # finish; both are deliberate in every test that does it.
+          - nilerr
 
 formatters:
   enable:

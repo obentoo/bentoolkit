@@ -89,7 +89,10 @@ func start(t testing.TB) (string, *exec.Cmd) {
 		t.Fatalf("dbustest: writing %s: %v", confPath, err)
 	}
 
-	//nolint:gosec // G204: path comes from exec.LookPath and confPath is a file this function wrote; no test input reaches the command line.
+	// No t.Context(): it is cancelled BEFORE the t.Cleanup functions run, so
+	// the daemon would die while a client's cleanup still talks to it. The
+	// cleanup below kills it last instead.
+	//nolint:gosec,noctx // G204: path comes from exec.LookPath and confPath is a file this function wrote; noctx: see above.
 	cmd := exec.Command(path, "--config-file="+confPath, "--nofork", "--print-address=1")
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr

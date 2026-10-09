@@ -39,7 +39,7 @@ func (h *hostSlots) acquire(ctx context.Context, rawURL string) (func(), error) 
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil || u.Host == "" {
-		return func() {}, nil
+		return func() {}, nil //nolint:nilerr // an unparseable URL is not limited: the request fails on its own and says why
 	}
 	h.mu.Lock()
 	slot, ok := h.slots[u.Host]

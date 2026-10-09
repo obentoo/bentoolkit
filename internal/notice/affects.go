@@ -30,7 +30,7 @@ var (
 // operator from <, <=, =, >=, > immediately followed by a Gentoo version.
 // A rejection quotes the value and the part that failed.
 func ParseAffects(s string) (Affects, error) {
-	fail := func(part, why string) (Affects, error) {
+	fail := func(part, why string) (Affects, error) { //nolint:unparam // shaped like ParseAffects so each rejection is one `return fail(...)`
 		return Affects{}, fmt.Errorf("--affects %q: %q %s: %w", s, part, why, ErrAffects)
 	}
 

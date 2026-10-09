@@ -176,7 +176,7 @@ func (m *EbuildMatcher) matchPackageEbuilds(pkgPath, category, pkgName string, s
 		}
 
 		// Build the rename match
-		match := m.buildRenameMatch(category, pkgName, filename, spec.OldVersion, spec.NewVersion, hasRevision)
+		match := m.buildRenameMatch(category, pkgName, filename, spec.NewVersion, hasRevision)
 		match.OldPath = filepath.Join(pkgPath, filename)
 		match.NewPath = filepath.Join(pkgPath, match.NewFilename)
 		matches = append(matches, match)
@@ -218,7 +218,7 @@ func (m *EbuildMatcher) matchEbuild(filename, pkgName, oldVersion string) (bool,
 
 // buildRenameMatch creates a RenameMatch from matched ebuild information.
 // The new filename will NOT contain any revision suffix.
-func (m *EbuildMatcher) buildRenameMatch(category, pkgName, oldFilename, oldVersion, newVersion string, hasRevision bool) RenameMatch {
+func (m *EbuildMatcher) buildRenameMatch(category, pkgName, oldFilename, newVersion string, hasRevision bool) RenameMatch {
 	// Build new filename: pkgName-newVersion.ebuild (no revision)
 	newFilename := pkgName + "-" + newVersion + ".ebuild"
 

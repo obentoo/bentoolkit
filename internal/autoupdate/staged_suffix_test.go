@@ -87,7 +87,7 @@ func startFailure(t *testing.T) error {
 	return err
 }
 
-// stagedManifestFailure wraps err exactly as runStagedManifest builds its error
+// stagedManifestFailure wraps err exactly as runStagedManifestIn builds its error
 // (sweep_staged.go): ErrManifestFailed first, the run error chained with %w, the
 // captured output appended. The classifier is handed THIS shape in production.
 func stagedManifestFailure(err error) error {
