@@ -171,6 +171,10 @@ func renderTOMLValue(v reflect.Value) (string, bool) {
 			parts = append(parts, elem)
 		}
 		return "[" + strings.Join(parts, ", ") + "]", true
+
+	default:
+		// A kind PackageConfig does not use is not rendered; the test named
+		// above fails when a field of such a kind is added.
 	}
 
 	return "", false

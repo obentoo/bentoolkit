@@ -12,6 +12,7 @@ linters:
     - ineffassign
     - misspell
     - bodyclose
+    - exhaustive
     - contextcheck
     - containedctx
     - errorlint
@@ -53,6 +54,11 @@ linters:
       # Resolve the package behind an identifier, so a renamed import of os
       # (`import osx "os"`) cannot hide an os.Exit from the rule above.
       analyze-types: true
+    exhaustive:
+      # A default clause counts as handling the rest; a switch without one must
+      # name every value, so a value added later fails the lint where it is
+      # not handled instead of falling through in silence.
+      default-signifies-exhaustive: true
     sloglint:
       # Story 062 (R5.4, R5.5): no package-level slog logger, constant
       # messages, key-value pairs only, snake_case keys.
@@ -115,6 +121,8 @@ linters:
         linters:
           - errcheck
           - gosec
+          # A test switches over the cases it builds, not over every value.
+          - exhaustive
           # R5.5 binds production diagnostics; a test logs hostile, built
           # messages and attributes on purpose (the redaction tests).
           - sloglint
