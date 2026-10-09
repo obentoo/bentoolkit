@@ -1,14 +1,14 @@
 module github.com/obentoo/bentoolkit
 
-go 1.26.0
+go 1.27.0
 
-// Pinned so the CI runner does not land on the unpatched 1.26.0. Every
+// Pinned so the CI runner does not land on an unpatched release. Every
 // golang.org/x release from late August 2026 on declares `go 1.26.0`, which
 // forced the directive above from `go 1.26` to `go 1.26.0` -- and setup-go
 // reads a patch-qualified `go` directive as an exact version, which would have
 // frozen CI eight patch releases behind. It prefers `toolchain` when present,
 // so this line is what the runner installs. Bump it on each Go patch release.
-toolchain go1.26.9
+toolchain go1.27.2
 
 require (
 	github.com/BurntSushi/toml v1.6.0
