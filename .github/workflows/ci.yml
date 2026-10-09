@@ -2,9 +2,9 @@ name: CI
 
 # Manual only. Every job below runs locally before a push, through
 # scripts/ci-vm-gate.sh (a KVM guest plus the host), and that run is the
-# evidence a change is ready; see docs/development.md. GitHub runs only what
-# has no local substitute: CodeQL, through the repository's default setup, not
-# this file.
+# evidence a change is ready; see docs/development.md. The gate runs CodeQL
+# too, so GitHub keeps only its services (Dependabot, secret scanning) and runs
+# no checks of its own.
 #
 # This file stays as the definition the gate mirrors and as a kill switch:
 # start it from the Actions tab, or restore the push/pull_request triggers to
