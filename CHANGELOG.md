@@ -42,6 +42,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   line is gone, and the bash example writes to the per-user
   bash-completion directory instead of `/etc`, which needs root.
 
+### Added
+
+- **A local CI gate, `scripts/ci-vm-gate.sh`.** It reproduces every CI job
+  on a clean checkout of a commit: the Go jobs in a KVM guest (Ubuntu 24.04,
+  as the hosted runner, non-root) and the scanners on the host. One PASS/FAIL
+  line per job, logs kept. `scripts/ci-vm-create.sh` creates the guest from a
+  cloud image without root. See docs/development.md.
+
 ### Fixed
 
 - **Refreshing a cloned repository works with git 2.43.** When `git pull
