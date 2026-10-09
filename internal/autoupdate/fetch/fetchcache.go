@@ -227,6 +227,8 @@ func (c *BodyCache) Do(ctx context.Context, key string, fetch func() ([]byte, er
 		// rather than rejoining: N callers of a permanently failing identity
 		// then produce exactly N fetches instead of a number that depends on
 		// which goroutine happened to arrive when.
+
+	case arriveAlone:
 	}
 
 	// arriveAlone, and a waiter released by a failed leader.

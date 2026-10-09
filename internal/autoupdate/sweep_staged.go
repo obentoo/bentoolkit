@@ -12,20 +12,6 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
-// runStagedManifest regenerates the Manifest of a STAGED package directory
-// against a private distdir this call creates for it.
-//
-// It is runStagedManifestIn with nothing supplied, which is what every caller
-// but the post-fix re-check wants, and it is the form whose behaviour has not
-// changed. The whole argument — what is dropped from runManifest and why, where
-// the private directory is created, and who removes it — lives on
-// runStagedManifestIn below.
-func (s *sweeper) runStagedManifest(ctx context.Context, stagedPkgDir, pkg, version string) (string, error) {
-	// An empty supplied distdir means "create one", and that is the entire
-	// difference between the two entry points.
-	return s.runStagedManifestIn(ctx, "", stagedPkgDir, pkg, version)
-}
-
 // runStagedManifestIn regenerates the Manifest of a STAGED package directory —
 // the `<category>/<package>/` inside the single-package repo validate.Stage
 // builds — without any shared directory of the host changing while it runs.

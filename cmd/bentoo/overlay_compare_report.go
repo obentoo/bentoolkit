@@ -330,40 +330,12 @@ var compareCauseOrder = []string{
 // no recorded cause — a result built by hand — also reads "".
 func compareCauseWord(result overlay.CompareResult) string {
 	if result.Status == overlay.StatusError {
-		switch result.LookupCause {
-		case overlay.LookupRateLimited:
-			return "rate-limited"
-		case overlay.LookupAuth:
-			return "auth"
-		case overlay.LookupNetwork:
-			return "network"
-		case overlay.LookupNotFound:
-			return "not found upstream"
-		case overlay.LookupOther:
-			return "other"
-		}
-		return ""
+		return result.LookupCause.String()
 	}
 	if result.Reading != overlay.ReadingFailed {
 		return ""
 	}
-	switch result.ReviewFailure {
-	case overlay.ReviewTimedOut:
-		return "timed out"
-	case overlay.ReviewCouldNotStart:
-		return "could not start"
-	case overlay.ReviewExitedNonZero:
-		return "exited non-zero"
-	case overlay.ReviewUnusableReply:
-		return "empty or unusable reply"
-	case overlay.ReviewCancelled:
-		return "cancelled"
-	case overlay.ReviewEbuildUnreadable:
-		return "ebuild unreadable"
-	case overlay.ReviewOther:
-		return "other"
-	}
-	return ""
+	return result.ReviewFailure.String()
 }
 
 // compareCauseCounts turns a cause tally into report entries, highest count

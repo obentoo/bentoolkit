@@ -507,7 +507,7 @@ The `analyze` command uses an LLM for schema generation. `bentoo overlay autoupd
 
 | Provider | Config value | API key env var | Notes |
 |----------|-------------|-----------------|-------|
-| Anthropic Claude (HTTP API) | `claude` | `ANTHROPIC_API_KEY` | Default model: `claude-3-haiku-20240307` |
+| Anthropic Claude (HTTP API) | `claude` | `ANTHROPIC_API_KEY` | Default model: `claude-haiku-4-5` |
 | Claude Code (local CLI) | `claude-code` | `ANTHROPIC_API_KEY` (bare mode) | Drives the local `claude` CLI headlessly. Default model: `sonnet` alias. Hybrid auth via `llm.bare`; honors `llm.max_budget_usd`. Degrades to a Warn + fallback when the CLI is missing or unauthenticated. |
 | OpenAI | `openai` | `OPENAI_API_KEY` | Default model: `gpt-4o-mini` |
 | Ollama (local) | `ollama` | *(none)* | Default model: `llama3`, runs locally |
@@ -518,7 +518,7 @@ Configure in `~/.config/bentoo/config.yaml`:
 llm:
   provider: claude
   api_key_env: ANTHROPIC_API_KEY
-  model: claude-3-haiku-20240307
+  model: claude-haiku-4-5
 ```
 
 The Claude endpoint can be overridden via `CLAUDE_API_ENDPOINT` environment variable (useful for testing or proxies).

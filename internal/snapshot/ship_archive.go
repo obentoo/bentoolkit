@@ -82,7 +82,7 @@ func (a *archiveShipper) Send(ctx context.Context, snap Snapshot) (ShipReport, e
 	}
 
 	stages := archivePipeStages(snap, parentPath, a.remote, a.compress)
-	if _, err := runPipe(ctx, a.run, stages); err != nil {
+	if err := runPipe(ctx, a.run, stages); err != nil {
 		// A streamed pipe can let rclone rcat finish a truncated upload after
 		// btrfs send dies, so the object under this snapshot's key is removed,
 		// best-effort. The pipe error stays the returned error.
@@ -572,19 +572,20 @@ func (a *archiveShipper) PruneRemoteOnDemand(ctx context.Context, subvolumes []s
 	return errors.Join(errs...)
 }
 
-// runPipe runs stages as one streaming pipe through run's Piper seam and returns
-// the final stage's stdout. Any stage error fails the whole pipe, and
-// cancelling ctx kills every stage.
+// runPipe runs stages as one streaming pipe through run's Piper seam. The last
+// stage uploads (rclone rcat), so the pipe's own stdout carries nothing to read.
+// Any stage error fails the whole pipe, and cancelling ctx kills every stage.
 //
 // A Runner without the seam is refused rather than driven stage by stage: the
 // buffered chain it would need holds each stage's whole output in memory, about
 // twice a multi-GB `btrfs send` stream at peak.
-func runPipe(ctx context.Context, run Runner, stages []PipeStage) ([]byte, error) {
+func runPipe(ctx context.Context, run Runner, stages []PipeStage) error {
 	p, ok := run.(Piper)
 	if !ok {
-		return nil, fmt.Errorf("runner %T cannot stream the archive pipe", run)
+		return fmt.Errorf("runner %T cannot stream the archive pipe", run)
 	}
-	return p.Pipe(ctx, stages)
+	_, err := p.Pipe(ctx, stages)
+	return err
 }
 
 // runStagesBuffered runs stages one after another through run, feeding each

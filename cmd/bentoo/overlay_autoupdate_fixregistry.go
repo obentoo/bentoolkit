@@ -34,15 +34,15 @@ import (
 // re-checked through a FRESH Checker and decided by the re-check rather than
 // the agent summary. A pass keeps the edit; a still-failing re-check prompts
 // keep/revert and reverts atomically on N. A fixer error has already been
-// reverted by the transaction and is NON-FATAL: the function returns nil even
-// though an individual FixRegistry call errored.
+// reverted by the transaction and is NON-FATAL, which is why the function
+// returns no error at all.
 //
 // in is the prompt source (os.Stdin in production, a strings.Reader in tests);
 // newChecker constructs a fresh Checker over the same overlay on each call.
-func promptRegistryFixes(ctx context.Context, overlayPath string, registryFixer fixer.RegistryFixer, failures map[string]error, in io.Reader, newChecker func() (*autoupdate.Checker, error)) error {
+func promptRegistryFixes(ctx context.Context, overlayPath string, registryFixer fixer.RegistryFixer, failures map[string]error, in io.Reader, newChecker func() (*autoupdate.Checker, error)) {
 	pkgs := autoupdate.RepairableFetchFailures(failures)
 	if len(pkgs) == 0 {
-		return nil
+		return
 	}
 
 	// One reader for the whole loop: re-creating a bufio.Reader per package would
@@ -117,7 +117,6 @@ loop:
 	}
 
 	fmt.Printf("fixed %d · reverted %d · skipped %d\n", fixed, reverted, skipped)
-	return nil
 }
 
 // registryFixStageLine is the wording each stopped stage has always printed
