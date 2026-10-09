@@ -270,6 +270,15 @@ checksums:
 	cd $(BUILD_DIR) && printf '%s\n' "$$files" | xargs sha256sum > SHA256SUMS; \
 	echo "checksums: wrote $(BUILD_DIR)/SHA256SUMS"
 
+# Release assets for an existing tag: the signed, reproducible vendor tarball,
+# its SBOM and SHA256SUMS in dist/. See "Release assets" in docs/development.md.
+.PHONY: release-deps release-deps-verify
+release-deps:
+	scripts/release-deps.sh generate "$(VERSION)" dist
+
+release-deps-verify:
+	scripts/release-deps.sh verify "$(VERSION)" dist
+
 # Cross-compilation targets. CGO is disabled so these build on any host without a
 # target C cross-toolchain (both binaries are pure Go); the result is a static
 # binary, which is what we want to ship.
@@ -369,6 +378,8 @@ help:
 	@echo "  clean           Remove build artifacts"
 	@echo "  build-all       Cross-compile for linux amd64 and arm64"
 	@echo "  checksums       Write build/SHA256SUMS over the binaries in build/"
+	@echo "  release-deps    Write the signed vendor tarball, SBOM and sums for VERSION=X.Y.Z to dist/"
+	@echo "  release-deps-verify  Regenerate and check the dist/ release assets for VERSION=X.Y.Z"
 	@echo "  build-linux-amd64  Build for Linux amd64"
 	@echo "  build-linux-arm64  Build for Linux arm64"
 	@echo "  fmt             Format code"

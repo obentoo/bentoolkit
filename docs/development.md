@@ -83,6 +83,44 @@ make audit
 
 CI adds gitleaks over the full history, OSV-Scanner and zizmor (workflow lint).
 
+### Release assets
+
+Every release carries a vendor tarball, so the overlay ebuilds build without
+network access, plus an SPDX SBOM, a SHA256SUMS file and a cosign signature
+bundle for the tarball and the SBOM. They are made locally, after the
+annotated tag is pushed and before the release notes are written:
+
+```bash
+make release-deps VERSION=X.Y.Z          # writes the five files to dist/
+make release-deps-verify VERSION=X.Y.Z   # regenerates the tarball and checks everything
+gh release upload vX.Y.Z \
+  dist/bentoolkit-X.Y.Z-vendor.tar.xz dist/bentoolkit-X.Y.Z-vendor.tar.xz.sigstore.json \
+  dist/bentoolkit-X.Y.Z.spdx.json dist/bentoolkit-X.Y.Z.spdx.json.sigstore.json \
+  dist/bentoolkit-X.Y.Z-SHA256SUMS
+```
+
+Name the five files: a `dist/bentoolkit-X.Y.Z*` glob also matches another
+version's files, such as `X.Y.Z0`.
+
+- The tarball holds only `bentoolkit-X.Y.Z/vendor/`, built from
+  `git archive vX.Y.Z` with the toolchain the tag's `go.mod` names. It is
+  byte-reproducible: anyone with the tag can run `make release-deps-verify`.
+- The signing key lives outside the repository, in
+  `~/.config/bentoolkit-release/cosign.key` (override with `COSIGN_KEY`);
+  `cosign.pub` at the repository root is its public half. Create the pair once
+  with `cosign generate-key-pair --output-key-prefix
+  ~/.config/bentoolkit-release/cosign`.
+- Signatures are not uploaded to the public Rekor transparency log, so no
+  identity or key fingerprint is published. The cost is that verification has
+  to skip the log check.
+
+To verify a downloaded asset:
+
+```bash
+cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
+  --bundle bentoolkit-X.Y.Z-vendor.tar.xz.sigstore.json bentoolkit-X.Y.Z-vendor.tar.xz
+```
+
 ### Project Structure
 
 Two binaries, one module. Dependencies point downwards: `cmd` composes the

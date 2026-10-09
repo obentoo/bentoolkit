@@ -15,6 +15,7 @@ coverage.html
 
 # Build
 build/
+dist/
 
 # Vendored dependencies
 vendor/

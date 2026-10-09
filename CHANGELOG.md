@@ -9,6 +9,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **Releases carry a signed, reproducible vendor tarball and an SBOM.**
+  `make release-deps VERSION=X.Y.Z` writes `bentoolkit-X.Y.Z-vendor.tar.xz`
+  (the tag's `go mod vendor`), an SPDX SBOM, SHA256SUMS and a cosign bundle
+  for the tarball and the SBOM; `make release-deps-verify` regenerates the
+  tarball byte for byte and checks the rest. The overlay ebuilds fetch the
+  tarball, so they no longer need network access to build. See "Release
+  assets" in docs/development.md.
+
 ## [0.34.0] - 2026-10-09
 
 ### Added
