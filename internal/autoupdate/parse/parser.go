@@ -141,39 +141,19 @@ func parseJSONPath(path string) ([]pathSegment, error) {
 			break
 		}
 
+		var err error
+
 		// Check for array index at start (valid for paths like "[0].tag_name")
 		if remaining[0] == '[' {
-			// Parse array indices
-			for strings.HasPrefix(remaining, "[") {
-				// Find closing bracket
-				closeBracket := strings.Index(remaining, "]")
-				if closeBracket == -1 {
-					return nil, fmt.Errorf("%w: unclosed bracket", ErrInvalidJSONPath)
-				}
-
-				indexStr := remaining[1:closeBracket]
-				index, err := strconv.Atoi(indexStr)
-				if err != nil {
-					return nil, fmt.Errorf("%w: invalid array index %q", ErrInvalidJSONPath, indexStr)
-				}
-				if index < 0 {
-					return nil, fmt.Errorf("%w: negative array index", ErrInvalidJSONPath)
-				}
-
-				segments = append(segments, pathSegment{segType: segmentIndex, index: index})
-				remaining = remaining[closeBracket+1:]
+			segments, remaining, err = appendIndexSegments(segments, remaining)
+			if err != nil {
+				return nil, err
 			}
 			continue
 		}
 
 		// Find field name (until dot, bracket, or end)
-		fieldEnd := len(remaining)
-		for i, c := range remaining {
-			if c == '.' || c == '[' {
-				fieldEnd = i
-				break
-			}
-		}
+		fieldEnd := fieldNameEnd(remaining)
 
 		if fieldEnd > 0 {
 			fieldName := remaining[:fieldEnd]
@@ -185,24 +165,9 @@ func parseJSONPath(path string) ([]pathSegment, error) {
 		}
 
 		// Check for array index
-		for strings.HasPrefix(remaining, "[") {
-			// Find closing bracket
-			closeBracket := strings.Index(remaining, "]")
-			if closeBracket == -1 {
-				return nil, fmt.Errorf("%w: unclosed bracket", ErrInvalidJSONPath)
-			}
-
-			indexStr := remaining[1:closeBracket]
-			index, err := strconv.Atoi(indexStr)
-			if err != nil {
-				return nil, fmt.Errorf("%w: invalid array index %q", ErrInvalidJSONPath, indexStr)
-			}
-			if index < 0 {
-				return nil, fmt.Errorf("%w: negative array index", ErrInvalidJSONPath)
-			}
-
-			segments = append(segments, pathSegment{segType: segmentIndex, index: index})
-			remaining = remaining[closeBracket+1:]
+		segments, remaining, err = appendIndexSegments(segments, remaining)
+		if err != nil {
+			return nil, err
 		}
 	}
 
@@ -211,6 +176,43 @@ func parseJSONPath(path string) ([]pathSegment, error) {
 	}
 
 	return segments, nil
+}
+
+// fieldNameEnd returns the offset of the first '.' or '[' in remaining, or
+// len(remaining) when there is none.
+func fieldNameEnd(remaining string) int {
+	for i, c := range remaining {
+		if c == '.' || c == '[' {
+			return i
+		}
+	}
+	return len(remaining)
+}
+
+// appendIndexSegments consumes every leading "[N]" of remaining, appending one
+// index segment per bracket, and returns the extended segments and the rest of
+// the path.
+func appendIndexSegments(segments []pathSegment, remaining string) ([]pathSegment, string, error) {
+	for strings.HasPrefix(remaining, "[") {
+		// Find closing bracket
+		closeBracket := strings.Index(remaining, "]")
+		if closeBracket == -1 {
+			return nil, "", fmt.Errorf("%w: unclosed bracket", ErrInvalidJSONPath)
+		}
+
+		indexStr := remaining[1:closeBracket]
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			return nil, "", fmt.Errorf("%w: invalid array index %q", ErrInvalidJSONPath, indexStr)
+		}
+		if index < 0 {
+			return nil, "", fmt.Errorf("%w: negative array index", ErrInvalidJSONPath)
+		}
+
+		segments = append(segments, pathSegment{segType: segmentIndex, index: index})
+		remaining = remaining[closeBracket+1:]
+	}
+	return segments, remaining, nil
 }
 
 // toString converts an interface{} to a string if possible
