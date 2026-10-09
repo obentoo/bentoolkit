@@ -90,10 +90,11 @@ if [[ $mode == generate ]]; then
 	t_hash=$(sha256sum <"$dist/.release-deps.tar" | cut -d' ' -f1)
 	s_hash=$(sha256sum <"$dist/.release-deps.spdx" | cut -d' ' -f1)
 	printf '%s  %s\n%s  %s\n' "$t_hash" "$tarball" "$s_hash" "$sbom" >"$dist/.release-deps.sums"
+	# cosign's stderr stays on the terminal: it carries the password prompt.
 	for pair in "tar:$tarball" "spdx:$sbom"; do
 		cosign sign-blob --yes --key "$rkey" --signing-config "$tmp/signing-config.json" \
-			--bundle "$dist/.release-deps.${pair%%:*}.bundle" "$dist/.release-deps.${pair%%:*}" >/dev/null 2>"$tmp/cosign.err" \
-			|| { cat "$tmp/cosign.err" >&2; die 1 "cosign sign-blob failed for ${pair#*:}"; }
+			--bundle "$dist/.release-deps.${pair%%:*}.bundle" "$dist/.release-deps.${pair%%:*}" >/dev/null \
+			|| die 1 "cosign sign-blob failed for ${pair#*:}"
 		log "step=sign file=${pair#*:}"
 	done
 	mv -f -- "$dist/.release-deps.tar" "$dist/$tarball"

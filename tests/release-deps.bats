@@ -417,6 +417,34 @@ use_golden() {
 	! grep -qF "$PW_SENTINEL" <<<"$output"$'\n'"$stderr" || fail "the password was printed"
 }
 
+@test "generate: with no COSIGN_PASSWORD, cosign's password prompt reaches the terminal" {
+	# A maintainer signs interactively. The prompt is on cosign's stderr; a
+	# script that captures that stream hides it and the password is typed blind.
+	# Each password is sent only once its prompt is on the terminal; with no
+	# prompt, cosign waits for input and the timeout ends the run.
+	command -v script >/dev/null || skip "util-linux script is not installed"
+	unset COSIGN_PASSWORD
+	local log="$BATS_TEST_TMPDIR/tty.log" cmd
+	cmd="$(printf '%q ' "$SCRIPT" generate "$VERSION" dist)"
+	: >"$log"
+	{
+		local n tries
+		for n in 1 2; do
+			tries=0
+			until [ "$(grep -c 'Enter password' "$log")" -ge "$n" ]; do
+				tries=$((tries + 1))
+				[ "$tries" -le 900 ] || exit 0
+				sleep 0.2
+			done
+			printf '%s\n' "$PW_SENTINEL"
+		done
+		sleep 2
+	} | COSIGN_KEY="$FX/kpw/cosign.key" timeout 240 script -qefc "$cmd" "$log" >/dev/null || true
+	grep -q 'Enter password' "$log" || fail "no password prompt was shown on the terminal: $(cat -v "$log")"
+	assert_generated dist
+	! grep -qF "$PW_SENTINEL" "$log" || fail "the password was echoed to the terminal"
+}
+
 @test "generate: logs one structured release-deps step line per step; the tar step names the tarball digest" {
 	rd generate "$VERSION" dist
 	assert_status 0
