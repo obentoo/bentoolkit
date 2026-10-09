@@ -2068,6 +2068,36 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		return distdir, fmt.Errorf("%w (manifest fix skipped: failed to create temp distdir: %v)", firstErr, err) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
 
+	// The first distdir's completed downloads move into fixDistdir before it is
+	// removed below: they are this version's real bytes, and discarding them made
+	// the repair depend on the upstream host a second time. Only regular files
+	// move. Its symlinks into the distfiles cache are dropped, not carried: the
+	// manifest fixer holds Write, and a link in its directory would let it
+	// overwrite the cache entry. Both directories live under fixSandboxRoot, so
+	// the move is a rename, not a copy. What is still missing among the names
+	// derived from the published package is then COPIED in from the distfiles
+	// cache or the host DISTDIR, for the same reason never linked.
+	if cand.staged && distdir != "" {
+		carried, carryErrs := distfiles.CarryOver(distdir, fixDistdir)
+		for _, e := range carryErrs {
+			a.logger().Warn("manifest fix: could not carry a downloaded distfile over",
+				"package", pkg, "version", version, "file", e.Name, "error", e.Err)
+		}
+		sw := a.sweeper()
+		copied, copyErrs := distfiles.CopyFromSources(fixDistdir,
+			sw.stagedDistfileSources(ctx, fixDistdir), sw.stagedExpectedDistfiles(pkg, version))
+		for _, e := range copyErrs {
+			a.logger().Warn("manifest fix: could not copy a cached distfile",
+				"package", pkg, "version", version, "file", e.Name, "source", e.Source, "error", e.Err)
+		}
+		a.logger().Info("manifest fix: distdir prepared",
+			"package", pkg, "version", version, "carried", carried, "copied", copied)
+		if carried+copied > 0 {
+			a.reporter.Log("info", fmt.Sprintf("reusing %d downloaded and %d cached distfile(s) for the %s-%s repair",
+				carried, copied, pkg, version))
+		}
+	}
+
 	// THE TRANSFER. From this line the agent's directory is what
 	// this function returns, on every path below including the failing ones, and
 	// the caller's `defer removeStagedDistdir` is what takes it back — the same
