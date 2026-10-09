@@ -15,6 +15,7 @@ linters:
     - exhaustive
     - contextcheck
     - containedctx
+    - noctx
     - errorlint
     - nilerr
     - usetesting
@@ -121,6 +122,9 @@ linters:
         linters:
           - errcheck
           - gosec
+          # httptest servers, fake commands and listeners live and die with
+          # the test; a context on each adds nothing the test does not bound.
+          - noctx
           # A test switches over the cases it builds, not over every value.
           - exhaustive
           # R5.5 binds production diagnostics; a test logs hostile, built
