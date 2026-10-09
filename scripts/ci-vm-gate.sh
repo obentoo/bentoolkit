@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The local CI gate. Everything .github/workflows/ci.yml checks runs here,
-# before a push, and its result is the evidence the work is done; pushing
-# publishes verified work, it is not how to find out whether it passes.
+# before a push, and so does CodeQL; the result is the evidence the work is
+# done. Pushing publishes verified work, it is not how to find out whether it
+# passes.
 #
 # The VM is created once with scripts/ci-vm-create.sh.
 #
@@ -10,7 +11,9 @@
 #   ./scripts/ci-vm-gate.sh --status <ref>  # also post the verdict as a commit status
 #
 # What runs where:
-#   VM   — Lint, Test, Audit and Build, as ci.yml runs them
+#   VM   — Lint, Test, Audit and Build, as ci.yml runs them, and CodeQL (Go and
+#          Actions, the suites GitHub's default setup runs; dismissals live in
+#          scripts/codeql-dismissed.tsv)
 #          (scripts/ci-vm-gate-inner.sh), on the KVM guest `bentoolkit-ci`:
 #          Ubuntu 24.04 like ubuntu-latest, a non-root user like the runner
 #          (several tests chmod a directory to simulate a write failure, and
@@ -117,10 +120,13 @@ log "pushed $SHORT to the VM"
 # 3. VM jobs and host scanners, side by side. The inner script is THIS
 #    checkout's copy, so a branch that predates the script can still be gated.
 REMOTE_LOG="/home/$VM_USER/gate/logs/$SHORT"
-scp -q -i "$VM_KEY" "$REPO_ROOT/scripts/ci-vm-gate-inner.sh" "$VM_HOST:gate/inner.sh" ||
-  { log "FAIL: could not copy the inner script to the VM"; exit 1; }
-log "gate running (VM: test, audit, lint, build; host: secrets, osv, workflow-lint, changelog)"
-"${SSH[@]}" "rm -rf '$REMOTE_LOG' && bash ~/gate/inner.sh ~/gate/ws '$REMOTE_LOG' '$TOOLCHAIN'" \
+if ! scp -q -i "$VM_KEY" "$REPO_ROOT/scripts/ci-vm-gate-inner.sh" "$VM_HOST:gate/inner.sh" ||
+  ! scp -q -i "$VM_KEY" "$REPO_ROOT/scripts/codeql-dismissed.tsv" "$VM_HOST:gate/codeql-dismissed.tsv"; then
+  log "FAIL: could not copy the inner script or the CodeQL dismissals to the VM"
+  exit 1
+fi
+log "gate running (VM: test, audit, lint, build, codeql; host: secrets, osv, workflow-lint, changelog)"
+"${SSH[@]}" "rm -rf '$REMOTE_LOG' && bash ~/gate/inner.sh ~/gate/ws '$REMOTE_LOG' '$TOOLCHAIN' ~/gate/codeql-dismissed.tsv" \
   >"$LOG_DIR/vm.log" 2>&1 &
 VM_PID=$!
 
@@ -182,7 +188,7 @@ scp -q -r -i "$VM_KEY" "$VM_HOST:$REMOTE_LOG/." "$LOG_DIR/vm-logs/" 2>/dev/null 
 #    missing .rc means a job never finished, which is red, never green.
 {
   echo "== gate $SHORT ($(date +%H:%M)), $TOOLCHAIN"
-  for name in test audit lint build; do
+  for name in test audit lint build codeql; do
     f="$LOG_DIR/vm-logs/$name.rc"
     if [[ ! -f "$f" ]]; then
       printf '  %-15s FAIL (did not finish)\n' "vm:$name"

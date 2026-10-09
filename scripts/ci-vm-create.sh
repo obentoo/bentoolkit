@@ -61,7 +61,7 @@ users:
     ssh_authorized_keys:
       - $(cat "$KEY.pub")
 package_update: true
-packages: [git, make, build-essential, ca-certificates, curl, jq, bc, dbus, golang-go]
+packages: [git, make, build-essential, ca-certificates, curl, jq, bc, dbus, golang-go, zstd]
 YAML
 printf 'instance-id: %s\nlocal-hostname: %s\n' "$VM" "$VM" >"$DIR/meta-data"
 cloud-localds "$DIR/seed.iso" "$DIR/user-data" "$DIR/meta-data"
