@@ -51,6 +51,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **`overlay autoupdate --apply` no longer makes the package's other versions
+  lose their Manifest entries.** Promotion wrote the candidate's Manifest,
+  which covers only the new version, over the published one, so every other
+  ebuild of the package was left with no DIST entry and could not be
+  installed (seen on `dev-util/flutter`). The other versions keep their DIST
+  entries now: the published records stay, the candidate's are added, and a
+  record for the same file is taken from the candidate.
+
 - **`config.example.yaml` documents every key, in English.** It was the one
   Portuguese file in the repository and it never mentioned
   `autoupdate.distdir`, `autoupdate.distfiles_cache` or any of the
