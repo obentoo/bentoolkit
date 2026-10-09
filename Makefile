@@ -48,7 +48,7 @@ GOMOD := $(GO) mod
 # golangci-lint at the version the CI Lint job installs, built with the toolchain
 # exported above — the one CI uses; built with a newer host Go, its gofmt
 # disagrees with CI's. lint-pin-check keeps this pin and the CI one equal.
-GOLANGCI_LINT_VERSION := v2.13.2
+GOLANGCI_LINT_VERSION := v2.14.0
 GOLANGCI_LINT := $(GO) run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
 # Extra golangci-lint arguments, e.g. LINT_ARGS="--enable-only misspell".
 LINT_ARGS ?=

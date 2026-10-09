@@ -30,6 +30,12 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   supported build toolchain. The bentoo overlay already builds with
   `>=dev-lang/go-1.27.2`.
 
+- **The lint pin moved from golangci-lint v2.13.2 to v2.14.0.** v2.13.2
+  cannot read the export data of the Go 1.27 standard library ("export data
+  version 5 is greater than maximum supported version 4"), so the Lint job
+  failed on every commit since the move to Go 1.27. v2.14.0 reports no
+  issue on the current tree, with and without the `chromedp` tag.
+
 - **CI runs locally; GitHub runs only what cannot.** `.github/workflows/ci.yml`
   no longer starts on push or pull request. Every one of its jobs runs in the
   local gate (`scripts/ci-vm-gate.sh`), whose result is what a pull request
