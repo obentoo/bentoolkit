@@ -16,6 +16,7 @@ linters:
     - contextcheck
     - containedctx
     - errorlint
+    - nilerr
     - usetesting
     - tparallel
     - forbidigo
@@ -127,6 +128,10 @@ linters:
           - sloglint
           # A test table carrying a context per case is idiomatic.
           - containedctx
+          # A test's filepath.Walk callback skips an unreadable entry, and a
+          # seam that has already called t.Error returns nil to let the run
+          # finish; both are deliberate in every test that does it.
+          - nilerr
 
 formatters:
   enable:
