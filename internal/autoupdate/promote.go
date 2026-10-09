@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 )
@@ -205,16 +206,32 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 		promoted.undo(wrapped)
 		return nil, wrapped
 	default:
+		// The staged Manifest covers the candidate alone. Its records are the
+		// validated bytes and are written unchanged; every other record is the
+		// published tree's own, taken from the captured Manifest. With no
+		// published Manifest the staged bytes are written as they are, and only
+		// the counts come from the merge.
+		body := stagedBody
+		merged, merge := distfiles.MergeManifestDist(promoted.manifestBefore, stagedBody)
+		if promoted.manifestExisted {
+			body = merged
+		}
+		if merge.Dropped > 0 {
+			promoted.log.Warn("promotion: dropped malformed DIST records from the published Manifest",
+				"package", pkg, "version", version, "manifest", promoted.manifestPath, "dropped", merge.Dropped)
+		}
 		mode := promoted.manifestMode
 		if !promoted.manifestExisted {
 			mode = publishedFileMode
 		}
-		if err := writeThenRename(promoted.log, promoted.manifestPath, stagedBody, mode); err != nil {
+		if err := writeThenRename(promoted.log, promoted.manifestPath, body, mode); err != nil {
 			wrapped := fmt.Errorf("publishing the validated Manifest for %s-%s as %s: %w", pkg, version, promoted.manifestPath, err)
 			promoted.undo(wrapped)
 			return nil, wrapped
 		}
 		promoted.manifestPublished = true
+		promoted.log.Info("promotion: published Manifest merged",
+			"package", pkg, "version", version, "kept", merge.Kept, "written", merge.Written, "replaced", merge.Replaced)
 	}
 
 	return promoted.undo, nil
