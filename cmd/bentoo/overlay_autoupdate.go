@@ -441,7 +441,7 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 }
 
 // buildApplyReporter selects the apply backend per the gate (tuiEnabledForApply)
-// and returns a tui.Reporter, the extra ApplierOptions that wire it into the
+// and returns the extra ApplierOptions that wire its tui.Reporter into the
 // Applier, and a finish func to run once the applies complete.
 //
 // Plain branch (non-TTY / opt-out): a rate-limited plainReporter streams the tail
@@ -459,11 +459,11 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // closes the batch and restores the terminal, and also calls it before the
 // summary, which must print after the TUI is gone. It writes no state, so its
 // order relative to the overlay lock's release does not matter.
-func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) (tui.Reporter, []autoupdate.ApplierOption, func()) {
+func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) ([]autoupdate.ApplierOption, func()) {
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
 		r.BatchStart(total)
-		return r, []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, sync.OnceFunc(func() { r.BatchDone("") })
+		return []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, sync.OnceFunc(func() { r.BatchDone("") })
 	}
 
 	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
@@ -504,7 +504,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 			ar.log().Debug("apply: live TUI program exited with error", "err", err)
 		}
 	})
-	return r, extra, finish
+	return extra, finish
 }
 
 // runAutoupdate is the RunE of `overlay autoupdate`: o holds the flags of the
@@ -878,9 +878,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		fixer = nil
 	}
 	if fixer != nil && ar.deps.checkInteractive() {
-		if perr := promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker); perr != nil {
-			ar.log().Warn("registry-fix prompt ended with an error", "err", perr)
-		}
+		promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker)
 	}
 
 	// --revivable: in the same pass, also scan the disabled+absent (orphaned)
@@ -1595,7 +1593,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	// buildApplyReporter wires the reporter into extra (WithApplierReporter), so
 	// the reporter value itself is not needed at this call site.
-	_, extra, finish := ar.buildApplyReporter(applyCtx, cancel, 1)
+	extra, finish := ar.buildApplyReporter(applyCtx, cancel, 1)
 	// Every early return closes the batch and restores the terminal through
 	// this; finish is idempotent (func buildApplyReporter), so the explicit
 	// call before the summary below is the one that does the work there.
@@ -1674,7 +1672,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	_, extra, finish := ar.buildApplyReporter(applyCtx, cancel, len(updates))
+	extra, finish := ar.buildApplyReporter(applyCtx, cancel, len(updates))
 	// Every early return closes the batch and restores the terminal through
 	// this; finish is idempotent (func buildApplyReporter), so the explicit
 	// call before the batch summary below is the one that does the work there.

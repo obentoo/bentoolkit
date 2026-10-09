@@ -53,7 +53,7 @@ var _ Notifier = noopNotifier{}
 //
 // log receives those warnings and the composed notifier's (nil discards). A
 // resolved secret is scrubbed by the invocation logger's redacting handler.
-func newNotifier(cfg NotifyConfig, log *slog.Logger) (Notifier, error) {
+func newNotifier(cfg NotifyConfig, log *slog.Logger) (Notifier, error) { //nolint:unparam // the error return is kept for signature stability, as the comment above states
 	var notifiers []Notifier
 	if cfg.Ntfy.URL != "" {
 		ntfyToken, _, err := secrets.Lookup("BENTOO_NTFY_TOKEN")
