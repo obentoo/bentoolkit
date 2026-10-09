@@ -8,7 +8,7 @@ go 1.26.0
 // reads a patch-qualified `go` directive as an exact version, which would have
 // frozen CI eight patch releases behind. It prefers `toolchain` when present,
 // so this line is what the runner installs. Bump it on each Go patch release.
-toolchain go1.26.8
+toolchain go1.26.9
 
 require (
 	github.com/BurntSushi/toml v1.6.0
@@ -62,7 +62,7 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v1.2.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
-	golang.org/x/net v0.59.0 // indirect
+	golang.org/x/net v0.60.0 // indirect
 	golang.org/x/sync v0.23.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/telemetry v0.0.0-20260921160320-bdcd072333a6 // indirect
