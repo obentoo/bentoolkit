@@ -216,10 +216,6 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 		if promoted.manifestExisted {
 			body = merged
 		}
-		if merge.Dropped > 0 {
-			promoted.log.Warn("promotion: dropped malformed DIST records from the published Manifest",
-				"package", pkg, "version", version, "manifest", promoted.manifestPath, "dropped", merge.Dropped)
-		}
 		mode := promoted.manifestMode
 		if !promoted.manifestExisted {
 			mode = publishedFileMode
@@ -232,6 +228,10 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 		promoted.manifestPublished = true
 		promoted.log.Info("promotion: published Manifest merged",
 			"package", pkg, "version", version, "kept", merge.Kept, "written", merge.Written, "replaced", merge.Replaced)
+		if merge.Dropped > 0 {
+			promoted.log.Warn("promotion: dropped malformed DIST records from the published Manifest",
+				"package", pkg, "version", version, "manifest", promoted.manifestPath, "dropped", merge.Dropped)
+		}
 	}
 
 	return promoted.undo, nil
