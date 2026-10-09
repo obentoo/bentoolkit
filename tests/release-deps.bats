@@ -538,6 +538,34 @@ use_golden() {
 	done
 }
 
+@test "generate: a missing git is refused naming git, before any tag lookup" {
+	local bin
+	bin="$(path_without git)"
+	PATH="$bin" rd generate "$VERSION" dist
+	assert_status 2 || fail "missing git was not refused with exit 2"
+	assert_reason "git" || fail "missing git: reason does not name it"
+	[ "$(snapshot dist)" = "ABSENT" ] || fail "missing git: dist was written"
+}
+
+@test "generate: a step failing after the preconditions exits 1 with a reason naming it, and writes nothing" {
+	local t bin
+	for t in syft xz; do
+		bin="$(path_without "$t")"
+		# xz is fed the tar stream on stdin; syft reads no stdin.
+		if [ "$t" = xz ]; then
+			printf '#!/bin/sh\ncat >/dev/null\nexit 3\n' >"$bin/$t"
+		else
+			printf '#!/bin/sh\nexit 3\n' >"$bin/$t"
+		fi
+		chmod +x "$bin/$t"
+		rm -rf dist
+		PATH="$bin" rd generate "$VERSION" dist
+		assert_status 1 || fail "a failing $t did not exit 1"
+		assert_reason "$t" || fail "a failing $t: no release-deps reason line names it: $stderr"
+		[ -z "$(find dist -type f 2>/dev/null)" ] || fail "a failing $t left files: $(listing dist)"
+	done
+}
+
 @test "generate: outputs of a version whose name extends this one (1.2.30) do not block, and survive untouched" {
 	mkdir -p dist
 	local f
@@ -777,6 +805,14 @@ use_golden() {
 	use_golden
 	run --separate-stderr unshare -rn "$SCRIPT" verify "$VERSION" dist
 	assert_status 0
+}
+
+@test "verify: passes with no syft on PATH, since it never runs syft" {
+	use_golden
+	local bin
+	bin="$(path_without syft)"
+	PATH="$bin" rd verify "$VERSION" dist
+	assert_status 0 || fail "verify refused a host without syft: $stderr"
 }
 
 @test "verify: passes on a freshly generated set and writes nothing in dist" {
