@@ -215,7 +215,7 @@ func grantPortageTraversal(from, upto string) error {
 	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		// Not an ancestor — including the case where they are the same
 		// directory, which has nothing between it and itself.
-		return nil
+		return nil //nolint:nilerr // not an ancestor: doing nothing is the bound that stops a climb to /
 	}
 
 	for dir := filepath.Dir(from); ; dir = filepath.Dir(dir) {

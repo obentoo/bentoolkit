@@ -50,7 +50,8 @@ func runLog(cmd *cobra.Command, args []string) error {
 	// from internal literals ("log", a numeric -N, "--color=always",
 	// "--oneline"/"--pretty=format:..."/"--date=short") — no user-supplied
 	// input reaches the argument vector.
-	gitCmd := exec.Command("git", gitArgs...) //nolint:gosec // G204: fixed "git" command + internal literal args only
+	// The process-wide context; see the matching note in runDiff.
+	gitCmd := exec.CommandContext(commandContext(cmd), "git", gitArgs...) //nolint:gosec // G204: fixed "git" command + internal literal args only
 	gitCmd.Dir = overlayPath
 	gitCmd.Stdout = os.Stdout
 	gitCmd.Stderr = os.Stderr

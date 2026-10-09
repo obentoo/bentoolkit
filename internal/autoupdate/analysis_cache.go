@@ -157,7 +157,7 @@ func readAnalysisCacheFileForMerge(path string) (analysisCacheFile, error) {
 		return cf, fmt.Errorf("re-reading %s before saving: %w", path, err)
 	}
 	if json.Unmarshal(data, &cf) != nil {
-		return analysisCacheFile{}, nil
+		return analysisCacheFile{}, nil //nolint:nilerr // a corrupted file reads as empty, as documented above: the merge then keeps this process's state
 	}
 	return cf, nil
 }

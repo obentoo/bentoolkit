@@ -190,7 +190,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 		map[string]string{"X-Api-Key": "${GITHUB_TOKEN}"}), "https://api.github.com/repos/o/r/releases/latest")
 	cfg.LLMPrompt = "extract the version"
 
-	version, err := checker.fetchUpstreamVersionRaw(t.Context(), "app-misc/leak", &cfg)
+	version, err := checker.fetchUpstreamVersionRaw(t.Context(), &cfg)
 	if !errors.Is(err, fetch.ErrCredentialHostMismatch) {
 		t.Fatalf("fetchUpstreamVersionRaw = (%q, %v); want errors.Is(err, ErrCredentialHostMismatch)", version, err)
 	}
@@ -211,7 +211,7 @@ func TestFetchUpstreamVersionRaw_MismatchSkipsFallbackAndLLM(t *testing.T) {
 			WithHTTPClient(fake2), WithRateLimiter(&recordingRateLimiter{}))
 		cfg2 := withFallback(regexPkg("https://api.github.com/repos/o/r/nomatch",
 			map[string]string{"X-Api-Key": "${GITHUB_TOKEN}"}), "https://api.github.com/repos/o/r/releases/latest")
-		v, err := c2.fetchUpstreamVersionRaw(t.Context(), "app-misc/ok", &cfg2)
+		v, err := c2.fetchUpstreamVersionRaw(t.Context(), &cfg2)
 		if err != nil || v != "2.0.0" {
 			t.Fatalf("fetchUpstreamVersionRaw = (%q, %v); want (2.0.0, nil) from the fallback", v, err)
 		}

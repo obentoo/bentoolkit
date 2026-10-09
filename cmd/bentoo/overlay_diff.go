@@ -55,7 +55,11 @@ func runDiff(cmd *cobra.Command, args []string) error {
 	}
 	gitArgs = append(gitArgs, args...)
 
-	gitCmd := exec.Command("git", gitArgs...)
+	// The process-wide context, as every other subprocess in cmd/bentoo gets.
+	// diff is not a cancellable command, so on Ctrl+C bentoo re-raises the
+	// signal rather than cancelling: git (and its pager) stay in the terminal's
+	// foreground group and receive the Ctrl+C themselves, exactly as before.
+	gitCmd := exec.CommandContext(commandContext(cmd), "git", gitArgs...)
 	gitCmd.Dir = overlayPath
 	gitCmd.Stdout = os.Stdout
 	gitCmd.Stderr = os.Stderr
