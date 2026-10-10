@@ -144,7 +144,7 @@ linters:
       # after deleting this rule.
       - linters:
           - gocognit
-        text: '^cognitive complexity (35 of func `\(\*App\)\.loop`|32 of func `displaySweepPlan`|35 of func `renderValidateText`|57 of func `runCompare`|35 of func `sendMailBounded`) is high'
+        text: '^cognitive complexity (35 of func `\(\*App\)\.loop`|35 of func `sendMailBounded`) is high'
       - path: _test\.go
         linters:
           - gocognit

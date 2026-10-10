@@ -129,8 +129,19 @@ func displaySweepPlan(batch autoupdate.SweepBatch) {
 		return
 	}
 
-	var removable, blocked []autoupdate.SweepDirPlan
-	for _, d := range batch.Dirs {
+	removable, blocked := partitionSweepDirs(batch.Dirs)
+
+	displaySweepRemovable(batch.TotalRemove, removable)
+	displaySweepBlocked(blocked)
+	displaySweepHeld(batch.SkippedHeld)
+	displaySweepPlanErrors(batch.PlanErrors)
+}
+
+// partitionSweepDirs splits the planned directories into the blocked ones and
+// the ones with something to remove, each in plan order. A directory that is
+// neither is in no list.
+func partitionSweepDirs(dirs []autoupdate.SweepDirPlan) (removable, blocked []autoupdate.SweepDirPlan) {
+	for _, d := range dirs {
 		if d.IsBlocked() {
 			blocked = append(blocked, d)
 			continue
@@ -139,52 +150,73 @@ func displaySweepPlan(batch autoupdate.SweepBatch) {
 			removable = append(removable, d)
 		}
 	}
+	return removable, blocked
+}
 
-	if len(removable) > 0 {
-		fmt.Printf("  To remove (%d ebuild(s) in %d director(ies)):\n", batch.TotalRemove, len(removable))
-		for _, d := range removable {
-			pkgName := filepath.Base(d.Atom)
-			for _, v := range d.Remove {
-				fmt.Printf("    %-45s %s-%s.ebuild\n", d.Atom, pkgName, v)
-			}
-			for _, line := range keptLines(d.Keep) {
-				output.Info.Printf("      keeps %s\n", line)
-			}
-		}
-		fmt.Println()
+// displaySweepRemovable prints the plan's removals, each directory followed by
+// the versions it keeps and who claims them. An empty list prints nothing.
+func displaySweepRemovable(totalRemove int, removable []autoupdate.SweepDirPlan) {
+	if len(removable) == 0 {
+		return
 	}
+	fmt.Printf("  To remove (%d ebuild(s) in %d director(ies)):\n", totalRemove, len(removable))
+	for _, d := range removable {
+		pkgName := filepath.Base(d.Atom)
+		for _, v := range d.Remove {
+			fmt.Printf("    %-45s %s-%s.ebuild\n", d.Atom, pkgName, v)
+		}
+		for _, line := range keptLines(d.Keep) {
+			output.Info.Printf("      keeps %s\n", line)
+		}
+	}
+	fmt.Println()
+}
 
-	if len(blocked) > 0 {
-		fmt.Printf("  Blocked — nothing removed (%d):\n", len(blocked))
-		for _, d := range blocked {
-			if d.Blocked != "" {
-				fmt.Printf("    %-45s entry %q has no version pin\n", d.Atom, d.Blocked)
-			} else {
-				fmt.Printf("    %-45s no registry entry claims this directory\n", d.Atom)
-			}
-			if len(d.WouldRemove) > 0 {
-				output.Info.Printf("      would have removed: %s\n", strings.Join(d.WouldRemove, ", "))
-			}
-		}
-		fmt.Println()
+// displaySweepBlocked prints the directories nothing is removed from, with why
+// and what would otherwise have gone. An empty list prints nothing.
+func displaySweepBlocked(blocked []autoupdate.SweepDirPlan) {
+	if len(blocked) == 0 {
+		return
 	}
+	fmt.Printf("  Blocked — nothing removed (%d):\n", len(blocked))
+	for _, d := range blocked {
+		if d.Blocked != "" {
+			fmt.Printf("    %-45s entry %q has no version pin\n", d.Atom, d.Blocked)
+		} else {
+			fmt.Printf("    %-45s no registry entry claims this directory\n", d.Atom)
+		}
+		if len(d.WouldRemove) > 0 {
+			output.Info.Printf("      would have removed: %s\n", strings.Join(d.WouldRemove, ", "))
+		}
+	}
+	fmt.Println()
+}
 
-	if len(batch.SkippedHeld) > 0 {
-		fmt.Printf("  Held — reported by --check, never swept (%d):\n", len(batch.SkippedHeld))
-		for _, a := range batch.SkippedHeld {
-			fmt.Printf("    %-45s held: clean it by hand if you want it gone\n", a)
-		}
-		output.Info.Println("      A held package's older ebuild is usually the fallback `hold` exists to keep.")
-		fmt.Println()
+// displaySweepHeld prints the held packages the sweep never touches. An empty
+// list prints nothing.
+func displaySweepHeld(held []string) {
+	if len(held) == 0 {
+		return
 	}
+	fmt.Printf("  Held — reported by --check, never swept (%d):\n", len(held))
+	for _, a := range held {
+		fmt.Printf("    %-45s held: clean it by hand if you want it gone\n", a)
+	}
+	output.Info.Println("      A held package's older ebuild is usually the fallback `hold` exists to keep.")
+	fmt.Println()
+}
 
-	if len(batch.PlanErrors) > 0 {
-		fmt.Printf("  Could not be planned (%d):\n", len(batch.PlanErrors))
-		for _, e := range batch.PlanErrors {
-			output.Error.Printf("    %-45s %v\n", e.Atom, e.Err)
-		}
-		fmt.Println()
+// displaySweepPlanErrors prints the directories that could not be planned. An
+// empty list prints nothing.
+func displaySweepPlanErrors(planErrors []autoupdate.SweepPlanError) {
+	if len(planErrors) == 0 {
+		return
 	}
+	fmt.Printf("  Could not be planned (%d):\n", len(planErrors))
+	for _, e := range planErrors {
+		output.Error.Printf("    %-45s %v\n", e.Atom, e.Err)
+	}
+	fmt.Println()
 }
 
 // keptLines renders a directory's surviving versions with the entry claiming
