@@ -317,11 +317,12 @@ func restoreReportFlags(t *testing.T) {
 }
 
 // reportFlagGlobals is every package variable restoreReportFlags puts back:
-// the three report flags newRootCmd declares on the root. --no-tui, which
-// outranks --ui, is no longer one of them: it is a field of autoupdateOptions
-// and reaches resolveAutoupdateUIMode as a parameter (story 060).
+// the three report flags newRootCmd declares on the root, and the three output
+// flags its PersistentPreRunE publishes into verbose, quiet and noColor. --no-tui,
+// which outranks --ui, is no longer one of them: it is a field of
+// autoupdateOptions and reaches resolveAutoupdateUIMode as a parameter.
 func reportFlagGlobals() []any {
-	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport}
+	return []any{&autoupdateUI, &autoupdateAll, &autoupdateExport, &verbose, &quiet, &noColor}
 }
 
 // testAutoupdateOptions returns an autoupdateOptions holding every flag's

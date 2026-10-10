@@ -117,11 +117,6 @@ func s086RunIn(t *testing.T, args []string, ctx context.Context) s086Result {
 	}))
 	compareCmd.SetContext(logging.NewContext(ctx, logger))
 	t.Cleanup(func() { compareCmd.SetContext(context.Background()) })
-	// Other tests in the package set quiet and leave it set; uiInfo lines are
-	// part of what these tests pin, so run with it off whatever ran before.
-	savedQuiet := quiet
-	quiet = false
-	t.Cleanup(func() { quiet = savedQuiet })
 
 	var res s086Result
 	res.stderr = captureStderr(t, func() { //nolint:contextcheck // runCompare reads ctx from compareCmd, set above

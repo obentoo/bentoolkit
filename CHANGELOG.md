@@ -19,6 +19,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   tarball, so they no longer need network access to build. See "Release
   assets" in docs/development.md.
 
+### Fixed
+
+- **`overlay autoupdate --check` no longer hangs when a package check
+  misbehaves.** A check that returned neither a result nor an error crashed
+  the worker while it held the run's lock, and the crash recovery waited on
+  that same lock forever. The package is now reported as failed ("check
+  returned no result") and the remaining packages are still checked.
+
 ## [0.34.0] - 2026-10-09
 
 ### Added
