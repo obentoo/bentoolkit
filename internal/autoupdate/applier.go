@@ -868,129 +868,10 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		a.reporter.TaskDone(pkg, result.Success, applySummary(result), "")
 	}()
 
-	// Refuse a held package before touching anything. hold = true is the
-	// maintainer's "present, but never auto-bump" decision, and until now it was
-	// enforced in the checker alone: CheckAll skips held packages, but an explicit
-	// `--check <pkg> --force` does not, and it writes the update to pending.json
-	// like any other. From there `--apply all` applied the very bump the hold
-	// existed to prevent. The guard belongs here because this is the only place
-	// every apply path passes through.
-	//
-	// enabled = false is refused here for the same reason: CheckAll skips a
-	// disabled entry, but an update already in pending.json — recorded before
-	// the disable, or by an explicit check — would otherwise still be applied.
-	if reason := a.refusal(pkg); reason != "" {
-		result.Held = true
-		result.HoldReason = reason
-		if update, found := a.pending.Get(pkg); found {
-			result.OldVersion = update.CurrentVersion
-			result.NewVersion = update.NewVersion
-		}
-		return result, nil
+	run := &applyRun{a: a, pkg: pkg, compile: compile, result: result}
+	if done, err := run.preflight(); done != nil {
+		return done, err
 	}
-
-	// Get pending update
-	update, found := a.pending.Get(pkg)
-	if !found {
-		result.Error = ErrPackageNotInPending
-		return result, result.Error
-	}
-
-	result.OldVersion = update.CurrentVersion
-
-	// Upstream version detection can carry a leading tag prefix (e.g. the git
-	// tag "v9.2.0588"). A Gentoo ebuild filename requires a bare PV, so strip
-	// the prefix before it reaches the filename and the manifest step; otherwise
-	// `pkgdev manifest` rejects it with "does not follow correct package syntax".
-	// Validate up front so a non-version (or a string still invalid after
-	// stripping) fails with a clear error instead of a cryptic portage one.
-	newVersion := parse.StripVersionPrefix(strings.TrimSpace(update.NewVersion))
-	if !ebuild.IsValidVersion(newVersion) {
-		result.Error = fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, update.NewVersion)
-		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
-		}
-		return result, result.Error
-	}
-	// The aux value and the commit hash come from upstream, untrimmed and
-	// unrepaired here: the checker already trimmed them, so inner or trailing
-	// whitespace is refused. Gated before anything is staged or copied, so a
-	// refused package leaves its directory byte-identical.
-	if err := checkUpstreamValues(pkg, update); err != nil {
-		result.Error = err
-		if err := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); err != nil {
-			result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
-		}
-		return result, result.Error
-	}
-	// Attach the slot's pinned revision, when the entry declares one. Upstream
-	// yields a bare PV; for a slot discriminated by its revision suffix that PV
-	// names the WRONG slot's ebuild, so the whole apply — copy destination,
-	// manifest, compile, clean — has to run against the decorated version from
-	// here on. Validation stays on the bare upstream value above; the suffix is
-	// well-formed by construction.
-	newVersion = ebuilds.ApplyRevision(newVersion, a.configs[pkg].Revision)
-	result.NewVersion = newVersion
-
-	// Re-resolve the current version against the live overlay rather than
-	// trusting update.CurrentVersion. That field is a snapshot from check-time
-	// and drifts: the overlay may have been bumped past it, or the package
-	// removed entirely. Blind trust produced a cryptic "source ebuild not found"
-	// when the recorded version's ebuild was already gone. Re-resolution
-	// self-heals a stale current_version and lets a genuinely obsolete entry be
-	// pruned with a clear outcome instead of a hard failure.
-	currentVersion, err := a.resolveCurrentVersion(pkg)
-	if err != nil {
-		// A slot that matches nothing is a config error, not an obsolete entry:
-		// the package is present, its key is wrong. Pruning would delete the
-		// pending record and report success-ish, hiding the typo. Fail loudly.
-		if errors.Is(err, ebuilds.ErrSlotNotFound) {
-			result.Error = err
-			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
-			}
-			return result, result.Error
-		}
-		// Package no longer present in the overlay (removed/renamed). The pending
-		// entry is obsolete — prune it and report, not as a failure.
-		return a.pruneObsolete(pkg, result,
-			fmt.Errorf("%w: %s no longer in overlay (%w)", ErrObsoletePending, pkg, err))
-	}
-	result.OldVersion = currentVersion
-
-	// Overlay already at or beyond the target: the update was already applied or
-	// has been superseded by a newer bump. A copy would be pointless (or a
-	// downgrade) — prune the stale entry instead.
-	if ebuild.CompareVersions(currentVersion, newVersion) >= 0 {
-		return a.pruneObsolete(pkg, result,
-			fmt.Errorf("%w: overlay already at %s (target %s)", ErrObsoletePending, currentVersion, newVersion))
-	}
-
-	// Requirements are gated after the captured values were checked above, so an
-	// invalid replayed version fails as such and is never turned into a wait, and
-	// after the obsolete prune, so an entry the overlay already passed is pruned
-	// rather than left waiting forever. Nothing has been written yet.
-	if waiting, err := a.unmetRequirements(pkg, update); err != nil {
-		if !errors.Is(err, ErrRequirementsNotCaptured) {
-			result.Error = err
-			if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
-				result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
-			}
-			return result, result.Error
-		}
-		result.Waiting = []string{err.Error()}
-		return result, nil
-	} else if len(waiting) > 0 {
-		result.Waiting = waiting
-		return result, nil
-	}
-	// How deep this bump is validated, and on whose authority.
-	// Resolved HERE, before anything is staged, for two reasons: the report can
-	// then name the depth even for a bump whose tree was never built, and every
-	// gate below reads one decision rather than each re-deriving its own.
-	depth := a.depthFor(pkg, currentVersion, newVersion)
-	result.DepthRequested = depth.Depth.String()
-	result.DepthReason = depth.Reason
 
 	// From here to promotion nothing writes into the published overlay, and
 	// promotion is the last thing this function does. Everything in between is
@@ -1004,91 +885,209 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// correct while the candidate was written into the overlay first, and is wrong
 	// the moment the candidate lives in a staged tree, where the published path does
 	// not exist yet and the tree that does exist must be RETAINED, not removed.
-	var rollbackPublished publishedUndo
 	defer func() {
-		if result == nil || result.Error == nil || rollbackPublished == nil {
+		if result == nil || result.Error == nil || run.rollbackPublished == nil {
 			return
 		}
-		rollbackPublished(result.Error)
+		run.rollbackPublished(result.Error)
 	}()
 
-	// gates accumulates every outcome this run produces, and it is declared here
+	return run.execute(ctx)
+}
+
+// applyRun is the state one Apply call carries from phase to phase. Apply owns
+// the deferred cleanups; each phase method reads and fills these fields, so a
+// defer that reads one at return time sees the value the last phase left.
+//
+// A phase that may end the apply returns the pair Apply returns; a nil result
+// means the apply goes on to the next phase.
+type applyRun struct {
+	a       *Applier
+	pkg     string
+	compile bool
+	result  *ApplyResult
+
+	update         *PendingUpdate
+	currentVersion string
+	newVersion     string
+	depth          validate.DepthDecision
+
+	// rollbackPublished undoes what this apply placed in the published overlay;
+	// nil until something was placed (see Apply).
+	rollbackPublished publishedUndo
+
+	// gates accumulates every outcome this run produces. It lives on the run
 	// rather than where the first one is assigned so that the record written
-	// beside the staged tree (below) sees the WHOLE list however this
-	// function returns — including the failing exits, whose record is the one that
+	// beside the staged tree (see execute) sees the WHOLE list however Apply
+	// returns — including the failing exits, whose record is the one that
 	// stops the next run promoting a rejected bump.
-	var gates []validate.GateResult
+	gates []validate.GateResult
 
-	// What an earlier run already proved about this exact bump.
+	inputs          stagedInputs
+	retainedVerdict string
+	cand            candidatePaths
+}
+
+// preflight runs every check that precedes staging: the hold refusal, the
+// pending lookup, the target and current versions, the requirements and the
+// depth decision. Nothing has been written into the overlay on any path that
+// ends the apply here.
+func (r *applyRun) preflight() (*ApplyResult, error) {
+	if r.refuseHeld() {
+		return r.result, nil
+	}
+
+	// Get pending update
+	update, found := r.a.pending.Get(r.pkg)
+	if !found {
+		r.result.Error = ErrPackageNotInPending
+		return r.result, r.result.Error
+	}
+	r.update = update
+
+	r.result.OldVersion = update.CurrentVersion
+
+	if err := r.resolveTarget(); err != nil {
+		return r.a.failApply(r.pkg, r.result, err)
+	}
+	if done, err := r.resolveCurrent(); done != nil {
+		return done, err
+	}
+	if done, err := r.awaitRequirements(); done != nil {
+		return done, err
+	}
+
+	// How deep this bump is validated, and on whose authority.
+	// Resolved HERE, before anything is staged, for two reasons: the report can
+	// then name the depth even for a bump whose tree was never built, and every
+	// gate below reads one decision rather than each re-deriving its own.
+	r.depth = r.a.depthFor(r.pkg, r.currentVersion, r.newVersion)
+	r.result.DepthRequested = r.depth.Depth.String()
+	r.result.DepthReason = r.depth.Reason
+	return nil, nil
+}
+
+// refuseHeld reports whether the package is refused, recording why on result.
+func (r *applyRun) refuseHeld() bool {
+	// Refuse a held package before touching anything. hold = true is the
+	// maintainer's "present, but never auto-bump" decision, and until now it was
+	// enforced in the checker alone: CheckAll skips held packages, but an explicit
+	// `--check <pkg> --force` does not, and it writes the update to pending.json
+	// like any other. From there `--apply all` applied the very bump the hold
+	// existed to prevent. The guard belongs here because this is the only place
+	// every apply path passes through.
 	//
-	// Taken BEFORE anything is staged, for the reason staging itself makes
-	// unavoidable: validate.Stage replaces the retained tree, so a question
-	// asked after it is a question about a tree this run just rebuilt.
-	//
-	// retainedVerdict is what that question was ANSWERED with, kept in a variable
-	// rather than only on the result because the reviewer's re-decision below
-	// reassigns result.DepthReason wholesale. Without it the answer survives only
-	// on the promoting path — which returns before that line — and every REFUSAL
-	// this file computes ("its record shows configure FAILED", "no readable
-	// record", "produced by validate rather than by the applier") reaches the
-	// operator as an ordinary slow apply with no explanation attached. Each
-	// package states which of the two happened, and the half worth stating is
-	// the half where the retained tree was NOT used.
-	var (
-		inputs          stagedInputs
-		retainedVerdict string
-	)
-	if a.stagingRoot != "" {
-		captured, err := a.stagedInputsFor(pkg, currentVersion, update)
-		if err != nil {
-			return a.failApply(pkg, result, err)
-		}
-		inputs = captured
+	// enabled = false is refused here for the same reason: CheckAll skips a
+	// disabled entry, but an update already in pending.json — recorded before
+	// the disable, or by an explicit check — would otherwise still be applied.
+	reason := r.a.refusal(r.pkg)
+	if reason == "" {
+		return false
+	}
+	r.result.Held = true
+	r.result.HoldReason = reason
+	if update, found := r.a.pending.Get(r.pkg); found {
+		r.result.OldVersion = update.CurrentVersion
+		r.result.NewVersion = update.NewVersion
+	}
+	return true
+}
 
-		// One of the two answers is recorded on every staged apply, and
-		// the default is the honest one — the gates below run in this run unless
-		// the retained tree takes their place.
-		result.ValidationSource = ValidationSourceThisRun
+// resolveTarget validates the upstream values and sets the decorated target
+// version on the run and the result. A returned error is the apply's failure.
+func (r *applyRun) resolveTarget() error {
+	// Upstream version detection can carry a leading tag prefix (e.g. the git
+	// tag "v9.2.0588"). A Gentoo ebuild filename requires a bare PV, so strip
+	// the prefix before it reaches the filename and the manifest step; otherwise
+	// `pkgdev manifest` rejects it with "does not follow correct package syntax".
+	// Validate up front so a non-version (or a string still invalid after
+	// stripping) fails with a clear error instead of a cryptic portage one.
+	newVersion := parse.StripVersionPrefix(strings.TrimSpace(r.update.NewVersion))
+	if !ebuild.IsValidVersion(newVersion) {
+		return fmt.Errorf("%w: %q (from %q)", ErrInvalidNewVersion, newVersion, r.update.NewVersion)
+	}
+	// The aux value and the commit hash come from upstream, untrimmed and
+	// unrepaired here: the checker already trimmed them, so inner or trailing
+	// whitespace is refused. Gated before anything is staged or copied, so a
+	// refused package leaves its directory byte-identical.
+	if err := checkUpstreamValues(r.pkg, r.update); err != nil {
+		return err
+	}
+	// Attach the slot's pinned revision, when the entry declares one. Upstream
+	// yields a bare PV; for a slot discriminated by its revision suffix that PV
+	// names the WRONG slot's ebuild, so the whole apply — copy destination,
+	// manifest, compile, clean — has to run against the decorated version from
+	// here on. Validation stays on the bare upstream value above; the suffix is
+	// well-formed by construction.
+	r.newVersion = ebuilds.ApplyRevision(newVersion, r.a.configs[r.pkg].Revision)
+	r.result.NewVersion = r.newVersion
+	return nil
+}
 
-		reuse := a.reusableStagedTree(pkg, newVersion, inputs, depth.Depth)
-		if reuse.root != "" {
-			// Only when a tree was actually there. "Which of the two
-			// happened" is already on the result and in the summary line; what
-			// this adds is the WHY, and "there was no retained tree" explains
-			// nothing an operator did not know from the absence of one.
-			retainedVerdict = reuse.reason
-			result.DepthReason = appendDepthReason(result.DepthReason, retainedVerdict)
+// resolveCurrent re-resolves the current version against the live overlay. It
+// ends the apply on a failure or a pruned entry.
+func (r *applyRun) resolveCurrent() (*ApplyResult, error) {
+	// Re-resolve the current version against the live overlay rather than
+	// trusting update.CurrentVersion. That field is a snapshot from check-time
+	// and drifts: the overlay may have been bumped past it, or the package
+	// removed entirely. Blind trust produced a cryptic "source ebuild not found"
+	// when the recorded version's ebuild was already gone. Re-resolution
+	// self-heals a stale current_version and lets a genuinely obsolete entry be
+	// pruned with a clear outcome instead of a hard failure.
+	currentVersion, err := r.a.resolveCurrentVersion(r.pkg)
+	if err != nil {
+		// A slot that matches nothing is a config error, not an obsolete entry:
+		// the package is present, its key is wrong. Pruning would delete the
+		// pending record and report success-ish, hiding the typo. Fail loudly.
+		if errors.Is(err, ebuilds.ErrSlotNotFound) {
+			return r.a.failApply(r.pkg, r.result, err)
 		}
-		if reuse.err != nil {
-			// The retained tree matched this bump exactly and its distfile moved
-			// underneath it. Reported against the staged proof, because that is
-			// what the decision was taken on — nothing was validated here.
-			result.ValidationSource = ValidationSourceStaged
-			result.StagedPath = reuse.root
-			return a.failApply(pkg, result, reuse.err)
-		}
-		if reuse.promote {
-			// The hours were already spent. Nothing between here and the
-			// published write runs a gate, which is the entire economic argument
-			// — an operator who pays for `--check --llm` and then pays again for
-			// `--apply` stops running the check first.
-			result.ValidationSource = ValidationSourceStaged
-			result.StagedPath = reuse.root
-			result.DepthReached = reuse.reached
+		// Package no longer present in the overlay (removed/renamed). The pending
+		// entry is obsolete — prune it and report, not as a failure.
+		return r.a.pruneObsolete(r.pkg, r.result,
+			fmt.Errorf("%w: %s no longer in overlay (%w)", ErrObsoletePending, r.pkg, err))
+	}
+	r.currentVersion = currentVersion
+	r.result.OldVersion = currentVersion
 
-			promoted, err := a.promote(ctx, reuse.cand, pkg, newVersion)
-			if err != nil {
-				return a.failApply(pkg, result, err)
-			}
-			rollbackPublished = promoted
+	// Overlay already at or beyond the target: the update was already applied or
+	// has been superseded by a newer bump. A copy would be pointless (or a
+	// downgrade) — prune the stale entry instead.
+	if ebuild.CompareVersions(currentVersion, r.newVersion) >= 0 {
+		return r.a.pruneObsolete(r.pkg, r.result,
+			fmt.Errorf("%w: overlay already at %s (target %s)", ErrObsoletePending, currentVersion, r.newVersion))
+	}
+	return nil, nil
+}
 
-			result.Success = true
-			// Retention's other direction, exactly as on the validating path: the
-			// retained tree is a failure's evidence, and there is no failure here.
-			result.StagedPath = ""
-			a.completeApply(ctx, pkg, newVersion, result)
-			return result, nil
+// awaitRequirements gates the bump on its captured requirements. It ends the
+// apply on a failure or a bump left waiting.
+func (r *applyRun) awaitRequirements() (*ApplyResult, error) {
+	// Requirements are gated after the captured values were checked above, so an
+	// invalid replayed version fails as such and is never turned into a wait, and
+	// after the obsolete prune, so an entry the overlay already passed is pruned
+	// rather than left waiting forever. Nothing has been written yet.
+	waiting, err := r.a.unmetRequirements(r.pkg, r.update)
+	if err != nil {
+		if !errors.Is(err, ErrRequirementsNotCaptured) {
+			return r.a.failApply(r.pkg, r.result, err)
 		}
+		r.result.Waiting = []string{err.Error()}
+		return r.result, nil
+	}
+	if len(waiting) > 0 {
+		r.result.Waiting = waiting
+		return r.result, nil
+	}
+	return nil, nil
+}
+
+// execute stages the candidate, runs the manifest step and hands over to the
+// gates. It owns the two cleanups armed during staging, so they run before
+// Apply's own on every exit.
+func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
+	if done, err := r.reuseRetainedTree(ctx); done != nil {
+		return done, err
 	}
 
 	// Materialise the candidate where the gates will read it: in a staged tree
@@ -1097,17 +1096,8 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// Only the pre-staging branch arms the rollback, and it arms it with the one
 	// path it just wrote. The staged branch leaves it nil, because after it there
 	// is still nothing in the published overlay to take back.
-	var (
-		cand    candidatePaths
-		prepErr error
-	)
-	if a.stagingRoot == "" {
-		cand, rollbackPublished, prepErr = a.prepareInOverlay(pkg, currentVersion, newVersion, update)
-	} else {
-		cand, prepErr = a.prepareInStagingTree(pkg, currentVersion, newVersion, update, result)
-	}
-	if prepErr != nil {
-		return a.failApply(pkg, result, prepErr)
+	if prepErr := r.prepareCandidate(); prepErr != nil {
+		return r.a.failApply(r.pkg, r.result, prepErr)
 	}
 
 	// A record of what the gates said, beside the tree they said it about,
@@ -1118,8 +1108,10 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// failing one — an unrecorded failed tree would be promoted by the next run's
 	// reuse path on a match alone. The closure reads `gates` and `depth` at return time, so it
 	// records the final list and the depth a reviewer's escalation may have raised.
-	if stagedRoot := result.StagedPath; stagedRoot != "" {
-		defer func() { a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
+	if stagedRoot := r.result.StagedPath; stagedRoot != "" {
+		defer func() {
+			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth)
+		}()
 	}
 
 	// Run manifest command. When a fixer is wired, a failure here triggers a
@@ -1127,23 +1119,123 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// outcome (including whether a fix was applied) is recorded on result. On the
 	// staged path this is `pkgdev manifest` inside the staged tree against a
 	// private distdir, so no directory the host shares changes while it runs.
-	a.reporter.TaskStage(pkg, "manifest")
-	fetchedDistdir, manifestErr := a.runManifestWithFix(ctx, cand, pkg, newVersion, result)
+	r.a.reporter.TaskStage(r.pkg, "manifest")
+	fetchedDistdir, manifestErr := r.a.runManifestWithFix(ctx, r.cand, r.pkg, r.newVersion, r.result)
 	// Armed the instant the directory can exist, so every exit below — the six
 	// failing ones included — takes it back. A removal added after
 	// the fact is a removal one path will not have.
-	defer removeStagedDistdir(a.logger(), fetchedDistdir)
+	defer removeStagedDistdir(r.a.logger(), fetchedDistdir)
 	// And handed to the gates, which are its consumer. On a host
 	// that has never fetched this release, what this step just downloaded is the
 	// only copy of the candidate's archive in existence locally.
-	cand.fetchedDistdir = fetchedDistdir
+	r.cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
-		return a.failApply(pkg, result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
+		return r.a.failApply(r.pkg, r.result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
 	}
 	// pkgdev exiting 0 does not prove every SRC_URI file got a DIST line.
-	if err := a.checkManifestCoverage(ctx, cand.pkgDir, pkg, newVersion); err != nil {
-		return a.failApply(pkg, result, err)
+	if err := r.a.checkManifestCoverage(ctx, r.cand.pkgDir, r.pkg, r.newVersion); err != nil {
+		return r.a.failApply(r.pkg, r.result, err)
 	}
+
+	return r.gateAndPromote(ctx)
+}
+
+// reuseRetainedTree asks what an earlier run already proved about this exact
+// bump and, when the retained tree may be promoted as it stands, promotes it,
+// which ends the apply.
+//
+// Taken BEFORE anything is staged, for the reason staging itself makes
+// unavoidable: validate.Stage replaces the retained tree, so a question
+// asked after it is a question about a tree this run just rebuilt.
+//
+// retainedVerdict is what that question was ANSWERED with, kept on the run
+// rather than only on the result because the reviewer's re-decision
+// reassigns result.DepthReason wholesale. Without it the answer survives only
+// on the promoting path — which returns before that line — and every REFUSAL
+// this file computes ("its record shows configure FAILED", "no readable
+// record", "produced by validate rather than by the applier") reaches the
+// operator as an ordinary slow apply with no explanation attached. Each
+// package states which of the two happened, and the half worth stating is
+// the half where the retained tree was NOT used.
+func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) {
+	if r.a.stagingRoot == "" {
+		return nil, nil
+	}
+	captured, err := r.a.stagedInputsFor(r.pkg, r.currentVersion, r.update)
+	if err != nil {
+		return r.a.failApply(r.pkg, r.result, err)
+	}
+	r.inputs = captured
+
+	// One of the two answers is recorded on every staged apply, and
+	// the default is the honest one — the gates below run in this run unless
+	// the retained tree takes their place.
+	r.result.ValidationSource = ValidationSourceThisRun
+
+	reuse := r.a.reusableStagedTree(r.pkg, r.newVersion, r.inputs, r.depth.Depth)
+	if reuse.root != "" {
+		// Only when a tree was actually there. "Which of the two
+		// happened" is already on the result and in the summary line; what
+		// this adds is the WHY, and "there was no retained tree" explains
+		// nothing an operator did not know from the absence of one.
+		r.retainedVerdict = reuse.reason
+		r.result.DepthReason = appendDepthReason(r.result.DepthReason, r.retainedVerdict)
+	}
+	if reuse.err != nil {
+		// The retained tree matched this bump exactly and its distfile moved
+		// underneath it. Reported against the staged proof, because that is
+		// what the decision was taken on — nothing was validated here.
+		r.result.ValidationSource = ValidationSourceStaged
+		r.result.StagedPath = reuse.root
+		return r.a.failApply(r.pkg, r.result, reuse.err)
+	}
+	if !reuse.promote {
+		return nil, nil
+	}
+	return r.promoteRetained(ctx, reuse)
+}
+
+// promoteRetained publishes a retained tree that was already proved, with no
+// gate run in this run.
+func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*ApplyResult, error) {
+	// The hours were already spent. Nothing between here and the
+	// published write runs a gate, which is the entire economic argument
+	// — an operator who pays for `--check --llm` and then pays again for
+	// `--apply` stops running the check first.
+	r.result.ValidationSource = ValidationSourceStaged
+	r.result.StagedPath = reuse.root
+	r.result.DepthReached = reuse.reached
+
+	promoted, err := r.a.promote(ctx, reuse.cand, r.pkg, r.newVersion)
+	if err != nil {
+		return r.a.failApply(r.pkg, r.result, err)
+	}
+	r.rollbackPublished = promoted
+
+	r.result.Success = true
+	// Retention's other direction, exactly as on the validating path: the
+	// retained tree is a failure's evidence, and there is no failure here.
+	r.result.StagedPath = ""
+	r.a.completeApply(ctx, r.pkg, r.newVersion, r.result)
+	return r.result, nil
+}
+
+// prepareCandidate materialises the candidate in the published overlay or in a
+// staged tree; only the overlay route arms rollbackPublished.
+func (r *applyRun) prepareCandidate() error {
+	var prepErr error
+	if r.a.stagingRoot == "" {
+		r.cand, r.rollbackPublished, prepErr = r.a.prepareInOverlay(r.pkg, r.currentVersion, r.newVersion, r.update)
+	} else {
+		r.cand, prepErr = r.a.prepareInStagingTree(r.pkg, r.currentVersion, r.newVersion, r.update, r.result)
+	}
+	return prepErr
+}
+
+// gateAndPromote runs the gates on the prepared candidate and, when every gate
+// allows it, publishes it and completes the apply.
+func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
+	a, pkg, result := r.a, r.pkg, r.result
 
 	// The static gates — the Meson option gate and the advisory QA scan, reused
 	// verbatim. They read files that already exist, so they cost no build and can
@@ -1151,7 +1243,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// the slot: a gate added ABOVE that line instead of below it would silently
 	// undo the move below, and the state's meaning — "passed the static gates" —
 	// would quietly go back to "the manifest ran".
-	gates = a.runStaticGates(ctx, cand, pkg, newVersion)
+	r.gates = a.runStaticGates(ctx, r.cand, pkg, r.newVersion)
 
 	// Update status to validated.
 	//
@@ -1169,91 +1261,38 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// The optional bump reviewer, after the static gates and before anything
 	// is built — it reads a diff and may only ask for MORE gates, never fewer.
 	// A run with no reviewer wired passes the policy depth straight through.
-	depth = a.reviewBump(ctx, cand, pkg, currentVersion, newVersion, depth, &gates)
-	result.DepthRequested = depth.Depth.String()
+	r.depth = a.reviewBump(ctx, r.cand, pkg, r.currentVersion, r.newVersion, r.depth, &r.gates)
+	result.DepthRequested = r.depth.Depth.String()
 	// The reviewer may have raised the depth, so its reason REPLACES the policy's
 	// — but the retained tree's verdict answers a different question and is put
 	// back beside it. Assigning depth.Reason alone here is what used to drop it.
-	result.DepthReason = appendDepthReason(depth.Reason, retainedVerdict)
+	result.DepthReason = appendDepthReason(r.depth.Reason, r.retainedVerdict)
 
-	// The build gates, at the depth selected above. They are the
-	// generalisation of the compile gate below, so the two never both run: with
-	// --compile the shipped gate keeps its prompt, its privilege and its repair
-	// path, and running the depth gates beside it would build the same tree twice.
-	if !compile {
-		a.reporter.TaskStage(pkg, "build gates")
-		buildGates, buildErr := a.runBuildGates(ctx, cand, pkg, newVersion, depth.Depth, result)
-		gates = append(gates, buildGates...)
-		if buildErr != nil {
-			a.recordDepthReached(result, gates, depth.Depth)
-			return a.failApply(pkg, result, buildErr)
-		}
-	}
-
-	// Run compile test if requested. It runs against cand's repository, which on
-	// the staged path is the staged tree: a gate that built out of the published
-	// overlay would be reading a candidate that is not there yet.
-	if compile {
-		a.reporter.TaskStage(pkg, "compile")
-		logPath, err := a.runCompile(ctx, cand, pkg, newVersion, result)
-		if err != nil {
-			result.LogPath = logPath
-			a.recordDepthReached(result, gates, depth.Depth)
-			return a.failApply(pkg, result, err)
-		}
-		gates = append(gates, a.compileGateResult(cand, pkg, newVersion, result)...)
+	if err := r.runDepthGates(ctx); err != nil {
+		return a.failApply(pkg, result, err)
 	}
 
 	// The outcome states its own reach, and says why it stops
 	// where it does, whether or not this apply is about to succeed.
-	a.recordDepthReached(result, gates, depth.Depth)
+	a.recordDepthReached(result, r.gates, r.depth.Depth)
 
-	// A host that asked for proof does not get a publish built on skips.
-	// It is deliberately NOT folded into PromotionDecision: that function's rule
-	// is "PASS or SKIPPED promotes", and this is the operator subtracting
-	// from it, which is a different authority and belongs where it can be seen.
-	// The same invariant, said early so the operator reads the interruption
-	// instead of refuseUnproved's "proof at depth X is required" — true, but it
-	// blames configuration for a Ctrl-C. promote() enforces it regardless.
-	if err := a.refuseOnInterrupt(ctx, pkg, newVersion); err != nil {
+	if err := r.promotionRefusal(ctx); err != nil {
 		return a.failApply(pkg, result, err)
-	}
-
-	if err := a.refuseUnproved(gates, pkg, newVersion, depth.Depth); err != nil {
-		return a.failApply(pkg, result, err)
-	}
-
-	// The candidate may be published only once every gate up to the selected
-	// depth has reported PASS or SKIPPED. The rule lives in one pure function so it
-	// is asserted directly rather than only through a real promotion, and so that a
-	// gate added above cannot reach the overlay without passing through it.
-	//
-	// The staging error is nil by construction: a tree that could not be prepared
-	// already withdrew the bump in prepareInStagingTree, so a promotion
-	// decision is only ever reached WHERE a staged tree exists.
-	//
-	// The refusal is enriched with the failing gates' own error findings before it
-	// leaves here (refusalWithFindings): PromotionDecision names the gate, and an
-	// apply's only channel to the operator is this one error — "the options gate
-	// reported FAILED" without the option it found would send them off to diff two
-	// tarballs by hand, which is the work these gates replace.
-	if ok, reason := validate.PromotionDecision(gates, nil); !ok {
-		return a.failApply(pkg, result, refusalWithFindings(reason, gates))
 	}
 
 	// The published overlay's first and only write of this apply. On the
 	// pre-staging path there is nothing to promote: copyEbuild already put the
 	// candidate there and `pkgdev manifest` already regenerated the Manifest in
 	// place.
-	if cand.staged {
-		promoted, err := a.promote(ctx, cand, pkg, newVersion)
+	if r.cand.staged {
+		promoted, err := a.promote(ctx, r.cand, pkg, r.newVersion)
 		if err != nil {
 			return a.failApply(pkg, result, err)
 		}
 		// Armed only now: from this point a failure DOES have something published
 		// to take back, and promotion's own rollback is what knows the difference
 		// between the ebuild (remove it) and the Manifest (restore it).
-		rollbackPublished = promoted
+		r.rollbackPublished = promoted
 	}
 
 	result.Success = true
@@ -1272,8 +1311,79 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// what is left is one directory per version, not a growing pile per run.
 	result.StagedPath = ""
 
-	a.completeApply(ctx, pkg, newVersion, result)
+	a.completeApply(ctx, pkg, r.newVersion, result)
 	return result, nil
+}
+
+// runDepthGates runs the build gates at the selected depth, or the compile
+// gate when --compile was asked for. A returned error is the apply's failure;
+// the reach is already recorded on result when it is returned.
+func (r *applyRun) runDepthGates(ctx context.Context) error {
+	// The build gates, at the depth selected above. They are the
+	// generalisation of the compile gate below, so the two never both run: with
+	// --compile the shipped gate keeps its prompt, its privilege and its repair
+	// path, and running the depth gates beside it would build the same tree twice.
+	if !r.compile {
+		r.a.reporter.TaskStage(r.pkg, "build gates")
+		buildGates, buildErr := r.a.runBuildGates(ctx, r.cand, r.pkg, r.newVersion, r.depth.Depth, r.result)
+		r.gates = append(r.gates, buildGates...)
+		if buildErr != nil {
+			r.a.recordDepthReached(r.result, r.gates, r.depth.Depth)
+			return buildErr
+		}
+		return nil
+	}
+
+	// Run compile test if requested. It runs against cand's repository, which on
+	// the staged path is the staged tree: a gate that built out of the published
+	// overlay would be reading a candidate that is not there yet.
+	r.a.reporter.TaskStage(r.pkg, "compile")
+	logPath, err := r.a.runCompile(ctx, r.cand, r.pkg, r.newVersion, r.result)
+	if err != nil {
+		r.result.LogPath = logPath
+		r.a.recordDepthReached(r.result, r.gates, r.depth.Depth)
+		return err
+	}
+	r.gates = append(r.gates, r.a.compileGateResult(r.cand, r.pkg, r.newVersion, r.result)...)
+	return nil
+}
+
+// promotionRefusal returns the first reason the candidate may not be
+// published, or nil when every rule allows it.
+func (r *applyRun) promotionRefusal(ctx context.Context) error {
+	// A host that asked for proof does not get a publish built on skips.
+	// It is deliberately NOT folded into PromotionDecision: that function's rule
+	// is "PASS or SKIPPED promotes", and this is the operator subtracting
+	// from it, which is a different authority and belongs where it can be seen.
+	// The same invariant, said early so the operator reads the interruption
+	// instead of refuseUnproved's "proof at depth X is required" — true, but it
+	// blames configuration for a Ctrl-C. promote() enforces it regardless.
+	if err := r.a.refuseOnInterrupt(ctx, r.pkg, r.newVersion); err != nil {
+		return err
+	}
+
+	if err := r.a.refuseUnproved(r.gates, r.pkg, r.newVersion, r.depth.Depth); err != nil {
+		return err
+	}
+
+	// The candidate may be published only once every gate up to the selected
+	// depth has reported PASS or SKIPPED. The rule lives in one pure function so it
+	// is asserted directly rather than only through a real promotion, and so that a
+	// gate added above cannot reach the overlay without passing through it.
+	//
+	// The staging error is nil by construction: a tree that could not be prepared
+	// already withdrew the bump in prepareInStagingTree, so a promotion
+	// decision is only ever reached WHERE a staged tree exists.
+	//
+	// The refusal is enriched with the failing gates' own error findings before it
+	// leaves here (refusalWithFindings): PromotionDecision names the gate, and an
+	// apply's only channel to the operator is this one error — "the options gate
+	// reported FAILED" without the option it found would send them off to diff two
+	// tarballs by hand, which is the work these gates replace.
+	if ok, reason := validate.PromotionDecision(r.gates, nil); !ok {
+		return refusalWithFindings(reason, r.gates)
+	}
+	return nil
 }
 
 // completeApply is the bookkeeping every promoted bump gets once the published
