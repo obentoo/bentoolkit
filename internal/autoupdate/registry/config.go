@@ -18,6 +18,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/jsonpath"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
@@ -1270,6 +1271,9 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if err := validateParserFields(pkg, cfg); err != nil {
 		return err
 	}
+	if err := validateJSONPaths(pkg, cfg); err != nil {
+		return err
+	}
 	if err := validateEnumFields(pkg, cfg); err != nil {
 		return err
 	}
@@ -1387,6 +1391,57 @@ func validateParserFields(pkg string, cfg *PackageConfig) error {
 		return fmt.Errorf("package %s: %w: got %q", pkg, ErrInvalidParserType, cfg.Parser)
 	}
 	return nil
+}
+
+// validateJSONPaths checks the syntax of every JSON path the record sets, so a
+// malformed one is refused when the registry loads instead of failing the
+// fetch that would navigate it. Each field is checked only where a fetch reads
+// it as a JSON path: path for a json primary or fallback parser, commit_sha_path
+// for a json record (validateTrackFields refuses it on any other parser, and
+// keeps that error first), versions_path whatever the parser.
+func validateJSONPaths(pkg string, cfg *PackageConfig) error {
+	versionPath, commitSHAPath := "", ""
+	if cfg.Parser == "json" || cfg.FallbackParser == "json" {
+		versionPath = cfg.Path
+	}
+	if cfg.Parser == "json" {
+		commitSHAPath = cfg.CommitSHAPath
+	}
+	// select = "max" or "last" reads path as a list, where a leading "[*]" is
+	// the wildcard the version-history extractor understands.
+	pathCheck := parseJSONPath
+	if cfg.Select == "max" || cfg.Select == "last" {
+		pathCheck = parseVersionsPath
+	}
+	fields := []struct {
+		name, path string
+		check      func(string) error
+	}{
+		{"path", versionPath, pathCheck},
+		{"commit_sha_path", commitSHAPath, parseJSONPath},
+		{"versions_path", cfg.VersionsPath, parseVersionsPath},
+	}
+	for _, f := range fields {
+		if f.path == "" {
+			continue
+		}
+		if err := f.check(f.path); err != nil {
+			return fmt.Errorf("package %s: %s %q: %w", pkg, f.name, f.path, err)
+		}
+	}
+	return nil
+}
+
+func parseJSONPath(path string) error {
+	_, err := jsonpath.Parse(path)
+	return err
+}
+
+// parseVersionsPath checks a versions_path with the same wildcard rule the
+// version-history extractor applies.
+func parseVersionsPath(path string) error {
+	_, _, err := jsonpath.CutWildcard(path)
+	return err
 }
 
 // validateEnumFields checks the closed-vocabulary fields select and type, and
@@ -1679,11 +1734,11 @@ func validateAuxURL(pkg string, cfg *PackageConfig) error {
 	if cfg.AuxPattern == "" {
 		return fmt.Errorf("package %s: aux_url requires aux_var and aux_pattern", pkg)
 	}
-	switch fetch.URLTemplateFault(cfg.AuxURL) {
-	case fetch.TemplateNotHTTP:
+	// Only TemplateNotHTTP can come back here: url.Parse refuses a brace in the
+	// scheme, userinfo, host or port, so a template that parses with a host
+	// never carries a placeholder there.
+	if fetch.URLTemplateFault(cfg.AuxURL) == fetch.TemplateNotHTTP {
 		return fmt.Errorf("package %s: aux_url %q is not an absolute http(s) URL with a host", pkg, cfg.AuxURL)
-	case fetch.TemplatePlaceholderInHost:
-		return fmt.Errorf("package %s: aux_url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, cfg.AuxURL)
 	}
 	return nil
 }
@@ -1691,16 +1746,45 @@ func validateAuxURL(pkg string, cfg *PackageConfig) error {
 // validateMirrors checks that every mirror is an absolute http(s) URL other
 // than the entry's own url.
 func validateMirrors(pkg string, cfg *PackageConfig) error {
+	primary := normalizeMirrorURL(cfg.URL)
+	seen := make(map[string]string, len(cfg.Mirrors))
 	for _, m := range cfg.Mirrors {
 		u, err := url.Parse(m)
 		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			return fmt.Errorf("package %s: mirror %q is not an absolute http(s) URL", pkg, m)
 		}
-		if m == cfg.URL {
+		key := normalizeMirrorURL(m)
+		if key == primary {
 			return fmt.Errorf("package %s: mirror %q repeats url", pkg, m)
 		}
+		if earlier, ok := seen[key]; ok {
+			return fmt.Errorf("package %s: mirror %q repeats mirror %q", pkg, m, earlier)
+		}
+		seen[key] = m
 	}
 	return nil
+}
+
+// normalizeMirrorURL is the form two mirror URLs are compared in: scheme and
+// host lower-cased, and one trailing '/' of the path dropped. The rest of the
+// path, the query and the fragment keep their case, since a server may tell
+// them apart. A string url.Parse refuses is compared as written.
+func normalizeMirrorURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	// Trim the escaped form, so an encoded "%2F" stays data and is never
+	// taken for the trailing separator.
+	escaped := strings.TrimSuffix(u.EscapedPath(), "/")
+	path, err := url.PathUnescape(escaped)
+	if err != nil {
+		return raw
+	}
+	u.Path, u.RawPath = path, escaped
+	return u.String()
 }
 
 // validateFallback checks the fallback configuration if present.

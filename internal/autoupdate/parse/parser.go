@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"regexp"
 	"strconv"
-	"strings"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/jsonpath"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
@@ -19,8 +19,9 @@ var (
 	ErrRegexNoMatch = errors.New("regex pattern did not match")
 	// ErrNoVersionFound is returned when no version could be extracted from upstream
 	ErrNoVersionFound = errors.New("could not extract version from upstream")
-	// ErrInvalidJSONPath is returned when the JSON path syntax is invalid
-	ErrInvalidJSONPath = errors.New("invalid JSON path syntax")
+	// ErrInvalidJSONPath is returned when the JSON path syntax is invalid. It
+	// is the jsonpath package's sentinel, so errors.Is matches either name.
+	ErrInvalidJSONPath = jsonpath.ErrInvalidJSONPath
 	// ErrInvalidRegexPattern is returned when the regex pattern is invalid
 	ErrInvalidRegexPattern = errors.New("invalid regex pattern")
 	// ErrNoCaptureGroup is returned when the regex pattern has no capture group
@@ -78,7 +79,7 @@ func NavigateJSONPath(data interface{}, path string) (interface{}, error) {
 	}
 
 	// Parse path segments
-	segments, err := parseJSONPath(path)
+	segments, err := parsePathSegments(path)
 	if err != nil {
 		return nil, err
 	}
@@ -127,92 +128,23 @@ type pathSegment struct {
 	index   int    // array index for segmentIndex
 }
 
-// parseJSONPath parses a JSON path string into segments.
-// Examples: "version", "notes[0].version", "data.releases[0].tag", "[0].tag_name"
-func parseJSONPath(path string) ([]pathSegment, error) {
-	var segments []pathSegment
-	remaining := path
-
-	for remaining != "" {
-		// Skip leading dot
-		remaining = strings.TrimPrefix(remaining, ".")
-
-		if remaining == "" {
-			break
-		}
-
-		var err error
-
-		// Check for array index at start (valid for paths like "[0].tag_name")
-		if remaining[0] == '[' {
-			segments, remaining, err = appendIndexSegments(segments, remaining)
-			if err != nil {
-				return nil, err
-			}
-			continue
-		}
-
-		// Find field name (until dot, bracket, or end)
-		fieldEnd := fieldNameEnd(remaining)
-
-		if fieldEnd > 0 {
-			fieldName := remaining[:fieldEnd]
-			if fieldName == "" {
-				return nil, fmt.Errorf("%w: empty field name", ErrInvalidJSONPath)
-			}
-			segments = append(segments, pathSegment{segType: segmentField, value: fieldName})
-			remaining = remaining[fieldEnd:]
-		}
-
-		// Check for array index
-		segments, remaining, err = appendIndexSegments(segments, remaining)
-		if err != nil {
-			return nil, err
+// parsePathSegments parses path with the shared JSON path grammar and maps
+// its segments onto the navigator's own segment type.
+func parsePathSegments(path string) ([]pathSegment, error) {
+	parsed, err := jsonpath.Parse(path)
+	if err != nil {
+		return nil, err
+	}
+	segments := make([]pathSegment, 0, len(parsed))
+	for _, seg := range parsed {
+		switch seg.Kind {
+		case jsonpath.KindField:
+			segments = append(segments, pathSegment{segType: segmentField, value: seg.Field})
+		case jsonpath.KindIndex:
+			segments = append(segments, pathSegment{segType: segmentIndex, index: seg.Index})
 		}
 	}
-
-	if len(segments) == 0 {
-		return nil, fmt.Errorf("%w: empty path", ErrInvalidJSONPath)
-	}
-
 	return segments, nil
-}
-
-// fieldNameEnd returns the offset of the first '.' or '[' in remaining, or
-// len(remaining) when there is none.
-func fieldNameEnd(remaining string) int {
-	for i, c := range remaining {
-		if c == '.' || c == '[' {
-			return i
-		}
-	}
-	return len(remaining)
-}
-
-// appendIndexSegments consumes every leading "[N]" of remaining, appending one
-// index segment per bracket, and returns the extended segments and the rest of
-// the path.
-func appendIndexSegments(segments []pathSegment, remaining string) ([]pathSegment, string, error) {
-	for strings.HasPrefix(remaining, "[") {
-		// Find closing bracket
-		closeBracket := strings.Index(remaining, "]")
-		if closeBracket == -1 {
-			return nil, "", fmt.Errorf("%w: unclosed bracket", ErrInvalidJSONPath)
-		}
-
-		indexStr := remaining[1:closeBracket]
-		index, err := strconv.Atoi(indexStr)
-		if err != nil {
-			return nil, "", fmt.Errorf("%w: invalid array index %q", ErrInvalidJSONPath, indexStr)
-		}
-		if index < 0 {
-			return nil, "", fmt.Errorf("%w: negative array index", ErrInvalidJSONPath)
-		}
-
-		segments = append(segments, pathSegment{segType: segmentIndex, index: index})
-		remaining = remaining[closeBracket+1:]
-	}
-	return segments, remaining, nil
 }
 
 // toString converts an interface{} to a string if possible

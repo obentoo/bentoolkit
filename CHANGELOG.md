@@ -27,6 +27,21 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   that same lock forever. The package is now reported as failed ("check
   returned no result") and the remaining packages are still checked.
 
+- **A malformed JSON path in `packages.toml` is refused when the registry
+  loads.** `path`, `commit_sha_path` and `versions_path` used to accept
+  `a..b`, `a[0]b`, `a[+1]` or a stray `]` and then read something other than
+  what was written (`a..b` read as `a.b`). They now follow one grammar, shared
+  by the loader, `overlay autoupdate --lint` and the fetch itself, and the error
+  names the package, the field and the quoted path. No record of the bentoo
+  overlay is affected.
+
+- **`overlay autoupdate --lint` reads what the registry says.** A
+  `track = "commit"` with a trailing comment, or with `base_from = ""`, now gets
+  the legacy-base finding; a `type` followed by a comment is read; a
+  non-boolean `binary` is named as such instead of "it says nothing"; and a
+  mirror that repeats `url` or another mirror up to host case or a trailing `/`
+  is refused at load.
+
 ## [0.34.0] - 2026-10-09
 
 ### Added

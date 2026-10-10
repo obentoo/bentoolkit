@@ -629,7 +629,9 @@ func collectRecordFieldFacts(fields []recordField) recordFieldFacts {
 			facts.hasType = true
 			facts.typeValue = tomlStringValue(f.value)
 		case "base_from":
-			facts.hasBaseFrom = true
+			// An empty string declares nothing, so it does not silence the
+			// legacy-base rule the way a real source does.
+			facts.hasBaseFrom = !isEmptyTOMLString(f.value)
 		case "track":
 			if tomlStringValue(f.value) == "commit" {
 				facts.trackCommitLine = f.line
@@ -686,6 +688,12 @@ func lintBinaryField(pkg string, f recordField, facts recordFieldFacts) (LintIss
 			Line: f.line, Package: pkg, Rule: LintLegacyBinary, Fix: FixBinaryToType,
 			Message: `binary is retired: the record declares no type, so it becomes type = "bin"`,
 		}, true
+	}
+	if _, isBool := tomlBoolValue(f.value); !isBool {
+		return LintIssue{
+			Line: f.line, Package: pkg, Rule: LintLegacyBinary, Fix: FixDropBinary,
+			Message: fmt.Sprintf("binary is retired, and %s is not a boolean, so the line is deleted", tomlValueText(f.value)),
+		}, false
 	}
 	detail := "the record already declares type"
 	if facts.typeValue != "" {
@@ -750,20 +758,53 @@ func tomlBoolValue(raw string) (value, ok bool) {
 	return false, false
 }
 
+// isEmptyTOMLString reports whether an assignment's right-hand side is the
+// empty basic or literal string ("" or ”), optionally followed by an inline
+// comment. A multi-line string ("""…""") is not empty, whatever it holds.
+func isEmptyTOMLString(raw string) bool {
+	v := strings.TrimSpace(raw)
+	if !strings.HasPrefix(v, `""`) && !strings.HasPrefix(v, "''") {
+		return false
+	}
+	tail := strings.TrimSpace(v[2:])
+	return tail == "" || tail[0] == '#'
+}
+
+// tomlValueText is an assignment's right-hand side as a finding quotes it: a
+// basic or literal string with its quotes, else the first token, so a
+// trailing inline comment is not read as part of the value.
+func tomlValueText(raw string) string {
+	v := strings.TrimSpace(raw)
+	if v != "" && (v[0] == '"' || v[0] == '\'') {
+		if end := strings.IndexByte(v[1:], v[0]); end >= 0 {
+			return v[:end+2]
+		}
+		return v
+	}
+	if fields := strings.Fields(v); len(fields) > 0 {
+		return fields[0]
+	}
+	return v
+}
+
 // tomlStringValue unquotes the right-hand side of an assignment when it is a
-// single-line basic ("…") or literal ('…') string, and returns "" otherwise. It
-// is deliberately minimal: the only values read through it are the closed
-// vocabularies of `track` and `type`, which never carry an escape.
+// single-line basic ("…") or literal ('…') string, optionally followed by an
+// inline comment (`track = "commit" # pinned`), and returns "" otherwise. It is
+// deliberately minimal: the only values read through it are the closed
+// vocabularies of `track`, `type` and `base_from`, which never carry an escape.
 func tomlStringValue(raw string) string {
 	v := strings.TrimSpace(raw)
-	if len(v) < 2 {
+	if len(v) < 2 || (v[0] != '"' && v[0] != '\'') {
 		return ""
 	}
-	q := v[0]
-	if (q != '"' && q != '\'') || v[len(v)-1] != q {
+	end := strings.IndexByte(v[1:], v[0])
+	if end < 0 {
 		return ""
 	}
-	return v[1 : len(v)-1]
+	if tail := strings.TrimSpace(v[end+2:]); tail != "" && tail[0] != '#' {
+		return ""
+	}
+	return v[1 : end+1]
 }
 
 // sortedKeys returns the map's keys in ascending order, so lint output is
