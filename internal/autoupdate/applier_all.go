@@ -111,8 +111,30 @@ func (a *Applier) applyWave(ctx context.Context, updates []PendingUpdate, wave [
 // requirement gate refuses whatever is still unmet.
 func applyWaves(updates []PendingUpdate, pins func(pkg, atom string) string) [][]int {
 	n := len(updates)
-	dependents := make([][]int, n)
-	indegree := make([]int, n)
+	dependents, indegree := waveGraph(updates, pins)
+
+	done := make([]bool, n)
+	var waves [][]int
+	for remaining := n; remaining > 0; {
+		wave := nextWave(done, indegree)
+		for _, i := range wave {
+			done[i] = true
+			for _, d := range dependents[i] {
+				indegree[d]--
+			}
+		}
+		remaining -= len(wave)
+		waves = append(waves, wave)
+	}
+	return waves
+}
+
+// waveGraph returns, for each entry of updates, the entries that depend on it
+// and the number of entries it depends on, under applyWaves' edge rule.
+func waveGraph(updates []PendingUpdate, pins func(pkg, atom string) string) (dependents [][]int, indegree []int) {
+	n := len(updates)
+	dependents = make([][]int, n)
+	indegree = make([]int, n)
 	for b, ub := range updates {
 		for atom, want := range ub.Requires {
 			pin := pins(ub.Package, atom)
@@ -127,31 +149,25 @@ func applyWaves(updates []PendingUpdate, pins func(pkg, atom string) string) [][
 			}
 		}
 	}
+	return dependents, indegree
+}
 
-	done := make([]bool, n)
-	var waves [][]int
-	for remaining := n; remaining > 0; {
-		var wave []int
-		for i := range updates {
-			if !done[i] && indegree[i] == 0 {
+// nextWave returns, in input order, every entry not yet done whose
+// dependencies are all done — or, when a cycle leaves none, every entry not
+// yet done.
+func nextWave(done []bool, indegree []int) []int {
+	var wave []int
+	for i := range done {
+		if !done[i] && indegree[i] == 0 {
+			wave = append(wave, i)
+		}
+	}
+	if len(wave) == 0 { // a cycle: everything left runs last, together
+		for i := range done {
+			if !done[i] {
 				wave = append(wave, i)
 			}
 		}
-		if len(wave) == 0 { // a cycle: everything left runs last, together
-			for i := range updates {
-				if !done[i] {
-					wave = append(wave, i)
-				}
-			}
-		}
-		for _, i := range wave {
-			done[i] = true
-			for _, d := range dependents[i] {
-				indegree[d]--
-			}
-		}
-		remaining -= len(wave)
-		waves = append(waves, wave)
 	}
-	return waves
+	return wave
 }

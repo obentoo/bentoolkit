@@ -601,79 +601,11 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		}
 	}
 
-	// Load packages configuration if not provided
-	if checker.config == nil {
-		config, err := registry.LoadPackagesConfig(overlayPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load packages config: %w", err)
-		}
-		checker.config = config
+	if err := checker.initState(overlayPath); err != nil {
+		return nil, err
 	}
-
-	// Initialize cache if not provided. When WithCacheTTL set cacheTTL to a
-	// positive value, thread it through to the underlying Cache via WithTTL so
-	// the user-configured `autoupdate.cache_ttl` is honoured. When the
-	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
-	if checker.cache == nil {
-		cacheOpts := []fetch.CacheOption{}
-		if checker.cacheTTL > 0 {
-			cacheOpts = append(cacheOpts, fetch.WithTTL(checker.cacheTTL))
-		}
-		cache, err := fetch.NewCache(checker.configDir, cacheOpts...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize cache: %w", err)
-		}
-		checker.cache = cache
-	}
-
-	// Initialize pending list if not provided
-	if checker.pending == nil {
-		pending, err := NewPendingList(checker.configDir)
-		if err != nil {
-			return nil, fmt.Errorf("failed to initialize pending list: %w", err)
-		}
-		checker.pending = pending
-	}
-
-	// Initialize HTTP client if not provided
-	if checker.httpClient == nil {
-		checker.httpClient = fetch.NewRetryableHTTPClient()
-	}
-	// The client reports through the checker's logger — an injected client
-	// too, since there is one logger per invocation. Without WithLogger the
-	// client keeps its own logger, and a client the checker built discards.
-	if checker.log != nil {
-		checker.httpClient.SetLogger(checker.log)
-	}
-	checker.log = logging.OrDiscard(checker.log)
-
-	// Apply the configured per-request HTTP timeout to the client and size the
-	// per-operation budget from it. Without this, the default per-request timeout
-	// and the per-operation budget are equal, so the first slow request consumes
-	// the whole budget and the retry attempts never run (they fail with "context
-	// deadline exceeded"). Deriving a larger budget gives the retries room to run.
-	if checker.httpReqTimeout > 0 {
-		checker.httpClient.SetRequestTimeout(checker.httpReqTimeout)
-		if !checker.opTimeoutExplicit {
-			checker.opTimeout = deriveOpTimeout(checker.httpReqTimeout, checker.httpClient.Config())
-		}
-	}
-
-	// Authenticate api.github.com requests. Anonymous GitHub API access is capped
-	// at 60 req/h per IP, which the batch checker exhausts quickly; the server
-	// then answers HTTP 403. The token is resolved from GITHUB_TOKEN/GH_TOKEN via
-	// the secrets chain (github.ResolveToken, the single source of truth); a
-	// resolution error warns and continues with unauthenticated access. An
-	// injected client that already carries a token is left untouched.
-	if checker.httpClient.GetGitHubToken() == "" {
-		token, err := github.ResolveToken()
-		if err != nil {
-			checker.log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
-		}
-		if token != "" {
-			checker.httpClient.SetGitHubToken(token)
-		}
-	}
+	checker.initHTTPClient()
+	checker.resolveGitHubToken()
 
 	// Initialize the HTTP rate limiter if not injected. A Checker must never
 	// have a nil rateLimiter: fetchContent unconditionally waits on it.
@@ -681,6 +613,99 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 		checker.rateLimiter = fetch.NewRateLimiter()
 	}
 
+	checker.warnUnusedLLMPrompts()
+
+	return checker, nil
+}
+
+// initState loads every collaborator an option did not inject, in order:
+// the packages configuration, the fetch cache and the pending list.
+func (c *Checker) initState(overlayPath string) error {
+	// Load packages configuration if not provided
+	if c.config == nil {
+		config, err := registry.LoadPackagesConfig(overlayPath)
+		if err != nil {
+			return fmt.Errorf("failed to load packages config: %w", err)
+		}
+		c.config = config
+	}
+
+	// Initialize cache if not provided. When WithCacheTTL set cacheTTL to a
+	// positive value, thread it through to the underlying Cache via WithTTL so
+	// the user-configured `autoupdate.cache_ttl` is honoured. When the
+	// option was not supplied (cacheTTL == 0), keep the default 1-hour TTL.
+	if c.cache == nil {
+		cacheOpts := []fetch.CacheOption{}
+		if c.cacheTTL > 0 {
+			cacheOpts = append(cacheOpts, fetch.WithTTL(c.cacheTTL))
+		}
+		cache, err := fetch.NewCache(c.configDir, cacheOpts...)
+		if err != nil {
+			return fmt.Errorf("failed to initialize cache: %w", err)
+		}
+		c.cache = cache
+	}
+
+	// Initialize pending list if not provided
+	if c.pending == nil {
+		pending, err := NewPendingList(c.configDir)
+		if err != nil {
+			return fmt.Errorf("failed to initialize pending list: %w", err)
+		}
+		c.pending = pending
+	}
+	return nil
+}
+
+// initHTTPClient builds the HTTP client when none was injected, wires the
+// logger into it and applies the per-request timeout.
+func (c *Checker) initHTTPClient() {
+	// Initialize HTTP client if not provided
+	if c.httpClient == nil {
+		c.httpClient = fetch.NewRetryableHTTPClient()
+	}
+	// The client reports through the checker's logger — an injected client
+	// too, since there is one logger per invocation. Without WithLogger the
+	// client keeps its own logger, and a client the checker built discards.
+	if c.log != nil {
+		c.httpClient.SetLogger(c.log)
+	}
+	c.log = logging.OrDiscard(c.log)
+
+	// Apply the configured per-request HTTP timeout to the client and size the
+	// per-operation budget from it. Without this, the default per-request timeout
+	// and the per-operation budget are equal, so the first slow request consumes
+	// the whole budget and the retry attempts never run (they fail with "context
+	// deadline exceeded"). Deriving a larger budget gives the retries room to run.
+	if c.httpReqTimeout > 0 {
+		c.httpClient.SetRequestTimeout(c.httpReqTimeout)
+		if !c.opTimeoutExplicit {
+			c.opTimeout = deriveOpTimeout(c.httpReqTimeout, c.httpClient.Config())
+		}
+	}
+}
+
+// resolveGitHubToken authenticates the HTTP client for api.github.com.
+func (c *Checker) resolveGitHubToken() {
+	// Authenticate api.github.com requests. Anonymous GitHub API access is capped
+	// at 60 req/h per IP, which the batch checker exhausts quickly; the server
+	// then answers HTTP 403. The token is resolved from GITHUB_TOKEN/GH_TOKEN via
+	// the secrets chain (github.ResolveToken, the single source of truth); a
+	// resolution error warns and continues with unauthenticated access. An
+	// injected client that already carries a token is left untouched.
+	if c.httpClient.GetGitHubToken() == "" {
+		token, err := github.ResolveToken()
+		if err != nil {
+			c.log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
+		}
+		if token != "" {
+			c.httpClient.SetGitHubToken(token)
+		}
+	}
+}
+
+// warnUnusedLLMPrompts names each package whose llm_prompt this run ignores.
+func (c *Checker) warnUnusedLLMPrompts() {
 	// A non-empty llm_prompt only drives --check when an LLM
 	// provider is wired (llmClient != nil). Warn for each affected package so
 	// users discover an UNUSED llm_prompt before debugging a silent no-op — but
@@ -694,22 +719,20 @@ func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
 	// Sorted iteration keeps the diagnostic order deterministic. De-duplication
 	// is per-Checker (the lifetime of one `bentoo overlay autoupdate --check`
 	// run), not process-wide.
-	if checker.llmClient == nil && !checker.llmProviderConfigured && checker.config != nil {
-		names := make([]string, 0, len(checker.config.Packages))
-		for name, pkgCfg := range checker.config.Packages {
+	if c.llmClient == nil && !c.llmProviderConfigured && c.config != nil {
+		names := make([]string, 0, len(c.config.Packages))
+		for name, pkgCfg := range c.config.Packages {
 			if pkgCfg.LLMPrompt != "" {
 				names = append(names, name)
 			}
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			checker.log.Warn("package sets llm_prompt but no LLM is wired into "+
+			c.log.Warn("package sets llm_prompt but no LLM is wired into "+
 				"the check path; this field is consumed only by "+
 				"'bentoo overlay analyze' (see docs/autoupdate.md)", "package", name)
 		}
 	}
-
-	return checker, nil
 }
 
 // fetchFailure wraps a failed upstream fetch as ErrFetchFailed and, when the
@@ -788,114 +811,138 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	// current so the applier can substitute it in the ebuild, and caching only
 	// the date without the SHA would leave the pending entry unusable.
 	if pkgConfig.Track == "commit" {
-		info, err := c.fetchCommitInfo(ctx, &pkgConfig)
-		if err != nil {
-			// An unresolved base is a configuration fault, not a transport one;
-			// wrapping it as ErrFetchFailed would hide that from callers that
-			// branch on the sentinel (and from anyone reading the message).
-			if errors.Is(err, ErrBaseVersionUnresolved) {
-				result.Error = err
-			} else {
-				result.Error = fetchFailure(err)
-			}
-			return result, result.Error
-		}
-
-		base := extractSnapshotBase(currentVersion)
-		suffix := extractSnapshotSuffix(currentVersion)
-		// Adopt the resolved base when it is newer than the ebuild's. The
-		// one-way ratchet is deliberate: a momentarily wrong upstream (a
-		// reverted bump, a file mid-edit) must not be able to walk the overlay
-		// backwards, and a real downgrade is rare enough to want a human.
-		if info.NewBase != "" && ebuild.CompareVersions(info.NewBase, base) > 0 {
-			base = info.NewBase
-		}
-		// A tracked commit that IS a release tag gets the bare version, not a
-		// snapshot one. vulkan-headers pinned 11d6898, which is exactly tag
-		// v1.4.358, yet shipped as 1.4.358_p20260731 — and _p orders ABOVE its
-		// base, so the name claimed to be newer than the very release it was.
-		//
-		// Restricted to _p on purpose. A _pre package's version-bump commit
-		// OPENS the cycle rather than closing it (zed's "Bump Zed to v1.15.0"
-		// precedes the 1.15.0 release by weeks), so there the snapshot form
-		// stays correct.
-		newVersion := base + suffix + info.Date
-		if info.BaseIsExactTag && suffix == "_p" {
-			newVersion = base
-		}
-		result.UpstreamVersion = newVersion
-
-		// Write to cache so the UI can display the latest known state,
-		// even though this entry is never read back as a cache hit.
-		if err := c.cache.Set(pkg, newVersion, pkgConfig.URL); err != nil {
-			result.Error = fmt.Errorf("failed to update cache: %w", err)
-		}
-
-		hasUpdate, comparable := c.compareVersions(newVersion, currentVersion)
-		result.HasUpdate = hasUpdate
-		result.NotComparable = !comparable
-
-		// Version comparison alone cannot decide a commit-tracked package once a
-		// bare release version can be emitted: the overlay would hold 1.4.358
-		// while the next check builds 1.4.358_p<today>, which compares NEWER and
-		// would re-bump the same commit every single day.
-		//
-		// So an ebuild already pinned to the tracked commit is up to date — but
-		// ONLY while its base version still agrees. A base correction is exactly
-		// the case where the commit does not move and the version must: when the
-		// registry started reading vulkan-tools' CMakeLists, the pinned commit
-		// was already current while the ebuild still said 1.4.354 against
-		// upstream's 1.4.357. Suppressing on the SHA alone would have frozen
-		// that package at the wrong version for good.
-		if result.HasUpdate && extractSnapshotBase(currentVersion) == base {
-			if cur := currentEbuildCommit(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg)); cur != "" &&
-				strings.EqualFold(cur, info.SHA) {
-				result.HasUpdate = false
-			}
-		}
-
-		if result.HasUpdate {
-			if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, "", nil); err != nil {
-				if result.Error == nil {
-					result.Error = fmt.Errorf("failed to add to pending: %w", err)
-				}
-			}
-		}
-
-		return result, nil
+		return c.checkCommitTracked(ctx, pkg, &pkgConfig, currentVersion, result)
 	}
 
 	// Check cache first (unless force is true)
 	if !force {
 		if cachedVersion, ok := c.cache.Get(pkg); ok {
-			result.UpstreamVersion = cachedVersion
-			result.FromCache = true
-			hasUpdate, comparable := c.compareVersions(cachedVersion, currentVersion)
-			result.HasUpdate = hasUpdate
-			result.NotComparable = !comparable
-
-			// Add to pending if update available
-			if result.HasUpdate {
-				sha := c.resolveAuxSHA(ctx, &pkgConfig, result)
-				aux := c.resolveAuxValue(ctx, &pkgConfig, result)
-				reqs, reqErr := c.resolveRequirements(ctx, pkg, &pkgConfig, result)
-				c.settleRequirements(pkg, &pkgConfig, reqs, result)
-				if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
-					result.Error = errors.Join(result.Error, held)
-				} else if reqErr != nil {
-					result.Error = errors.Join(result.Error, reqErr)
-				} else if err := c.addToPending(pkg, currentVersion, cachedVersion, sha, aux, reqs); err != nil {
-					// Log but don't fail the check
-					result.Error = fmt.Errorf("failed to add to pending: %w", err)
-				}
-			}
-
-			return result, nil
+			return c.checkCached(ctx, pkg, &pkgConfig, currentVersion, cachedVersion, result)
 		}
 	}
 
+	return c.checkUpstream(ctx, pkg, &pkgConfig, currentVersion, result)
+}
+
+// checkCommitTracked is CheckPackage for a package that tracks a commit: the
+// candidate version is built from the tracked commit's base and date.
+func (c *Checker) checkCommitTracked(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion string, result *CheckResult) (*CheckResult, error) {
+	info, err := c.fetchCommitInfo(ctx, pkgConfig)
+	if err != nil {
+		// An unresolved base is a configuration fault, not a transport one;
+		// wrapping it as ErrFetchFailed would hide that from callers that
+		// branch on the sentinel (and from anyone reading the message).
+		if errors.Is(err, ErrBaseVersionUnresolved) {
+			result.Error = err
+		} else {
+			result.Error = fetchFailure(err)
+		}
+		return result, result.Error
+	}
+
+	newVersion, base := commitTrackedVersion(currentVersion, info)
+	result.UpstreamVersion = newVersion
+
+	// Write to cache so the UI can display the latest known state,
+	// even though this entry is never read back as a cache hit.
+	if err := c.cache.Set(pkg, newVersion, pkgConfig.URL); err != nil {
+		result.Error = fmt.Errorf("failed to update cache: %w", err)
+	}
+
+	hasUpdate, comparable := c.compareVersions(newVersion, currentVersion)
+	result.HasUpdate = hasUpdate
+	result.NotComparable = !comparable
+
+	// Version comparison alone cannot decide a commit-tracked package once a
+	// bare release version can be emitted: the overlay would hold 1.4.358
+	// while the next check builds 1.4.358_p<today>, which compares NEWER and
+	// would re-bump the same commit every single day.
+	//
+	// So an ebuild already pinned to the tracked commit is up to date — but
+	// ONLY while its base version still agrees. A base correction is exactly
+	// the case where the commit does not move and the version must: when the
+	// registry started reading vulkan-tools' CMakeLists, the pinned commit
+	// was already current while the ebuild still said 1.4.354 against
+	// upstream's 1.4.357. Suppressing on the SHA alone would have frozen
+	// that package at the wrong version for good.
+	if result.HasUpdate && c.pinnedToTrackedCommit(pkg, currentVersion, base, info.SHA) {
+		result.HasUpdate = false
+	}
+
+	if result.HasUpdate {
+		if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, "", nil); err != nil {
+			if result.Error == nil {
+				result.Error = fmt.Errorf("failed to add to pending: %w", err)
+			}
+		}
+	}
+
+	return result, nil
+}
+
+// commitTrackedVersion builds the candidate version of a commit-tracked package
+// from the ebuild's current version and the tracked commit, and returns it with
+// the base version it was built on.
+func commitTrackedVersion(currentVersion string, info *commitInfo) (newVersion, base string) {
+	base = extractSnapshotBase(currentVersion)
+	suffix := extractSnapshotSuffix(currentVersion)
+	// Adopt the resolved base when it is newer than the ebuild's. The
+	// one-way ratchet is deliberate: a momentarily wrong upstream (a
+	// reverted bump, a file mid-edit) must not be able to walk the overlay
+	// backwards, and a real downgrade is rare enough to want a human.
+	if info.NewBase != "" && ebuild.CompareVersions(info.NewBase, base) > 0 {
+		base = info.NewBase
+	}
+	// A tracked commit that IS a release tag gets the bare version, not a
+	// snapshot one. vulkan-headers pinned 11d6898, which is exactly tag
+	// v1.4.358, yet shipped as 1.4.358_p20260731 — and _p orders ABOVE its
+	// base, so the name claimed to be newer than the very release it was.
+	//
+	// Restricted to _p on purpose. A _pre package's version-bump commit
+	// OPENS the cycle rather than closing it (zed's "Bump Zed to v1.15.0"
+	// precedes the 1.15.0 release by weeks), so there the snapshot form
+	// stays correct.
+	newVersion = base + suffix + info.Date
+	if info.BaseIsExactTag && suffix == "_p" {
+		newVersion = base
+	}
+	return newVersion, base
+}
+
+// pinnedToTrackedCommit reports whether the current ebuild keeps base and
+// already pins the tracked commit sha. The ebuild is read only when the base
+// agrees.
+func (c *Checker) pinnedToTrackedCommit(pkg, currentVersion, base, sha string) bool {
+	if extractSnapshotBase(currentVersion) != base {
+		return false
+	}
+	cur := currentEbuildCommit(c.logger(), c.overlayPath, pkg, c.seriesFor(pkg))
+	return cur != "" && strings.EqualFold(cur, sha)
+}
+
+// checkCached is CheckPackage answered from the cached upstream version.
+func (c *Checker) checkCached(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion, cachedVersion string, result *CheckResult) (*CheckResult, error) {
+	result.UpstreamVersion = cachedVersion
+	result.FromCache = true
+	hasUpdate, comparable := c.compareVersions(cachedVersion, currentVersion)
+	result.HasUpdate = hasUpdate
+	result.NotComparable = !comparable
+
+	// Add to pending if update available
+	if result.HasUpdate {
+		if err := c.queueUpdate(ctx, pkg, pkgConfig, currentVersion, cachedVersion, result); err != nil {
+			// Log but don't fail the check
+			result.Error = fmt.Errorf("failed to add to pending: %w", err)
+		}
+	}
+
+	return result, nil
+}
+
+// checkUpstream is CheckPackage answered by a fresh upstream fetch.
+func (c *Checker) checkUpstream(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion string, result *CheckResult) (*CheckResult, error) {
 	// Fetch upstream version
-	upstreamVersion, err := c.fetchUpstreamVersion(ctx, &pkgConfig)
+	upstreamVersion, err := c.fetchUpstreamVersion(ctx, pkgConfig)
 	if err != nil {
 		result.Error = fetchFailure(err)
 		return result, result.Error
@@ -915,17 +962,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 
 	// Add to pending if update available
 	if result.HasUpdate {
-		sha := c.resolveAuxSHA(ctx, &pkgConfig, result)
-		aux := c.resolveAuxValue(ctx, &pkgConfig, result)
-		reqs, reqErr := c.resolveRequirements(ctx, pkg, &pkgConfig, result)
-		c.settleRequirements(pkg, &pkgConfig, reqs, result)
-		if held := heldBump(pkg, &pkgConfig, sha, aux); held != nil {
-			// Joined, not overwritten: result.Error may already hold the cache
-			// write error, in which case the helper did not record its own cause.
-			result.Error = errors.Join(result.Error, held)
-		} else if reqErr != nil {
-			result.Error = errors.Join(result.Error, reqErr)
-		} else if err := c.addToPending(pkg, currentVersion, upstreamVersion, sha, aux, reqs); err != nil {
+		if err := c.queueUpdate(ctx, pkg, pkgConfig, currentVersion, upstreamVersion, result); err != nil {
 			// Log but don't fail the check
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
@@ -934,6 +971,28 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	}
 
 	return result, nil
+}
+
+// queueUpdate resolves what the pending entry for newVersion needs and records
+// it. A held bump or an unresolved requirement is joined into result.Error and
+// nothing is recorded; the returned error is addToPending's alone, so each
+// caller keeps its own rule for whether it may replace result.Error.
+func (c *Checker) queueUpdate(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion, newVersion string, result *CheckResult) error {
+	sha := c.resolveAuxSHA(ctx, pkgConfig, result)
+	aux := c.resolveAuxValue(ctx, pkgConfig, result)
+	reqs, reqErr := c.resolveRequirements(ctx, pkg, pkgConfig, result)
+	c.settleRequirements(pkg, pkgConfig, reqs, result)
+	if held := heldBump(pkg, pkgConfig, sha, aux); held != nil {
+		// Joined, not overwritten: result.Error may already hold the cache
+		// write error, in which case the helper did not record its own cause.
+		result.Error = errors.Join(result.Error, held)
+		return nil
+	}
+	if reqErr != nil {
+		result.Error = errors.Join(result.Error, reqErr)
+		return nil
+	}
+	return c.addToPending(pkg, currentVersion, newVersion, sha, aux, reqs)
 }
 
 // seriesFor returns the release-line filter configured for pkg, or "" when the
@@ -2284,24 +2343,148 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	// Absent means deliberate — fail-safe, but it freezes every entry disabled
 	// before the origin field existed, so those are named once below rather
 	// than left silent: each is a repair someone must make by hand.
-	var revived, frozen []string
-	for name, pkg := range c.config.Packages {
-		if pkg.IsEnabled() || pkg.IsHeld() {
+	c.reconcileDisabled()
+
+	// Narrow the package set up front so excluded packages incur no network
+	// fetch and are absent from progress and totals. Three filters apply:
+	//   - enabled = false: always skipped, silently (no log, no count);
+	//   - hold = true: maintainer-held, skipped silently like a disabled entry;
+	//   - type filter (when active): keep only the matching bin/source class.
+	pkgs := c.checkablePackages()
+
+	var (
+		sem = make(chan struct{}, c.concurrency)
+		wg  sync.WaitGroup
+		run = &checkAllRun{
+			results:  make([]CheckResult, 0, len(pkgs)),
+			failures: make(map[string]error),
+			total:    uint64(len(pkgs)),
+		}
+	)
+
+	for name := range pkgs {
+		// A select with both cases ready picks at random, so check the context
+		// deterministically first: an already-cancelled context must mark
+		// EVERY remaining package as a failure, not just roughly half of them.
+		if err := ctx.Err(); err != nil {
+			run.fail(name, err)
 			continue
 		}
-		if _, err := c.getCurrentVersion(name); err != nil {
-			continue // still absent from the overlay: a true orphan, disabled for the reason it states
+		// Cancellable semaphore acquisition: also record a context failure if
+		// the parent context is cancelled while waiting for a free slot.
+		select {
+		case <-ctx.Done():
+			run.fail(name, ctx.Err())
+			continue
+		case sem <- struct{}{}:
 		}
-		switch {
-		case reconcilesAutomatically(pkg):
-			revived = append(revived, name) // ebuild present again → reconcile to enabled
-		case pkg.DisabledBy == "":
-			// Ebuild present, disable unexplained: left alone, and reported.
-			// An entry naming a non-automatic origin is left alone SILENTLY —
-			// its record already says who decided, so there is nothing to repair.
-			frozen = append(frozen, name)
+
+		wg.Add(1)
+		go c.checkAllWorker(ctx, run, sem, &wg, name, force)
+	}
+
+	// Join every worker before touching the shared state so the BatchResult is
+	// fully populated and safe to return.
+	wg.Wait()
+
+	// Auto-disable packages whose ebuild vanished from the overlay. A single
+	// batched write keeps the hand-maintained packages.toml's comments intact;
+	// a failure here is non-fatal — the run's results still stand and the entry
+	// is simply retried (and re-reported) next time.
+	if len(run.orphaned) > 0 {
+		if err := c.DisableOrphans(run.orphaned); err != nil {
+			c.logger().Warn("failed to auto-disable orphaned package(s) in packages.toml", "count", len(run.orphaned), "err", err)
 		}
 	}
+
+	// A requirement found missing by one worker may be pending by now: the
+	// required package can have been checked, and queued, after the package
+	// that requires it. Settle again against the final pending list so the
+	// report never depends on check order.
+	c.resettleMissing(run.results)
+
+	// Deterministic final ordering, independent of completion order.
+	sort.Slice(run.results, func(i, j int) bool {
+		return run.results[i].Package < run.results[j].Package
+	})
+
+	// One line per run, at DEBUG, reporting what the body deduplication did.
+	// It is emitted after wg.Wait above, so every worker has joined
+	// and the figures are final rather than a mid-flight sample.
+	//
+	// CheckAll has a SINGLE exit — the return below — so a plain call here emits
+	// exactly once per run. If a second return is ever added, this must become a
+	// defer at the top of the function; otherwise that new path would silently
+	// report nothing.
+	c.logFetchCacheStats()
+
+	return BatchResult[CheckResult]{Items: run.results, Failures: run.failures}
+}
+
+// checkAllRun is the state CheckAll's workers share; mu guards every field
+// but progress, which is atomic, and total, which is read-only.
+type checkAllRun struct {
+	mu       sync.Mutex
+	results  []CheckResult
+	failures map[string]error
+	orphaned []string
+	progress atomic.Uint64
+	total    uint64
+}
+
+// fail records err as the failure of package name.
+func (r *checkAllRun) fail(name string, err error) {
+	r.mu.Lock()
+	r.failures[name] = err
+	r.mu.Unlock()
+}
+
+// record files the outcome of one CheckPackage call.
+func (r *checkAllRun) record(n string, result *CheckResult, err error) {
+	r.mu.Lock()
+	switch {
+	case err != nil && errors.Is(err, ebuilds.ErrNoEbuildFound):
+		// The ebuild was removed from the overlay. Don't record a
+		// recurring failure: queue the package for auto-disable after
+		// the run and surface it as an informational result so it does
+		// not count toward the failure exit code.
+		r.orphaned = append(r.orphaned, n)
+		r.results = append(r.results, CheckResult{Package: n, Orphaned: true})
+	case err != nil:
+		r.failures[n] = err
+	default:
+		r.results = append(r.results, *result)
+	}
+	r.mu.Unlock()
+}
+
+// checkAllWorker checks package n in one of CheckAll's workers and releases
+// its semaphore slot when done.
+func (c *Checker) checkAllWorker(ctx context.Context, run *checkAllRun, sem chan struct{}, wg *sync.WaitGroup, n string, force bool) {
+	defer wg.Done()
+	defer func() { <-sem }()
+	// A panic in CheckPackage (or anything it calls) must not crash
+	// the process: recover it and record a per-package failure.
+	defer func() {
+		if r := recover(); r != nil {
+			run.fail(n, fmt.Errorf("panic: %v", r))
+		}
+	}()
+
+	result, err := c.CheckPackage(ctx, n, force)
+
+	run.record(n, result, err)
+
+	if c.progressCallback != nil {
+		c.progressCallback(run.progress.Add(1), run.total)
+	}
+}
+
+// reconcileDisabled re-enables the entries the checker disabled itself whose
+// ebuild is back in the overlay, and names the unexplained disables it
+// leaves frozen.
+func (c *Checker) reconcileDisabled() {
+	revived, frozen := c.disabledWithEbuild()
 	if len(revived) > 0 {
 		sort.Strings(revived)
 		if err := c.ReviveDisabled(revived); err != nil {
@@ -2322,12 +2505,33 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 		sort.Strings(frozen)
 		logFrozenDisables(c.logger(), frozen)
 	}
+}
 
-	// Narrow the package set up front so excluded packages incur no network
-	// fetch and are absent from progress and totals. Three filters apply:
-	//   - enabled = false: always skipped, silently (no log, no count);
-	//   - hold = true: maintainer-held, skipped silently like a disabled entry;
-	//   - type filter (when active): keep only the matching bin/source class.
+// disabledWithEbuild splits the disabled, unheld entries whose ebuild is in
+// the overlay into those to revive and those frozen by an unexplained disable.
+func (c *Checker) disabledWithEbuild() (revived, frozen []string) {
+	for name, pkg := range c.config.Packages {
+		if pkg.IsEnabled() || pkg.IsHeld() {
+			continue
+		}
+		if _, err := c.getCurrentVersion(name); err != nil {
+			continue // still absent from the overlay: a true orphan, disabled for the reason it states
+		}
+		switch {
+		case reconcilesAutomatically(pkg):
+			revived = append(revived, name) // ebuild present again → reconcile to enabled
+		case pkg.DisabledBy == "":
+			// Ebuild present, disable unexplained: left alone, and reported.
+			// An entry naming a non-automatic origin is left alone SILENTLY —
+			// its record already says who decided, so there is nothing to repair.
+			frozen = append(frozen, name)
+		}
+	}
+	return revived, frozen
+}
+
+// checkablePackages returns the enabled, unheld entries the type filter keeps.
+func (c *Checker) checkablePackages() map[string]registry.PackageConfig {
 	pkgs := make(map[string]registry.PackageConfig, len(c.config.Packages))
 	for name, pkg := range c.config.Packages {
 		if !pkg.IsEnabled() || pkg.IsHeld() {
@@ -2338,113 +2542,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 		}
 		pkgs[name] = pkg
 	}
-
-	var (
-		sem      = make(chan struct{}, c.concurrency)
-		wg       sync.WaitGroup
-		mu       sync.Mutex
-		results  = make([]CheckResult, 0, len(pkgs))
-		failures = make(map[string]error)
-		orphaned []string
-		progress atomic.Uint64
-		total    = uint64(len(pkgs))
-	)
-
-	for name := range pkgs {
-		// A select with both cases ready picks at random, so check the context
-		// deterministically first: an already-cancelled context must mark
-		// EVERY remaining package as a failure, not just roughly half of them.
-		if err := ctx.Err(); err != nil {
-			mu.Lock()
-			failures[name] = err
-			mu.Unlock()
-			continue
-		}
-		// Cancellable semaphore acquisition: also record a context failure if
-		// the parent context is cancelled while waiting for a free slot.
-		select {
-		case <-ctx.Done():
-			mu.Lock()
-			failures[name] = ctx.Err()
-			mu.Unlock()
-			continue
-		case sem <- struct{}{}:
-		}
-
-		wg.Add(1)
-		go func(n string) {
-			defer wg.Done()
-			defer func() { <-sem }()
-			// A panic in CheckPackage (or anything it calls) must not crash
-			// the process: recover it and record a per-package failure.
-			defer func() {
-				if r := recover(); r != nil {
-					mu.Lock()
-					failures[n] = fmt.Errorf("panic: %v", r)
-					mu.Unlock()
-				}
-			}()
-
-			result, err := c.CheckPackage(ctx, n, force)
-
-			mu.Lock()
-			switch {
-			case err != nil && errors.Is(err, ebuilds.ErrNoEbuildFound):
-				// The ebuild was removed from the overlay. Don't record a
-				// recurring failure: queue the package for auto-disable after
-				// the run and surface it as an informational result so it does
-				// not count toward the failure exit code.
-				orphaned = append(orphaned, n)
-				results = append(results, CheckResult{Package: n, Orphaned: true})
-			case err != nil:
-				failures[n] = err
-			default:
-				results = append(results, *result)
-			}
-			mu.Unlock()
-
-			if c.progressCallback != nil {
-				c.progressCallback(progress.Add(1), total)
-			}
-		}(name)
-	}
-
-	// Join every worker before touching the shared state so the BatchResult is
-	// fully populated and safe to return.
-	wg.Wait()
-
-	// Auto-disable packages whose ebuild vanished from the overlay. A single
-	// batched write keeps the hand-maintained packages.toml's comments intact;
-	// a failure here is non-fatal — the run's results still stand and the entry
-	// is simply retried (and re-reported) next time.
-	if len(orphaned) > 0 {
-		if err := c.DisableOrphans(orphaned); err != nil {
-			c.logger().Warn("failed to auto-disable orphaned package(s) in packages.toml", "count", len(orphaned), "err", err)
-		}
-	}
-
-	// A requirement found missing by one worker may be pending by now: the
-	// required package can have been checked, and queued, after the package
-	// that requires it. Settle again against the final pending list so the
-	// report never depends on check order.
-	c.resettleMissing(results)
-
-	// Deterministic final ordering, independent of completion order.
-	sort.Slice(results, func(i, j int) bool {
-		return results[i].Package < results[j].Package
-	})
-
-	// One line per run, at DEBUG, reporting what the body deduplication did.
-	// It is emitted after wg.Wait above, so every worker has joined
-	// and the figures are final rather than a mid-flight sample.
-	//
-	// CheckAll has a SINGLE exit — the return below — so a plain call here emits
-	// exactly once per run. If a second return is ever added, this must become a
-	// defer at the top of the function; otherwise that new path would silently
-	// report nothing.
-	c.logFetchCacheStats()
-
-	return BatchResult[CheckResult]{Items: results, Failures: failures}
+	return pkgs
 }
 
 // logFetchCacheStats emits this run's body-deduplication counters ONCE, at

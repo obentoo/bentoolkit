@@ -181,13 +181,46 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 	// pull`) leaves the same drift. Keeping one ebuild too many costs a dirty
 	// directory for one run; one too few costs a maintained release line. Do not
 	// "simplify" this back to the pin alone.
-	heldBy := make(map[string]string)
+	heldBy, blocked := collectHolders(claims)
+	plan.Blocked = blocked
+
+	// The directory is read exactly once, here.
+	live, nonLive := splitEbuildVersions(paths, category, pkgName)
+
+	// Rules 3 and 4: what survives, and who says so. Skipped entirely when no
+	// entry claims the directory — with nothing claiming anything, a populated
+	// Keep would be a claim the report cannot attribute to anyone.
+	if len(claims) > 0 {
+		keepHeld(plan.Keep, heldBy, live, nonLive)
+	}
+
+	candidates, floorSurvivor := sweepCandidates(nonLive, plan.Keep)
+
+	// Rule 1 and its no-entry twin, rule 2: report the candidates, delete nothing.
+	if plan.Blocked != "" || len(claims) == 0 {
+		plan.WouldRemove = candidates
+		return plan, nil
+	}
+
+	plan.Remove = candidates
+	if floorSurvivor != "" {
+		plan.Keep[floorSurvivor] = ""
+	}
+
+	return plan, nil
+}
+
+// collectHolders maps each version a pinned claim holds — its pin and its
+// resolved version — to the first claiming key, and names the first pinless
+// claim, which blocks the directory.
+func collectHolders(claims []claim) (heldBy map[string]string, blocked string) {
+	heldBy = make(map[string]string)
 	// Claims arrive in key order, so first-writer-wins below is stable across
 	// runs rather than a map-iteration coin flip.
 	for _, c := range claims {
 		if c.Pin == "" {
-			if plan.Blocked == "" {
-				plan.Blocked = c.Key
+			if blocked == "" {
+				blocked = c.Key
 			}
 			// A pinless entry blocks the whole directory, so its
 			// resolved version is not collected either. Nothing is at risk —
@@ -209,9 +242,12 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 			}
 		}
 	}
+	return heldBy, blocked
+}
 
-	// The directory is read exactly once, here.
-	var live, nonLive []string
+// splitEbuildVersions parses the ebuild paths of category/pkgName into live
+// and non-live versions, skipping any file that is not a versioned ebuild.
+func splitEbuildVersions(paths []string, category, pkgName string) (live, nonLive []string) {
 	for _, p := range paths {
 		name := filepath.Base(p)
 		eb, err := ebuild.ParsePath(filepath.Join(category, pkgName, name))
@@ -226,32 +262,35 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 		}
 		nonLive = append(nonLive, eb.Version)
 	}
+	return live, nonLive
+}
 
-	// Rules 3 and 4: what survives, and who says so. Skipped entirely when no
-	// entry claims the directory — with nothing claiming anything, a populated
-	// Keep would be a claim the report cannot attribute to anyone.
-	if len(claims) > 0 {
-		for _, v := range nonLive {
-			if key, held := heldBy[v]; held {
-				plan.Keep[v] = key
-			}
-		}
-		for _, v := range live {
-			if key, held := heldBy[v]; held {
-				plan.Keep[v] = key // an entry pinning a live version still owns the line
-				continue
-			}
-			plan.Keep[v] = ""
+// keepHeld keeps every non-live version a claim holds, and every live one,
+// attributed to its holder or to the live-ebuild rule.
+func keepHeld(keep, heldBy map[string]string, live, nonLive []string) {
+	for _, v := range nonLive {
+		if key, held := heldBy[v]; held {
+			keep[v] = key
 		}
 	}
+	for _, v := range live {
+		if key, held := heldBy[v]; held {
+			keep[v] = key // an entry pinning a live version still owns the line
+			continue
+		}
+		keep[v] = ""
+	}
+}
 
+// sweepCandidates returns the non-live versions keep does not hold, ascending,
+// minus the floor survivor it also returns when they are all of them.
+func sweepCandidates(nonLive []string, keep map[string]string) (candidates []string, floorSurvivor string) {
 	// The candidates: every non-live ebuild no claim keeps. Computed once, under
 	// one set of rules, and only THEN routed to Remove or WouldRemove — so a
 	// blocked plan reports exactly what an unblocked one would have done, rather
 	// than a second, looser calculation of it.
-	var candidates []string
 	for _, v := range nonLive {
-		if _, kept := plan.Keep[v]; !kept {
+		if _, kept := keep[v]; !kept {
 			candidates = append(candidates, v)
 		}
 	}
@@ -262,7 +301,6 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 	// Rule 5: the floor. Only parsed non-live ebuilds count as "remaining" — an
 	// unparsable file left on disk is not a release the directory can fall back
 	// on, so it must not license removing the last real one.
-	floorSurvivor := ""
 	if len(candidates) > 0 && len(candidates) == len(nonLive) {
 		floorSurvivor = candidates[len(candidates)-1] // the highest: keep the most current
 		candidates = candidates[:len(candidates)-1]
@@ -270,19 +308,7 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 	if len(candidates) == 0 {
 		candidates = nil
 	}
-
-	// Rule 1 and its no-entry twin, rule 2: report the candidates, delete nothing.
-	if plan.Blocked != "" || len(claims) == 0 {
-		plan.WouldRemove = candidates
-		return plan, nil
-	}
-
-	plan.Remove = candidates
-	if floorSurvivor != "" {
-		plan.Keep[floorSurvivor] = ""
-	}
-
-	return plan, nil
+	return candidates, floorSurvivor
 }
 
 // DivergenceKind classifies one disagreement between the registry and the
