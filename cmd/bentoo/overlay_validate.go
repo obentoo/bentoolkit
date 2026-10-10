@@ -454,36 +454,10 @@ func renderValidateText(report validate.Report) {
 			skipped++
 		}
 
-		// info findings are counted here and printed in full only by --json.
-		//
-		// Measured on the live overlay: media-libs/mesa alone declares 101
-		// options its ebuild does not pass, every one a legitimate info finding.
-		// Printed in full, one package fills a screen and a whole-overlay run
-		// buries every error and warning inside thousands of lines nobody
-		// scrolls — and a gate too noisy to be read is a gate that gets switched
-		// off.
-		//
-		// Nothing is lost: the finding is emitted, carried on the Report, and
-		// written in full by --json. This is a rendering choice about the human
-		// surface, not a filter on what the gate reports.
-		for _, gate := range res.Gates {
-			for _, f := range gate.Findings {
-				if f.Gate == validate.GateQA {
-					qaFindings++
-				}
-				// Only the OPTION gate's infos are collapsed into the count,
-				// since that is what the count line describes. pkgcheck findings
-				// are also carried at info — its records have no level at all —
-				// and folding them in here would make the number claim
-				// something it is not.
-				if f.Gate == validate.GateOptions && f.Severity == validate.SeverityInfo {
-					line.infos++
-					continue
-				}
-				line.findings = append(line.findings, f)
-				severities = append(severities, string(f.Severity))
-			}
-		}
+		var lineQA int
+		line.findings, line.infos, lineQA = collectValidateFindings(res.Gates)
+		qaFindings += lineQA
+		severities = append(severities, findingSeverities(line.findings)...)
 		// The count line's label sits in the severity column too, so it is
 		// measured with the rest of it. It used to be kept in line by hand —
 		// "info:" followed by three typed spaces, which came to 8 because %-8s
@@ -555,6 +529,53 @@ func renderValidateText(report validate.Report) {
 		output.Dim.Println("pkgcheck findings are all reported at info: its JsonStream records carry no level,\n" +
 			"and inferring one from the message text would be a guess. They never affect the exit code.")
 	}
+}
+
+// collectValidateFindings splits one ebuild's findings into the ones its block
+// prints, in gate order and then in the order each gate reported them, and
+// the count of option-gate info findings collapsed into the count line. qa is
+// how many of them, printed or not, came from the QA gate.
+func collectValidateFindings(gates []validate.GateResult) (findings []validate.Finding, infos, qa int) {
+	// info findings are counted here and printed in full only by --json.
+	//
+	// Measured on the live overlay: media-libs/mesa alone declares 101
+	// options its ebuild does not pass, every one a legitimate info finding.
+	// Printed in full, one package fills a screen and a whole-overlay run
+	// buries every error and warning inside thousands of lines nobody
+	// scrolls — and a gate too noisy to be read is a gate that gets switched
+	// off.
+	//
+	// Nothing is lost: the finding is emitted, carried on the Report, and
+	// written in full by --json. This is a rendering choice about the human
+	// surface, not a filter on what the gate reports.
+	for _, gate := range gates {
+		for _, f := range gate.Findings {
+			if f.Gate == validate.GateQA {
+				qa++
+			}
+			// Only the OPTION gate's infos are collapsed into the count,
+			// since that is what the count line describes. pkgcheck findings
+			// are also carried at info — its records have no level at all —
+			// and folding them in here would make the number claim
+			// something it is not.
+			if f.Gate == validate.GateOptions && f.Severity == validate.SeverityInfo {
+				infos++
+				continue
+			}
+			findings = append(findings, f)
+		}
+	}
+	return findings, infos, qa
+}
+
+// findingSeverities lists each finding's severity, in the findings' order:
+// the values the severity column is measured over.
+func findingSeverities(findings []validate.Finding) []string {
+	severities := make([]string, 0, len(findings))
+	for _, f := range findings {
+		severities = append(severities, string(f.Severity))
+	}
+	return severities
 }
 
 // gateSummary renders every gate's own outcome on one line, as

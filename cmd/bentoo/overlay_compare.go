@@ -205,37 +205,15 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	if compareSync {
-		if err := registry.Sync(ctx); err != nil {
-			if errors.Is(err, context.Canceled) {
-				log.Error(registryInterruptedMsg)
-				return exitWith(1)
-			}
-			log.Error("Failed to sync repository list", "err", err)
-			return exitWith(1)
+		if err := syncCompareRegistry(ctx, log, registry); err != nil {
+			return err
 		}
 	}
 
 	// Resolve repository info
-	repoInfo, err := provider.ResolveRepository(ctx, repoName, configRepos, registry)
+	repoInfo, err := resolveCompareRepository(ctx, log, repoName, configRepos, registry)
 	if err != nil {
-		// An interruption is not a missing repository, and returning here keeps
-		// the hint below from downloading the registry a second time.
-		if errors.Is(err, context.Canceled) {
-			log.Error(registryInterruptedMsg)
-			return exitWith(1)
-		}
-		log.Error("Repository not found.", "repository", repoName)
-		configNames := provider.ListAvailableRepositories(ctx, configRepos, nil)
-		registryNames := provider.ListAvailableRepositories(ctx, nil, registry)
-		if len(configNames) > 0 {
-			log.Info("Config repositories", "repositories", strings.Join(configNames, ", "))
-		}
-		if len(registryNames) > 0 {
-			log.Info("Registry repositories: use `eselect repository list` to see all available")
-		} else {
-			log.Info("Registry unavailable. Use --sync to refresh or run `eselect repository list`")
-		}
-		return exitWith(1)
+		return err
 	}
 
 	// Token precedence lives in resolveRepoToken. An unreadable secrets file
@@ -273,48 +251,10 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		}
 	}
 
-	// Set timeout for API providers
-	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
-		ghProv.HTTPClient.Timeout = time.Duration(compareTimeout) * time.Second
-		if compareNoCache {
-			ghProv.CacheDir = ""
-		}
-	}
+	configureCompareGitHubProvider(prov)
 
-	// Check rate limit for GitHub provider - block if exhausted
-	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
-		remaining, resetTime, err := ghProv.GetRateLimitInfo(ctx)
-		if err == nil {
-			switch {
-			case remaining == 0:
-				// The failure is a diagnostic; the ways out below it are the
-				// command's guidance and print as bare lines (ui_notes.go), so
-				// the indented YAML snippet can be pasted as it reads.
-				resetAt := resetTime.Format("15:04:05")
-				log.Error("GitHub API rate limit exceeded", "resets_at", resetAt)
-				uiInfo("")
-				uiInfo("Options:")
-				uiInfo("  1. Use --clone to download the repository:")
-				uiInfo(fmt.Sprintf("     bentoo overlay compare %s --clone", repoName))
-				uiInfo("")
-				uiInfo("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
-				uiInfo("     repositories:")
-				uiInfo("       gentoo:")
-				uiInfo("         provider: local")
-				uiInfo("         path: /var/db/repos/gentoo")
-				uiInfo("")
-				uiInfo(fmt.Sprintf("  3. Wait until %s for rate limit reset", resetAt))
-				return exitWith(1)
-			case remaining < 10:
-				log.Warn("GitHub API rate limit low",
-					"remaining", remaining, "resets_at", resetTime.Format("15:04:05"))
-				if !compareClone {
-					uiInfo("Tip: Use --clone flag to avoid rate limits")
-				}
-			case verbose:
-				log.Debug("GitHub API rate limit", "remaining", remaining)
-			}
-		}
+	if err := checkCompareGitHubRateLimit(ctx, log, prov, repoName); err != nil {
+		return err
 	}
 
 	// Scan local overlay
@@ -333,13 +273,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	uiInfo(fmt.Sprintf("Found %s packages in Bentoo overlay",
 		output.Sprint(output.Info, fmt.Sprintf("%d", len(scanResult.Packages)))))
 
-	// Report scan errors if any
-	if len(scanResult.Errors) > 0 {
-		log.Warn("Encountered errors during scan", "errors", len(scanResult.Errors))
-		for _, e := range scanResult.Errors {
-			log.Debug("scan error", "path", e.Path, "message", e.Message)
-		}
-	}
+	reportCompareScanErrors(log, scanResult.Errors)
 
 	// What the overlay declares about itself, resolved once before the comparison
 	// starts so the per-package goroutines only ever read it. An unreadable
@@ -375,13 +309,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		Concurrency:        compareConcurrency,
 		Divergence:         divergence,
 		OverlayPath:        overlayPath,
-		ProgressCallback: func(done, total uint64) {
-			percent := uint64(0)
-			if total > 0 {
-				percent = (done * 100) / total
-			}
-			fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
-		},
+		ProgressCallback:   printCompareProgress,
 	}
 	// A failure's text is recorded on the result and exported, and a transport
 	// error can echo the request, so the token this run resolved is scrubbed
@@ -392,15 +320,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	report, err := overlay.CompareWithProvider(ctx, scanResult.Packages, prov, opts)
 	if err != nil {
-		// Check if it's a rate limit error and suggest --clone
-		if strings.Contains(err.Error(), "rate limit") && !compareClone {
-			log.Error("GitHub API rate limit exceeded.")
-			uiInfo("Try using --clone flag to download the repository instead:")
-			uiInfo(fmt.Sprintf("  bentoo overlay compare %s --clone", repoName))
-			return exitWith(1)
-		}
-		log.Error("comparing packages: failed", "err", err)
-		return exitWith(1)
+		return compareFailure(log, err, repoName)
 	}
 
 	// Clear progress line
@@ -603,6 +523,138 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// after the export — because the report is still worth printing and worth
 	// exporting, `compare` did its job, and the status is returned only now.
 	return exitOnSkippedBaseline(report)
+}
+
+// syncCompareRegistry refreshes the repository list for --sync. A failure is
+// logged here and returned as exit status 1.
+func syncCompareRegistry(ctx context.Context, log *slog.Logger, registry *provider.RepositoryRegistry) error {
+	if err := registry.Sync(ctx); err != nil {
+		if errors.Is(err, context.Canceled) {
+			log.Error(registryInterruptedMsg)
+			return exitWith(1)
+		}
+		log.Error("Failed to sync repository list", "err", err)
+		return exitWith(1)
+	}
+	return nil
+}
+
+// resolveCompareRepository resolves repoName against the configured
+// repositories and the registry. A miss is logged with the names that could
+// have been meant and returned as exit status 1.
+func resolveCompareRepository(ctx context.Context, log *slog.Logger, repoName string, configRepos map[string]*provider.RepositoryInfo, registry *provider.RepositoryRegistry) (*provider.RepositoryInfo, error) {
+	repoInfo, err := provider.ResolveRepository(ctx, repoName, configRepos, registry)
+	if err != nil {
+		// An interruption is not a missing repository, and returning here keeps
+		// the hint below from downloading the registry a second time.
+		if errors.Is(err, context.Canceled) {
+			log.Error(registryInterruptedMsg)
+			return nil, exitWith(1)
+		}
+		log.Error("Repository not found.", "repository", repoName)
+		configNames := provider.ListAvailableRepositories(ctx, configRepos, nil)
+		registryNames := provider.ListAvailableRepositories(ctx, nil, registry)
+		if len(configNames) > 0 {
+			log.Info("Config repositories", "repositories", strings.Join(configNames, ", "))
+		}
+		if len(registryNames) > 0 {
+			log.Info("Registry repositories: use `eselect repository list` to see all available")
+		} else {
+			log.Info("Registry unavailable. Use --sync to refresh or run `eselect repository list`")
+		}
+		return nil, exitWith(1)
+	}
+	return repoInfo, nil
+}
+
+// configureCompareGitHubProvider applies --timeout and --no-cache to a GitHub
+// API provider; any other provider is left as it is.
+func configureCompareGitHubProvider(prov provider.Provider) {
+	// Set timeout for API providers
+	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
+		ghProv.HTTPClient.Timeout = time.Duration(compareTimeout) * time.Second
+		if compareNoCache {
+			ghProv.CacheDir = ""
+		}
+	}
+}
+
+// checkCompareGitHubRateLimit consults a GitHub API provider's rate limit
+// before the run spends any of it. An exhausted limit is logged with the ways
+// out and returned as exit status 1; any other provider, or a limit that
+// cannot be read, returns nil.
+func checkCompareGitHubRateLimit(ctx context.Context, log *slog.Logger, prov provider.Provider, repoName string) error {
+	// Check rate limit for GitHub provider - block if exhausted
+	if ghProv, ok := prov.(*provider.GitHubProvider); ok {
+		remaining, resetTime, err := ghProv.GetRateLimitInfo(ctx)
+		if err == nil {
+			switch {
+			case remaining == 0:
+				// The failure is a diagnostic; the ways out below it are the
+				// command's guidance and print as bare lines (ui_notes.go), so
+				// the indented YAML snippet can be pasted as it reads.
+				resetAt := resetTime.Format("15:04:05")
+				log.Error("GitHub API rate limit exceeded", "resets_at", resetAt)
+				uiInfo("")
+				uiInfo("Options:")
+				uiInfo("  1. Use --clone to download the repository:")
+				uiInfo(fmt.Sprintf("     bentoo overlay compare %s --clone", repoName))
+				uiInfo("")
+				uiInfo("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
+				uiInfo("     repositories:")
+				uiInfo("       gentoo:")
+				uiInfo("         provider: local")
+				uiInfo("         path: /var/db/repos/gentoo")
+				uiInfo("")
+				uiInfo(fmt.Sprintf("  3. Wait until %s for rate limit reset", resetAt))
+				return exitWith(1)
+			case remaining < 10:
+				log.Warn("GitHub API rate limit low",
+					"remaining", remaining, "resets_at", resetTime.Format("15:04:05"))
+				if !compareClone {
+					uiInfo("Tip: Use --clone flag to avoid rate limits")
+				}
+			case verbose:
+				log.Debug("GitHub API rate limit", "remaining", remaining)
+			}
+		}
+	}
+	return nil
+}
+
+// reportCompareScanErrors warns once about the overlay entries the scan could
+// not read, and lists each at debug level.
+func reportCompareScanErrors(log *slog.Logger, scanErrors []repo.ScanError) {
+	// Report scan errors if any
+	if len(scanErrors) > 0 {
+		log.Warn("Encountered errors during scan", "errors", len(scanErrors))
+		for _, e := range scanErrors {
+			log.Debug("scan error", "path", e.Path, "message", e.Message)
+		}
+	}
+}
+
+// printCompareProgress redraws the comparison's progress line in place.
+func printCompareProgress(done, total uint64) {
+	percent := uint64(0)
+	if total > 0 {
+		percent = (done * 100) / total
+	}
+	fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
+}
+
+// compareFailure logs a failed comparison and returns exit status 1. A rate
+// limit error on an API provider suggests --clone instead of the generic line.
+func compareFailure(log *slog.Logger, err error, repoName string) error {
+	// Check if it's a rate limit error and suggest --clone
+	if strings.Contains(err.Error(), "rate limit") && !compareClone {
+		log.Error("GitHub API rate limit exceeded.")
+		uiInfo("Try using --clone flag to download the repository instead:")
+		uiInfo(fmt.Sprintf("  bentoo overlay compare %s --clone", repoName))
+		return exitWith(1)
+	}
+	log.Error("comparing packages: failed", "err", err)
+	return exitWith(1)
 }
 
 // filterCompareResults narrows a report to the rows the operator asked for.
