@@ -134,17 +134,6 @@ linters:
         linters:
           - gochecknoglobals
         text: '^(addCmd|analyzeAll|analyzeCmd|analyzeDryRun|analyzeForce|analyzeHint|analyzeNoCache|analyzeURL|autoupdateAll|autoupdateExport|autoupdateUI|commitCmd|commitDryRun|commitMessage|commitYes|compareCacheDir|compareCauseOrder|compareClone|compareCmd|compareConcurrency|compareDepth|compareNoCache|compareNoReview|compareOnlyOutdated|compareOnlyPatched|compareOnlyRedundant|compareRealign|compareSync|compareTimeout|compareToken|compareYes|completionCmd|diffCmd|diffStaged|distfileCmd|distfileFetchCmd|distfileFetchDistdir|distfileFetchVersion|exitCleanupNext|exitCleanups|exitCleanupsMu|initCmd|logCmd|logCount|logOneline|manifestCmd|manifestFlags|noColor|overlayCmd|processSignals|pruneApply|pruneIncludePatched|pruneKeepRegistry|pruneYes|pullCmd|pullDryRun|pullMerge|pullRebase|pushCmd|pushDryRun|quiet|renameCmd|renameFlags|rootCmd|snapshotApplyCmd|snapshotApplyDryRun|snapshotCmd|snapshotConfigPath|snapshotHookCmd|snapshotHookInstall|snapshotHookUninstall|snapshotListCmd|snapshotListRemote|snapshotPruneCmd|snapshotPruneDryRun|snapshotPruneShip|snapshotRestoreCmd|snapshotRestoreDryRun|snapshotRestoreShip|snapshotRestoreSubvolume|snapshotRestoreTarget|snapshotRestoreYes|snapshotRollbackCmd|snapshotRollbackDryRun|snapshotRollbackYes|snapshotRunCmd|snapshotRunDryRun|snapshotStatusCmd|stagedCleanYes|statusCmd|uiDowngradeReported|verbose|versionCmd) is a global variable$'
-      # The baseline: the production functions already above 30 when gocognit
-      # was enabled, each pinned to its score then. A function that grows, or
-      # a new one above 30, fails the lint. One that shrinks fails too, until
-      # its entry is lowered here, or removed once it is at or below 30: the
-      # list ONLY SHRINKS, and the progress is recorded in review. Re-derive
-      # it with
-      #   golangci-lint run --enable-only gocognit ./...
-      # after deleting this rule.
-      - linters:
-          - gocognit
-        text: '^cognitive complexity () is high'
       - path: _test\.go
         linters:
           - gocognit
