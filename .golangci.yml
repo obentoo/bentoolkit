@@ -144,7 +144,7 @@ linters:
       # after deleting this rule.
       - linters:
           - gocognit
-        text: '^cognitive complexity (35 of func `\(\*App\)\.loop`|61 of func `\(\*Applier\)\.Apply`|41 of func `\(\*Checker\)\.CheckAll`|56 of func `\(\*Checker\)\.CheckPackage`|36 of func `\(\*JSONVersionHistoryExtractor\)\.extractVersionsFromPath`|37 of func `\(\*RetryableHTTPClient\)\.DoWithContext`|32 of func `AnnotateRealignVerdicts`|38 of func `FormatRenameResult`|35 of func `NewChecker`|35 of func `applyWaves`|37 of func `detectVersionBumps`|32 of func `displaySweepPlan`|43 of func `parseJSONPath`|40 of func `planSweep`|35 of func `renderValidateText`|57 of func `runCompare`|35 of func `sendMailBounded`) is high'
+        text: '^cognitive complexity (35 of func `\(\*App\)\.loop`|61 of func `\(\*Applier\)\.Apply`|41 of func `\(\*Checker\)\.CheckAll`|56 of func `\(\*Checker\)\.CheckPackage`|32 of func `AnnotateRealignVerdicts`|38 of func `FormatRenameResult`|35 of func `NewChecker`|35 of func `applyWaves`|37 of func `detectVersionBumps`|32 of func `displaySweepPlan`|40 of func `planSweep`|35 of func `renderValidateText`|57 of func `runCompare`|35 of func `sendMailBounded`) is high'
       - path: _test\.go
         linters:
           - gocognit

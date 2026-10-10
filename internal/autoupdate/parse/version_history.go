@@ -82,50 +82,7 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 
 	// Handle wildcard array path: [*].field or [*]
 	if strings.HasPrefix(path, "[*]") {
-		arr, ok := data.([]interface{})
-		if !ok {
-			return nil, fmt.Errorf("%w: expected array for [*] path", ErrJSONPathNotFound)
-		}
-
-		// Get the remaining path after [*]
-		remainingPath := strings.TrimPrefix(path, "[*]")
-		remainingPath = strings.TrimPrefix(remainingPath, ".")
-
-		var versions []string
-		for _, item := range arr {
-			var version string
-
-			if remainingPath == "" {
-				// Direct array of versions
-				version, ok = toString(item)
-				if !ok {
-					continue // Skip non-string items
-				}
-			} else {
-				// Navigate to nested field
-				result, navErr := NavigateJSONPath(item, remainingPath)
-				if navErr != nil {
-					continue // Skip items where path doesn't exist
-				}
-				version, ok = toString(result)
-				if !ok {
-					continue // Skip non-string values
-				}
-			}
-
-			versions = append(versions, version)
-
-			// Stop if we have enough versions
-			if lim > 0 && len(versions) >= lim {
-				break
-			}
-		}
-
-		if len(versions) == 0 {
-			return nil, fmt.Errorf("%w: no versions found at path", ErrJSONPathNotFound)
-		}
-
-		return versions, nil
+		return wildcardVersions(data, path, lim)
 	}
 
 	// Handle regular path that points to an array
@@ -140,6 +97,68 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 		return nil, fmt.Errorf("%w: expected array at path", ErrJSONPathNotFound)
 	}
 
+	versions := arrayVersions(arr, lim)
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("%w: no versions found in array", ErrJSONPathNotFound)
+	}
+
+	return versions, nil
+}
+
+// wildcardVersions resolves a "[*]" or "[*].field" path against data, keeping
+// at most lim versions when lim > 0.
+func wildcardVersions(data interface{}, path string, lim int) ([]string, error) {
+	arr, ok := data.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("%w: expected array for [*] path", ErrJSONPathNotFound)
+	}
+
+	// Get the remaining path after [*]
+	remainingPath := strings.TrimPrefix(path, "[*]")
+	remainingPath = strings.TrimPrefix(remainingPath, ".")
+
+	var versions []string
+	for _, item := range arr {
+		version, ok := wildcardItemVersion(item, remainingPath)
+		if !ok {
+			continue
+		}
+
+		versions = append(versions, version)
+
+		// Stop if we have enough versions
+		if lim > 0 && len(versions) >= lim {
+			break
+		}
+	}
+
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("%w: no versions found at path", ErrJSONPathNotFound)
+	}
+
+	return versions, nil
+}
+
+// wildcardItemVersion returns the version of one "[*]" array item: the item
+// itself when remainingPath is empty, else the value at remainingPath. Items
+// whose path is missing or whose value is not stringifiable report false.
+func wildcardItemVersion(item interface{}, remainingPath string) (string, bool) {
+	if remainingPath == "" {
+		// Direct array of versions
+		return toString(item)
+	}
+
+	// Navigate to nested field
+	result, navErr := NavigateJSONPath(item, remainingPath)
+	if navErr != nil {
+		return "", false // Skip items where path doesn't exist
+	}
+	return toString(result)
+}
+
+// arrayVersions stringifies the items of arr, dropping non-stringifiable and
+// empty ones, and keeps at most lim versions when lim > 0.
+func arrayVersions(arr []interface{}, lim int) []string {
 	var versions []string
 	for _, item := range arr {
 		version, ok := toString(item)
@@ -153,12 +172,7 @@ func (e *JSONVersionHistoryExtractor) extractVersionsFromPath(data interface{}) 
 			break
 		}
 	}
-
-	if len(versions) == 0 {
-		return nil, fmt.Errorf("%w: no versions found in array", ErrJSONPathNotFound)
-	}
-
-	return versions, nil
+	return versions
 }
 
 // HTMLVersionHistoryExtractor extracts version history using CSS selector.

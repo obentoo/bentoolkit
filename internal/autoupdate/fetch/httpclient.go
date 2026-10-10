@@ -456,22 +456,8 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 	var lastResp *http.Response
 
 	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
-		// Check context cancellation before each attempt
-		if err := ctx.Err(); err != nil {
-			return nil, ctxStopError(req.URL.Host, "request", err)
-		}
-
-		// Wait before a retry (not before the first attempt); a cancelled or
-		// expired context ends the wait, and the operation, at once.
-		if attempt > 0 {
-			delay, err := c.retryDelay(ctx, req.URL.Host, attempt, lastErr)
-			if err != nil {
-				return nil, err
-			}
-			c.recordDelay(delay)
-			if err := c.wait(ctx, delay); err != nil {
-				return nil, ctxStopError(req.URL.Host, "retry wait", err)
-			}
+		if err := c.awaitAttempt(ctx, req.URL.Host, attempt, lastErr); err != nil {
+			return nil, err
 		}
 
 		// Clone the request for retry (body needs to be re-readable)
@@ -480,38 +466,17 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 		// Execute the request, optionally wrapped in the circuit breaker
 		resp, err := c.executeRequest(reqCopy)
 		if err != nil {
-			// Propagate circuit-breaker open errors immediately (no retries)
-			if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
-				return nil, err
+			retryErr, stopErr := classifyAttemptError(ctx, req.URL.Host, err)
+			if stopErr != nil {
+				return nil, stopErr
 			}
-			// A refused https -> http redirect is the redirect policy's verdict
-			// on the request, not a transient failure: retrying would only
-			// re-send the credential to the original host.
-			if errors.Is(err, httpx.ErrInsecureRedirect) {
-				return nil, err
-			}
-			// An attempt that failed because the operation's own context
-			// ended is not an upstream failure: report the cancellation or
-			// deadline, never "max retries exceeded".
-			if ctxErr := ctx.Err(); ctxErr != nil {
-				return nil, ctxStopError(req.URL.Host, "request", ctxErr)
-			}
-			lastErr = err
-			// Check if it's a timeout error
-			if isTimeoutError(err) {
-				lastErr = fmt.Errorf("%w: %w", ErrRequestTimeout, err)
-			}
+			lastErr = retryErr
 			continue
 		}
 
 		// Check if we should retry based on status code
 		if c.shouldRetry(resp.StatusCode) {
-			// Close the response body before retrying
-			if resp.Body != nil {
-				io.Copy(io.Discard, resp.Body) //nolint:errcheck // discarding response body, error is irrelevant
-				resp.Body.Close()
-			}
-			lastErr = &retryableStatusError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
+			lastErr = discardRetryableResponse(resp)
 			lastResp = resp
 			continue
 		}
@@ -534,6 +499,69 @@ func (c *RetryableHTTPClient) DoWithContext(ctx context.Context, req *http.Reque
 		return lastResp, fmt.Errorf("%w: %w", ErrMaxRetriesExceeded, lastErr)
 	}
 	return lastResp, ErrMaxRetriesExceeded
+}
+
+// awaitAttempt gates one attempt of DoWithContext: it fails when ctx has
+// already ended and, before a retry (attempt > 0), records and sleeps the
+// backoff delay derived from lastErr.
+func (c *RetryableHTTPClient) awaitAttempt(ctx context.Context, host string, attempt int, lastErr error) error {
+	// Check context cancellation before each attempt
+	if err := ctx.Err(); err != nil {
+		return ctxStopError(host, "request", err)
+	}
+
+	// Wait before a retry (not before the first attempt); a cancelled or
+	// expired context ends the wait, and the operation, at once.
+	if attempt == 0 {
+		return nil
+	}
+	delay, err := c.retryDelay(ctx, host, attempt, lastErr)
+	if err != nil {
+		return err
+	}
+	c.recordDelay(delay)
+	if err := c.wait(ctx, delay); err != nil {
+		return ctxStopError(host, "retry wait", err)
+	}
+	return nil
+}
+
+// classifyAttemptError sorts a failed attempt's err: stopErr is non-nil when
+// the operation must end now with that error, otherwise retryErr is the error
+// to remember for the next attempt.
+func classifyAttemptError(ctx context.Context, host string, err error) (retryErr, stopErr error) {
+	// Propagate circuit-breaker open errors immediately (no retries)
+	if errors.Is(err, gobreaker.ErrOpenState) || errors.Is(err, gobreaker.ErrTooManyRequests) {
+		return nil, err
+	}
+	// A refused https -> http redirect is the redirect policy's verdict
+	// on the request, not a transient failure: retrying would only
+	// re-send the credential to the original host.
+	if errors.Is(err, httpx.ErrInsecureRedirect) {
+		return nil, err
+	}
+	// An attempt that failed because the operation's own context
+	// ended is not an upstream failure: report the cancellation or
+	// deadline, never "max retries exceeded".
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return nil, ctxStopError(host, "request", ctxErr)
+	}
+	// Check if it's a timeout error
+	if isTimeoutError(err) {
+		return fmt.Errorf("%w: %w", ErrRequestTimeout, err), nil
+	}
+	return err, nil
+}
+
+// discardRetryableResponse drains and closes the body of a response whose
+// status will be retried, and returns the error that records that status.
+func discardRetryableResponse(resp *http.Response) error {
+	// Close the response body before retrying
+	if resp.Body != nil {
+		io.Copy(io.Discard, resp.Body) //nolint:errcheck // discarding response body, error is irrelevant
+		resp.Body.Close()
+	}
+	return &retryableStatusError{status: resp.StatusCode, retryAfter: resp.Header.Get("Retry-After")}
 }
 
 // retryOverHTTP1 re-issues req over HTTP/1.1 after an HTTP/2 attempt came back
