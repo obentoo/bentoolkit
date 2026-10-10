@@ -2432,16 +2432,25 @@ type checkAllRun struct {
 	total    uint64
 }
 
-// fail records err as the failure of package name.
+// errNoCheckResult is recorded for a package whose CheckPackage returned
+// neither a result nor an error.
+var errNoCheckResult = errors.New("check returned no result")
+
+// fail records err as the failure of package name. The unlock is deferred so a
+// panic here cannot leave the mutex held for the worker's recover, which calls
+// fail again.
 func (r *checkAllRun) fail(name string, err error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.failures[name] = err
-	r.mu.Unlock()
 }
 
-// record files the outcome of one CheckPackage call.
+// record files the outcome of one CheckPackage call. The unlock is deferred for
+// the same reason as in fail: a panic while the mutex is held would otherwise
+// deadlock the worker's recover.
 func (r *checkAllRun) record(n string, result *CheckResult, err error) {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	switch {
 	case err != nil && errors.Is(err, ebuilds.ErrNoEbuildFound):
 		// The ebuild was removed from the overlay. Don't record a
@@ -2452,10 +2461,11 @@ func (r *checkAllRun) record(n string, result *CheckResult, err error) {
 		r.results = append(r.results, CheckResult{Package: n, Orphaned: true})
 	case err != nil:
 		r.failures[n] = err
+	case result == nil:
+		r.failures[n] = fmt.Errorf("package %s: %w", n, errNoCheckResult)
 	default:
 		r.results = append(r.results, *result)
 	}
-	r.mu.Unlock()
 }
 
 // checkAllWorker checks package n in one of CheckAll's workers and releases
