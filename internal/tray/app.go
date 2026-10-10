@@ -396,6 +396,9 @@ func (a *App) loop(ctx context.Context) error {
 		if ctx.Err() != nil {
 			return a.stop()
 		}
+		// stop is set by a branch that asks the run to end; a closed source
+		// leaves it false and the loop goes round again.
+		stop := false
 		select {
 		case <-ctx.Done():
 			return a.stop()
@@ -407,47 +410,37 @@ func (a *App) loop(ctx context.Context) error {
 			}
 			return a.busLost()
 		case <-a.fetchAt:
-			if a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkScheduled) }) {
-				return a.stop()
-			}
+			stop = a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkScheduled) })
 		case <-a.pauseAt:
-			if a.guard(ctx, a.pauseTimer) {
-				return a.stop()
-			}
+			stop = a.guard(ctx, a.pauseTimer)
 		case ev, ok := <-notifyEvents:
-			if !ok {
-				notifyEvents = nil
-				continue
+			if received(&notifyEvents, ok) {
+				a.onNotification(ctx, ev)
 			}
-			a.onNotification(ctx, ev)
 		case ev, ok := <-a.iconEvents:
-			if !ok {
-				a.iconEvents = nil
-				continue
-			}
-			if a.onMenu(ctx, ev) {
-				return a.stop()
-			}
+			stop = received(&a.iconEvents, ok) && a.onMenu(ctx, ev)
 		case _, ok := <-newsChanged:
-			if !ok {
-				newsChanged = nil
-				continue
-			}
-			if a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkLocal) }) {
-				return a.stop()
-			}
+			stop = received(&newsChanged, ok) &&
+				a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkLocal) })
 		case _, ok := <-netChanged:
-			if !ok {
-				netChanged = nil
-				continue
-			}
-			if a.guard(ctx, a.onNetworkChanged) {
-				return a.stop()
-			}
+			stop = received(&netChanged, ok) && a.guard(ctx, a.onNetworkChanged)
 		case r := <-a.opened:
 			a.onOpened(r)
 		}
+		if stop {
+			return a.stop()
+		}
 	}
+}
+
+// received reports whether a receive from *ch got a value. A receive that
+// found the channel closed sets *ch to nil instead, so the select never
+// picks that case again.
+func received[T any](ch *<-chan T, ok bool) bool {
+	if !ok {
+		*ch = nil
+	}
+	return ok
 }
 
 // stop ends a normal run: openings in flight get their grace, then the
