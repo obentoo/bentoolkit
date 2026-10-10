@@ -387,10 +387,8 @@ var smtpTimeout = notifyHTTPTimeout
 // an EHLO without AUTH. With credentials set, both fail here rather than send
 // unauthenticated.
 func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string, to []string, msg []byte) (err error) {
-	for _, line := range append([]string{from}, to...) {
-		if strings.ContainsAny(line, "\r\n") {
-			return fmt.Errorf("smtp address %q to %s: %w", line, addr, errors.New("an address must not contain CR or LF"))
-		}
+	if err := checkSMTPAddresses(addr, from, to); err != nil {
+		return err
 	}
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -410,22 +408,7 @@ func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string,
 	aborted := make(chan error, 1)
 	stop := context.AfterFunc(ctx, func() { aborted <- conn.Close() })
 	closeConn := conn.Close
-	defer func() {
-		if !stop() {
-			// The AfterFunc ran: the connection is closed, and a failure is the
-			// cancellation's doing.
-			if cerr := <-aborted; err != nil {
-				err = errors.Join(err, fmt.Errorf("smtp to %s: %w", addr, ctx.Err()), cerr)
-			}
-			return
-		}
-		if closeConn != nil {
-			// A failed AUTH has already quit and closed the connection.
-			if cerr := closeConn(); cerr != nil && !errors.Is(cerr, net.ErrClosed) {
-				err = errors.Join(err, fmt.Errorf("smtp close to %s: %w", addr, cerr))
-			}
-		}
-	}()
+	defer func() { err = endSMTPSession(ctx, addr, stop, aborted, closeConn, err) }()
 
 	if err := conn.SetDeadline(deadline); err != nil {
 		return fmt.Errorf("smtp deadline to %s: %w", addr, err)
@@ -435,22 +418,8 @@ func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string,
 		return fmt.Errorf("smtp greeting to %s: %w", addr, err)
 	}
 	closeConn = c.Close
-	if err := c.Hello("localhost"); err != nil {
-		return fmt.Errorf("smtp hello to %s: %w", addr, err)
-	}
-
-	if ok, _ := c.Extension("STARTTLS"); ok {
-		if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
-			return fmt.Errorf("smtp starttls to %s: %w", addr, err)
-		}
-	}
-	if a != nil {
-		if ok, _ := c.Extension("AUTH"); !ok {
-			return fmt.Errorf("smtp auth to %s: %w", addr, errors.New("server doesn't support AUTH"))
-		}
-		if err := c.Auth(a); err != nil {
-			return fmt.Errorf("smtp auth to %s: %w", addr, err)
-		}
+	if err := smtpHandshake(c, addr, host, a); err != nil {
+		return err
 	}
 	if err := c.Mail(from); err != nil {
 		return fmt.Errorf("smtp mail to %s: %w", addr, err)
@@ -474,6 +443,61 @@ func sendMailBounded(ctx context.Context, addr string, a smtp.Auth, from string,
 		return fmt.Errorf("smtp quit to %s: %w", addr, err)
 	}
 	closeConn = nil
+	return nil
+}
+
+// checkSMTPAddresses refuses a sender or recipient holding a CR or LF, as
+// smtp.SendMail does, before anything is dialed.
+func checkSMTPAddresses(addr, from string, to []string) error {
+	for _, line := range append([]string{from}, to...) {
+		if strings.ContainsAny(line, "\r\n") {
+			return fmt.Errorf("smtp address %q to %s: %w", line, addr, errors.New("an address must not contain CR or LF"))
+		}
+	}
+	return nil
+}
+
+// endSMTPSession ends the session of sendMailBounded and returns its error,
+// err with whatever ending the session added. When the AfterFunc has run,
+// stop reports false and the connection is already closed: its Close result
+// is received from aborted, and a failure is the cancellation's doing.
+// Otherwise closeConn, when set, closes the connection.
+func endSMTPSession(ctx context.Context, addr string, stop func() bool, aborted <-chan error, closeConn func() error, err error) error {
+	if !stop() {
+		if cerr := <-aborted; err != nil {
+			err = errors.Join(err, fmt.Errorf("smtp to %s: %w", addr, ctx.Err()), cerr)
+		}
+		return err
+	}
+	if closeConn != nil {
+		// A failed AUTH has already quit and closed the connection.
+		if cerr := closeConn(); cerr != nil && !errors.Is(cerr, net.ErrClosed) {
+			err = errors.Join(err, fmt.Errorf("smtp close to %s: %w", addr, cerr))
+		}
+	}
+	return err
+}
+
+// smtpHandshake sends EHLO, upgrades to TLS when the server advertises
+// STARTTLS (verifying the certificate against host), and authenticates when a
+// is set.
+func smtpHandshake(c *smtp.Client, addr, host string, a smtp.Auth) error {
+	if err := c.Hello("localhost"); err != nil {
+		return fmt.Errorf("smtp hello to %s: %w", addr, err)
+	}
+	if ok, _ := c.Extension("STARTTLS"); ok {
+		if err := c.StartTLS(&tls.Config{ServerName: host, MinVersion: tls.VersionTLS12}); err != nil {
+			return fmt.Errorf("smtp starttls to %s: %w", addr, err)
+		}
+	}
+	if a != nil {
+		if ok, _ := c.Extension("AUTH"); !ok {
+			return fmt.Errorf("smtp auth to %s: %w", addr, errors.New("server doesn't support AUTH"))
+		}
+		if err := c.Auth(a); err != nil {
+			return fmt.Errorf("smtp auth to %s: %w", addr, err)
+		}
+	}
 	return nil
 }
 
