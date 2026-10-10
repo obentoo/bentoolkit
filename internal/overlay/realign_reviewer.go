@@ -3,6 +3,7 @@ package overlay
 import (
 	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -263,17 +264,14 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 	// argument reviewCache.storeWarnOnce makes, and the same one that prints
 	// undeclaredDivergenceCaveat once per section rather than once per row. The
 	// count is not lost: formatRealignSummary states it with its denominator.
-	var unreadablePair, callFailed, silentAnswer realignWarnOnce
-
-	asked, unanswered := 0, 0
 	// unansweredBy splits unanswered by the review cause that applies, in the
 	// same words the divergence review uses (see `type ReviewFailure`).
 	unansweredBy := map[ReviewFailure]int{}
+	pass := &realignPass{rev: rev, opts: opts, log: log, cache: cache, unansweredBy: unansweredBy}
 	for n, i := range pending {
 		// Indexed rather than ranged over a copy: this pass exists to write one
 		// field back onto the report the caller is holding.
 		r := &report.Results[i]
-		atom := r.Category + "/" + r.Package
 
 		if err := ctx.Err(); err != nil {
 			// Ctrl-C. Every remaining call would fail on this same context, so
@@ -285,66 +283,10 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 			break
 		}
 
-		req, ok := realignRequestFor(*r, opts)
-		if !ok {
-			asked++
-			unanswered++
-			unansweredBy[ReviewEbuildUnreadable]++
-			if unreadablePair.first() {
-				log.Warn(
-					"overlay: the two ebuilds behind a package could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again",
-					"atom", atom)
-			}
-			continue
-		}
-		if bytes.Equal(req.Ours, req.Baseline) {
-			// The two files are the same file. There is no divergence here to
-			// justify, and a verdict on one would be a judgement about nothing —
-			// so this is not counted as unanswered either: nothing was asked.
-			continue
-		}
-		asked++
-
-		// A cached verdict is the same question already answered: the key is the
-		// two files' content, so while neither has changed the answer cannot have.
-		// An entry that says nothing is treated as a miss — a hand-edited or
-		// half-written one must not suppress a question forever, and nothing here
-		// expires.
-		if note, hit := cache.getRealign(req); hit && realignNoteSpeaks(note) {
-			r.RealignVerdict = formatRealignVerdict(note)
-			continue
-		}
-
-		note, err := rev.ReviewRealignment(ctx, req)
-		if err != nil {
-			unanswered++
-			unansweredBy[classifyReviewError(err)]++
-			if callFailed.first() {
-				log.Warn(
-					"overlay: the realignment review of a package failed; it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again",
-					"atom", atom, "err", err)
-			}
-			continue
-		}
-		if !realignNoteSpeaks(note) {
-			unanswered++
-			unansweredBy[ReviewUnusableReply]++
-			if silentAnswer.first() {
-				log.Warn(
-					"overlay: the realignment review of a package came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again",
-					"atom", atom)
-			}
-			continue
-		}
-
-		r.RealignVerdict = formatRealignVerdict(note)
-		// Stored only once it is worth storing. A cache with no expiry would keep
-		// an empty answer for as long as neither ebuild changed, which is the one
-		// failure that would not heal itself on the next run.
-		cache.putRealign(req, note)
+		pass.judge(ctx, r)
 	}
 
-	report.RealignAsked, report.RealignNoVerdict = asked, unanswered
+	report.RealignAsked, report.RealignNoVerdict = pass.asked, pass.unanswered
 	// Written on every pass, like the two counts, so it always describes the
 	// pass that just ran and sums to RealignNoVerdict; nil when none.
 	report.RealignNoVerdictBy = nil
@@ -363,6 +305,85 @@ func AnnotateRealignVerdicts(ctx context.Context, report *CompareReport, rev Rea
 	// verdicts been there, and it never doubles. The early returns above skip it
 	// on purpose — a pass that judged nothing changed nothing to re-establish.
 	EstablishFindings(report)
+}
+
+// realignPass is the state one AnnotateRealignVerdicts run carries from one
+// result to the next: what it asks with, the one-per-run warnings, and the
+// counts it writes onto the report at the end.
+type realignPass struct {
+	rev   RealignReviewer
+	opts  CompareOptions
+	log   *slog.Logger
+	cache *reviewCache
+
+	unreadablePair, callFailed, silentAnswer realignWarnOnce
+
+	asked, unanswered int
+	unansweredBy      map[ReviewFailure]int
+}
+
+// judge asks for the verdict on one result and writes it onto r, counting the
+// question and, when there is no verdict, the reason there is none.
+func (p *realignPass) judge(ctx context.Context, r *CompareResult) {
+	atom := r.Category + "/" + r.Package
+
+	req, ok := realignRequestFor(*r, p.opts)
+	if !ok {
+		p.asked++
+		p.unanswered++
+		p.unansweredBy[ReviewEbuildUnreadable]++
+		if p.unreadablePair.first() {
+			p.log.Warn(
+				"overlay: the two ebuilds behind a package could not be read for a realignment verdict; it carries none, and any further package in the same state is counted in the report's realignment summary rather than warned about again",
+				"atom", atom)
+		}
+		return
+	}
+	if bytes.Equal(req.Ours, req.Baseline) {
+		// The two files are the same file. There is no divergence here to
+		// justify, and a verdict on one would be a judgement about nothing —
+		// so this is not counted as unanswered either: nothing was asked.
+		return
+	}
+	p.asked++
+
+	// A cached verdict is the same question already answered: the key is the
+	// two files' content, so while neither has changed the answer cannot have.
+	// An entry that says nothing is treated as a miss — a hand-edited or
+	// half-written one must not suppress a question forever, and nothing here
+	// expires.
+	if note, hit := p.cache.getRealign(req); hit && realignNoteSpeaks(note) {
+		r.RealignVerdict = formatRealignVerdict(note)
+		return
+	}
+
+	note, err := p.rev.ReviewRealignment(ctx, req)
+	if err != nil {
+		p.unanswered++
+		p.unansweredBy[classifyReviewError(err)]++
+		if p.callFailed.first() {
+			p.log.Warn(
+				"overlay: the realignment review of a package failed; it carries no verdict, the report is otherwise complete, and any further failure is counted in the report's realignment summary rather than warned about again",
+				"atom", atom, "err", err)
+		}
+		return
+	}
+	if !realignNoteSpeaks(note) {
+		p.unanswered++
+		p.unansweredBy[ReviewUnusableReply]++
+		if p.silentAnswer.first() {
+			p.log.Warn(
+				"overlay: the realignment review of a package came back with no reason; a verdict nobody argued for is not one, so it carries none, and any further silent answer is counted in the report's realignment summary rather than warned about again",
+				"atom", atom)
+		}
+		return
+	}
+
+	r.RealignVerdict = formatRealignVerdict(note)
+	// Stored only once it is worth storing. A cache with no expiry would keep
+	// an empty answer for as long as neither ebuild changed, which is the one
+	// failure that would not heal itself on the next run.
+	p.cache.putRealign(req, note)
 }
 
 // realignBaselineIsAnnotated reports whether the baseline review has already

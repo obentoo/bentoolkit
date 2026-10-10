@@ -133,60 +133,74 @@ func detectVersionBumps(packageVersions map[string][]versionInfo) []Change {
 		category := parts[0]
 		pkg := parts[1]
 
-		var added, deleted []string
-		for _, v := range versions {
-			if v.status == "A" {
-				added = append(added, v.version)
-			} else {
-				deleted = append(deleted, v.version)
-			}
+		changes = append(changes, packageVersionChanges(category, pkg, versions)...)
+	}
+
+	return changes
+}
+
+// packageVersionChanges is detectVersionBumps for one package: the Up and Down
+// changes of its paired versions first, then its unpaired Add and Del changes.
+func packageVersionChanges(category, pkg string, versions []versionInfo) []Change {
+	var changes []Change
+
+	var added, deleted []string
+	for _, v := range versions {
+		if v.status == "A" {
+			added = append(added, v.version)
+		} else {
+			deleted = append(deleted, v.version)
+		}
+	}
+
+	pairedAdded := make(map[string]bool)
+	pairedDeleted := make(map[string]bool)
+
+	for _, delVer := range deleted {
+		bestMatch := firstUnpairedVersion(added, pairedAdded)
+		if bestMatch == "" {
+			continue
 		}
 
-		pairedAdded := make(map[string]bool)
-		pairedDeleted := make(map[string]bool)
+		pairedAdded[bestMatch] = true
+		pairedDeleted[delVer] = true
 
-		for _, delVer := range deleted {
-			bestMatch := ""
-			for _, addVer := range added {
-				if pairedAdded[addVer] {
-					continue
-				}
-				if bestMatch == "" {
-					bestMatch = addVer
-				}
-			}
-
-			if bestMatch != "" {
-				pairedAdded[bestMatch] = true
-				pairedDeleted[delVer] = true
-
-				cmp := ebuild.CompareVersions(bestMatch, delVer)
-				switch {
-				case cmp > 0:
-					changes = append(changes, Change{Type: Up, Category: category, Package: pkg, Version: bestMatch, OldVersion: delVer})
-				case cmp < 0:
-					changes = append(changes, Change{Type: Down, Category: category, Package: pkg, Version: bestMatch, OldVersion: delVer})
-				default:
-					pairedAdded[bestMatch] = false
-					pairedDeleted[delVer] = false
-				}
-			}
+		cmp := ebuild.CompareVersions(bestMatch, delVer)
+		switch {
+		case cmp > 0:
+			changes = append(changes, Change{Type: Up, Category: category, Package: pkg, Version: bestMatch, OldVersion: delVer})
+		case cmp < 0:
+			changes = append(changes, Change{Type: Down, Category: category, Package: pkg, Version: bestMatch, OldVersion: delVer})
+		default:
+			pairedAdded[bestMatch] = false
+			pairedDeleted[delVer] = false
 		}
+	}
 
-		for _, addVer := range added {
-			if !pairedAdded[addVer] {
-				changes = append(changes, Change{Type: Add, Category: category, Package: pkg, Version: addVer})
-			}
+	for _, addVer := range added {
+		if !pairedAdded[addVer] {
+			changes = append(changes, Change{Type: Add, Category: category, Package: pkg, Version: addVer})
 		}
+	}
 
-		for _, delVer := range deleted {
-			if !pairedDeleted[delVer] {
-				changes = append(changes, Change{Type: Del, Category: category, Package: pkg, Version: delVer})
-			}
+	for _, delVer := range deleted {
+		if !pairedDeleted[delVer] {
+			changes = append(changes, Change{Type: Del, Category: category, Package: pkg, Version: delVer})
 		}
 	}
 
 	return changes
+}
+
+// firstUnpairedVersion returns the first non-empty version in added that is
+// not paired yet, or "" when there is none.
+func firstUnpairedVersion(added []string, paired map[string]bool) string {
+	for _, addVer := range added {
+		if !paired[addVer] && addVer != "" {
+			return addVer
+		}
+	}
+	return ""
 }
 
 // buildModifiedChanges converts modified ebuilds into Change objects.

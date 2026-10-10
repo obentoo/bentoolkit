@@ -450,54 +450,9 @@ func FormatRenameResult(result *RenameResult, dryRun bool) string {
 	}
 
 	if dryRun {
-		fmt.Fprintf(&sb, "Dry run: %d ebuild(s) would be renamed\n\n", len(result.Matches))
-		for _, match := range result.Matches {
-			fmt.Fprintf(&sb, "  %s/%s:\n", match.Category, match.Package)
-			fmt.Fprintf(&sb, "    %s → %s\n", match.OldFilename, match.NewFilename)
-			if match.HasRevision {
-				sb.WriteString("    (revision suffix will be stripped)\n")
-			}
-		}
+		writeRenamePlan(&sb, result.Matches)
 	} else {
-		if len(result.Renamed) > 0 {
-			fmt.Fprintf(&sb, "Renamed %d ebuild(s):\n\n", len(result.Renamed))
-			for _, match := range result.Renamed {
-				fmt.Fprintf(&sb, "  %s/%s: %s → %s\n", match.Category, match.Package, match.OldFilename, match.NewFilename)
-			}
-		}
-
-		if len(result.Failed) > 0 {
-			fmt.Fprintf(&sb, "\nFailed %d ebuild(s):\n", len(result.Failed))
-			for _, fail := range result.Failed {
-				fmt.Fprintf(&sb, "  %s/%s: %s\n", fail.Match.Category, fail.Match.Package, fail.Message)
-			}
-		}
-
-		// Show Manifest update results
-		if len(result.ManifestUpdates) > 0 {
-			successCount := 0
-			failCount := 0
-			for _, u := range result.ManifestUpdates {
-				if u.Success {
-					successCount++
-				} else {
-					failCount++
-				}
-			}
-
-			if successCount > 0 {
-				fmt.Fprintf(&sb, "\nManifest updated for %d package(s)\n", successCount)
-			}
-
-			if failCount > 0 {
-				fmt.Fprintf(&sb, "\nManifest update failed for %d package(s):\n", failCount)
-				for _, u := range result.ManifestUpdates {
-					if !u.Success {
-						fmt.Fprintf(&sb, "  %s/%s: %s\n", u.Category, u.Package, u.Error)
-					}
-				}
-			}
-		}
+		writeRenameOutcome(&sb, result)
 	}
 
 	if len(result.VersionFiles) > 0 {
@@ -515,4 +470,67 @@ func FormatRenameResult(result *RenameResult, dryRun bool) string {
 	}
 
 	return sb.String()
+}
+
+// writeRenamePlan writes the dry-run section of FormatRenameResult: every
+// match with the rename it would perform.
+func writeRenamePlan(sb *strings.Builder, matches []RenameMatch) {
+	fmt.Fprintf(sb, "Dry run: %d ebuild(s) would be renamed\n\n", len(matches))
+	for _, match := range matches {
+		fmt.Fprintf(sb, "  %s/%s:\n", match.Category, match.Package)
+		fmt.Fprintf(sb, "    %s → %s\n", match.OldFilename, match.NewFilename)
+		if match.HasRevision {
+			sb.WriteString("    (revision suffix will be stripped)\n")
+		}
+	}
+}
+
+// writeRenameOutcome writes the section of FormatRenameResult for a run that
+// renamed: what was renamed, what failed, and the Manifest updates.
+func writeRenameOutcome(sb *strings.Builder, result *RenameResult) {
+	if len(result.Renamed) > 0 {
+		fmt.Fprintf(sb, "Renamed %d ebuild(s):\n\n", len(result.Renamed))
+		for _, match := range result.Renamed {
+			fmt.Fprintf(sb, "  %s/%s: %s → %s\n", match.Category, match.Package, match.OldFilename, match.NewFilename)
+		}
+	}
+
+	if len(result.Failed) > 0 {
+		fmt.Fprintf(sb, "\nFailed %d ebuild(s):\n", len(result.Failed))
+		for _, fail := range result.Failed {
+			fmt.Fprintf(sb, "  %s/%s: %s\n", fail.Match.Category, fail.Match.Package, fail.Message)
+		}
+	}
+
+	// Show Manifest update results
+	if len(result.ManifestUpdates) > 0 {
+		writeRenameManifestUpdates(sb, result.ManifestUpdates)
+	}
+}
+
+// writeRenameManifestUpdates writes how many Manifests were updated and
+// lists every package whose update failed.
+func writeRenameManifestUpdates(sb *strings.Builder, updates []ManifestUpdate) {
+	successCount := 0
+	failCount := 0
+	for _, u := range updates {
+		if u.Success {
+			successCount++
+		} else {
+			failCount++
+		}
+	}
+
+	if successCount > 0 {
+		fmt.Fprintf(sb, "\nManifest updated for %d package(s)\n", successCount)
+	}
+
+	if failCount > 0 {
+		fmt.Fprintf(sb, "\nManifest update failed for %d package(s):\n", failCount)
+		for _, u := range updates {
+			if !u.Success {
+				fmt.Fprintf(sb, "  %s/%s: %s\n", u.Category, u.Package, u.Error)
+			}
+		}
+	}
 }
