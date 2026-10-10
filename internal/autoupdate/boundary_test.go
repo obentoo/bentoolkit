@@ -4,8 +4,8 @@ package autoupdate
 // god package (design D11). It is the single guard for that graph: there is no
 // depguard rule behind it (decided in Clarify).
 //
-// What it governs, and only that: the root package, its seven sub-packages
-// (ebuilds, statefile, registry, fetch, parse, llm, fixer), the pre-existing
+// What it governs, and only that: the root package, its eight sub-packages
+// (ebuilds, statefile, jsonpath, registry, fetch, parse, llm, fixer), the pre-existing
 // internal/autoupdate/validate and the new internal/gentoo/repo. Every other
 // package in the module is left alone (R2.8). A package that is not in
 // packageGraphRules is only ever walked THROUGH, as an intermediate between a
@@ -59,16 +59,22 @@ type graphRule struct {
 var packageGraphRules = []graphRule{
 	{pkg: "internal/autoupdate/ebuilds", allow: []string{"internal/common/ebuild", "internal/common/logging"}},
 	{pkg: "internal/autoupdate/statefile", allow: []string{"internal/common/filelock"}},
+	// jsonpath is the JSON path grammar parse and registry share (story 087);
+	// it reaches no module package, so either can import it.
+	{pkg: "internal/autoupdate/jsonpath"},
 	{pkg: "internal/autoupdate/registry", allow: []string{
+		"internal/autoupdate/jsonpath",
 		"internal/autoupdate/fetch", "internal/autoupdate/ebuilds", "internal/autoupdate/statefile", "internal/common/...",
 	}},
 	{pkg: "internal/autoupdate/llm", allow: []string{"internal/autoupdate/ebuilds", "internal/common/..."}},
 	{pkg: "internal/autoupdate/fetch", allow: []string{"internal/autoupdate/statefile", "internal/common/..."}},
 	{pkg: "internal/autoupdate/parse", allow: []string{
+		"internal/autoupdate/jsonpath",
 		"internal/autoupdate/registry", "internal/autoupdate/ebuilds", "internal/autoupdate/fetch",
 		"internal/autoupdate/statefile", "internal/common/...",
 	}},
 	{pkg: "internal/autoupdate/fixer", allow: []string{
+		"internal/autoupdate/jsonpath",
 		"internal/autoupdate/llm", "internal/autoupdate/registry", "internal/autoupdate/ebuilds",
 		"internal/autoupdate/fetch", "internal/autoupdate/statefile",
 		"internal/autoupdate/validate", "internal/common/...", "internal/gentoo/repo",
@@ -89,7 +95,7 @@ const (
 		"sub-package, so the edge back is a cycle waiting to happen. Move the shared code down into the " +
 		"sub-package (or a lower layer) and let the core call it, or pass the value in as a parameter."
 
-	graphLayerRemedy = "the autoupdate packages are layered L0 ebuilds, statefile, common/httpx, gentoo/repo; " +
+	graphLayerRemedy = "the autoupdate packages are layered L0 ebuilds, statefile, common/httpx, gentoo/repo, jsonpath; " +
 		"L1 fetch, llm; L2 registry; L3 parse; L4 fixer; the core above them (design D11 as amended by story 061's run). " +
 		"A package imports only the layers below it. " +
 		"Move the code that needs this import into a package allowed to reach it, or pass what it needs in as a value."

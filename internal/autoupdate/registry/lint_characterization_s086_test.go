@@ -63,7 +63,7 @@ func TestS086LintRecordFields(t *testing.T) {
 		}, want: []LintIssue{s086Issue(10, LintLegacyBinary, FixDropBinary, s086MsgBinaryNoType)}},
 		{name: "binary with a non-boolean value without type is dropped", fields: []recordField{
 			s086Field("binary", `"yes"`, 10),
-		}, want: []LintIssue{s086Issue(10, LintLegacyBinary, FixDropBinary, s086MsgBinaryNoType)}},
+		}, want: []LintIssue{s086Issue(10, LintLegacyBinary, FixDropBinary, `binary is retired, and "yes" is not a boolean, so the line is deleted`)}},
 		{name: "binary true with a trailing comment becomes type", fields: []recordField{
 			s086Field("binary", "true # prebuilt", 10),
 		}, want: []LintIssue{s086Issue(10, LintLegacyBinary, FixBinaryToType, s086MsgBinaryToType)}},
@@ -147,16 +147,16 @@ func TestS086LintRecordFields(t *testing.T) {
 		{name: "track commit with an empty base_from", fields: []recordField{
 			s086Field("track", `"commit"`, 10),
 			s086Field("base_from", `""`, 11),
-		}},
+		}, want: []LintIssue{s086Issue(10, LintLegacyBase, FixNone, s086MsgLegacyBase)}},
 		{name: "unbalanced track quote is not commit", fields: []recordField{
 			s086Field("track", `"commit`, 10),
 		}},
 		{name: "track Commit is not commit", fields: []recordField{
 			s086Field("track", `"Commit"`, 10),
 		}},
-		{name: "track commit with a trailing comment is not commit", fields: []recordField{
+		{name: "track commit with a trailing comment is commit", fields: []recordField{
 			s086Field("track", `"commit" # snapshot`, 10),
-		}},
+		}, want: []LintIssue{s086Issue(10, LintLegacyBase, FixNone, s086MsgLegacyBase)}},
 		{name: "the last track line wins", fields: []recordField{
 			s086Field("track", `"commit"`, 10),
 			s086Field("track", `"commit"`, 12),

@@ -224,12 +224,12 @@ func TestS086ValidatePackageConfigErrors(t *testing.T) {
 			c := s086JSON()
 			c.Mirrors = []string{c.URL + "/"}
 			return c
-		}, ""},
+		}, `package test/pkg: mirror "https://example.com/api/" repeats url`},
 		{"mirror differing from url only by host case", func() PackageConfig {
 			c := s086JSON()
 			c.Mirrors = []string{"https://EXAMPLE.com/api"}
 			return c
-		}, ""},
+		}, `package test/pkg: mirror "https://EXAMPLE.com/api" repeats url`},
 
 		// fallback
 		{"json fallback", func() PackageConfig {

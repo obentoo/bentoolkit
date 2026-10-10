@@ -9,6 +9,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/antchfx/htmlquery"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/jsonpath"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
@@ -113,9 +114,10 @@ func wildcardVersions(data interface{}, path string, lim int) ([]string, error) 
 		return nil, fmt.Errorf("%w: expected array for [*] path", ErrJSONPathNotFound)
 	}
 
-	// Get the remaining path after [*]
-	remainingPath := strings.TrimPrefix(path, "[*]")
-	remainingPath = strings.TrimPrefix(remainingPath, ".")
+	remainingPath, _, err := jsonpath.CutWildcard(path)
+	if err != nil {
+		return nil, err
+	}
 
 	var versions []string
 	for _, item := range arr {
