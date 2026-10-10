@@ -325,6 +325,10 @@ type Checker struct {
 	// log receives the checker's diagnostics. Set via WithLogger; NewChecker
 	// leaves it discarding when the option is absent. Read it through logger().
 	log *slog.Logger
+
+	// tokenErrSink, when non-nil, receives the GitHub token resolution error in
+	// place of the checker's own warning. Set via WithGitHubTokenErrorSink.
+	tokenErrSink func(error)
 }
 
 // logger returns the checker's logger, or a discarding one for a checker that
@@ -570,6 +574,18 @@ func WithFetchCache(enabled bool) CheckerOption {
 	}
 }
 
+// WithGitHubTokenErrorSink hands the error of the checker's GitHub token
+// resolution to sink instead of logging it as a warning, so a caller that
+// builds several checkers, or reads the same secrets file elsewhere, can report
+// the failure once. The checker still continues with unauthenticated access.
+// A nil sink keeps the default: the checker logs its own warning.
+func WithGitHubTokenErrorSink(sink func(error)) CheckerOption {
+	return func(c *Checker) error {
+		c.tokenErrSink = sink
+		return nil
+	}
+}
+
 // NewChecker creates a new checker instance for the given overlay.
 // It loads the packages configuration and initializes cache and pending list.
 func NewChecker(overlayPath string, opts ...CheckerOption) (*Checker, error) {
@@ -691,12 +707,17 @@ func (c *Checker) resolveGitHubToken() {
 	// at 60 req/h per IP, which the batch checker exhausts quickly; the server
 	// then answers HTTP 403. The token is resolved from GITHUB_TOKEN/GH_TOKEN via
 	// the secrets chain (github.ResolveToken, the single source of truth); a
-	// resolution error warns and continues with unauthenticated access. An
-	// injected client that already carries a token is left untouched.
+	// resolution error warns (or goes to the sink WithGitHubTokenErrorSink set)
+	// and continues with unauthenticated access. An injected client that already
+	// carries a token is left untouched.
 	if c.httpClient.GetGitHubToken() == "" {
 		token, err := github.ResolveToken()
 		if err != nil {
-			c.log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
+			if c.tokenErrSink != nil {
+				c.tokenErrSink(err)
+			} else {
+				c.log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
+			}
 		}
 		if token != "" {
 			c.httpClient.SetGitHubToken(token)

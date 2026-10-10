@@ -42,6 +42,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   mirror that repeats `url` or another mirror up to host case or a trailing `/`
   is refused at load.
 
+- **`overlay compare` logs say what happened, once.** `Repository not found.`
+  now carries the resolution error, and `Registry unavailable` carries the
+  registry's load error when there is one. An unreadable secrets file is
+  warned about once per `overlay compare` or `overlay autoupdate` run, naming
+  the file, instead of once per repository and once more per update check. An
+  interrupted comparison is logged as an interruption, not as
+  `comparing packages: failed`.
+
+- **The local VM gate prints a failing host job's real result.** A host job
+  (gitleaks, osv-scanner, zizmor, the changelog check) that exited non-zero
+  was killed by `set -e` before it recorded its exit code, so the verdict
+  read "did not finish". It now reads `FAIL` with the job's exit code and
+  duration.
+
 ## [0.34.0] - 2026-10-09
 
 ### Added

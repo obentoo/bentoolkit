@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
@@ -194,8 +196,12 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		repoName = args[0]
 	}
 
+	// Every token lookup of this run reports an unreadable secrets file to sw,
+	// which warns about it once.
+	sw := newSecretsWarning(log)
+
 	// Convert config repos to provider.RepositoryInfo map
-	configRepos := convertConfigRepos(log, cfg)
+	configRepos := convertConfigRepos(sw, cfg)
 
 	// Create repository registry
 	registry, err := provider.NewRepositoryRegistry()
@@ -217,11 +223,10 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	}
 
 	// Token precedence lives in resolveRepoToken. An unreadable secrets file
-	// warns and degrades to anonymous access rather than aborting the comparison.
+	// warns (once per run, through sw) and degrades to anonymous access rather
+	// than aborting the comparison.
 	resolvedToken, err := resolveRepoToken(compareToken, repoInfo.Token)
-	if err != nil {
-		log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
-	}
+	sw.note(err)
 	repoInfo.Token = resolvedToken
 
 	// Create provider
@@ -551,20 +556,39 @@ func resolveCompareRepository(ctx context.Context, log *slog.Logger, repoName st
 			log.Error(registryInterruptedMsg)
 			return nil, exitWith(1)
 		}
-		log.Error("Repository not found.", "repository", repoName)
+		log.Error("Repository not found.", "repository", repoName, "err", err)
 		configNames := provider.ListAvailableRepositories(ctx, configRepos, nil)
-		registryNames := provider.ListAvailableRepositories(ctx, nil, registry)
+		registryNames, loadErr := listRegistryRepositories(ctx, registry)
 		if len(configNames) > 0 {
 			log.Info("Config repositories", "repositories", strings.Join(configNames, ", "))
 		}
-		if len(registryNames) > 0 {
+		switch {
+		case len(registryNames) > 0:
 			log.Info("Registry repositories: use `eselect repository list` to see all available")
-		} else {
-			log.Info("Registry unavailable. Use --sync to refresh or run `eselect repository list`")
+		case loadErr != nil:
+			log.Info(registryUnavailableMsg, "err", loadErr)
+		default:
+			log.Info(registryUnavailableMsg)
 		}
 		return nil, exitWith(1)
 	}
 	return repoInfo, nil
+}
+
+// registryUnavailableMsg is the hint logged when the registry yields no names,
+// whether it failed to load or loaded empty.
+const registryUnavailableMsg = "Registry unavailable. Use --sync to refresh or run `eselect repository list`"
+
+// listRegistryRepositories returns the registry's names together with the
+// error that stopped it from loading, which provider.ListAvailableRepositories
+// discards. A nil registry lists nothing and has no load error. The error is
+// returned as List gives it: it already names what failed, and the log reads
+// it as the cause.
+func listRegistryRepositories(ctx context.Context, registry *provider.RepositoryRegistry) ([]string, error) {
+	if registry == nil {
+		return nil, nil
+	}
+	return registry.List(ctx)
 }
 
 // configureCompareGitHubProvider applies --timeout and --no-cache to a GitHub
@@ -643,9 +667,14 @@ func printCompareProgress(done, total uint64) {
 	fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
 }
 
-// compareFailure logs a failed comparison and returns exit status 1. A rate
+// compareFailure logs a failed comparison and returns exit status 1. An
+// interruption is logged as one, the way repository resolution logs it; a rate
 // limit error on an API provider suggests --clone instead of the generic line.
 func compareFailure(log *slog.Logger, err error, repoName string) error {
+	if errors.Is(err, context.Canceled) {
+		log.Error(registryInterruptedMsg)
+		return exitWith(1)
+	}
 	// Check if it's a rate limit error and suggest --clone
 	if strings.Contains(err.Error(), "rate limit") && !compareClone {
 		log.Error("GitHub API rate limit exceeded.")
@@ -815,12 +844,66 @@ func resolveRepoToken(flagToken, repoToken string) (string, error) {
 // resolveGentooProvider's error for prune and the revive flows.
 const registryInterruptedMsg = "interrupted while fetching the repository registry"
 
+// secretsWarning warns about an unreadable secrets file at most once. A run
+// creates one and hands it to every token lookup it makes (each configured
+// repository's, the GitHub token's, and that of every update Checker the run
+// builds), so lookups that all fail on the same file yield one warning; the
+// next run holds a fresh value and warns again. It is safe for concurrent use.
+type secretsWarning struct {
+	log  *slog.Logger
+	once sync.Once
+}
+
+// newSecretsWarning returns a secretsWarning that logs through log.
+func newSecretsWarning(log *slog.Logger) *secretsWarning {
+	return &secretsWarning{log: log}
+}
+
+// note records the error of one token lookup. A nil error is ignored; the
+// first non-nil one is logged as a warning naming the file (when the error
+// carries it) and the error; every later one is dropped, since the caller has
+// already treated the token as unset.
+func (w *secretsWarning) note(err error) {
+	if err == nil {
+		return
+	}
+	w.once.Do(func() {
+		attrs := make([]any, 0, 4)
+		var pathErr *fs.PathError
+		if errors.As(err, &pathErr) {
+			attrs = append(attrs, "path", pathErr.Path)
+		}
+		attrs = append(attrs, "err", err)
+		w.log.Warn("reading secrets file: failed; tokens not set in the environment are treated as unset", attrs...)
+	})
+}
+
+// secretsWarningKey is the context key a run's secretsWarning travels under.
+type secretsWarningKey struct{}
+
+// withSecretsWarning returns ctx carrying sw, so a lookup reached only through
+// ctx (resolveGentooProvider) reports to the run's one warning.
+func withSecretsWarning(ctx context.Context, sw *secretsWarning) context.Context {
+	return context.WithValue(ctx, secretsWarningKey{}, sw)
+}
+
+// secretsWarningFrom returns the secretsWarning ctx carries, or a fresh one
+// logging through log when it carries none: a caller outside a run that shares
+// one still warns, once for its own lookups.
+func secretsWarningFrom(ctx context.Context, log *slog.Logger) *secretsWarning {
+	if sw, ok := ctx.Value(secretsWarningKey{}).(*secretsWarning); ok && sw != nil {
+		return sw
+	}
+	return newSecretsWarning(log)
+}
+
 // convertConfigRepos converts a config.RepoConfig map to a
 // provider.RepositoryInfo map, resolving each repository's auth token from
 // BENTOO_REPO_<NAME>_TOKEN via the secrets chain (env → user file → system file).
-// config.yaml is no longer a token source. An unreadable secrets file warns and
-// the token is treated as unset rather than aborting the whole conversion.
-func convertConfigRepos(log *slog.Logger, cfg *config.Config) map[string]*provider.RepositoryInfo {
+// config.yaml is no longer a token source. An unreadable secrets file is
+// reported to sw and the token is treated as unset rather than aborting the
+// whole conversion.
+func convertConfigRepos(sw *secretsWarning, cfg *config.Config) map[string]*provider.RepositoryInfo {
 	if cfg.Repositories == nil {
 		return nil
 	}
@@ -829,7 +912,7 @@ func convertConfigRepos(log *slog.Logger, cfg *config.Config) map[string]*provid
 	for name, repo := range cfg.Repositories {
 		tok, _, err := secrets.Lookup(repoTokenName(name))
 		if err != nil {
-			log.Warn("resolving token for repository: failed; treating it as unset", "repository", name, "err", err)
+			sw.note(err)
 			tok = ""
 		}
 		result[name] = &provider.RepositoryInfo{
