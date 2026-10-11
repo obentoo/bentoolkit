@@ -155,7 +155,7 @@ autoupdate:
   #     - --remote
 
   # --------------------------------------------------------------------------
-  # llm —AI provider used by the automatic repairs:
+  # llm — AI provider used by the automatic repairs:
   #   * Manifest auto-fix during --apply (broken SRC_URI/Manifest)
   #   * registry entry repair at the end of --check
   #
