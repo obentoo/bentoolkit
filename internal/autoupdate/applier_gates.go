@@ -740,7 +740,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", gate, pkg, version)
 	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
 		"gate", gate, "package", pkg, "version", version)
-	a.reporter.TaskStage(pkg, "llm-build-fix")
+	a.substage(result, pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
@@ -755,6 +755,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	if fixErr != nil {
 		return nil, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)
 	}
+	appendRefusedTools(result, fixRes.DeniedTools)
 
 	// An empty summary is the agent reporting NO CHANGE, and a re-run of an
 	// untouched tree can only reproduce the failure it already produced — at the
@@ -766,7 +767,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 
 	// The authoritative re-run: bentoo's own build of the same gates, never
 	// the agent's account of what it did.
-	a.reporter.TaskStage(pkg, "re-check")
+	a.substage(result, pkg, "re-check")
 	var second buildAttempt
 	deps.RunAttached = a.recordingRunner(ctx, &second)
 	gates, err := validate.RunBuildGates(ctx, req, deps)

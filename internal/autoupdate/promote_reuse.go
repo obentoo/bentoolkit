@@ -293,6 +293,7 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 	if record.DistfileDigest != inputs.distfile {
 		return stagedReuse{
 			root:   root,
+			cand:   cand,
 			reason: "the retained tree matches this bump exactly, but the distfile it was validated against changed under it",
 			err: fmt.Errorf("not promoted: the distfile of %s-%s was validated as %s and the published Manifest now records %s; "+
 				"an archive re-rolled upstream under the same name is a different source tree, and every gate's answer was about the old one. "+

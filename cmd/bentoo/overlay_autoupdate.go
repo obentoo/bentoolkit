@@ -1869,6 +1869,9 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
 			output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
 		}
+		if result.RepairBundle != "" {
+			output.Info.Printf("    Repair:  bentoo overlay autoupdate --repair %s\n", result.Package)
+		}
 	}
 }
 
