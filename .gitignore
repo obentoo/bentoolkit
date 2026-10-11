@@ -17,8 +17,8 @@ coverage.html
 build/
 dist/
 
-# Vendored dependencies
-vendor/
+# Vendored dependencies (the root module only: internal/autoupdate/vendor is source)
+/vendor/
 
 # Epic planning artifacts (stories/design/tasks/drafts) — never versioned.
 # No trailing slash: a worktree links .epic to the main checkout, and git treats
