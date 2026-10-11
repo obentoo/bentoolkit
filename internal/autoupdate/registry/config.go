@@ -501,7 +501,7 @@ func validateRequires(pkg string, cfg *PackageConfig) error {
 			switch fetch.URLTemplateFault(spec.URL) {
 			case fetch.TemplateNotHTTP:
 				return fmt.Errorf("package %s: requires %s: url %q is not an absolute http(s) URL with a host", pkg, atom, spec.URL)
-			case fetch.TemplatePlaceholderInHost:
+			case fetch.TemplatePlaceholderInHost: // unreachable today; kept with URLTemplateFault's guard
 				return fmt.Errorf("package %s: requires %s: url %q puts a placeholder in the scheme or host; {version} may appear only in the path or query", pkg, atom, spec.URL)
 			}
 		}

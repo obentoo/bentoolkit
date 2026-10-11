@@ -32,8 +32,9 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `a..b`, `a[0]b`, `a[+1]` or a stray `]` and then read something other than
   what was written (`a..b` read as `a.b`). They now follow one grammar, shared
   by the loader, `overlay autoupdate --lint` and the fetch itself, and the error
-  names the package, the field and the quoted path. No record of the bentoo
-  overlay is affected.
+  names the package, the field and the quoted path. A `versions_path` whose
+  `[*]` is followed by a name with no `.` (`[*]tag`) is now refused too; write
+  `[*].tag`. No record of the bentoo overlay is affected.
 
 - **`overlay autoupdate --lint` reads what the registry says.** A
   `track = "commit"` with a trailing comment, or with `base_from = ""`, now gets
@@ -45,16 +46,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 - **`overlay compare` logs say what happened, once.** `Repository not found.`
   now carries the resolution error, and `Registry unavailable` carries the
   registry's load error when there is one. An unreadable secrets file is
-  warned about once per `overlay compare` or `overlay autoupdate` run, naming
-  the file, instead of once per repository and once more per update check. An
-  interrupted comparison is logged as an interruption, not as
-  `comparing packages: failed`.
+  warned about once per `overlay compare`, `overlay autoupdate` or
+  `overlay prune` run, naming the file, instead of once per repository and
+  once more per update check. An interrupted comparison is logged as an
+  interruption, not as `comparing packages: failed`.
 
 - **The local VM gate prints a failing host job's real result.** A host job
   (gitleaks, osv-scanner, zizmor, the changelog check) that exited non-zero
   was killed by `set -e` before it recorded its exit code, so the verdict
-  read "did not finish". It now reads `FAIL` with the job's exit code and
-  duration.
+  read "did not finish". It now reads `FAIL` with the job's duration, and the
+  job's exit code is recorded in its `host-<name>.rc` file under the gate's
+  log directory.
 
 ## [0.34.0] - 2026-10-09
 

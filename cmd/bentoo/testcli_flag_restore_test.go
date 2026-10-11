@@ -24,9 +24,13 @@ package main
 // By building two trees. A flag bound to a package variable points at the same
 // address in both; one read off the command (--depth) or bound to a local of
 // newRootCmd (--verbose, --quiet, --no-color) points at fresh storage in each,
-// and cannot outlive the tree that owns it. Only the first kind can leak, so
-// only the first kind must be restored — and no list of exemptions has to be
-// kept by hand.
+// and the FLAG cannot outlive the tree that owns it. Only the first kind can
+// leak through its flag, so only the first kind must be restored here — and no
+// list of exemptions has to be kept by hand.
+//
+// The three output flags leak another way: the root's pre-run copies them into
+// the package variables verbose, quiet and noColor, which do outlive the tree.
+// Those variables are listed in reportFlagGlobals and restored by testCLI.Run.
 //
 // The -run prefix TestAutoupdateFlagGlobals selects this file whole.
 
