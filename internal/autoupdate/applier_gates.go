@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
@@ -397,8 +398,14 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	}
 	oldArchive, searched := a.previousReviewArchive(ctx, pkg, oldVersion)
 	if oldArchive == "" {
-		*gates = append(*gates, reviewSkipped(archiveNotFoundReason("previous", pkg, oldVersion, searched)))
-		return floor
+		fetched, dir, err := a.fetchPreviousArchive(ctx, pkg, oldVersion)
+		defer removeStagedDistdir(a.logger(), dir)
+		if err != nil {
+			*gates = append(*gates, reviewSkipped(archiveNotFoundReason("previous", pkg, oldVersion, searched)+
+				fmt.Sprintf("; fetching it failed: %v", err)))
+			return floor
+		}
+		oldArchive = fetched
 	}
 	progress, progressDone := a.agentProgress(pkg)
 	report, err := withSlot(ctx, a.slots.llm, func() (fixer.BumpReviewReport, error) {
@@ -515,6 +522,66 @@ func findReviewArchive(pkgDir, version string, dirs []string) (string, archiveSe
 		searched.lastErr = err
 	}
 	return "", searched
+}
+
+// fetchPreviousArchive downloads the previous version's distfiles with
+// Portage's own `ebuild <published ebuild> fetch` into a fresh private
+// directory, so the published Manifest checks every checksum and nothing here
+// expands SRC_URI. The caller owns dir and removes it; it is returned even on
+// an error once created. Nothing is written to --distdir, the distfiles cache
+// or the host DISTDIR: DISTDIR is the only destination the child is given.
+func (a *Applier) fetchPreviousArchive(ctx context.Context, pkg, version string) (archive, dir string, err error) {
+	ebuildPath := a.EbuildPath(pkg, version)
+	if ebuildPath == "" {
+		return "", "", fmt.Errorf("no published ebuild of %s-%s to fetch from", pkg, version)
+	}
+	dir, err = os.MkdirTemp(fixSandboxRoot(ctx), "bentoo-review-distfiles-")
+	if err != nil {
+		return "", "", fmt.Errorf("creating a private distdir for %s-%s: %w", pkg, version, err)
+	}
+
+	start := time.Now()
+	cmd := a.execCommand(ctx, "ebuild", ebuildPath, "fetch")
+	cmd.Dir = a.overlayPath
+	cmd.Env = append(validate.AllowedBuildEnv(os.Environ()), "DISTDIR="+dir)
+	cmd.Stdin = strings.NewReader("")
+	procgroup.Group(cmd)
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		return "", dir, fmt.Errorf("ebuild fetch of %s-%s into %s: %w: %s", pkg, version, dir, runErr, lastOutput(out))
+	}
+
+	archive, err = validate.FindDistfile(filepath.Dir(ebuildPath), dir, version)
+	if err != nil {
+		return "", dir, fmt.Errorf("after fetching %s-%s: %w", pkg, version, err)
+	}
+	a.logger().Info("bump review: fetched the previous archive",
+		"package", pkg, "version", version, "bytes", dirBytes(dir), "duration", time.Since(start))
+	return archive, dir, nil
+}
+
+// lastOutput is the tail of a child's output, enough to name its failure.
+func lastOutput(out []byte) string {
+	const keep = 500
+	text := strings.TrimSpace(string(out))
+	if len(text) > keep {
+		text = "…" + text[len(text)-keep:]
+	}
+	return text
+}
+
+// dirBytes sums the sizes of the regular files directly in dir.
+func dirBytes(dir string) int64 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+	}
+	return total
 }
 
 // archiveNotFoundReason says which side's archive is missing, for which

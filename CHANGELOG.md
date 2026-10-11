@@ -55,6 +55,22 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   fixer, bump reviewer) at once, and one `--compile` step at a time, so its
   confirmation prompt and sudo call never overlap.
 
+### Fixed
+
+- **The `--llm` bump reviewer now runs when both archives can be found.**
+  It skipped almost every bump: it looked only in `--distdir`, matched
+  archive names with the `-rN` revision attached, and never saw the
+  candidate archive the apply had just downloaded. It now looks in the
+  apply's own download directory, `--distdir` and the distfiles cache,
+  ignores `-rN` when matching, and fetches a previous archive that is no
+  longer on disk with `ebuild … fetch` into a private directory removed
+  afterwards. Binary packages and non-Meson projects are skipped without a
+  search, and the bump's review gate records why.
+- **An archive of a neighbour version is no longer taken for this one.**
+  A lone `m-1.0.1.tar.gz`, `m-11.0.tar.gz` or `m-2.1.0.tar.gz` was accepted
+  as version `1.0`'s archive, by the bump reviewer and by the options gate
+  alike. The version must now appear as a whole token in the name.
+
 ## [0.35.0] - 2026-10-10
 
 ### Added
