@@ -41,6 +41,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -48,6 +49,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -264,6 +266,7 @@ func newTestCLI(t *testing.T, opts ...testCLIOption) *testCLI {
 	restoreReportFlags(t)
 
 	c := &testCLI{t: t, home: home, overlay: overlay, deps: defaultDeps()}
+	isolateResolvedSecrets(t, c.deps)
 	for _, opt := range opts {
 		opt(c)
 	}
@@ -314,6 +317,32 @@ func newTestCLI(t *testing.T, opts ...testCLIOption) *testCLI {
 func restoreReportFlags(t *testing.T) {
 	t.Helper()
 	restoreFlagGlobals(t, reportFlagGlobals()...)
+}
+
+// isolateResolvedSecrets narrows what the invocation logger of a tree built
+// from d scrubs to the values secrets.Lookup returns from this call on.
+//
+// The secrets package records every value Lookup returns for the life of the
+// process, and the logger masks all of them. Without this, a value an earlier
+// test resolved — "secret", say — is masked in this test's stderr, and a test
+// reading its own output fails only on the shuffle seeds that run the
+// resolving test first. A value resolved after this call stays masked: the
+// isolation drops other tests' secrets, it never switches redaction off.
+//
+// It changes a field of d, the test's own deps value, and no package variable,
+// so there is nothing to restore and nothing a parallel test could race. The
+// narrowed func wraps the field's previous value, so a second call narrows
+// further.
+func isolateResolvedSecrets(t *testing.T, d *deps) {
+	t.Helper()
+	earlier := map[string]bool{}
+	for _, v := range secrets.Resolved() {
+		earlier[v] = true
+	}
+	previous := d.resolvedSecrets
+	d.resolvedSecrets = func() []string {
+		return slices.DeleteFunc(previous(), func(v string) bool { return earlier[v] })
+	}
 }
 
 // reportFlagGlobals is every package variable restoreReportFlags puts back:

@@ -791,7 +791,8 @@ func tomlValueText(raw string) string {
 // single-line basic ("…") or literal ('…') string, optionally followed by an
 // inline comment (`track = "commit" # pinned`), and returns "" otherwise. It is
 // deliberately minimal: the only values read through it are the closed
-// vocabularies of `track`, `type` and `base_from`, which never carry an escape.
+// vocabularies of `track` and `type`, which never carry an escape. Whether
+// `base_from` is empty is read by isEmptyTOMLString instead.
 func tomlStringValue(raw string) string {
 	v := strings.TrimSpace(raw)
 	if len(v) < 2 || (v[0] != '"' && v[0] != '\'') {

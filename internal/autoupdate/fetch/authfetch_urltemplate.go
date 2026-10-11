@@ -73,6 +73,11 @@ func URLTemplateFault(template string) templateFault {
 	// scheme, userinfo, host and port. A successful parse with a host means
 	// the template holds "scheme://", and a scheme cannot contain "/", so the
 	// first "//" is the one that opens the authority.
+	//
+	// url.Parse refuses "{" and "}" in the scheme, userinfo, host and port, so
+	// no template that parsed above reaches this check today. It is kept as
+	// defence in depth: the request carries a credential, and a looser parser
+	// would otherwise let an upstream value choose the host it is sent to.
 	authority := strings.Index(template, "//") + len("//")
 	end := len(template)
 	if i := strings.IndexAny(template[authority:], "/?#"); i >= 0 {

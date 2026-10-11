@@ -12,6 +12,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/obentoo/bentoolkit/internal/realign"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -133,6 +134,12 @@ type deps struct {
 	// terminal I/O. A plain func(string) bool is assignable to
 	// RestoreOptions.Confirm (the unexported confirmFunc type) from package main.
 	snapshotRestoreConfirm func(string) bool
+	// resolvedSecrets lists the values the invocation logger scrubs from every
+	// record. Production keeps secrets.Resolved, every value secrets.Lookup
+	// returned in this process. That set lives as long as the process, which in
+	// a test binary is every test: a test narrows its own tree's list to the
+	// values it resolved itself, so another test's secret never masks its output.
+	resolvedSecrets func() []string
 }
 
 // defaultDeps returns the production wiring: the values the replaced package
@@ -170,6 +177,7 @@ func defaultDeps() *deps {
 		snapshotRunner:          nil,
 		snapshotRollbackConfirm: nil,
 		snapshotRestoreConfirm:  nil,
+		resolvedSecrets:         secrets.Resolved,
 	}
 }
 

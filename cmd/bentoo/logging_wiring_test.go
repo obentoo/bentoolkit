@@ -102,7 +102,12 @@ func s062Execute(t *testing.T, extra *cobra.Command, args ...string) (stdout, st
 
 	code = func() int {
 		defer func() { color.Output, color.NoColor = origColorOut, origNoColor }()
-		root := newRootCmd()
+		// The tree's own deps, narrowed here because this harness does not
+		// build its tree through newTestCLI: no s062 test resolves a secret of
+		// its own, so a snapshot taken at the run equals one taken at setup.
+		d := defaultDeps()
+		isolateResolvedSecrets(t, d)
+		root := newRootCmdWith(d)
 		if extra != nil {
 			root.AddCommand(extra)
 		}
