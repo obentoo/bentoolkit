@@ -1003,6 +1003,10 @@ type applyRun struct {
 	retainedVerdict string
 	cand            candidatePaths
 
+	// gatesPassed is set once every gate allowed promotion; only then does the
+	// record beside the staged tree name the bytes the gates read.
+	gatesPassed bool
+
 	// stageName is the last stage this run entered through stage; fail copies
 	// it into the result.
 	stageName string
@@ -1239,7 +1243,11 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// records the final list and the depth a reviewer's escalation may have raised.
 	if stagedRoot := r.result.StagedPath; stagedRoot != "" {
 		defer func() {
-			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth)
+			validatedEbuild := ""
+			if r.gatesPassed {
+				validatedEbuild = r.cand.ebuildPath
+			}
+			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth, validatedEbuild)
 		}()
 	}
 
@@ -1428,6 +1436,7 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	if err := r.promotionRefusal(ctx); err != nil {
 		return r.fail(err)
 	}
+	r.gatesPassed = true
 
 	// The published overlay's first and only write of this apply. On the
 	// pre-staging path there is nothing to promote: copyEbuild already put the

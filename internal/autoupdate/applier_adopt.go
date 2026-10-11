@@ -18,16 +18,20 @@ import (
 // it stands. Nothing is copied into the tree and no substitution is applied:
 // either would overwrite the operator's edit.
 //
-// The tree is named on the result before any gate runs, so execute arms the
-// record of what the gates said exactly as on the staging path, and a failure
-// keeps the tree and rewrites its repair bundle. A root that is not this bump's
-// staged tree, or that holds no candidate, is refused before it is named, so no
-// bundle is written into it.
+// The tree is named on the result as soon as its root is accepted, so any
+// failure from there on keeps the tree and rewrites its repair bundle, and
+// execute arms the record of what the gates said exactly as on the staging
+// path. A root that is not this bump's staged tree is refused before it is
+// named, so no bundle is written into it.
 func (r *applyRun) adoptCandidate(root string) error {
 	root, err := r.adoptedTreeRoot(root)
 	if err != nil {
 		return err
 	}
+	// Named from here on, so a failure before the candidate is resolved still
+	// rewrites the bundle of this tree. No record is written for it: execute
+	// arms that only once this function has returned without an error.
+	r.result.StagedPath = root
 	if err := r.captureInputs(); err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: %w", root, r.pkg, r.newVersion, err)
 	}
@@ -43,7 +47,6 @@ func (r *applyRun) adoptCandidate(root string) error {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: the candidate %s is not a regular file", root, r.pkg, r.newVersion, cand.ebuildPath)
 	}
 	r.cand = cand
-	r.result.StagedPath = root
 	r.result.StagedEbuild = cand.ebuildPath
 
 	if err := r.raiseDepthToRecord(root); err != nil {

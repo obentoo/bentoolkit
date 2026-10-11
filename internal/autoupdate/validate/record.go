@@ -121,6 +121,13 @@ type StageRecord struct {
 	// just quietly pay for a second build every time.
 	EbuildDigest string `json:"ebuild_digest"`
 
+	// ValidatedDigest is the candidate's bytes AS THE GATES READ THEM, fixer
+	// and operator edits included, taken when the record is written for a run
+	// whose gates passed. It is empty on any other run. EbuildDigest says which
+	// bump the tree is about; this says which bytes were proved, so a staged
+	// ebuild edited after its proof no longer matches and is validated again.
+	ValidatedDigest string `json:"validated_digest,omitempty"`
+
 	// SubstitutionDigest covers the per-package rewrites the applier applies to
 	// the staged candidate after staging it (a tracked commit hash, an auxiliary
 	// variable). It is empty when the bump declares none, which is the ordinary
@@ -152,6 +159,7 @@ type stageRecordWire struct {
 	Depth              string       `json:"depth"`
 	Gates              []GateResult `json:"gates"`
 	EbuildDigest       string       `json:"ebuild_digest"`
+	ValidatedDigest    string       `json:"validated_digest,omitempty"`
 	SubstitutionDigest string       `json:"substitution_digest,omitempty"`
 	DistfileDigest     string       `json:"distfile_digest,omitempty"`
 }
@@ -194,6 +202,7 @@ func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 		Depth:              rec.Depth.String(),
 		Gates:              rec.Gates,
 		EbuildDigest:       rec.EbuildDigest,
+		ValidatedDigest:    rec.ValidatedDigest,
 		SubstitutionDigest: rec.SubstitutionDigest,
 		DistfileDigest:     rec.DistfileDigest,
 	}, "", "  ")
@@ -269,6 +278,7 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 		Depth:              depth,
 		Gates:              wire.Gates,
 		EbuildDigest:       wire.EbuildDigest,
+		ValidatedDigest:    wire.ValidatedDigest,
 		SubstitutionDigest: wire.SubstitutionDigest,
 		DistfileDigest:     wire.DistfileDigest,
 	}, nil
