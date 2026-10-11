@@ -668,6 +668,26 @@ func (c *RetryableHTTPClient) Get(ctx context.Context, url string) (*http.Respon
 	return c.Do(req)
 }
 
+// Download performs one GET for a file whose transfer may outlast the
+// per-request timeout: http.Client.Timeout also bounds reading the body, so a
+// distfile larger than http_timeout allows would be cut off mid-transfer. The
+// request runs on a copy of the client with that timeout removed, so ctx alone
+// bounds the transfer; the transport's header wait still bounds a silent
+// server. It neither retries nor goes through the circuit breakers, and it
+// sends the client's default headers. The caller closes the body.
+func (c *RetryableHTTPClient) Download(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	for k, v := range c.defaultHeaders {
+		req.Header.Set(k, v)
+	}
+	hc := *c.client
+	hc.Timeout = 0
+	return hc.Do(req)
+}
+
 // GetWithContext performs an HTTP GET request with retry logic and context support.
 //
 // The returned response body is wrapped in an http.MaxBytesReader bounded by

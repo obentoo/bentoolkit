@@ -457,12 +457,13 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 	}
 	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, ar.applierDistfileOptions()...)
+	opts = append(opts, ar.applierVendorOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 
 	// Deliberately NOT WithApplierClean: `--clean` deletes published ebuilds, and
 	// a read-only check has no business owning that switch even by accident.
-	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
 		ar.log().Warn("could not initialize the validator, so nothing was validated", "err", err)
 		// Printed, for the same reason the declined answer above is: the price

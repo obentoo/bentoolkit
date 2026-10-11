@@ -84,6 +84,15 @@ type sweeper struct {
 	// (see newChildRunError). Empty, the default, keeps none, so a sweeper built
 	// inside a test writes no file that test did not ask for.
 	childLogsDir string
+	// httpClient is what the vendor step probes and downloads with; nil
+	// disables that step. vendorHosts lists the hosts whose vendor tarballs it
+	// owns, empty meaning the default host.
+	httpClient  *fetch.RetryableHTTPClient
+	vendorHosts []string
+	// vendorSink, when set, receives the vendor step's outcome whenever it
+	// generated a tarball. It points into the ApplyResult of the apply that
+	// built this sweeper; nil drops the outcome.
+	vendorSink *VendorOutcome
 	// log receives the sweeper's diagnostics. newSweeper makes it discarding
 	// when withSweeperLogger is absent.
 	log *slog.Logger

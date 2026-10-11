@@ -22,12 +22,14 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/repair"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
@@ -311,6 +313,10 @@ type ApplyResult struct {
 	// path no gate runs and neither answer would be true. The two constants are
 	// ValidationSourceStaged and ValidationSourceThisRun.
 	ValidationSource string
+	// Vendor is what the vendor step did before the staged manifest: when it
+	// generated a Go vendor tarball, the tarball's path, name, URI and digest.
+	// The zero value means it generated nothing.
+	Vendor VendorOutcome
 }
 
 // Applier handles update application for packages.
@@ -455,6 +461,11 @@ type Applier struct {
 	distdir           string
 	configuredDistdir string
 	distfilesCache    string
+	// vendorConfig is the autoupdate.vendor block and httpClient the client the
+	// vendor step probes and downloads with; both are carried, unread, to the
+	// sweeper the Manifest step runs on. A nil client disables the vendor step.
+	vendorConfig config.VendorConfig
+	httpClient   *fetch.RetryableHTTPClient
 	// stagingRoot is the directory the staged trees are built under — in
 	// production <configDir>/staging. Non-empty is what turns the whole
 	// staged pipeline on: the candidate is materialised there instead of in the
@@ -783,6 +794,18 @@ func WithApplierDistdir(explicit, configured string) ApplierOption {
 // caller that omits this option gets.
 func WithApplierDistfilesCache(dir string) ApplierOption {
 	return func(a *Applier) { a.distfilesCache = dir }
+}
+
+// WithApplierVendorConfig supplies the autoupdate.vendor block: the hosts whose
+// Go vendor tarballs the applier owns, and how a generated one is uploaded.
+func WithApplierVendorConfig(cfg config.VendorConfig) ApplierOption {
+	return func(a *Applier) { a.vendorConfig = cfg }
+}
+
+// WithApplierHTTPClient supplies the client the vendor step probes and
+// downloads distfiles with. Without one the vendor step does nothing.
+func WithApplierHTTPClient(c *fetch.RetryableHTTPClient) ApplierOption {
+	return func(a *Applier) { a.httpClient = c }
 }
 
 // WithApplierStagingRoot points the applier at the directory its staged trees are
@@ -2154,8 +2177,20 @@ func (a *Applier) sweeper() *sweeper {
 		withSweeperDistdir(a.distdir, a.configuredDistdir),
 		withSweeperDistfilesCache(a.distfilesCache),
 		withSweeperChildLogsDir(a.logsDir),
+		withSweeperHTTPClient(a.httpClient),
+		withSweeperVendorHosts(a.vendorConfig.EffectiveHosts()),
 		withSweeperLogger(a.logger()),
 	)
+}
+
+// sweeperFor is sweeper() for one apply: the vendor step's outcome lands in
+// result.Vendor. A nil result drops it.
+func (a *Applier) sweeperFor(result *ApplyResult) *sweeper {
+	s := a.sweeper()
+	if result != nil {
+		s.vendorSink = &result.Vendor
+	}
+	return s
 }
 
 // sweepConfigs returns the registry the sweep plans against — a copy of
@@ -2483,7 +2518,8 @@ func literalReplacement(value string) string {
 // caller then removes. When the fixer runs, the directory the AGENT downloaded
 // into becomes that path, and the first distdir is removed when superseded.
 func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
-	distdir, firstErr := a.runManifestFor(ctx, cand, pkg, version)
+	sw := a.sweeperFor(result)
+	distdir, firstErr := a.runManifestFor(ctx, sw, cand, pkg, version)
 	if firstErr == nil {
 		return distdir, nil
 	}
@@ -2493,6 +2529,14 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// the one that never happens.
 	if envErr := a.refuseFixOnEnvironmentFailure(pkg, version, firstErr); envErr != nil {
 		return distdir, envErr
+	}
+
+	// A failure the vendor step owns is not the fixer's: no ebuild edit can
+	// produce a tarball, and a failed manifest over a generated one is a fact
+	// about that tarball, not about the ebuild.
+	if result.Vendor.Generated || errors.Is(firstErr, ErrVendorStale) || errors.Is(firstErr, ErrVendorGenerate) {
+		a.logger().Info("vendor-owned failure; LLM fixer not invoked", "package", pkg, "version", version)
+		return distdir, firstErr
 	}
 
 	if a.fixer == nil {
@@ -2615,7 +2659,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// The path returned is whatever the re-check ran against, on its failure paths
 	// too — the caller must be able to take the directory back however this ends.
 	a.substage(result, pkg, "re-check")
-	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
+	recheckDistdir, secondErr := a.runManifestForIn(ctx, sw, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
 		// Both runs stay in the chain, each with its own output: a renderer
@@ -2802,10 +2846,10 @@ func (a *Applier) runManifest(ctx context.Context, pkg, version string) error {
 // "" on the published path — which has no private directory, having written into
 // the shared one all along. A caller that receives a non-empty path owns it and
 // must remove it; removeStagedDistdir is that removal.
-func (a *Applier) runManifestFor(ctx context.Context, cand candidatePaths, pkg, version string) (string, error) {
+func (a *Applier) runManifestFor(ctx context.Context, sw *sweeper, cand candidatePaths, pkg, version string) (string, error) {
 	// An empty supplied distdir means "whatever this path would have created for
 	// itself", which is the entire difference between the two entry points.
-	return a.runManifestForIn(ctx, "", cand, pkg, version)
+	return a.runManifestForIn(ctx, sw, "", cand, pkg, version)
 }
 
 // runManifestForIn is runManifestFor against a distdir the caller already holds.
@@ -2825,9 +2869,10 @@ func (a *Applier) runManifestFor(ctx context.Context, cand candidatePaths, pkg, 
 //
 // Both branches therefore keep runManifestFor's contract: what comes back is the
 // directory the caller owns and must remove, and "" only where there is none.
-func (a *Applier) runManifestForIn(ctx context.Context, suppliedDistdir string, cand candidatePaths, pkg, version string) (string, error) {
+// sw runs the staged step; sweeperFor builds it to carry the vendor outcome.
+func (a *Applier) runManifestForIn(ctx context.Context, sw *sweeper, suppliedDistdir string, cand candidatePaths, pkg, version string) (string, error) {
 	if cand.staged {
-		return a.sweeper().runStagedManifestIn(ctx, suppliedDistdir, cand.pkgDir, pkg, version)
+		return sw.runStagedManifestIn(ctx, suppliedDistdir, cand.pkgDir, pkg, version)
 	}
 	return suppliedDistdir, a.runManifest(ctx, pkg, version)
 }
@@ -3451,6 +3496,17 @@ func (a *Applier) StagingRoot() string {
 // Pending returns the pending list instance.
 func (a *Applier) Pending() *PendingList {
 	return a.pending
+}
+
+// VendorConfig returns the autoupdate.vendor block this applier was built with.
+func (a *Applier) VendorConfig() config.VendorConfig {
+	return a.vendorConfig
+}
+
+// HTTPClient returns the client the vendor step probes and downloads with; nil
+// means the vendor step is off.
+func (a *Applier) HTTPClient() *fetch.RetryableHTTPClient {
+	return a.httpClient
 }
 
 // OverlayPath returns the overlay path.
