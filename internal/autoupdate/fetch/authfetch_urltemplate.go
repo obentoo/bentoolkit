@@ -75,7 +75,7 @@ func URLTemplateFault(template string) templateFault {
 	// first "//" is the one that opens the authority.
 	//
 	// url.Parse refuses "{" and "}" in the scheme, userinfo, host and port, so
-	// no template that parsed above reaches this check today. It is kept as
+	// for a template that parsed above this check never fires today. It is kept as
 	// defence in depth: the request carries a credential, and a looser parser
 	// would otherwise let an upstream value choose the host it is sent to.
 	authority := strings.Index(template, "//") + len("//")

@@ -30,7 +30,8 @@ package main
 //
 // The three output flags leak another way: the root's pre-run copies them into
 // the package variables verbose, quiet and noColor, which do outlive the tree.
-// Those variables are listed in reportFlagGlobals and restored by testCLI.Run.
+// Those variables are listed in reportFlagGlobals and restored by the
+// restoreReportFlags cleanup that newTestCLI registers.
 //
 // The -run prefix TestAutoupdateFlagGlobals selects this file whole.
 
