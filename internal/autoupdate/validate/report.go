@@ -111,6 +111,9 @@ type EbuildResult struct {
 	DepthReason    string       `json:"depth_reason,omitempty"`
 	Gates          []GateResult `json:"gates"`
 	Sources        []string     `json:"sources"`
+	// Notes are facts about how the result was reached that no gate carries,
+	// rendered under the ebuild's row.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // WorstOutcome is the one outcome that stands for the whole ebuild, for a

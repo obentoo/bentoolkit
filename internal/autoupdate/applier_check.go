@@ -247,7 +247,7 @@ func checkResult(pkg, version string, local *ApplyResult, depth validate.DepthDe
 	if reached == "" {
 		reached = validate.DepthNone.String()
 	}
-	return validate.EbuildResult{
+	res := validate.EbuildResult{
 		Package:        pkg,
 		Version:        version,
 		Depth:          reached,
@@ -255,7 +255,15 @@ func checkResult(pkg, version string, local *ApplyResult, depth validate.DepthDe
 		DepthReason:    local.DepthReason,
 		Gates:          gates,
 	}
+	if local.Vendor.Generated {
+		res.Notes = append(res.Notes, VendorGeneratedNote)
+	}
+	return res
 }
+
+// VendorGeneratedNote marks a check whose gates ran on a vendor tarball this
+// run generated: a check never uploads one.
+const VendorGeneratedNote = "vendor tarball generated locally, not uploaded"
 
 // checkSkipped is the answer for a package no gate could be run for at all.
 //

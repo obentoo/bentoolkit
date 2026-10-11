@@ -286,6 +286,7 @@ func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult)
 		Depth:            reportedDepth(result, entry),
 		Reason:           reason,
 		SameReasonAsPlan: reason == entry.Reason,
+		Notes:            result.Notes,
 	}
 }
 
