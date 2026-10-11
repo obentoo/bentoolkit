@@ -50,7 +50,7 @@ func TestTruncatePkgNameShortPadded(t *testing.T) {
 // TestConvertConfigReposNil tests convertConfigRepos with nil repositories.
 func TestConvertConfigReposNil(t *testing.T) {
 	cfg := &config.Config{}
-	result := convertConfigRepos(discardLog(), cfg)
+	result := convertConfigRepos(newSecretsWarning(discardLog()), cfg)
 	if result != nil {
 		t.Errorf("convertConfigRepos with nil repos should return nil, got %v", result)
 	}
@@ -76,7 +76,7 @@ func TestConvertConfigRepos(t *testing.T) {
 			},
 		},
 	}
-	result := convertConfigRepos(discardLog(), cfg)
+	result := convertConfigRepos(newSecretsWarning(discardLog()), cfg)
 	if result == nil {
 		t.Fatal("convertConfigRepos should return non-nil map")
 	}
@@ -109,7 +109,7 @@ func TestConvertConfigReposMultiple(t *testing.T) {
 			"repo2": {Provider: "gitlab", URL: "https://gitlab.com/c/d"},
 		},
 	}
-	result := convertConfigRepos(discardLog(), cfg)
+	result := convertConfigRepos(newSecretsWarning(discardLog()), cfg)
 	if len(result) != 2 {
 		t.Errorf("expected 2 repos, got %d", len(result))
 	}
@@ -148,7 +148,10 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	t.Setenv("BENTOO_REPO_TEST_TOKEN", "secret")
+	// A value no log line contains: secrets.Lookup records every value it
+	// returns in a process-wide redaction set, so a common word here ("secret")
+	// would be masked in every later test's log output in this binary.
+	t.Setenv("BENTOO_REPO_TEST_TOKEN", preserveFieldsToken)
 
 	cfg := &config.Config{
 		Repositories: map[string]*config.RepoConfig{
@@ -159,7 +162,7 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 			},
 		},
 	}
-	result := convertConfigRepos(discardLog(), cfg)
+	result := convertConfigRepos(newSecretsWarning(discardLog()), cfg)
 	repo := result["test"]
 
 	// Verify it's a *provider.RepositoryInfo
@@ -167,7 +170,11 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 	if repo.Provider != "git" {
 		t.Errorf("Provider = %q, want %q", repo.Provider, "git")
 	}
-	if repo.Token != "secret" {
-		t.Errorf("Token = %q, want %q", repo.Token, "secret")
+	if repo.Token != preserveFieldsToken {
+		t.Errorf("Token = %q, want %q", repo.Token, preserveFieldsToken)
 	}
 }
+
+// preserveFieldsToken is the repository token TestConvertConfigReposPreservesAllFields
+// resolves.
+const preserveFieldsToken = "tok-preserve-all-fields-4b1d"

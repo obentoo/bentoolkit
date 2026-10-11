@@ -381,12 +381,17 @@ func TestS086CompareUnknownRepositoryHints(t *testing.T) {
 }
 
 // TestS086CompareUnreadableSecretsWarnsAndCompletes pins the token fallback: a
-// user secrets file that cannot be read (here a directory) warns once per
-// configured repository and once for the GitHub token, and the run still
+// user secrets file that cannot be read (here a directory) warns exactly once
+// per run, naming the file and the error, although the per-repository lookups
+// (gentoo, guru) and the GitHub token lookup all fail on it; the run still
 // completes with exit 0.
+//
+// Rewritten by story 087 (R6.3, R10.2): story 086 pinned one warning per
+// configured repository plus one for the GitHub token.
 func TestS086CompareUnreadableSecretsWarnsAndCompletes(t *testing.T) {
 	s086World(t)
-	if err := os.MkdirAll(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bentoo", "secrets"), 0o750); err != nil {
+	secretsPath := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bentoo", "secrets")
+	if err := os.MkdirAll(secretsPath, 0o750); err != nil {
 		t.Fatalf("mkdir secrets: %v", err)
 	}
 
@@ -395,11 +400,11 @@ func TestS086CompareUnreadableSecretsWarnsAndCompletes(t *testing.T) {
 	if res.code != 0 {
 		t.Errorf("exit code = %d, want 0\nlogs:\n%s", res.code, res.logs)
 	}
-	if n := strings.Count(res.logs, `msg="resolving token for repository: failed; treating it as unset"`); n != 2 {
-		t.Errorf("per-repository token warnings = %d, want 2 (gentoo, guru)\nlogs:\n%s", n, res.logs)
+	if n := strings.Count(res.logs, "secrets: file present but unreadable"); n != 1 {
+		t.Errorf("warnings about the unreadable secrets file = %d, want exactly 1\nlogs:\n%s", n, res.logs)
 	}
 	s086WantLines(t, "logs", res.logs,
-		`level=WARN msg="resolving GitHub token: failed; continuing with unauthenticated GitHub API access" err="secrets: file present but unreadable: `,
+		`level=WARN msg="reading secrets file: failed; tokens not set in the environment are treated as unset" path=`+secretsPath+` err="secrets: file present but unreadable: `,
 		`level=INFO msg="Scanning Bentoo overlay"`,
 		`level=INFO msg="Comparing with upstream" repository=gentoo`)
 	s086WantLines(t, "stderr", res.stderr, "Found 2 packages in Bentoo overlay")
@@ -482,8 +487,9 @@ func TestS086CompareScanErrorsWarnAndComplete(t *testing.T) {
 
 // TestS086CompareInterruptedComparisonExitsOne pins a comparison whose context
 // is already cancelled: config and scan succeed, CompareWithProvider returns the
-// cancellation, which is NOT a rate limit, so the generic failure line is
-// logged and the run exits 1 with nothing on stdout (no progress, no report).
+// cancellation, which is logged as an interruption rather than the generic
+// failure line, and the run exits 1 with nothing on stdout (no progress, no
+// report).
 func TestS086CompareInterruptedComparisonExitsOne(t *testing.T) {
 	s086World(t)
 
@@ -495,8 +501,9 @@ func TestS086CompareInterruptedComparisonExitsOne(t *testing.T) {
 	s086WantLines(t, "logs", res.logs,
 		`level=INFO msg="Scanning Bentoo overlay"`,
 		`level=INFO msg="Comparing with upstream" repository=gentoo`,
-		`level=ERROR msg="comparing packages: failed" err="context canceled"`)
+		`level=ERROR msg="interrupted while fetching the repository registry"`)
 	s086Absent(t, "logs", res.logs, "GitHub API rate limit exceeded.")
+	s086Absent(t, "logs", res.logs, `msg="comparing packages: failed"`)
 	s086WantLines(t, "stderr", res.stderr, "Found 2 packages in Bentoo overlay")
 	s086Absent(t, "stderr", res.stderr, "Try using --clone flag")
 	if res.stdout != "" {

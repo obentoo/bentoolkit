@@ -172,6 +172,19 @@ type autoupdateRun struct {
 	uiConfig *config.Config
 	// lg is the invocation's logger; read it through log().
 	lg *slog.Logger
+	// secrets is the run's one unreadable-secrets warning, shared by every
+	// token lookup the run makes. nil (a run built directly by a unit test)
+	// leaves each Checker warning on its own.
+	secrets *secretsWarning
+}
+
+// checkerSecretsOption routes a Checker's GitHub token resolution error to the
+// run's shared secrets warning; without one it keeps the Checker's own warning.
+func (ar *autoupdateRun) checkerSecretsOption() autoupdate.CheckerOption {
+	if ar.secrets == nil {
+		return autoupdate.WithGitHubTokenErrorSink(nil)
+	}
+	return autoupdate.WithGitHubTokenErrorSink(ar.secrets.note)
 }
 
 // log returns the invocation's logger, or a discarding one when the run was
@@ -511,6 +524,9 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 // tree that allocated it, and d that tree's dependencies.
 func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *deps) error {
 	ar := &autoupdateRun{opts: o, deps: d, lg: logging.FromContext(commandContext(cmd))}
+	// One unreadable-secrets warning per run, whatever the number of Checkers
+	// and provider resolutions that read the file.
+	ar.secrets = newSecretsWarning(ar.log())
 	const (
 		minConcurrency = 1
 		maxConcurrency = 100
@@ -587,7 +603,9 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// the run aborts within ~2 s of a signal, and every child the modes
 	// spawn in their own process group (git, pkgdev, the `claude` CLI, the
 	// unprivileged ebuild) receives it, since no terminal signal reaches them.
-	runCtx := commandContext(cmd)
+	// It carries the run's secrets warning to resolveGentooProvider, which
+	// deps reaches through a signature that has no room for it.
+	runCtx := withSecretsWarning(commandContext(cmd), ar.secrets)
 
 	// Compute the autoupdate cache TTL from config. GetCacheTTL
 	// returns the user-configured value when positive, otherwise the
@@ -736,7 +754,8 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// no-op (checks every package). Ignored on the single-package path.
 		autoupdate.WithTypeFilter(ar.opts.only),
 		// NewChecker authenticates api.github.com itself: it resolves the token
-		// from GITHUB_TOKEN/GH_TOKEN via the secrets chain (github.ResolveToken).
+		// from GITHUB_TOKEN/GH_TOKEN via the secrets chain (github.ResolveToken)
+		// and reports a failure to the run's secrets warning (checkerSecretsOption).
 		// Tune per-host HTTP rate limits: GitHub ~10/s and GitLab ~3/s (the two
 		// hosts that dominate packages.toml), every other host at the conservative
 		// 6s default. Without this the uniform 1-req/6s-per-host limiter serialises
@@ -748,6 +767,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		// un-deduplicated run.
 		autoupdate.WithFetchCache(!ar.opts.noFetchCache),
 		autoupdate.WithLogger(ar.log()),
+		ar.checkerSecretsOption(),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
@@ -1943,7 +1963,8 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 // LLM wiring (with the err-first nil guard) — so a revived package's upstream
 // check behaves identically to a normal --check. The GitHub token is not an
 // option: NewChecker resolves it itself from GITHUB_TOKEN/GH_TOKEN via the
-// secrets chain. The progress callback is omitted: the revive paths drive
+// secrets chain, reporting a failure to the run's shared secrets warning. The
+// progress callback is omitted: the revive paths drive
 // single-package CheckPackage calls, which never fire it.
 func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTimeout time.Duration, llmCfg config.LLMConfig) []autoupdate.CheckerOption {
 	opts := []autoupdate.CheckerOption{
@@ -1958,6 +1979,7 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 		// be honoured on --check and silently ignored on a revive.
 		autoupdate.WithFetchCache(!ar.opts.noFetchCache),
 		autoupdate.WithLogger(ar.log()),
+		ar.checkerSecretsOption(),
 	}
 	if cacheTTL > 0 {
 		opts = append(opts, autoupdate.WithCacheTTL(cacheTTL))
@@ -1988,7 +2010,11 @@ func (ar *autoupdateRun) reviveCheckerOptions(configDir string, cacheTTL, httpTi
 // (runRevive/runReviveList exit non-zero; the --revivable add-on to --check only
 // warns and skips the report).
 func resolveGentooProvider(ctx context.Context, log *slog.Logger, cfg *config.Config) (provider.Provider, error) {
-	configRepos := convertConfigRepos(log, cfg)
+	// Every token lookup here reports to the run's secrets warning when ctx
+	// carries one, and otherwise to one of its own, so an unreadable secrets
+	// file is warned about once.
+	sw := secretsWarningFrom(ctx, log)
+	configRepos := convertConfigRepos(sw, cfg)
 
 	registry, err := provider.NewRepositoryRegistry()
 	if err != nil {
@@ -2006,13 +2032,12 @@ func resolveGentooProvider(ctx context.Context, log *slog.Logger, cfg *config.Co
 	}
 
 	// Resolve the GitHub token from GITHUB_TOKEN/GH_TOKEN via the secrets chain
-	// (github.ResolveToken); a resolution error warns and continues with
-	// unauthenticated access. Only fill an empty repo token so a per-repo one
-	// (BENTOO_REPO_<NAME>_TOKEN, resolved by convertConfigRepos) still wins.
+	// (github.ResolveToken); a resolution error is reported to sw and the run
+	// continues with unauthenticated access. Only fill an empty repo token so a
+	// per-repo one (BENTOO_REPO_<NAME>_TOKEN, resolved by convertConfigRepos)
+	// still wins.
 	token, err := github.ResolveToken()
-	if err != nil {
-		log.Warn("resolving GitHub token: failed; continuing with unauthenticated GitHub API access", "err", err)
-	}
+	sw.note(err)
 	if token != "" && repoInfo.Token == "" {
 		repoInfo.Token = token
 	}

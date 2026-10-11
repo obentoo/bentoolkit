@@ -134,8 +134,8 @@ host_job() { # <name> <command...>
   local name=$1 start rc
   shift
   start=$(date +%s)
-  "$@" >"$LOG_DIR/host-$name.log" 2>&1
-  rc=$?
+  # errexit would end the subshell on a red job before its .rc is written
+  "$@" >"$LOG_DIR/host-$name.log" 2>&1 && rc=0 || rc=$?
   echo "$rc $(($(date +%s) - start))" >"$LOG_DIR/host-$name.rc"
 }
 
