@@ -399,19 +399,49 @@ func (r *s060Reviewer) ReviewBump(context.Context, fixer.BumpReviewRequest) (fix
 	return fixer.BumpReviewReport{}, nil
 }
 
-// TestApplyAllBoundsLLMAgentsBySlots: every staged bump asks the reviewer, and
-// the reviews in flight never exceed the LLM limit even on a wider pool.
+// TestApplyAllBoundsLLMAgentsBySlots: every staged bump with both archives on
+// disk asks the reviewer, and the reviews in flight never exceed the LLM limit
+// even on a wider pool. The fake pkgdev writes the staged Manifest and the
+// candidate archive the way the real one would; the previous archive and its
+// published Manifest sit in --distdir.
 func TestApplyAllBoundsLLMAgentsBySlots(t *testing.T) {
 	const limit = 2
 	reviewer := &s060Reviewer{}
+	distdir := t.TempDir()
+	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
+		if name != "pkgdev" {
+			return exec.CommandContext(ctx, "true")
+		}
+		fetched := distdir
+		for i, a := range arg {
+			if a == "--distdir" && i+1 < len(arg) {
+				fetched = arg[i+1]
+			}
+		}
+		script := `n=$(basename "$PWD") && printf 'DIST %s-1.28.6.tar.gz 1 BLAKE2B a SHA512 b\n' "$n" > Manifest && : > "$1/$n-1.28.6.tar.gz"`
+		return exec.CommandContext(ctx, "sh", "-c", script, "sh", fetched)
+	}
 	b := newS060Batch(t, s060BatchSetup{
 		bumps:  s060Bumps(5, "1.28.5", "1.28.6"),
 		staged: true,
 		opts: []ApplierOption{
 			WithApplierBumpReviewer(reviewer),
 			WithApplierLLMConcurrency(limit),
+			WithExecCommand(seam),
+			WithApplierDistdir(distdir, ""),
 		},
 	})
+	for _, u := range b.updates {
+		name := strings.TrimPrefix(u.Package, "cat/")
+		archive := name + "-1.28.5.tar.gz"
+		manifest := "DIST " + archive + " 1 BLAKE2B a SHA512 b\n"
+		if err := os.WriteFile(filepath.Join(b.applier.overlayPath, u.Package, "Manifest"), []byte(manifest), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(distdir, archive), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	results, _ := b.runApplyAll(t, t.Context(), false, 5)
 

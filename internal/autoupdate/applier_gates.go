@@ -374,7 +374,16 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	}
 
 	a.reporter.TaskStage(pkg, fixer.StageBumpReview)
-	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
+	newArchive, searched := a.candidateReviewArchive(ctx, cand, newVersion)
+	if newArchive == "" {
+		*gates = append(*gates, reviewSkipped(archiveNotFoundReason("candidate", pkg, newVersion, searched)))
+		return floor
+	}
+	oldArchive, searched := a.previousReviewArchive(ctx, pkg, oldVersion)
+	if oldArchive == "" {
+		*gates = append(*gates, reviewSkipped(archiveNotFoundReason("previous", pkg, oldVersion, searched)))
+		return floor
+	}
 	progress, progressDone := a.agentProgress(pkg)
 	report, err := withSlot(ctx, a.slots.llm, func() (fixer.BumpReviewReport, error) {
 		return a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
@@ -437,48 +446,79 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	return validate.DepthDecision{Depth: depth, Reason: reason, SkippedByPolicy: floor.SkippedByPolicy && depth <= floor.Depth}
 }
 
-// reviewArchives names the two release archives the reviewer compares, when both
-// are already on disk. Either may come back empty, and empty is a legitimate
-// answer the reviewer renders as a skip that NAMES the archive it wanted — which
-// is more use than an anonymous failure.
-//
-// The two sides are read from different Manifests on purpose: the previous
-// version's from the PUBLISHED package directory, which is the only place that
-// still describes it, and the candidate's from the staged tree, which is the only
-// place that describes it yet.
-func (a *Applier) reviewArchives(ctx context.Context, cand candidatePaths, pkg, oldVersion, newVersion string) (oldArchive, newArchive string) {
-	distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir)
-	if !ok {
-		return "", ""
-	}
-
-	publishedDir := filepath.Dir(a.EbuildPath(pkg, oldVersion))
-	return presentArchive(distdir, filepath.Join(publishedDir, "Manifest"), oldVersion),
-		presentArchive(distdir, filepath.Join(cand.pkgDir, "Manifest"), newVersion)
+// archiveSearch records where one side's archive was looked for, and why the
+// last directory tried did not settle on one, so a skip can say both.
+type archiveSearch struct {
+	dirs    []string
+	lastErr error
 }
 
-// presentArchive returns the path of the distfile a Manifest names for exactly
-// this version and that distdir actually holds, or "" when there is no single
-// unambiguous answer.
-//
-// Ambiguity answers "" rather than guessing. Handing the reviewer the wrong
-// version's tarball would produce a confident opinion about a difference nobody
-// asked about, which is worse than no opinion at all.
-func presentArchive(distdir, manifestPath, version string) string {
-	var found string
-	for _, name := range distfiles.ParseManifestDistFilenames(manifestPath) {
-		if !strings.Contains(name, version) {
+// candidateReviewArchive finds the candidate's archive: first where the staged
+// manifest step just downloaded it, then --distdir, then the distfiles cache.
+// The names come from the staged Manifest, the only one that describes it yet.
+func (a *Applier) candidateReviewArchive(ctx context.Context, cand candidatePaths, version string) (string, archiveSearch) {
+	dirs := []string{cand.fetchedDistdir}
+	if distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir); ok {
+		dirs = append(dirs, distdir)
+	}
+	dirs = append(dirs, a.distfilesCache)
+	return findReviewArchive(cand.pkgDir, version, dirs)
+}
+
+// previousReviewArchive finds the previous version's archive in --distdir, then
+// the distfiles cache. The names come from the PUBLISHED Manifest, the only one
+// that still describes that version.
+func (a *Applier) previousReviewArchive(ctx context.Context, pkg, version string) (string, archiveSearch) {
+	var dirs []string
+	if distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir); ok {
+		dirs = append(dirs, distdir)
+	}
+	dirs = append(dirs, a.distfilesCache)
+	return findReviewArchive(filepath.Dir(a.EbuildPath(pkg, version)), version, dirs)
+}
+
+// findReviewArchive returns the archive the options gate's own selection
+// settles on in the first directory that holds exactly one, passing over a
+// directory that is unset, missing or ambiguous. A guess is never returned:
+// the wrong release's tarball would produce a confident review of a difference
+// nobody asked about.
+func findReviewArchive(pkgDir, version string, dirs []string) (string, archiveSearch) {
+	var searched archiveSearch
+	for _, dir := range dirs {
+		if dir == "" {
 			continue
 		}
-		if found != "" {
-			return ""
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			continue
 		}
-		path := filepath.Join(distdir, name)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			found = path
+		searched.dirs = append(searched.dirs, dir)
+		archive, err := validate.FindDistfile(pkgDir, dir, version)
+		if err == nil {
+			return archive, searched
 		}
+		searched.lastErr = err
 	}
-	return found
+	return "", searched
+}
+
+// archiveNotFoundReason says which side's archive is missing, for which
+// version, and every directory that was searched for it.
+func archiveNotFoundReason(side, pkg, version string, searched archiveSearch) string {
+	where := "no directory to search was configured"
+	if len(searched.dirs) > 0 {
+		where = "searched " + strings.Join(searched.dirs, ", ")
+	}
+	reason := fmt.Sprintf("no archive of the %s version (%s) of %s was found, so there is no build-declaration difference to review; %s",
+		side, version, pkg, where)
+	if searched.lastErr != nil {
+		reason += fmt.Sprintf(" (last: %v)", searched.lastErr)
+	}
+	return reason
+}
+
+// reviewSkipped is the review gate of a bump the reviewer was not asked about.
+func reviewSkipped(reason string) validate.GateResult {
+	return validate.GateResult{Gate: validate.GateReview, Outcome: validate.OutcomeSkipped, Reason: reason}
 }
 
 // hostDeclinedGates is validate.SkippedGates with the cause stamped on every
