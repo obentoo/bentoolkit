@@ -36,7 +36,13 @@ var processSignals = []os.Signal{os.Interrupt, syscall.SIGTERM, syscall.SIGHUP}
 // signalPolicy records whether the running command handles cancellation. It
 // starts not cancellable, so a signal that lands before cobra has selected the
 // command takes its default action.
-type signalPolicy struct{ cancellable atomic.Bool }
+type signalPolicy struct {
+	cancellable atomic.Bool
+	// pause, set by func processContext, detaches its handler until unpause
+	// is called, or reports that the handler has already taken a signal.
+	// nil when no handler is installed.
+	pause func() (unpause func(), alreadyHandled bool)
+}
 
 // setFrom sets the policy from the command cobra selected: cancellable when it
 // carries Annotations["bentoo/cancellable"] == "true".
@@ -65,6 +71,54 @@ func applySignalPolicy(cmd *cobra.Command) {
 	}
 }
 
+// suspendSignals hands the operator's keys to a foreground child and keeps
+// the process alive until it ends. SIGINT and SIGQUIT are caught on a private
+// channel and dropped: the terminal delivers them to the child too, and exec
+// resets a caught signal to its default action, so the child still gets them.
+// SIGTERM and SIGHUP are caught as well, and the first one is remembered:
+// resume returns it, so the caller can stop instead of going on. The process
+// handler (func processContext) is detached meanwhile, so none of the four
+// cancels the run or ends the process. signal.Ignore must not be used instead:
+// an ignored signal stays ignored in the child, and Ignore also drops the
+// handler's registration for good.
+//
+// ok is false, and nothing is suspended, when the handler has already taken a
+// signal: the run is being cancelled and no child should start. A nil policy
+// (a run without func runMain) suspends only the default actions.
+func (p *signalPolicy) suspendSignals() (resume func() (received os.Signal), ok bool) {
+	keys := make(chan os.Signal, 1)
+	signal.Notify(keys, os.Interrupt, syscall.SIGQUIT)
+	stops := make(chan os.Signal, 1)
+	signal.Notify(stops, syscall.SIGTERM, syscall.SIGHUP)
+	unpause := func() {}
+	if p != nil && p.pause != nil {
+		u, handled := p.pause()
+		if handled {
+			signal.Stop(keys)
+			signal.Stop(stops)
+			return func() os.Signal { return nil }, false
+		}
+		unpause = u
+	}
+	return func() os.Signal {
+		unpause()
+		signal.Stop(keys)
+		signal.Stop(stops)
+		select {
+		case sig := <-stops:
+			return sig
+		default:
+			return nil
+		}
+	}, true
+}
+
+// policyFrom returns the signal policy ctx carries, or nil.
+func policyFrom(ctx context.Context) *signalPolicy {
+	policy, _ := ctx.Value(signalPolicyKey{}).(*signalPolicy)
+	return policy
+}
+
 // yieldSignalsToPrompt hands the next SIGINT, SIGTERM or SIGHUP its default
 // action and returns a function that restores the command's own policy. A
 // prompt blocked on stdin does not watch the context, so on a cancellable
@@ -74,8 +128,14 @@ func applySignalPolicy(cmd *cobra.Command) {
 // and this keeps it so. A command running without a policy (a direct handler call in a test)
 // gets a no-op.
 func yieldSignalsToPrompt(cmd *cobra.Command) (restore func()) {
-	policy, ok := commandContext(cmd).Value(signalPolicyKey{}).(*signalPolicy)
-	if !ok {
+	return yieldContextSignalsToPrompt(commandContext(cmd))
+}
+
+// yieldContextSignalsToPrompt is func yieldSignalsToPrompt for a caller that
+// holds the command's context rather than the command.
+func yieldContextSignalsToPrompt(ctx context.Context) (restore func()) {
+	policy := policyFrom(ctx)
+	if policy == nil {
 		return func() {}
 	}
 	was := policy.cancellable.Swap(false)
@@ -107,6 +167,52 @@ func processContext() (context.Context, context.CancelFunc, *signalPolicy) {
 	ch := make(chan os.Signal, 1)
 	signal.Notify(ch, processSignals...)
 
+	// act is the handler's response to its one signal. It reports whether the
+	// signal was re-raised, in which case the process is about to end.
+	act := func(sig os.Signal) (reraised bool) {
+		// Restore the default action first: a second signal, or the
+		// re-raised one below, must be able to end the process.
+		signal.Reset(processSignals...)
+		if policy.cancellable.Load() || !reraise(sig) {
+			cancel()
+			return false
+		}
+		return true
+	}
+
+	// mu orders the handler, pause, unpause and stop. handled records that
+	// the handler has taken its one signal; a signal it takes while paused is
+	// held and acted on by unpause, so signal.Reset never runs under a
+	// suspension and never drops the suspension's own registration.
+	var (
+		mu                       sync.Mutex
+		paused, handled, stopped bool
+		held                     os.Signal
+	)
+	policy.pause = func() (unpause func(), alreadyHandled bool) {
+		mu.Lock()
+		defer mu.Unlock()
+		if handled {
+			return nil, true
+		}
+		paused = true
+		signal.Stop(ch)
+		return func() {
+			mu.Lock()
+			paused = false
+			sig := held
+			held = nil
+			renotify := !handled && !stopped
+			mu.Unlock()
+			switch {
+			case sig != nil:
+				act(sig)
+			case renotify:
+				signal.Notify(ch, processSignals...)
+			}
+		}, false
+	}
+
 	done := make(chan struct{})
 	finished := make(chan struct{})
 	go func() {
@@ -117,21 +223,28 @@ func processContext() (context.Context, context.CancelFunc, *signalPolicy) {
 		case <-done:
 			return
 		}
-		// Restore the default action first: a second signal, or the
-		// re-raised one below, must be able to end the process.
-		signal.Reset(processSignals...)
-		if policy.cancellable.Load() || !reraise(sig) {
-			cancel()
+		mu.Lock()
+		handled = true
+		if paused {
+			held = sig
+			mu.Unlock()
+			<-done
 			return
 		}
-		// The re-raised signal is delivered asynchronously; wait for it (or
-		// for stop) rather than race the process's own exit path.
-		<-done
+		mu.Unlock()
+		if act(sig) {
+			// The re-raised signal is delivered asynchronously; wait for it
+			// (or for stop) rather than race the process's own exit path.
+			<-done
+		}
 	}()
 
 	var once sync.Once
 	stop := func() {
 		once.Do(func() {
+			mu.Lock()
+			stopped = true
+			mu.Unlock()
 			signal.Stop(ch)
 			cancel()
 			close(done)

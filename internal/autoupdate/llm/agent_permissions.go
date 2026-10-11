@@ -163,13 +163,19 @@ func agentArgv(names, allow []string, holdsEdit bool) []string {
 	)
 }
 
-// checkAgentDir refuses an agent directory a permission rule cannot carry
-// safely: it must be absolute, clean and made only of agentDirChars.
-func checkAgentDir(dir string) error {
+// CheckAgentDir refuses a directory a permission rule cannot carry safely: it
+// must be absolute, clean and made only of agentDirChars. Callers outside
+// this package that build their own claude argv check their paths with it.
+func CheckAgentDir(dir string) error {
 	if !filepath.IsAbs(dir) || filepath.Clean(dir) != dir || !agentDirChars.MatchString(dir) {
 		return errUnsafeAgentDir
 	}
 	return nil
+}
+
+// checkAgentDir is CheckAgentDir under the name the unattended agents use.
+func checkAgentDir(dir string) error {
+	return CheckAgentDir(dir)
 }
 
 // webFetchDomainRule returns the WebFetch allow rule for host, or an error when

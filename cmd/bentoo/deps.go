@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -140,6 +141,12 @@ type deps struct {
 	// a test binary is every test: a test narrows its own tree's list to the
 	// values it resolved itself, so another test's secret never masks its output.
 	resolvedSecrets func() []string
+	// lookPath resolves an executable on PATH; --repair asks it for claude
+	// before it reads anything, so a missing CLI is refused up front.
+	lookPath func(file string) (string, error)
+	// confirmRepair is the y/N question before --repair starts its session.
+	// --yes never answers it: the session is only for an operator who is there.
+	confirmRepair func(prompt string) bool
 }
 
 // defaultDeps returns the production wiring: the values the replaced package
@@ -178,6 +185,8 @@ func defaultDeps() *deps {
 		snapshotRollbackConfirm: nil,
 		snapshotRestoreConfirm:  nil,
 		resolvedSecrets:         secrets.Resolved,
+		lookPath:                exec.LookPath,
+		confirmRepair:           confirmAction,
 	}
 }
 

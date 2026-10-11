@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // sessionPreamble opens the session's initial prompt; the bundle follows it.
@@ -65,4 +66,25 @@ func sessionPrompt(b Bundle) string {
 		return sessionPreamble + fmt.Sprintf("%+v\n", b)
 	}
 	return buf.String()
+}
+
+// SessionEnv returns environ without every NAME=value entry whose name is in
+// secretNames, compared exactly; the order of what is kept is unchanged. The
+// session inherits the operator's environment for its own configuration, but
+// not the secrets bentoo itself reads from it.
+func SessionEnv(environ, secretNames []string) []string {
+	drop := make(map[string]struct{}, len(secretNames))
+	for _, name := range secretNames {
+		if name != "" {
+			drop[name] = struct{}{}
+		}
+	}
+	kept := make([]string, 0, len(environ))
+	for _, kv := range environ {
+		name, _, _ := strings.Cut(kv, "=")
+		if _, secret := drop[name]; !secret {
+			kept = append(kept, kv)
+		}
+	}
+	return kept
 }
