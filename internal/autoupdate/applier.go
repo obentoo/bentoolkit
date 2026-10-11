@@ -314,8 +314,9 @@ type ApplyResult struct {
 	// ValidationSourceStaged and ValidationSourceThisRun.
 	ValidationSource string
 	// Vendor is what the vendor step did before the staged manifest: when it
-	// generated a Go vendor tarball, the tarball's path, name, URI and digest.
-	// The zero value means it generated nothing.
+	// generated a Go vendor tarball, the tarball's path, name, URI and digest;
+	// when its probe failed, ProbeFailed with the name and URI. The zero value
+	// means the step neither generated nor owned anything.
 	Vendor VendorOutcome
 }
 
@@ -2550,7 +2551,8 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// A failure the vendor step owns is not the fixer's: no ebuild edit can
 	// produce a tarball, and a failed manifest over a generated one is a fact
 	// about that tarball, not about the ebuild.
-	if result.Vendor.Generated || errors.Is(firstErr, ErrVendorStale) || errors.Is(firstErr, ErrVendorGenerate) {
+	if result.Vendor.Generated || result.Vendor.ProbeFailed ||
+		errors.Is(firstErr, ErrVendorStale) || errors.Is(firstErr, ErrVendorGenerate) {
 		a.logger().Info("vendor-owned failure; LLM fixer not invoked", "package", pkg, "version", version)
 		return distdir, firstErr
 	}

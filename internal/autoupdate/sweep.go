@@ -90,7 +90,7 @@ type sweeper struct {
 	httpClient  *fetch.RetryableHTTPClient
 	vendorHosts []string
 	// vendorSink, when set, receives the vendor step's outcome whenever it
-	// generated a tarball. It points into the ApplyResult of the apply that
+	// generated a tarball or its probe failed. It points into the ApplyResult of the apply that
 	// built this sweeper; nil drops the outcome.
 	vendorSink *VendorOutcome
 	// log receives the sweeper's diagnostics. newSweeper makes it discarding

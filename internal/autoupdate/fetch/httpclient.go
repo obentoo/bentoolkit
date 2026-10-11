@@ -183,6 +183,9 @@ type RetryableHTTPClient struct {
 	// jitter draws the wait before a retry from [0, ceiling]. Nil means
 	// defaultJitter; tests replace it to make waits exact.
 	jitter func(ceiling time.Duration) time.Duration
+	// delaysMu guards recordedDelays: one client is shared by concurrent
+	// workers, and every retry records its delay.
+	delaysMu sync.Mutex
 	// recordedDelays stores delays for testing purposes
 	recordedDelays []time.Duration
 	// defaultHeaders are headers applied to all requests
@@ -428,16 +431,22 @@ func ctxStopError(host, phase string, err error) error {
 // GetRecordedDelays returns the delays that were recorded during requests.
 // Only populated when using a custom delay function that records delays.
 func (c *RetryableHTTPClient) GetRecordedDelays() []time.Duration {
-	return c.recordedDelays
+	c.delaysMu.Lock()
+	defer c.delaysMu.Unlock()
+	return slices.Clone(c.recordedDelays)
 }
 
 // ClearRecordedDelays clears the recorded delays.
 func (c *RetryableHTTPClient) ClearRecordedDelays() {
+	c.delaysMu.Lock()
+	defer c.delaysMu.Unlock()
 	c.recordedDelays = nil
 }
 
 // recordDelay records a delay for testing purposes.
 func (c *RetryableHTTPClient) recordDelay(d time.Duration) {
+	c.delaysMu.Lock()
+	defer c.delaysMu.Unlock()
 	c.recordedDelays = append(c.recordedDelays, d)
 }
 

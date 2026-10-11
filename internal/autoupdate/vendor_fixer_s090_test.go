@@ -16,7 +16,10 @@ func TestVendorFailureNeverReachesTheFixer(t *testing.T) {
 		head       s090Resp
 		wantFixers int
 	}{
-		{"not owned: vendor probe answered 503", "go-module", s090Resp{status: 503}, 1},
+		// R1.8 superseded the 503 row: a failed probe is owned now and is
+		// covered by TestVendorProbeFailureIsWarnedAndOwned. A 403 is a
+		// definite answer from a host that is not ours to repair.
+		{"not owned: vendor probe answered 403", "go-module", s090Resp{status: 403}, 1},
 		{"not a Go vendor candidate", "cargo", s090Resp{status: 404}, 1},
 		{"owned: tarball generated after a 404", "go-module", s090Resp{status: 404}, 0},
 	}

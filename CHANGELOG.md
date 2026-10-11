@@ -37,8 +37,9 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   promoting the bump; without a command it keeps the tarball and reports
   "Upload pending" with the file and the URL to upload it to. A served
   tarball pinned to an older version fails the bump when its vendor tree no
-  longer matches. The LLM manifest fixer is not run for these failures. See
-  "Vendor tarballs" in docs/autoupdate.md.
+  longer matches. A probe of that URL that fails (5xx, timeout) is reported
+  as a warning. The LLM manifest fixer is not run for any of these failures.
+  See "Vendor tarballs" in docs/autoupdate.md.
 
 ### Fixed
 

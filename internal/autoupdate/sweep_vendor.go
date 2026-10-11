@@ -47,6 +47,10 @@ type VendorOutcome struct {
 	Tarball   string // path of the tarball inside the staged distdir
 	File, URI string // the vendor distfile name and the URI it is served from
 	SHA512    string // hex digest of the tarball, computed once after Generate
+	// ProbeFailed reports a vendor probe that could not answer (a transport
+	// error, a timeout or a 5xx): whether the tarball is served is unknown, so
+	// the manifest failure that follows is the vendor step's, not the ebuild's.
+	ProbeFailed bool
 }
 
 // withSweeperHTTPClient sets the client the vendor step probes and downloads
@@ -86,9 +90,11 @@ func (r execRunner) Run(ctx context.Context, dir string, env []string, name stri
 // candidate whose vendor distfile is not served yet (a definite 404) it
 // generates the tarball into distdir, so pkgdev digests it without fetching
 // it. For a served tarball whose name lacks the candidate's version it checks
-// that the tarball still matches the candidate's source. Anything it cannot
-// classify, or a probe without a definite answer, leaves the candidate to the
-// ordinary manifest path with a zero outcome and no error.
+// that the tarball still matches the candidate's source. A probe that fails
+// (transport error, timeout, 5xx, retries exhausted) is reported as
+// ProbeFailed. Anything it cannot classify, a probe answered otherwise (e.g.
+// 403), or a cancelled run leaves the candidate to the ordinary manifest path
+// with a zero outcome and no error.
 func (s *sweeper) prepareVendorDistfile(ctx context.Context, stagedRoot, pkg, version, distdir string) (VendorOutcome, error) {
 	if s.httpClient == nil {
 		return VendorOutcome{}, nil
@@ -110,9 +116,16 @@ func (s *sweeper) prepareVendorDistfile(ctx context.Context, stagedRoot, pkg, ve
 			return VendorOutcome{}, nil
 		}
 		return VendorOutcome{}, s.checkPinnedVendor(ctx, c, pkg, version, distdir)
+	case errors.Is(err, context.Canceled):
+		// The run was interrupted: the upstream answered nothing wrong.
+		return VendorOutcome{}, nil
+	case err != nil || status >= http.StatusInternalServerError:
+		s.log.Warn("vendor: probe failed", "package", pkg, "version", version,
+			"uri", c.VendorURI, "status", status, "error", err)
+		return VendorOutcome{ProbeFailed: true, File: c.VendorFile, URI: c.VendorURI}, nil
 	default:
 		s.log.Info("vendor: not owned", "package", pkg, "version", version,
-			"uri", c.VendorURI, "status", status, "error", err)
+			"uri", c.VendorURI, "status", status)
 		return VendorOutcome{}, nil
 	}
 }

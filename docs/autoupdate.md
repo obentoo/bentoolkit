@@ -769,7 +769,8 @@ A HEAD request to the vendor URL then decides what happens:
 | `404` | Generates the tarball into the run's private distdir, so `pkgdev manifest` digests a local file instead of fetching it. The task's stage reads `vendor` meanwhile. |
 | `200`, and the name carries the new version | Nothing: the tarball is already served. |
 | `200`, and the name is pinned to another version | Compares the served tarball's `vendor/modules.txt` with one regenerated from the new source. If they differ the package fails with `… does not match the vendor tree of PV X; point the ebuild's vendor distfile at ${P}-vendor.tar.xz` — that ebuild edit stays manual. If the served tarball cannot be downloaded, the comparison is skipped with a WARN. |
-| anything else (`403`, `5xx`, a timeout) | Nothing: the bump takes the old path, LLM manifest fixer included. |
+| `5xx`, a timeout or a transport error | The probe failed: a WARN names the package, version and URL, and nothing is generated. Whether the tarball is served is unknown, so the manifest failure that follows is returned as is and the LLM manifest fixer is not invoked. |
+| anything else (e.g. `403`) | Not owned: the bump takes the old path, LLM manifest fixer included. |
 
 **How the tarball is built.** The source archive is downloaded into the
 distdir when it is not there yet (each distfile download has its own 30-minute

@@ -553,8 +553,9 @@ func TestPrepareVendorChecksAPinnedTarball(t *testing.T) {
 	}
 }
 
-// Not owned: no definite 404 means the step does nothing, and a candidate
-// that is not a Go vendor candidate is never probed.
+// No definite 404 means the step generates nothing: a failed probe (5xx,
+// transport error) is reported as such by ProbeFailed, a 403 is not owned, and
+// a candidate that is not a Go vendor candidate is never probed.
 func TestPrepareVendorIgnoresWhatItDoesNotOwn(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -563,9 +564,9 @@ func TestPrepareVendorIgnoresWhatItDoesNotOwn(t *testing.T) {
 		head      s090Resp
 		wantProbe bool
 	}{
-		{"server error", "go-module", s090VendorOK, s090Resp{status: 503}, true},
+		{"failed probe: server error", "go-module", s090VendorOK, s090Resp{status: 503}, true},
 		{"forbidden", "go-module", s090VendorOK, s090Resp{status: 403}, true},
-		{"transport error", "go-module", s090VendorOK, s090Resp{err: errors.New("connection reset")}, true},
+		{"failed probe: transport error", "go-module", s090VendorOK, s090Resp{err: errors.New("connection reset")}, true},
 		{"md5-cache does not inherit go-module", "cargo", s090VendorOK, s090Resp{status: 404}, false},
 		{"vendor on a foreign host", "go-module", "https://deps.gentoo.zip/dev-go/govulncheck-1.9.0-vendor.tar.xz", s090Resp{status: 404}, false},
 	}

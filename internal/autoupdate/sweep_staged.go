@@ -105,7 +105,7 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	if err != nil {
 		return distdir, err
 	}
-	if vendored.Generated && s.vendorSink != nil {
+	if (vendored.Generated || vendored.ProbeFailed) && s.vendorSink != nil {
 		*s.vendorSink = vendored
 	}
 
