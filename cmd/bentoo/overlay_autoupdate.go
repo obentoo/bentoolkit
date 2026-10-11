@@ -1767,11 +1767,11 @@ func (ar *autoupdateRun) newSingleApplier(overlayPath, configDir string, llmCfg 
 // package never aborts the others — and the process exits non-zero when any
 // package failed, matching the single-package --apply contract.
 //
-// Without --compile the applies run concurrently across a worker pool bounded by
-// --concurrency, so the slow, network-bound `pkgdev manifest` step of each
-// package overlaps instead of running one at a time. With --compile they stay
-// serial so the elevated compile step's confirmation prompt and sudo invocation
-// are not interleaved. Both paths live in (*autoupdate.Applier).ApplyAll.
+// The applies always run concurrently across a worker pool bounded by
+// --concurrency, so the slow, network-bound steps of each package overlap. The
+// expensive stages are bounded lower inside the Applier: builds, the elevated
+// --compile step (one at a time, so its prompt and sudo invocation are not
+// interleaved) and LLM agents. See (*autoupdate.Applier).ApplyAll.
 func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig) error {
 	// Read the pending list up front so the reporter's batch denominator (and the
 	// "nothing to do" short-circuit) are known before the TUI program starts. The

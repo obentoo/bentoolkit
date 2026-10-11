@@ -17,7 +17,7 @@ package autoupdate
 //     deletion rule at the only ebuild present.
 //  3. StatusValidated moves to AFTER the static gates (protocol §5.7), which
 //     changes the pending.json state machine `--list` renders.
-//  4. Anything above depth `options` serialises the applies (D14).
+//  4. Anything above depth `options` holds a build slot while it builds (D14).
 //  5. The revive path gets the same pipeline.
 //  6. `--depth` reaches the resolver (R2.7). Task 9.2 only RESOLVES a depth;
 //     without a surface on this command, `--compile` would be the only way to
@@ -33,7 +33,7 @@ package autoupdate
 //
 // This file pins `WithApplierValidatePolicy(validate.DepthPolicy)`,
 // `WithApplierDepth(validate.Depth)`, `WithApplierRequireProof(bool)`,
-// `RequiresSerialApply(validate.Depth) bool` and the result fields
+// `RequiresBuildSlot(validate.Depth) bool` and the result fields
 // `ApplyResult.DepthReached` / `.DepthRequested` / `.DepthReason`.
 
 import (
@@ -626,33 +626,33 @@ func TestApplyGates_ReviveUsesTheSamePipeline(t *testing.T) {
 	}
 }
 
-// TestRequiresSerialApply_AnyBuildDepthSerialises is D14. Concurrent builds
+// TestRequiresBuildSlot_AnyBuildDepthTakesASlot is D14. Concurrent builds
 // contend for CPU and for space under PORTAGE_TMPDIR — measured at 60 MB for one
-// gst configure — and the existing rule already serialises `--compile`.
+// gst configure — so they are bounded below the --concurrency pool.
 //
-// The predicate is asserted here; that (*Applier).ApplyAll consults it is
-// asserted by TestS060ApplyAllSerialWhenADepthStartsABuild.
-func TestRequiresSerialApply_AnyBuildDepthSerialises(t *testing.T) {
+// The predicate is asserted here; that Apply takes a build slot by it is
+// asserted by TestApplyAllBoundsBuildsBySlots.
+func TestRequiresBuildSlot_AnyBuildDepthTakesASlot(t *testing.T) {
 	tests := []struct {
 		depth validate.Depth
 		want  bool
 		why   string
 	}{
-		{validate.DepthNone, false, "nothing runs, so the worker pool is free"},
-		{validate.DepthOptions, false, "static reads only; this is today's concurrent path and it must stay concurrent"},
+		{validate.DepthNone, false, "nothing runs, so no slot is taken"},
+		{validate.DepthOptions, false, "static reads only; it must not queue behind real builds"},
 		{validate.DepthPatches, true, "unpacks a tarball and runs src_prepare"},
 		{validate.DepthConfigure, true, "60 MB under PORTAGE_TMPDIR for one gst configure, measured"},
-		{validate.DepthCompile, true, "the rule --compile already follows"},
+		{validate.DepthCompile, true, "a full compile"},
 		{validate.DepthInstall, true, "src_install writes a whole package image under PORTAGE_TMPDIR (S042-R4.4)"},
 	}
 
 	for _, tt := range tests {
-		if got := RequiresSerialApply(tt.depth); got != tt.want {
-			t.Errorf("RequiresSerialApply(%v) = %v, want %v — %s", tt.depth, got, tt.want, tt.why)
+		if got := RequiresBuildSlot(tt.depth); got != tt.want {
+			t.Errorf("RequiresBuildSlot(%v) = %v, want %v — %s", tt.depth, got, tt.want, tt.why)
 		}
 	}
 
-	// S042-R4.4. RequiresSerialApply answers install correctly BY ARITHMETIC
+	// S042-R4.4. RequiresBuildSlot answers install correctly BY ARITHMETIC
 	// ACCIDENT — `d > DepthOptions` happens to cover every rung ever added
 	// above it — and a property that holds by accident and is asserted nowhere
 	// is a property the next refactor of that predicate removes in silence. So

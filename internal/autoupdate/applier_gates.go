@@ -55,44 +55,16 @@ var gateDepths = map[string]validate.Depth{
 	validate.GateInstall:   validate.DepthInstall,
 }
 
-// RequiresSerialApply reports whether a run validating at depth d must apply one
-// package at a time.
+// RequiresBuildSlot reports whether an apply validating at depth d must hold
+// one of the Applier's build slots while its build gates run.
 //
-// `--compile` already serialises applies, for the prompt and the sudo
-// invocation. The rule extends to every depth that STARTS A BUILD, for a reason
-// that has nothing to do with prompts: concurrent builds contend for CPU and for
-// space under PORTAGE_TMPDIR, measured at 60 MB for one gst configure, and a
-// worker pool multiplies that by the pool size on a machine that was never asked.
-//
-// Depths none and options keep the existing worker pool: both only read files
-// that are already on disk, so they are the network-bound manifest step this
-// pool exists to overlap and nothing more.
-func RequiresSerialApply(d validate.Depth) bool {
+// Every depth that STARTS A BUILD does: concurrent builds contend for CPU and
+// for space under PORTAGE_TMPDIR, measured at 60 MB for one gst configure, so
+// they are bounded below the --concurrency pool (DefaultApplyBuildConcurrency).
+// Depths none and options only read files that are already on disk and take no
+// slot.
+func RequiresBuildSlot(d validate.Depth) bool {
 	return d > validate.DepthOptions
-}
-
-// SerialApplyRequired asks RequiresSerialApply of a whole batch: does any of
-// these pending updates resolve to a depth that starts a build.
-//
-// It resolves each bump through the SAME decision Apply will make, rather than
-// guessing from the flags, so the concurrency choice and the gates cannot come to
-// disagree about a package. The resolution is pure computation plus one ebuild
-// read per package, which is negligible beside the build it may be deciding to
-// serialise.
-//
-// A run with no staging root always answers false: the build gates only exist on
-// the staged path, so serialising there would buy nothing and would take away the
-// concurrency `--apply all` has always had.
-func (a *Applier) SerialApplyRequired(updates []PendingUpdate) bool {
-	if a.stagingRoot == "" {
-		return false
-	}
-	for _, update := range updates {
-		if RequiresSerialApply(a.depthFor(update.Package, update.CurrentVersion, update.NewVersion).Depth) {
-			return true
-		}
-	}
-	return false
 }
 
 // depthFor resolves how deep one bump is validated, and why.
@@ -404,14 +376,16 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	a.reporter.TaskStage(pkg, fixer.StageBumpReview)
 	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
 	progress, progressDone := a.agentProgress(pkg)
-	report, err := a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
-		Package:    pkg,
-		OldVersion: oldVersion,
-		NewVersion: newVersion,
-		OldArchive: oldArchive,
-		NewArchive: newArchive,
-		Progress:   progress,
-		LogPath:    a.agentLogPath(pkg, newVersion, fixer.StageBumpReview),
+	report, err := withSlot(ctx, a.slots.llm, func() (fixer.BumpReviewReport, error) {
+		return a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
+			Package:    pkg,
+			OldVersion: oldVersion,
+			NewVersion: newVersion,
+			OldArchive: oldArchive,
+			NewArchive: newArchive,
+			Progress:   progress,
+			LogPath:    a.agentLogPath(pkg, newVersion, fixer.StageBumpReview),
+		})
 	})
 	progressDone()
 	if err != nil {
@@ -581,8 +555,8 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	if !cand.staged || depth <= validate.DepthOptions {
 		// Below DepthPatches nothing is built, so there is no build gate to
 		// report — an empty list, not a hollow pass. It is the same threshold
-		// RequiresSerialApply reads, and deliberately so: the depths that start a
-		// build are exactly the depths that must not run concurrently.
+		// RequiresBuildSlot reads, and deliberately so: the depths that start a
+		// build are exactly the depths that hold a build slot.
 		return nil, nil
 	}
 
@@ -794,16 +768,18 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	a.reporter.Log("info", fixLine)
 
 	progress, progressDone := a.agentProgress(pkg)
-	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
-		Package:    pkg,
-		Version:    version,
-		Gate:       gate,
-		StagedDir:  cand.repoRoot,
-		EbuildPath: cand.ebuildPath,
-		BuildLog:   first.transcript,
-		Attempt:    1,
-		Progress:   progress,
-		LogPath:    a.agentLogPath(pkg, version, fixer.StageBuildFix),
+	fixRes, fixErr := withSlot(ctx, a.slots.llm, func() (fixer.BuildFixResult, error) {
+		return a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
+			Package:    pkg,
+			Version:    version,
+			Gate:       gate,
+			StagedDir:  cand.repoRoot,
+			EbuildPath: cand.ebuildPath,
+			BuildLog:   first.transcript,
+			Attempt:    1,
+			Progress:   progress,
+			LogPath:    a.agentLogPath(pkg, version, fixer.StageBuildFix),
+		})
 	})
 	progressDone()
 	if fixErr != nil {
