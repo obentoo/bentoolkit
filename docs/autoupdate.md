@@ -581,6 +581,63 @@ when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
 set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
 check off.
 
+#### Repairing a failed bump
+
+When `--apply` fails a package after staging it, the staged tree is kept and a
+repair bundle, `.bentoo-repair.json`, is written at its root (mode 0600). The
+Apply Result then prints the next step:
+
+```text
+    Repair:  bentoo overlay autoupdate --repair dev-go/govulncheck
+```
+
+The bundle (schema 1) records the package, the current and candidate versions,
+the failed stage (`manifest`, `llm-fix`, `llm-build-fix`, `re-check`,
+`gate:<name>`, `adopt`, …), the failure text (passed through the same secret
+redaction as the log, last 16 KiB), the tools the unattended agent was refused,
+the staged tree, the candidate ebuild, the upstream URLs and its creation
+time. The staged sweep (`bentoo overlay staged`) keeps any tree that carries a
+bundle.
+
+`--repair <cat/pkg>` cannot be combined with another mode and needs a terminal
+on stdin and stdout and `claude` on `PATH`. It refuses, with exit 1 and before
+asking anything, when no bundle exists (it lists the packages that have one),
+when the bundle does not parse or names a tree that is gone or is not the
+directory it sits in, and when the package's pending candidate is not the
+bundle's version. It takes the overlay lock for the whole run, so a concurrent
+`--apply` reports the lock as held.
+
+It prints the bundle and asks `Start an interactive claude session in <dir>?
+[y/N]`. `--yes` never answers this question; anything but `y` or `yes` exits 0
+and changes nothing. On `y`, `claude` runs in the foreground in the staged
+package directory, seeded with the bundle:
+
+- permission mode `default`: every command, fetch and edit is asked for;
+  `--dangerously-skip-permissions`, `bypassPermissions`, `acceptEdits` and
+  `dontAsk` are never passed;
+- deny rules for editing anything under the published overlay and for reading
+  or editing the secrets files; bentoo adds deny rules only, never allow rules,
+  and your own claude settings, plugins and `CLAUDE.md` apply;
+- the environment is yours minus every `BENTOO_*` variable, `GITHUB_TOKEN`,
+  `GH_TOKEN`, `GITLAB_TOKEN` and the variables named by `llm.api_key_env` and
+  the search provider's `api_key_env`;
+- Ctrl+C and SIGQUIT belong to the session; bentoo is not stopped by them.
+
+When the session exits, with any status, bentoo re-validates the edited tree
+exactly as `--apply` would — manifest, then the gates, at no less than the
+depth recorded for the tree, with `--compile` when the bundle failed at the
+compile gate or `--compile` was given — with no LLM agent, and promotes it on
+success: the bundle is removed and the pending entry is completed. A failed
+re-validation rewrites the bundle with the new stage and failure text and
+exits 1. Two cases skip the re-validation and leave everything as the session
+left it, exit 1: bentoo received SIGTERM or SIGHUP during the session (run
+`--repair` again), or the run was interrupted before it.
+
+Promotion publishes only the ebuild and its Manifest. A repair that changes
+`files/` or `metadata.xml` in the staged tree is refused, naming the first
+differing path: carry that change into the overlay by hand, then run
+`--repair` again.
+
 #### Example Autoupdate Workflow
 
 ```bash

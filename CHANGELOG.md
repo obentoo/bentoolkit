@@ -9,6 +9,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **`overlay autoupdate --repair <pkg>`: repair a failed bump in an
+  interactive claude session.** A failed `--apply` that keeps its staged tree
+  now writes `.bentoo-repair.json` beside it and prints the `--repair` command.
+  `--repair` shows the failure, asks before starting, runs `claude` in the
+  foreground in permission mode `default` (every action is asked for, the
+  published overlay and the secrets files are denied, bentoo's secret
+  variables are removed from its environment), then re-validates and promotes
+  the edited tree exactly as `--apply` would. The unattended agents keep their
+  grants unchanged. See "Repairing a failed bump" in docs/autoupdate.md.
+
 ## [0.35.0] - 2026-10-10
 
 ### Added
