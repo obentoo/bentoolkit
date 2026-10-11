@@ -17,7 +17,7 @@ import (
 const maxEntryLine = 16 << 20
 
 // vendorName is the only distfile name a vendor tarball may carry.
-var vendorName = regexp.MustCompile(`^[A-Za-z0-9._+-]+-vendor\.tar\.xz$`)
+var vendorName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]*-vendor\.tar\.xz$`)
 
 // errNoSrcURI is wrapped by Classify when the entry has no SRC_URI= line.
 var errNoSrcURI = errors.New("no SRC_URI= line")

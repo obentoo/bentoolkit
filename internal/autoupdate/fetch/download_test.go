@@ -68,3 +68,49 @@ func TestDownloadHonoursContext(t *testing.T) {
 		t.Fatal("Download outlived its context")
 	}
 }
+
+// DownloadRequest sends the caller's headers and fills in the client's
+// defaults only where the caller set none.
+func TestDownloadRequestKeepsCallerHeaders(t *testing.T) {
+	got := make(chan http.Header, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got <- r.Header.Clone()
+		_, _ = io.WriteString(w, "payload")
+	}))
+	defer srv.Close()
+
+	c := NewRetryableHTTPClient()
+	c.SetDefaultHeaders(map[string]string{"Cache-Control": "max-age=60", "X-Default": "yes"})
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, srv.URL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Cache-Control", "no-cache")
+	resp, err := c.DownloadRequest(req)
+	if err != nil {
+		t.Fatalf("DownloadRequest: %v", err)
+	}
+	resp.Body.Close()
+	h := <-got
+	if h.Get("Cache-Control") != "no-cache" || h.Get("X-Default") != "yes" || h.Get("User-Agent") == "" {
+		t.Errorf("headers sent = %v; want the caller's Cache-Control plus the defaults", h)
+	}
+}
+
+// Wait runs the delay function in place of the timer and still reports a
+// done context; without one it returns as soon as the context is done.
+func TestWaitUsesTheDelayFuncAndHonoursContext(t *testing.T) {
+	c := NewRetryableHTTPClient()
+	var waited time.Duration
+	c.SetDelayFunc(func(d time.Duration) { waited = d })
+	if err := c.Wait(context.Background(), 2*time.Second); err != nil || waited != 2*time.Second {
+		t.Errorf("Wait = %v after a delay of %s; want nil after 2s", err, waited)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	start := time.Now()
+	if err := NewRetryableHTTPClient().Wait(ctx, time.Minute); err == nil || time.Since(start) > 5*time.Second {
+		t.Errorf("Wait on a cancelled context = %v after %s; want its error at once", err, time.Since(start))
+	}
+}

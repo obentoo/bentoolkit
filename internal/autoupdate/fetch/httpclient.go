@@ -680,12 +680,28 @@ func (c *RetryableHTTPClient) Download(ctx context.Context, url string) (*http.R
 	if err != nil {
 		return nil, err
 	}
+	return c.DownloadRequest(req)
+}
+
+// DownloadRequest is Download for a request the caller built, so it can carry
+// headers of its own; the request's context bounds the transfer. A default
+// header the request already sets is left as the caller set it.
+func (c *RetryableHTTPClient) DownloadRequest(req *http.Request) (*http.Response, error) {
 	for k, v := range c.defaultHeaders {
-		req.Header.Set(k, v)
+		if req.Header.Get(k) == "" {
+			req.Header.Set(k, v)
+		}
 	}
 	hc := *c.client
 	hc.Timeout = 0
 	return hc.Do(req)
+}
+
+// Wait blocks for d the way the client waits between its own retries: the
+// delay function set with SetDelayFunc runs in its place when there is one,
+// and ctx's error is returned as soon as ctx is done.
+func (c *RetryableHTTPClient) Wait(ctx context.Context, d time.Duration) error {
+	return c.wait(ctx, d)
 }
 
 // GetWithContext performs an HTTP GET request with retry logic and context support.

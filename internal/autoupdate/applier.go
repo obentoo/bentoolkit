@@ -1099,6 +1099,12 @@ type applyRun struct {
 	// stageName is the last stage this run entered through stage; fail copies
 	// it into the result.
 	stageName string
+
+	// vendorPublished is set once a vendor tarball this run generated was
+	// uploaded and its served bytes verified. Every other exit — the gates
+	// failing first, an upload that failed or was left pending — records the
+	// tarball as unpublished beside the staged tree.
+	vendorPublished bool
 }
 
 // stageFallback is the stage a failure is reported in when its exit entered
@@ -1339,7 +1345,8 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 			if r.gatesPassed {
 				validatedEbuild = r.cand.ebuildPath
 			}
-			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth, validatedEbuild)
+			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth, validatedEbuild,
+				unpublishedVendor(r.result.Vendor, r.vendorPublished))
 		}()
 	}
 
@@ -1498,6 +1505,9 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 	r.result.DepthReached = reuse.reached
 
 	r.stage("promote")
+	if err := r.a.publishVendorDistfile(ctx, reuse.cand, r.pkg, r.newVersion, r.result.Vendor, r.result); err != nil {
+		return r.result, err
+	}
 	promoted, err := r.a.promote(ctx, reuse.cand, r.pkg, r.newVersion)
 	if err != nil {
 		return r.fail(err)
@@ -1585,6 +1595,12 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	// place.
 	if r.cand.staged {
 		r.stage("promote")
+		// Runs while the distdir holding a generated vendor tarball is still
+		// alive: execute's deferred removal fires only after this returns.
+		if err := a.publishVendorDistfile(ctx, r.cand, pkg, r.newVersion, result.Vendor, result); err != nil {
+			return result, err
+		}
+		r.vendorPublished = true
 		promoted, err := a.promote(ctx, r.cand, pkg, r.newVersion)
 		if err != nil {
 			return r.fail(err)

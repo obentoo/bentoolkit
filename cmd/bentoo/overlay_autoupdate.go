@@ -1990,6 +1990,15 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		}
 		output.Success.Println("\n✓ Update applied successfully")
 		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+	} else if action, ok := autoupdate.VendorUploadAction(result.Error); ok {
+		// Not a failure of the bump: the tarball it needs exists and was
+		// digested, and only its publication is owed by the operator.
+		output.Warning.Println("    Status:  Upload pending")
+		output.Warning.Printf("    Action:  %s\n", action)
+		output.Info.Println("             (then re-run --apply: the served tarball is fetched, not regenerated)")
+		if result.StagedPath != "" {
+			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
+		}
 	} else {
 		output.Error.Println("    Status:  Failed")
 		if result.Error != nil {
