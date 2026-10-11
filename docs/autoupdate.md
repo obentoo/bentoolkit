@@ -743,6 +743,94 @@ Promotion publishes only the ebuild and its Manifest. A repair that changes
 differing path: carry that change into the overlay by hand, then run
 `--repair` again.
 
+#### Vendor tarballs
+
+A Go ebuild in the overlay usually fetches two distfiles: upstream's source
+archive and a `<name>-vendor.tar.xz` holding the `go mod vendor` tree, which
+the overlay serves from its own host. Upstream never publishes the second one,
+so a bump that carries `${P}` into its name points at a URL that does not
+exist yet, and the staged Manifest fails on a 404. The vendor step builds that
+tarball before the Manifest is written.
+
+**When it runs.** For a staged bump whose ebuild inherits `go-module` and whose
+`SRC_URI` holds exactly two distfiles: one source archive, and one
+`<name>-vendor.tar.xz` fetched from a host listed in `autoupdate.vendor.hosts`
+(default `distfiles.obentoo.org`; see
+[Configuration Options](configuration.md#configuration-options)). The name
+must start with a letter or a digit. `SRC_URI` is read from the md5-cache entry
+`egencache` writes for the staged tree, so eclass and variable expansion has
+already happened. An entry that cannot be read is logged as a WARN and the bump
+continues the old way; any other ebuild is left alone.
+
+A HEAD request to the vendor URL then decides what happens:
+
+| Answer | What the step does |
+|--------|--------------------|
+| `404` | Generates the tarball into the run's private distdir, so `pkgdev manifest` digests a local file instead of fetching it. The task's stage reads `vendor` meanwhile. |
+| `200`, and the name carries the new version | Nothing: the tarball is already served. |
+| `200`, and the name is pinned to another version | Compares the served tarball's `vendor/modules.txt` with one regenerated from the new source. If they differ the package fails with `… does not match the vendor tree of PV X; point the ebuild's vendor distfile at ${P}-vendor.tar.xz` — that ebuild edit stays manual. If the served tarball cannot be downloaded, the comparison is skipped with a WARN. |
+| anything else (`403`, `5xx`, a timeout) | Nothing: the bump takes the old path, LLM manifest fixer included. |
+
+**How the tarball is built.** The source archive is downloaded into the
+distdir when it is not there yet (each distfile download has its own 30-minute
+limit), unpacked, and `go mod vendor` runs in it with
+`GOFLAGS=-modcacherw GOTOOLCHAIN=local`. The vendor tree is packed with the
+recipe of the overlay's `scripts/go-vendor.sh`: entries sorted by name, owner
+and group `0`, mtime `0`, `XZ_OPT=-9T0`. The same source and the same host
+tools give the same bytes. It needs network access to the Go module proxy and
+is stopped after 10 minutes. A failure here fails the package, and the LLM
+manifest fixer is never run for a failure the vendor step owns: no ebuild edit
+can produce a tarball.
+
+**`--check`** runs the validation gates on the generated tarball and never
+uploads it. The package's validation row carries the note
+`vendor tarball generated locally, not uploaded`, which the JSON report also
+holds in the row's `notes`.
+
+**`--apply`** publishes the tarball before the bump is promoted, because a
+Manifest that digests a tarball nobody can download breaks every user's
+fetch.
+
+- **With `autoupdate.vendor.upload_command`**, the command runs as an argv list,
+  without a shell, with `{path}` and `{file}` replaced once, and is stopped
+  after 5 minutes. Credentials come from the command's own environment or
+  profile, never from bentoo. INFO lines name only the program and the URL; the
+  full argv and the command's output are logged at debug level only (argv
+  values are masked in the output), and never reach the error. bentoo then
+  downloads the URL with `Cache-Control: no-cache`, up to 3 times 2 seconds
+  apart, and its SHA512 must equal the generated tarball's. Otherwise the
+  package fails and nothing is published; a different digest means the
+  uploaded object must be removed or replaced before the next run.
+- **Without it**, nothing is published. The tarball is kept at
+  `<staged tree>/.bentoo-vendor/<file>`, and the Apply Result reads:
+
+  ```text
+      Status:  Upload pending
+      Action:  upload <path> to <uri>
+  ```
+
+  The pending entry is marked failed with that reason and the exit status
+  counts it as a failure. Upload the file, then run `--apply` again: the URL is
+  served by then, so the tarball is fetched, not regenerated.
+
+A retained staged tree whose record says it digested a tarball that was never
+published is not promoted as it is: the next `--apply` validates it again
+(`vendor tarball generated but not published; re-validating`).
+
+**A CDN can keep answering 404 after the upload.** Cloudflare in front of
+`distfiles.obentoo.org` was measured caching a GET 404 for a year
+(`max-age=31536000`) and ignoring `no-cache`, so a tarball that was requested
+before it existed stays unreachable. When the URL still answers 404 but the
+origin, reached with a cache-busting query string, serves the right bytes, the
+error says to purge that URL from the CDN cache and re-run `--apply`. A cache
+rule that does not cache 404s avoids the purge.
+
+`--timeout` (see [Timeouts](behaviour.md#timeouts)) also bounds the HEAD probe
+of an `--apply` run.
+
+Out of scope: npm and cargo vendoring, packages that need another generator
+first, and the ebuild edit for a stale pinned tarball.
+
 #### Example Autoupdate Workflow
 
 ```bash

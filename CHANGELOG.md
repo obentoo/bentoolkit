@@ -26,6 +26,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   unattended agents keep their grants unchanged. See "Repairing a failed bump"
   in docs/autoupdate.md.
 
+- **`overlay autoupdate` generates a missing Go vendor tarball.** A Go
+  bump whose ebuild fetches `<name>-vendor.tar.xz` from the overlay's
+  distfiles host used to fail its Manifest on a 404, because upstream never
+  publishes that file. When the URL answers 404, the tarball is now built
+  locally (`go mod vendor`, packed reproducibly like the overlay's
+  `scripts/go-vendor.sh`) and digested. `--check` never uploads it and says
+  so in the package's row. `--apply` publishes it with
+  `autoupdate.vendor.upload_command` and checks the served SHA512 before
+  promoting the bump; without a command it keeps the tarball and reports
+  "Upload pending" with the file and the URL to upload it to. A served
+  tarball pinned to an older version fails the bump when its vendor tree no
+  longer matches. The LLM manifest fixer is not run for these failures. See
+  "Vendor tarballs" in docs/autoupdate.md.
+
 ### Fixed
 
 - **`overlay autoupdate --apply` stays readable while it runs and says what
