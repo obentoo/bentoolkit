@@ -109,7 +109,7 @@ func newRootCmdWith(d *deps) *cobra.Command {
 			// logs a failWith cause after ExecuteContext returns, so on that
 			// path execute closes it (func closeInvocationLog), and the
 			// exitProcess cleanup covers a process that ends before either.
-			closeLog = setUpInvocationLogger(cmd, verboseFlag, quietFlag)
+			closeLog = setUpInvocationLogger(cmd, d.resolvedSecrets, verboseFlag, quietFlag)
 
 			if noColor {
 				output.NoColor()

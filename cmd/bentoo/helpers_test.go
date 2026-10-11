@@ -148,10 +148,7 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	// A value no log line contains: secrets.Lookup records every value it
-	// returns in a process-wide redaction set, so a common word here ("secret")
-	// would be masked in every later test's log output in this binary.
-	t.Setenv("BENTOO_REPO_TEST_TOKEN", preserveFieldsToken)
+	t.Setenv("BENTOO_REPO_TEST_TOKEN", "secret")
 
 	cfg := &config.Config{
 		Repositories: map[string]*config.RepoConfig{
@@ -170,11 +167,7 @@ func TestConvertConfigReposPreservesAllFields(t *testing.T) {
 	if repo.Provider != "git" {
 		t.Errorf("Provider = %q, want %q", repo.Provider, "git")
 	}
-	if repo.Token != preserveFieldsToken {
-		t.Errorf("Token = %q, want %q", repo.Token, preserveFieldsToken)
+	if repo.Token != "secret" {
+		t.Errorf("Token = %q, want %q", repo.Token, "secret")
 	}
 }
-
-// preserveFieldsToken is the repository token TestConvertConfigReposPreservesAllFields
-// resolves.
-const preserveFieldsToken = "tok-preserve-all-fields-4b1d"

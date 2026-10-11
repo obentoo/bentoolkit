@@ -9,7 +9,6 @@ import (
 	"sync"
 
 	"github.com/obentoo/bentoolkit/internal/common/logging"
-	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/spf13/cobra"
 )
 
@@ -37,11 +36,14 @@ const (
 // os.Stderr is read here, at call time, never captured at package init: the
 // test harness swaps it per run, and a logger holding the first run's stream
 // would write into a pipe a later run has already closed.
-func setUpInvocationLogger(cmd *cobra.Command, verboseFlag, quietFlag bool) (closeLog func()) {
+//
+// resolved lists the values the logger scrubs from every record; the tree's
+// deps supply it, and production passes secrets.Resolved.
+func setUpInvocationLogger(cmd *cobra.Command, resolved func() []string, verboseFlag, quietFlag bool) (closeLog func()) {
 	env := os.Getenv(logLevelEnv)
 	level, levelErr := logging.ResolveLevel(verboseFlag, quietFlag, env)
 
-	opts := logging.Options{Stderr: os.Stderr, Level: level, Resolved: secrets.Resolved}
+	opts := logging.Options{Stderr: os.Stderr, Level: level, Resolved: resolved}
 	dir, dirErr := logging.DefaultLogDir()
 	if dirErr == nil {
 		opts.LogDir = dir
