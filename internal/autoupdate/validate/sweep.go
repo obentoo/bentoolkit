@@ -362,14 +362,29 @@ func recognisedStagedTree(dir, pkg, version string) (bool, string) {
 	return true, ""
 }
 
+// RepairBundleFile is the name of the repair bundle a failed apply leaves at the
+// root of the staged tree it kept. It is spelled here, below the package that
+// writes the bundle, so the sweep can keep such a tree without importing it.
+const RepairBundleFile = ".bentoo-repair.json"
+
 // recordKeepsIt answers whether a recognised, out-of-scope tree must be kept
 // anyway because of what its record says, and why.
+//
+// A tree carrying a repair bundle is kept whatever its record says: an
+// operator repair of it is pending, and the bundle lives in the tree.
 //
 // A record that cannot be read at all is an UNKNOWN outcome, not a passing one.
 // Both spellings of unknown — no record, and a record that would not parse —
 // keep the tree, and they are reported apart because they are different facts
 // about the operator's machine.
 func recordKeepsIt(dir string) (string, bool) {
+	switch _, err := os.Lstat(filepath.Join(dir, RepairBundleFile)); {
+	case err == nil:
+		return "it carries a repair bundle, so an operator repair is pending", true
+	case !errors.Is(err, fs.ErrNotExist):
+		return fmt.Sprintf("whether it carries a repair bundle could not be checked (%v), so an operator repair may be pending", err), true
+	}
+
 	record, err := ReadStageRecord(dir)
 	switch {
 	case errors.Is(err, ErrNoStageRecord):

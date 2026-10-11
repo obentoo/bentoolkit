@@ -336,9 +336,10 @@ type Applier struct {
 	// reenabled holds packages re-enabled in packages.toml after this Applier
 	// loaded it (--revive enables an orphan's entry, then applies it). Their
 	// enabled = false snapshot in configs is stale and must not refuse the bump.
-	// Guarded by reenabledMu: revives run concurrently on one Applier.
-	reenabledMu sync.Mutex
-	reenabled   map[string]bool
+	// Revives run concurrently on one Applier, so the set carries its own lock;
+	// it is held by pointer so a per-run copy of the Applier (withoutAgents)
+	// shares it instead of copying a lock.
+	reenabled *reenabledSet
 	// pending manages pending updates
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
@@ -477,6 +478,36 @@ type Applier struct {
 	// NewApplier leaves it discarding when the option is absent. Read it
 	// through logger().
 	log *slog.Logger
+
+	// adoptedRoot, when non-empty, is a staged tree an earlier run kept and an
+	// operator edited: Apply validates and promotes that tree as it stands
+	// instead of staging a fresh one. Set via WithAdoptedStagedTree.
+	adoptedRoot string
+}
+
+// reenabledSet is the set of packages re-enabled after the Applier loaded
+// packages.toml, guarded for concurrent revives.
+type reenabledSet struct {
+	mu   sync.Mutex
+	pkgs map[string]bool
+}
+
+func (s *reenabledSet) add(pkg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pkgs == nil {
+		s.pkgs = make(map[string]bool)
+	}
+	s.pkgs[pkg] = true
+}
+
+func (s *reenabledSet) has(pkg string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pkgs[pkg]
 }
 
 // logger returns the applier's logger, or a discarding one for an applier that
@@ -780,6 +811,30 @@ func WithApplierBumpReviewer(reviewer fixer.BumpReviewer) ApplierOption {
 	}
 }
 
+// WithAdoptedStagedTree makes Apply adopt the staged tree at root, kept by an
+// earlier failed apply and edited since, instead of staging a fresh candidate:
+// the manifest step, the gates and promotion run on that tree's bytes exactly
+// as they stand. No LLM agent runs on an adopted tree — the manifest fixer,
+// the build fixer and the bump reviewer are left out of the run, whatever was
+// wired — because its candidate is the operator's work, not an agent's input.
+// The tree is never removed by the run; a failure keeps it and rewrites its
+// repair bundle. An empty root leaves the applier as it was.
+func WithAdoptedStagedTree(root string) ApplierOption {
+	return func(a *Applier) {
+		a.adoptedRoot = root
+	}
+}
+
+// withoutAgents returns a copy of a with no LLM agent wired, for one run. The
+// copy, not a, is changed, so an Applier shared across runs keeps its agents.
+func (a *Applier) withoutAgents() *Applier {
+	view := *a
+	view.fixer = nil
+	view.buildFixer = nil
+	view.reviewer = nil
+	return &view
+}
+
 // NewApplier creates a new applier instance for the given overlay.
 // It initializes the pending list and logs directory.
 func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier, error) {
@@ -802,6 +857,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// path is byte-identical; replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
 		log:         logging.OrDiscard(nil),
+		reenabled:   &reenabledSet{},
 	}
 
 	// Apply options first
@@ -886,6 +942,9 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	}()
 
 	run := &applyRun{a: a, pkg: pkg, compile: compile, result: result}
+	if a.adoptedRoot != "" {
+		run.a = a.withoutAgents()
+	}
 	if done, err := run.preflight(); done != nil {
 		return done, err
 	}
@@ -1147,8 +1206,12 @@ func (r *applyRun) awaitRequirements() (*ApplyResult, error) {
 // gates. It owns the two cleanups armed during staging, so they run before
 // Apply's own on every exit.
 func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
-	if done, err := r.reuseRetainedTree(ctx); done != nil {
-		return done, err
+	// An adopted tree is not a reuse question: it is promoted only on the gates
+	// this run runs over it.
+	if r.a.adoptedRoot == "" {
+		if done, err := r.reuseRetainedTree(ctx); done != nil {
+			return done, err
+		}
 	}
 
 	// Materialise the candidate where the gates will read it: in a staged tree
@@ -1157,7 +1220,11 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// Only the pre-staging branch arms the rollback, and it arms it with the one
 	// path it just wrote. The staged branch leaves it nil, because after it there
 	// is still nothing in the published overlay to take back.
-	r.stage("substitute")
+	if r.a.adoptedRoot != "" {
+		r.stage("adopt")
+	} else {
+		r.stage("substitute")
+	}
 	if prepErr := r.prepareCandidate(); prepErr != nil {
 		return r.fail(prepErr)
 	}
@@ -1225,16 +1292,9 @@ func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) 
 		return nil, nil
 	}
 	r.stage("retained")
-	captured, err := r.a.stagedInputsFor(r.pkg, r.currentVersion, r.update)
-	if err != nil {
+	if err := r.captureInputs(); err != nil {
 		return r.fail(err)
 	}
-	r.inputs = captured
-
-	// One of the two answers is recorded on every staged apply, and
-	// the default is the honest one — the gates below run in this run unless
-	// the retained tree takes their place.
-	r.result.ValidationSource = ValidationSourceThisRun
 
 	reuse := r.a.reusableStagedTree(r.pkg, r.newVersion, r.inputs, r.depth.Depth)
 	if reuse.root != "" {
@@ -1258,6 +1318,22 @@ func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) 
 		return nil, nil
 	}
 	return r.promoteRetained(ctx, reuse)
+}
+
+// captureInputs records on the run the inputs the staged tree's record is
+// written against, and marks the gates as this run's.
+func (r *applyRun) captureInputs() error {
+	captured, err := r.a.stagedInputsFor(r.pkg, r.currentVersion, r.update)
+	if err != nil {
+		return err
+	}
+	r.inputs = captured
+
+	// One of the two answers is recorded on every staged apply, and
+	// the default is the honest one — the gates below run in this run unless
+	// the retained tree takes their place.
+	r.result.ValidationSource = ValidationSourceThisRun
+	return nil
 }
 
 // promoteRetained publishes a retained tree that was already proved, with no
@@ -1289,8 +1365,12 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 }
 
 // prepareCandidate materialises the candidate in the published overlay or in a
-// staged tree; only the overlay route arms rollbackPublished.
+// staged tree, or adopts a kept one; only the overlay route arms
+// rollbackPublished.
 func (r *applyRun) prepareCandidate() error {
+	if r.a.adoptedRoot != "" {
+		return r.adoptCandidate(r.a.adoptedRoot)
+	}
 	var prepErr error
 	if r.a.stagingRoot == "" {
 		r.cand, r.rollbackPublished, prepErr = r.a.prepareInOverlay(r.pkg, r.currentVersion, r.newVersion, r.update)
@@ -3349,24 +3429,16 @@ func copyTree(src, dst string) error {
 // MarkReenabled tells the Applier that pkg's entry was re-enabled in
 // packages.toml after the Applier loaded it, so its stale enabled = false no
 // longer refuses the bump. hold = true still does.
+// It needs an Applier built by NewApplier, which allocates the set.
 func (a *Applier) MarkReenabled(pkg string) {
-	a.reenabledMu.Lock()
-	defer a.reenabledMu.Unlock()
-	if a.reenabled == nil {
-		a.reenabled = make(map[string]bool)
-	}
-	a.reenabled[pkg] = true
+	a.reenabled.add(pkg)
 }
 
 // refusal is refusedBy with the run's re-enables applied.
 func (a *Applier) refusal(pkg string) string {
 	reason := registry.RefusedBy(a.configs, pkg)
-	if reason == "enabled = false" {
-		a.reenabledMu.Lock()
-		defer a.reenabledMu.Unlock()
-		if a.reenabled[pkg] {
-			return ""
-		}
+	if reason == "enabled = false" && a.reenabled.has(pkg) {
+		return ""
 	}
 	return reason
 }

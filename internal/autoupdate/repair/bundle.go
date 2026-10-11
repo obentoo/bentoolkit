@@ -12,11 +12,13 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
-// BundleFile is the repair bundle's file name at the root of a staged tree.
-const BundleFile = ".bentoo-repair.json"
+// BundleFile is the repair bundle's file name at the root of a staged tree. It
+// is validate's spelling, so the staged sweep keeps the trees bundles live in.
+const BundleFile = validate.RepairBundleFile
 
 // SchemaVersion is the only bundle schema this package writes and reads.
 const SchemaVersion = 1
