@@ -221,6 +221,16 @@ var buildSystemMarkers = []struct{ file, system string }{
 // scope" from "could not tell" — two different SKIPPED reasons. It never changes an outcome and never overrides the
 // sentinel.
 func detectedSystem(members []string) string {
+	best := markedSystem(members)
+	if best == "" {
+		return ""
+	}
+	return ", but " + best + " was found: reading its options is out of scope"
+}
+
+// markedSystem names the build system whose marker file sits shallowest in the
+// archive, or "" when none of buildSystemMarkers is present.
+func markedSystem(members []string) string {
 	best, bestDepth := "", -1
 	for _, m := range members {
 		base := path.Base(m)
@@ -236,10 +246,25 @@ func detectedSystem(members []string) string {
 			}
 		}
 	}
-	if best == "" {
-		return ""
+	return best
+}
+
+// ArchiveBuildSystem names the build system of the project an archive holds:
+// "meson" when its root carries a meson.build, otherwise the system the
+// shallowest marker file names, or "undetermined". It lists the archive and
+// never unpacks it.
+func ArchiveBuildSystem(ctx context.Context, archive string) (string, error) {
+	members, err := listArchiveMembers(ctx, archive)
+	if err != nil {
+		return "", fmt.Errorf("reading the build system of %s: %w", archive, err)
 	}
-	return ", but " + best + " was found: reading its options is out of scope"
+	if _, ok := projectRoot(members); ok {
+		return "meson", nil
+	}
+	if system := markedSystem(members); system != "" {
+		return system, nil
+	}
+	return "undetermined", nil
 }
 
 // pickOptionFile returns the option file inside dir, honouring the

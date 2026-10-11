@@ -15,6 +15,9 @@ package autoupdate
 // opens the archives, so plain files with the right names suffice.
 
 import (
+	"archive/tar"
+	"bytes"
+	"compress/gzip"
 	"context"
 	"os"
 	"path/filepath"
@@ -65,10 +68,45 @@ func s089aPut(t *testing.T, dir, name, content string) string {
 		t.Fatal(err)
 	}
 	p := filepath.Join(dir, name)
+	if strings.Contains(name, ".tar") {
+		s089aMesonArchive(t, p, content)
+		return p
+	}
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// s089aMesonArchive writes a minimal Meson project archive at p, carrying
+// content in one member so two archives of the same name stay distinguishable.
+// The reviewer reads an archive's build system before it compares anything, so
+// a plain file would be skipped as unreadable.
+func s089aMesonArchive(t *testing.T, p, content string) {
+	t.Helper()
+	root := strings.SplitN(filepath.Base(p), ".tar", 2)[0] + "/"
+	members := map[string]string{root + "meson.build": "project('m', 'c')\n", root + "content": content}
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(gz)
+	for _, name := range []string{root + "meson.build", root + "content"} {
+		body := members[name]
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(body))}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := gz.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // s089aNew builds a published app-misc/m-1.0-r1 whose Manifest lists published,

@@ -374,9 +374,25 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	}
 
 	a.reporter.TaskStage(pkg, fixer.StageBumpReview)
+	if a.resolvedPackageType(pkg, oldVersion) == "bin" {
+		*gates = append(*gates, reviewSkipped("binary package: there are no upstream build declarations to review"))
+		return floor
+	}
 	newArchive, searched := a.candidateReviewArchive(ctx, cand, newVersion)
 	if newArchive == "" {
 		*gates = append(*gates, reviewSkipped(archiveNotFoundReason("candidate", pkg, newVersion, searched)))
+		return floor
+	}
+	// Checked before the previous side is searched or fetched: a project this
+	// reviewer cannot read is not worth a download.
+	system, err := validate.ArchiveBuildSystem(ctx, newArchive)
+	if err != nil {
+		*gates = append(*gates, reviewSkipped(fmt.Sprintf("the candidate archive of %s-%s could not be read: %v", pkg, newVersion, err)))
+		return floor
+	}
+	if system != "meson" {
+		*gates = append(*gates, reviewSkipped(fmt.Sprintf("the candidate archive %s is a %s project; the bump reviewer reads Meson build options only",
+			filepath.Base(newArchive), system)))
 		return floor
 	}
 	oldArchive, searched := a.previousReviewArchive(ctx, pkg, oldVersion)

@@ -403,11 +403,30 @@ func (r *s060Reviewer) ReviewBump(context.Context, fixer.BumpReviewRequest) (fix
 // disk asks the reviewer, and the reviews in flight never exceed the LLM limit
 // even on a wider pool. The fake pkgdev writes the staged Manifest and the
 // candidate archive the way the real one would; the previous archive and its
-// published Manifest sit in --distdir.
+// published Manifest sit in --distdir. Both are Meson archives, because the
+// reviewer is only asked about a project whose options it can read.
 func TestApplyAllBoundsLLMAgentsBySlots(t *testing.T) {
 	const limit = 2
 	reviewer := &s060Reviewer{}
+	// Real Meson archives give the options gate a verdict, which starts the
+	// host's pkgcheck QA scan; a PATH holding only the fake pkgdev's tools and the
+	// archive readers makes that scan skip here exactly as it does on a runner
+	// without Portage.
+	bin := t.TempDir()
+	for _, tool := range []string{"sh", "cp", "true", "basename", "tar", "gzip"} {
+		path, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatalf("fixture needs %s: %v", tool, err)
+		}
+		if err := os.Symlink(path, filepath.Join(bin, tool)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", bin)
+
 	distdir := t.TempDir()
+	candidate := filepath.Join(t.TempDir(), "candidate.tar.gz")
+	s089aMesonArchive(t, candidate, "1.28.6")
 	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 		if name != "pkgdev" {
 			return exec.CommandContext(ctx, "true")
@@ -418,8 +437,8 @@ func TestApplyAllBoundsLLMAgentsBySlots(t *testing.T) {
 				fetched = arg[i+1]
 			}
 		}
-		script := `n=$(basename "$PWD") && printf 'DIST %s-1.28.6.tar.gz 1 BLAKE2B a SHA512 b\n' "$n" > Manifest && : > "$1/$n-1.28.6.tar.gz"`
-		return exec.CommandContext(ctx, "sh", "-c", script, "sh", fetched)
+		script := `n=$(basename "$PWD") && printf 'DIST %s-1.28.6.tar.gz 1 BLAKE2B a SHA512 b\n' "$n" > Manifest && cp "$2" "$1/$n-1.28.6.tar.gz"`
+		return exec.CommandContext(ctx, "sh", "-c", script, "sh", fetched, candidate)
 	}
 	b := newS060Batch(t, s060BatchSetup{
 		bumps:  s060Bumps(5, "1.28.5", "1.28.6"),
@@ -438,9 +457,7 @@ func TestApplyAllBoundsLLMAgentsBySlots(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(b.applier.overlayPath, u.Package, "Manifest"), []byte(manifest), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(filepath.Join(distdir, archive), nil, 0o644); err != nil {
-			t.Fatal(err)
-		}
+		s089aMesonArchive(t, filepath.Join(distdir, archive), "1.28.5")
 	}
 
 	results, _ := b.runApplyAll(t, t.Context(), false, 5)
