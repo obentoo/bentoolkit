@@ -38,6 +38,9 @@ func TestApplyKeepsRepairTreeApplyResultNamesRepairCommand(t *testing.T) {
 	if !strings.Contains(row, repairCmd) {
 		t.Fatalf("no live failure row naming %q:\n%s", repairCmd, out)
 	}
+	if giveUp := "or delete " + f.bundlePath + " to give the repair up"; !strings.Contains(out, giveUp) {
+		t.Fatalf("the refusal does not say %q:\n%s", giveUp, out)
+	}
 	if !strings.Contains(out, "Repair:  "+repairCmd) {
 		t.Fatalf("the Apply Result does not name %q:\n%s", repairCmd, out)
 	}

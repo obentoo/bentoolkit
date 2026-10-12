@@ -600,9 +600,15 @@ time. The staged sweep (`bentoo overlay staged`) keeps any tree that carries a
 bundle. After a `--repair` that did not pass, the bundle carries a
 `repaired_at` mark, and a later `--apply` or `--check` of that package does not
 restage over the tree: it refuses the package with `staged tree kept for
-repair: bentoo overlay autoupdate --repair <cat/pkg>`, leaving the tree, its
-bundle and the pending entry as they were. A bundle without the mark, as a
-plain failed `--apply` writes it, is restaged over as before.
+repair: bentoo overlay autoupdate --repair <cat/pkg>, or delete <bundle> to
+give the repair up`, leaving the tree, its bundle and the pending entry as they
+were. A bundle without the mark, as a plain failed `--apply` writes it, is
+restaged over as before. That mark is the only part of the bundle `--apply`
+and `--check` read; everything else in it is for `--repair` and for you.
+
+To give a repair up, delete the tree's `.bentoo-repair.json`. With the bundle
+gone, the next `--apply` restages the package from scratch, and the staged
+sweep treats the tree like any other.
 
 `--repair <cat/pkg>` cannot be combined with another mode and needs a terminal
 on stdin and stdout and `claude` on `PATH`. It refuses, with exit 1 and before

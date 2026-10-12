@@ -1304,7 +1304,8 @@ func (r *applyRun) refuseRepairPending() (*ApplyResult, error) {
 // repairPending checks the staged tree a restage of pkg at version would
 // remove. When its repair bundle carries the repair mark, the tree holds a
 // --repair session's work, and the returned error, wrapping ErrRepairPending,
-// names the command that resumes it; root and bundle locate the tree. A tree
+// names the command that resumes it and the bundle whose deletion gives the
+// repair up; root and bundle locate the tree. A tree
 // with no bundle, or with the unmarked bundle a plain failed apply leaves, may
 // be restaged, and the error is nil.
 //
@@ -1329,8 +1330,8 @@ func (a *Applier) repairPending(pkg, version string) (root, bundle string, err e
 	if !marked {
 		return "", "", nil
 	}
-	return root, bundle, fmt.Errorf("%w: %s-%s: staged tree kept for repair: bentoo overlay autoupdate --repair %s",
-		ErrRepairPending, pkg, version, pkg)
+	return root, bundle, fmt.Errorf("%w: %s-%s: staged tree kept for repair: bentoo overlay autoupdate --repair %s, or delete %s to give the repair up",
+		ErrRepairPending, pkg, version, pkg, bundle)
 }
 
 // reuseRetainedTree asks what an earlier run already proved about this exact

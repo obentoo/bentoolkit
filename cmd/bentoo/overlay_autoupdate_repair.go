@@ -227,6 +227,15 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	extra, finish := ar.buildApplyReporter(applyCtx, cancel, 1)
 	defer finish()
 
+	// The applier marks the bundle it rewrites, but an exit before it reached
+	// the tree, the applier's construction included, rewrote nothing.
+	promoted := false
+	defer func() {
+		if !promoted {
+			ar.markRepaired(b)
+		}
+	}()
+
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg,
 		append(extra, autoupdate.WithAdoptedStagedTree(b.StagedRoot))...)
 	if err != nil {
@@ -234,11 +243,6 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	}
 	result, err := applier.Apply(applyCtx, b.Package, ar.opts.compile || repairNeedsCompile(b))
 	finish()
-	if err != nil || result == nil || !result.Success {
-		// The applier marks the bundle it rewrites; an exit before it reached
-		// the tree rewrote nothing.
-		ar.markRepaired(b)
-	}
 
 	switch {
 	case err != nil:
@@ -248,6 +252,7 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 		ar.displayApplyResult(result)
 		return failWith(1, fmt.Errorf("--repair %s: the staged tree was not promoted: the package is %s", b.Package, repairOutcome(result)))
 	}
+	promoted = true
 	if err := repair.RemoveBundle(b.StagedRoot); err != nil {
 		ar.log().Warn("the staged tree was promoted but its repair bundle could not be removed",
 			"package", b.Package, "staged_root", b.StagedRoot, "err", err)

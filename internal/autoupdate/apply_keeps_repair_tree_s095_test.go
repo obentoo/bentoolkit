@@ -92,6 +92,10 @@ func TestApplyKeepsRepairTreeSurvivesByteForByte(t *testing.T) {
 	if !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), f.pkg) {
 		t.Fatalf("error %q does not say %q", err, want)
 	}
+	giveUp := "or delete " + filepath.Join(f.staged, repair.BundleFile) + " to give the repair up"
+	if !strings.Contains(err.Error(), giveUp) {
+		t.Fatalf("error %q does not say %q", err, giveUp)
+	}
 	if got := hashOverlayTree(t, f.staged); got != treeBefore {
 		t.Fatalf("the repair tree changed under a non-adopting Apply")
 	}
@@ -201,7 +205,7 @@ func TestApplyKeepsRepairTreeCheckRefuses(t *testing.T) {
 		t.Fatalf("Validate returned no gate outcome: %+v", res)
 	}
 	for _, g := range res.Gates {
-		if g.Outcome != validate.OutcomeSkipped || !strings.Contains(g.Reason, want) {
+		if g.Outcome != validate.OutcomeSkipped || !strings.Contains(g.Reason, want) || !strings.Contains(g.Reason, "to give the repair up") {
 			t.Fatalf("gate %s = %s (%q), want skipped saying %q", g.Gate, g.Outcome, g.Reason, want)
 		}
 	}

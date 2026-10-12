@@ -107,7 +107,13 @@ func ttyDeps(stdinTTY, stdoutTTY bool) *deps {
 // runRepair runs runAutoupdate with fds 1 and 2 captured and answer on stdin.
 func runRepair(t *testing.T, auOpts *autoupdateOptions, d *deps, answer string) (code int, out string) {
 	t.Helper()
-	auCmd := testAutoupdateCmd()
+	return runRepairCtx(t, context.Background(), auOpts, d, answer)
+}
+
+// runRepairCtx is func runRepair under parent, the context the command runs in.
+func runRepairCtx(t *testing.T, parent context.Context, auOpts *autoupdateOptions, d *deps, answer string) (code int, out string) {
+	t.Helper()
+	auCmd := testAutoupdateCmd() //nolint:contextcheck // parent reaches the command through SetContext below
 	f, err := os.CreateTemp(t.TempDir(), "out")
 	if err != nil {
 		t.Fatal(err)
@@ -145,8 +151,8 @@ func runRepair(t *testing.T, auOpts *autoupdateOptions, d *deps, answer string) 
 			_ = syscall.Close(saved1)
 			_ = syscall.Close(saved2)
 		}()
-		auCmd.SetContext(logging.NewContext(context.Background(), slog.New(slog.NewTextHandler(os.Stderr, nil))))
-		rerr := runAutoupdate(auCmd, nil, auOpts, d)
+		auCmd.SetContext(logging.NewContext(parent, slog.New(slog.NewTextHandler(os.Stderr, nil))))
+		rerr := runAutoupdate(auCmd, nil, auOpts, d)                 //nolint:contextcheck // runAutoupdate reads parent from auCmd, set above
 		if st, bare := rerr.(*exitStatus); bare && st.cause != nil { //nolint:errorlint // the same identity test as func execute
 			fmt.Fprintln(os.Stderr, st.cause)
 		}
