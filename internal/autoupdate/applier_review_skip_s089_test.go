@@ -362,3 +362,23 @@ func TestS089SkipUnstagedCandidateIsNotReviewed(t *testing.T) {
 		})
 	}
 }
+
+// The non-Meson skip reason reads as a sentence for every answer
+// ArchiveBuildSystem gives: a bare name, a phrase that carries its own article,
+// and "undetermined".
+func TestS089SkipNotMesonReasonReadsForEverySystem(t *testing.T) {
+	for _, system := range []string{"cmake", "autotools", "a configure script", "python (PEP 517)", "go modules", "undetermined"} {
+		reason := notMesonReason("m-2.0.tar.gz", system)
+		for _, garbled := range []string{"a a ", "a undetermined", "a autotools", "undetermined project"} {
+			if strings.Contains(reason, garbled) {
+				t.Errorf("system %q: reason %q contains %q", system, reason, garbled)
+			}
+		}
+		if !strings.Contains(reason, "m-2.0.tar.gz") || !strings.Contains(reason, "Meson") {
+			t.Errorf("system %q: reason %q must name the archive and say only Meson is read", system, reason)
+		}
+		if system != "undetermined" && !strings.Contains(reason, system) {
+			t.Errorf("system %q: reason %q does not name the detected system", system, reason)
+		}
+	}
+}

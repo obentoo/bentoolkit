@@ -260,7 +260,8 @@ func stagedTreeNamesArchive(cand candidatePaths) bool {
 // The published Manifest is a legitimate source of NAMES, never of hashes: the
 // gate decides on the archive's CONTENTS, and selectDistfile still requires
 // exactly one present name carrying THIS version before it reads a byte. It is
-// the same record presentArchive and the manifest step's prefetch already use.
+// the same record the bump reviewer's archive search and the manifest step's
+// prefetch use.
 // A DIST line ("<name> <size> BLAKE2B … SHA512 …") handed over verbatim would
 // miss every os.Stat and report a silent SKIPPED, so the shared parser answers.
 //
@@ -392,8 +393,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 		return floor
 	}
 	if system != "meson" {
-		*gates = append(*gates, reviewSkipped(fmt.Sprintf("the candidate archive %s is a %s project; the bump reviewer reads Meson build options only",
-			filepath.Base(newArchive), system)))
+		*gates = append(*gates, reviewSkipped(notMesonReason(filepath.Base(newArchive), system)))
 		return floor
 	}
 	oldArchive, searched := a.previousReviewArchive(ctx, pkg, oldVersion)
@@ -597,6 +597,17 @@ func archiveNotFoundReason(side, pkg, version string, searched archiveSearch) st
 		reason += fmt.Sprintf(" (last: %v)", searched.lastErr)
 	}
 	return reason
+}
+
+// notMesonReason says why a candidate that is not a Meson project is not
+// reviewed. system is validate.ArchiveBuildSystem's answer: a bare name
+// ("cmake"), a phrase with its own article ("a configure script") or
+// "undetermined", so it is never spliced in after an article.
+func notMesonReason(archive, system string) string {
+	if system == "undetermined" {
+		return fmt.Sprintf("the candidate archive %s has no meson.build and no build system file this recognises; the bump reviewer reads Meson build options only", archive)
+	}
+	return fmt.Sprintf("the candidate archive %s is built with %s, not Meson; the bump reviewer reads Meson build options only", archive, system)
 }
 
 // reviewSkipped is the review gate of a bump the reviewer was not asked about.

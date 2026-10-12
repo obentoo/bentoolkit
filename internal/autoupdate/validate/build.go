@@ -416,6 +416,12 @@ func eachBuildGate(d Depth, visit func(gate string, phase buildPhase)) {
 	}
 }
 
+// AllowedBuildEnv is the allow-listed subset of parent a Portage child gets,
+// for callers outside this package that spawn `ebuild` themselves.
+func AllowedBuildEnv(parent []string) []string {
+	return allowedBuildEnv(parent)
+}
+
 // allowedBuildEnv is the environment the build child receives: the allow-listed
 // variables of the parent's, and nothing else.
 //
@@ -428,12 +434,6 @@ func eachBuildGate(d Depth, visit func(gate string, phase buildPhase)) {
 // The parent's own environment is read and not touched. A gate that exported or
 // unset anything here would be changing the process every other gate, and the
 // operator's own next command, runs in.
-// AllowedBuildEnv is the allow-listed subset of parent a Portage child gets,
-// for callers outside this package that spawn `ebuild` themselves.
-func AllowedBuildEnv(parent []string) []string {
-	return allowedBuildEnv(parent)
-}
-
 func allowedBuildEnv(parent []string) []string {
 	env := make([]string, 0, len(buildEnvAllowed))
 	for _, kv := range parent {
