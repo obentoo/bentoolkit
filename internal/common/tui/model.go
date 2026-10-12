@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -114,10 +115,13 @@ type model struct {
 	total     int
 	completed int
 
-	tasks   []*task          // ordered active tasks
-	index   map[string]*task // id -> active task, for O(1) event routing
-	history []historyEntry
-	logs    []string
+	tasks []*task          // ordered active tasks
+	index map[string]*task // id -> active task, for O(1) event routing
+	// history is appended under historyMu so Program.PrintHistory can read it
+	// from another goroutine even when the run goroutine never returned.
+	historyMu sync.Mutex
+	history   []historyEntry
+	logs      []string
 
 	spinner      spinner.Model
 	batchDone    bool
@@ -193,8 +197,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the injected cancel synchronously so the operation context is cancelled
 		// and child processes are killed, then quit. Bubble Tea installs no signal
 		// handler here (WithoutSignalHandler), so this is the only path that turns
-		// a Ctrl-C keypress into cancellation. Other keys keep prior behavior.
+		// a Ctrl-C keypress into cancellation. The quit releases the region as
+		// Stop does, so the history reaches the scrollback once, through
+		// Program.PrintHistory. Other keys keep prior behavior.
 		if msg.Type == tea.KeyCtrlC {
+			m.released = true
 			if m.cancel != nil {
 				m.cancel()
 			}
@@ -324,7 +331,7 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 	if t == nil {
 		// Done for an unknown task: still count it and record the summary so the
 		// overall progress and history stay consistent.
-		m.history = append(m.history, entry)
+		m.recordHistory(entry)
 		m.completed++
 		return
 	}
@@ -338,8 +345,15 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 		}
 	}
 	entry.label = t.label
-	m.history = append(m.history, entry)
+	m.recordHistory(entry)
 	m.completed++
+}
+
+// recordHistory appends a finished task's entry under historyMu.
+func (m *model) recordHistory(entry historyEntry) {
+	m.historyMu.Lock()
+	defer m.historyMu.Unlock()
+	m.history = append(m.history, entry)
 }
 
 // View implements tea.Model. It composes the frame inline (no alt-screen):
@@ -347,6 +361,7 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 //	<header>  <done>/<total>
 //	<history lines, ✓/✗ above>
 //	<active task blocks: spinner+label[+stage], indented tail beneath each>
+//	<routed log lines>
 //	<batch summary, when the run is done>
 //
 // Every row is cut to the terminal width minus one column, and the frame is
@@ -356,21 +371,28 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 // glyph), so a driven-to-done model renders deterministically for the golden
 // test.
 //
-// Once released, the frame drops the history and ends with an empty row:
-// bubbletea erases the row under the cursor (the last one) as it exits, and the
-// history is printed below the frame by Program.PrintHistory instead.
+// Once released, the frame drops the history, keeps every log line unfolded
+// and ends with an empty row: bubbletea erases the row under the cursor (the
+// last one) as it exits, and the history is printed below the frame by
+// Program.PrintHistory instead.
 func (m *model) View() string {
 	f := frame{
-		head:    splitRows(m.headerRow()),
-		tasks:   m.taskBlocks(),
-		trailer: splitRows(m.trailerRows()...),
+		head:  splitRows(m.headerRow()),
+		tasks: m.taskBlocks(),
 	}
 	if m.released {
+		// Nothing else prints the routed log lines to the scrollback, so the
+		// released frame keeps every one of them among the rows never dropped.
+		f.trailer = splitRows(append(append([]string(nil), m.logs...), m.closingRows()...)...)
 		return m.fitRows(append(f.fold(m.height-1), ""))
 	}
 	for _, h := range m.history {
 		f.history = append(f.history, splitRows(historyRow(h, m.width)))
 	}
+	for _, l := range m.logs {
+		f.logs = append(f.logs, splitRows(l))
+	}
+	f.trailer = splitRows(m.closingRows()...)
 	return m.fitRows(f.fold(m.height - 1))
 }
 
@@ -378,6 +400,8 @@ func (m *model) View() string {
 // to the terminal width: the scrollback they are printed to wraps a long row
 // instead of losing its end.
 func (m *model) historyLines() []string {
+	m.historyMu.Lock()
+	defer m.historyMu.Unlock()
 	lines := make([]string, 0, len(m.history))
 	for _, h := range m.history {
 		lines = append(lines, historyRow(h, 0))
@@ -385,10 +409,10 @@ func (m *model) historyLines() []string {
 	return lines
 }
 
-// trailerRows renders what follows the task blocks: routed log lines, the final
-// batch summary once the run is closed, and a pending in-UI confirmation.
-func (m *model) trailerRows() []string {
-	rows := append([]string(nil), m.logs...)
+// closingRows renders what follows the routed log lines: the final batch
+// summary once the run is closed, and a pending in-UI confirmation.
+func (m *model) closingRows() []string {
+	var rows []string
 	if m.batchDone && m.batchSummary != "" {
 		rows = append(rows, styleSummary.Render(m.batchSummary))
 	}
@@ -460,11 +484,13 @@ func (m *model) taskBlocks() []taskBlock {
 }
 
 // frame is a rendered View split into sections of physical rows, so the height
-// fold can drop history and tail rows while the header and the task rows stay.
+// fold can drop history, log and tail rows while the header, the task rows and
+// the trailer stay.
 type frame struct {
 	head    []string
 	history [][]string // the rows of each finished task, oldest first
 	tasks   []taskBlock
+	logs    [][]string // the rows of each routed log line, oldest first
 	trailer []string
 }
 
@@ -476,51 +502,80 @@ type taskBlock struct {
 }
 
 // fold returns the frame as at most budget rows. History entries go first,
-// oldest first, replaced by one line counting them; then tail rows go from the
-// top of the longest tail, so every task keeps its newest lines the longest.
-// The header, the task rows and the trailer are never dropped, so a frame made
-// of those alone can still exceed the budget. The model keeps every history
-// entry; only this rendering drops them.
+// oldest first, replaced by one line counting them; then routed log lines go
+// the same way; then tail rows go from the top of the longest tail, so every
+// task keeps its newest lines the longest. The header, the task rows and the
+// trailer are never dropped, so a frame made of those alone can still exceed
+// the budget. The model keeps every history entry and log line; only this
+// rendering drops them.
 func (f frame) fold(budget int) []string {
-	n := len(f.head) + len(f.trailer)
-	for _, h := range f.history {
-		n += len(h)
-	}
+	n := len(f.head) + len(f.trailer) + entryRows(f.history) + entryRows(f.logs)
 	for _, t := range f.tasks {
 		n += len(t.row) + len(t.tail)
 	}
 
-	dropped := 0
-	for n > budget && dropped < len(f.history) {
-		if dropped == 0 {
-			n++ // the fold line takes the place of the dropped entries
-		}
-		n -= len(f.history[dropped])
-		dropped++
-	}
-
-	tails := make([]int, len(f.tasks)) // tail rows trimmed per task
-	for n > budget {
-		i := longestTail(f.tasks, tails)
-		if i < 0 {
-			break
-		}
-		tails[i]++
-		n--
-	}
+	history, n := dropOldest(f.history, n, budget)
+	logs, n := dropOldest(f.logs, n, budget)
+	tails := trimTails(f.tasks, n, budget)
 
 	rows := append(make([]string, 0, n), f.head...)
-	if dropped > 0 {
-		rows = append(rows, styleTail.Render(fmt.Sprintf("%s %d earlier package(s) finished", ellipsis, dropped)))
-	}
-	for _, h := range f.history[dropped:] {
-		rows = append(rows, h...)
-	}
+	rows = appendFolded(rows, f.history, history, "earlier package(s) finished")
 	for i, t := range f.tasks {
 		rows = append(rows, t.row...)
 		rows = append(rows, t.tail[tails[i]:]...)
 	}
+	rows = appendFolded(rows, f.logs, logs, "earlier log line(s)")
 	return append(rows, f.trailer...)
+}
+
+// entryRows counts the physical rows of entries.
+func entryRows(entries [][]string) int {
+	n := 0
+	for _, e := range entries {
+		n += len(e)
+	}
+	return n
+}
+
+// dropOldest drops entries, oldest first, while a frame of n rows exceeds
+// budget, counting the one fold line that takes their place. It returns how
+// many entries went and the frame's new row count.
+func dropOldest(entries [][]string, n, budget int) (dropped, rows int) {
+	for n > budget && dropped < len(entries) {
+		if dropped == 0 {
+			n++ // the fold line takes the place of the dropped entries
+		}
+		n -= len(entries[dropped])
+		dropped++
+	}
+	return dropped, n
+}
+
+// trimTails returns how many tail rows to take from the top of each task's tail
+// so a frame of n rows fits budget, always trimming the longest tail left.
+func trimTails(tasks []taskBlock, n, budget int) []int {
+	trimmed := make([]int, len(tasks))
+	for n > budget {
+		i := longestTail(tasks, trimmed)
+		if i < 0 {
+			break
+		}
+		trimmed[i]++
+		n--
+	}
+	return trimmed
+}
+
+// appendFolded appends the entries kept after the dropped oldest ones, behind
+// one `… N <what>` line when any entry was dropped.
+func appendFolded(rows []string, entries [][]string, dropped int, what string) []string {
+	if dropped > 0 {
+		rows = append(rows, styleTail.Render(fmt.Sprintf("%s %d %s", ellipsis, dropped, what)))
+	}
+	for _, e := range entries[dropped:] {
+		rows = append(rows, e...)
+	}
+	return rows
 }
 
 // longestTail returns the index of the task with the most tail rows left after

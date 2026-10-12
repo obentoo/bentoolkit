@@ -466,9 +466,9 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // Plain branch (non-TTY / opt-out): a rate-limited plainReporter streams the tail
 // to stderr with NO ANSI; finish closes the batch.
 //
-// TUI branch: a Bubble Tea Program is started and bound to ctx so Ctrl-C invokes
-// cancel — cancelling the apply context, which kills the in-flight child
-// (Apply runs under it) and triggers the existing orphan rollback. The extra
+// TUI branch: a Bubble Tea Program starts with ctx and cancel. Ctrl-C invokes
+// cancel, killing the in-flight child (the orphan rollback follows); a
+// cancelled ctx releases the live region as a normal end does. The extra
 // options also route the in-UI y/n confirm and release the terminal for the
 // compile step's sudo/doas prompt while teeing the child's output to a capture
 // buffer the failure path still logs. finish stops the program, waits for it
@@ -525,10 +525,12 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		r.BatchDone("")
 		prog.Stop()
 		// Wait for the program goroutine to exit so the terminal is restored
-		// before the summary prints. A context-cancel (Ctrl-C) outcome surfaces as
-		// tea.ErrProgramKilled here — the EXPECTED cancellation result, not a
-		// failure — so it is intentionally not escalated; the manual TTY
-		// gate covers a program that never started cleanly.
+		// before the summary prints. An interrupt releases the region like a
+		// normal end; only a program that did not exit within Wait's grace is
+		// killed, which surfaces as tea.ErrProgramKilled — expected, not a
+		// failure, so it is intentionally not escalated. Wait gives up on a
+		// program that survives the kill, so a stuck terminal cannot hold the
+		// exit; the manual TTY gate covers a program that never started cleanly.
 		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 			ar.log().Debug("apply: live TUI program exited with error", "err", err)
 		}
