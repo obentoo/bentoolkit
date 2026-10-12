@@ -119,8 +119,9 @@ func TestAgentProgressManifestFixStreamsIntoTheTask(t *testing.T) {
 // The build fixer on the --compile path: its request carries the task's
 // callback and the stage's log path.
 func TestAgentProgressBuildFixCompilePath(t *testing.T) {
-	spy := &buildFixSpy{err: errors.New("stop after the request is recorded")}
-	h := buildFixFixture(t, spy, buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")})
+	spy := &progressBuildFixSpy{stage: fixer.StageBuildFix, buildFixSpy: buildFixSpy{err: errors.New("stop after the request is recorded")}}
+	h := buildFixFixture(t, &spy.buildFixSpy, buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")})
+	WithApplierBuildFixer(spy)(h.applier)
 	rec := &recordingReporter{}
 	WithApplierReporter(rec)(h.applier)
 
@@ -137,7 +138,7 @@ func TestAgentProgressBuildFixCompilePath(t *testing.T) {
 // The build fixer on the depth-driven gates path.
 func TestAgentProgressBuildFixGatesPath(t *testing.T) {
 	tmp := t.TempDir()
-	spy := &buildFixSpy{err: errors.New("stop after the request is recorded")}
+	spy := &progressBuildFixSpy{stage: fixer.StageBuildFix, buildFixSpy: buildFixSpy{err: errors.New("stop after the request is recorded")}}
 	rec := &recordingReporter{}
 	a, err := NewApplier(filepath.Join(tmp, "overlay"), filepath.Join(tmp, "config"),
 		WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
@@ -169,11 +170,32 @@ func TestAgentProgressBuildFixGatesPath(t *testing.T) {
 	assertAgentWiring(t, a, rec, spy.calls[0].Progress, spy.calls[0].LogPath, pkg, version, fixer.StageBuildFix)
 }
 
-// bumpReviewSpy records the request and skips.
+// wiringLine is the progress line the wiring spies deliver during the call.
+func wiringLine(stage string) string { return stage + ": Edit /staged/x.ebuild" }
+
+// progressBuildFixSpy is a buildFixSpy that delivers wiringLine through the
+// request's Progress while the call runs, as a real agent does.
+type progressBuildFixSpy struct {
+	buildFixSpy
+	stage string
+}
+
+func (s *progressBuildFixSpy) FixBuild(ctx context.Context, req fixer.BuildFixRequest) (fixer.BuildFixResult, error) {
+	if req.Progress != nil {
+		req.Progress(wiringLine(s.stage))
+	}
+	return s.buildFixSpy.FixBuild(ctx, req)
+}
+
+// bumpReviewSpy records the request, delivers wiringLine during the call and
+// skips.
 type bumpReviewSpy struct{ calls []fixer.BumpReviewRequest }
 
 func (s *bumpReviewSpy) ReviewBump(_ context.Context, req fixer.BumpReviewRequest) (fixer.BumpReviewReport, error) {
 	s.calls = append(s.calls, req)
+	if req.Progress != nil {
+		req.Progress(wiringLine(fixer.StageBumpReview))
+	}
 	return fixer.BumpReviewReport{Skipped: true, SkipReason: "spy"}, nil
 }
 
@@ -200,8 +222,10 @@ func TestAgentProgressBumpReview(t *testing.T) {
 	assertAgentWiring(t, a, rec, spy.calls[0].Progress, spy.calls[0].LogPath, pkg, "1.29.2", fixer.StageBumpReview)
 }
 
-// assertAgentWiring checks a call site's request: Progress adds its line to
-// pkg's task after the stage was entered, and LogPath is the stage's file.
+// assertAgentWiring checks a call site's request: the line the spy delivered
+// through Progress during the call joined pkg's task after the stage was
+// entered, a call made once the agent call returned adds nothing, and LogPath
+// is the stage's file.
 func assertAgentWiring(t *testing.T, a *Applier, rec *recordingReporter, progress func(string), logPath, pkg, version, stage string) {
 	t.Helper()
 	cat, name, _ := strings.Cut(pkg, "/")
@@ -211,9 +235,13 @@ func assertAgentWiring(t *testing.T, a *Applier, rec *recordingReporter, progres
 	if progress == nil {
 		t.Fatal("the request carries no Progress callback")
 	}
-	line := stage + ": Edit /staged/x.ebuild"
-	progress(line)
-	assertOrder(t, rec.snapshot(), "TaskStage:"+pkg+":"+stage, "TaskLine:"+pkg+":"+line)
+	assertOrder(t, rec.snapshot(), "TaskStage:"+pkg+":"+stage, "TaskLine:"+pkg+":"+wiringLine(stage))
+
+	late := stage + ": Edit /staged/late.ebuild"
+	progress(late)
+	if lines := taskLines(rec.snapshot(), pkg); slices.Contains(lines, late) {
+		t.Errorf("a Progress call after the agent call returned reached the task: %q", late)
+	}
 }
 
 // No logs directory, or a name that cannot be one: the agent runs unrecorded.

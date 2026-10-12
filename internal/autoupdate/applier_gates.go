@@ -403,15 +403,17 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 
 	a.reporter.TaskStage(pkg, fixer.StageBumpReview)
 	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
+	progress, progressDone := a.agentProgress(pkg)
 	report, err := a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
 		Package:    pkg,
 		OldVersion: oldVersion,
 		NewVersion: newVersion,
 		OldArchive: oldArchive,
 		NewArchive: newArchive,
-		Progress:   a.agentProgress(pkg),
+		Progress:   progress,
 		LogPath:    a.agentLogPath(pkg, newVersion, fixer.StageBumpReview),
 	})
+	progressDone()
 	if err != nil {
 		// Unstamped: the reviewer is an optional capability outside
 		// this process, so a failure to ask it is a missing credential, a provider
@@ -791,6 +793,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	a.substage(result, pkg, fixer.StageBuildFix)
 	a.reporter.Log("info", fixLine)
 
+	progress, progressDone := a.agentProgress(pkg)
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
@@ -799,9 +802,10 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 		EbuildPath: cand.ebuildPath,
 		BuildLog:   first.transcript,
 		Attempt:    1,
-		Progress:   a.agentProgress(pkg),
+		Progress:   progress,
 		LogPath:    a.agentLogPath(pkg, version, fixer.StageBuildFix),
 	})
+	progressDone()
 	if fixErr != nil {
 		return nil, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)
 	}

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -442,4 +443,43 @@ func leadingLine(s string) string {
 		return s[:i]
 	}
 	return s
+}
+
+// spillSweepAge is how old a spill file must be before a later run removes it.
+// A live run keeps writing to its spill, so a file this stale belongs to a run
+// that was killed before it could remove it.
+const spillSweepAge = time.Hour
+
+// sweepChildRunSpills removes the spill files that runs killed mid-flight left
+// directly in the logs directory. Only regular files named like a spill and
+// older than spillSweepAge are touched; a failure is logged and never stops
+// the run.
+func (a *Applier) sweepChildRunSpills() {
+	if a.logsDir == "" {
+		return
+	}
+	entries, err := os.ReadDir(a.logsDir)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			a.logger().Warn("could not list the logs directory for leftover spill files",
+				"dir", a.logsDir, "error", err)
+		}
+		return
+	}
+	cutoff := time.Now().Add(-spillSweepAge)
+	for _, e := range entries {
+		name := e.Name()
+		if !e.Type().IsRegular() || !strings.HasPrefix(name, ".childrun-spill-") || !strings.HasSuffix(name, ".log") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || !info.ModTime().Before(cutoff) {
+			continue
+		}
+		path := filepath.Join(a.logsDir, name)
+		if err := os.Remove(path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			a.logger().Warn("could not remove a leftover spill file; it holds unmasked output",
+				"path", path, "error", err)
+		}
+	}
 }

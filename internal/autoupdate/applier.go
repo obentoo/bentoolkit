@@ -348,6 +348,9 @@ type Applier struct {
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
 	logsDir string
+	// spillSweep runs sweepChildRunSpills once per Applier, on its first Apply.
+	// It is a pointer so the copies withoutAgents makes share it.
+	spillSweep *sync.Once
 	// configDir is the bentoo autoupdate config directory — in production
 	// ~/.config/bentoo/autoupdate — and it is held for exactly one purpose: the
 	// cache.json in it is where a host-caused build failure records the
@@ -887,6 +890,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	logsDir := filepath.Join(configDir, "logs")
 
 	applier := &Applier{
+		spillSweep:  &sync.Once{},
 		overlayPath: overlayPath,
 		logsDir:     logsDir,
 		configDir:   configDir,
@@ -962,6 +966,9 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *ApplyResult, _ error) {
 	result = &ApplyResult{
 		Package: pkg,
+	}
+	if a.spillSweep != nil {
+		a.spillSweep.Do(a.sweepChildRunSpills)
 	}
 
 	// A context that is already done stops Apply before it reads the pending
@@ -2544,6 +2551,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	a.substage(result, pkg, fixer.StageManifestFix)
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
+	progress, progressDone := a.agentProgress(pkg)
 	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
 		Package:    pkg,
 		Version:    version,
@@ -2554,9 +2562,10 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		ManifestError: childRunDetail(firstErr),
 		DistDir:       fixDistdir,
 		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
-		Progress:      a.agentProgress(pkg),
+		Progress:      progress,
 		LogPath:       a.agentLogPath(pkg, version, fixer.StageManifestFix),
 	})
+	progressDone()
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
@@ -3220,6 +3229,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	a.substage(result, pkg, fixer.StageBuildFix)
 	a.reporter.Log("info", fixLine)
 
+	progress, progressDone := a.agentProgress(pkg)
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
@@ -3230,9 +3240,10 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		// One attempt per apply; FixBuild owns the bound and this states
 		// which try it is rather than counting tries here.
 		Attempt:  1,
-		Progress: a.agentProgress(pkg),
+		Progress: progress,
 		LogPath:  a.agentLogPath(pkg, version, fixer.StageBuildFix),
 	})
+	progressDone()
 	switch {
 	case errors.Is(fixErr, fixer.ErrBuildFixAttemptsExhausted):
 		// "We stopped on purpose" is different news from "the agent failed", and

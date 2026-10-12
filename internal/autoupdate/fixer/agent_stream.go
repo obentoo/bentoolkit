@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -127,9 +128,13 @@ func runAgentStream(cmd *exec.Cmd, spec agentStreamSpec) agentStreamRun {
 	// now ends the parse.
 	closeErr := pw.Close()
 	result := <-done
-	// The parse has ended, so no line is offered any more.
-	if dropped, abandoned := progress.finish(progressDrainGrace); dropped > 0 || abandoned {
-		log.Debug("agent progress lines dropped: the progress callback fell behind",
+	// The parse has ended, so no line is offered any more. Lost lines leave a
+	// hole in the task's output, so they are named once, at WARN: those the
+	// full queue refused and those an abandoned callback was never handed.
+	dropped, abandoned := progress.finish(progressDrainGrace)
+	dropped += progress.stranded
+	if dropped > 0 || abandoned {
+		log.Warn("agent progress lines dropped: the progress callback fell behind",
 			"package", spec.pkg, "stage", spec.stage, "dropped", dropped, "callback_abandoned", abandoned)
 	}
 
@@ -168,11 +173,21 @@ func progressLine(stage string, ev llm.StreamEvent) string {
 type progressForwarder struct {
 	deliver func(string)
 	lines   chan string
-	stop    chan struct{}
 	done    chan struct{}
-	// dropped counts the lines the full queue refused; only the offering
-	// goroutine writes it, and finish reads it after that goroutine is done.
+	// dropped counts the lines the full queue refused and offered the lines
+	// it took; only the offering goroutine writes them, and finish reads them
+	// after that goroutine is done.
 	dropped int
+	offered int
+
+	// stranded is how many queued lines an abandoned callback was never
+	// handed; finish sets it.
+	stranded int
+
+	// mu guards stopped and started, so finish can count stranded exactly.
+	mu      sync.Mutex
+	stopped bool
+	started int
 }
 
 // startProgressForwarder starts delivering to deliver; nil delivers nothing.
@@ -182,7 +197,6 @@ func startProgressForwarder(deliver func(string)) *progressForwarder {
 		return f
 	}
 	f.lines = make(chan string, progressQueue)
-	f.stop = make(chan struct{})
 	f.done = make(chan struct{})
 	go f.run()
 	return f
@@ -191,13 +205,23 @@ func startProgressForwarder(deliver func(string)) *progressForwarder {
 func (f *progressForwarder) run() {
 	defer close(f.done)
 	for line := range f.lines {
-		select {
-		case <-f.stop:
+		if !f.begin() {
 			return
-		default:
 		}
 		f.deliver(line)
 	}
+}
+
+// begin counts one more line handed to the callback, unless finish has
+// abandoned it.
+func (f *progressForwarder) begin() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.stopped {
+		return false
+	}
+	f.started++
+	return true
 }
 
 // offer queues line, or drops it when the queue is full. It never blocks.
@@ -207,6 +231,7 @@ func (f *progressForwarder) offer(line string) {
 	}
 	select {
 	case f.lines <- line:
+		f.offered++
 	default:
 		f.dropped++
 	}
@@ -214,9 +239,10 @@ func (f *progressForwarder) offer(line string) {
 
 // finish ends the queue and waits up to grace for the callback to take every
 // line in it, so a callback that keeps up has seen every line before the run
-// returns. Past grace the callback is abandoned: no new call starts, and a
-// call still running finishes on its own. It must be called once, after the
-// last offer.
+// returns. Past grace the callback is abandoned: no new call starts, a call
+// still running finishes on its own, and the lines never handed to it are
+// counted in stranded. dropped is the lines the full queue refused. It must be
+// called once, after the last offer.
 func (f *progressForwarder) finish(grace time.Duration) (dropped int, abandoned bool) {
 	if f.lines == nil {
 		return 0, false
@@ -228,7 +254,10 @@ func (f *progressForwarder) finish(grace time.Duration) (dropped int, abandoned 
 	case <-f.done:
 		return f.dropped, false
 	case <-timer.C:
-		close(f.stop)
+		f.mu.Lock()
+		f.stopped = true
+		f.stranded = f.offered - f.started
+		f.mu.Unlock()
 		return f.dropped, true
 	}
 }

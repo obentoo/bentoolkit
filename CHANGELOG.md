@@ -31,15 +31,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 - **`overlay autoupdate --apply` stays readable while it runs and says what
   failed once.** The live region now fits the terminal: rows are cut to its
   width, it is redrawn on resize, and older finished packages fold into
-  `… N earlier package(s) finished` instead of leaving stale frames in the
-  scrollback; every finished package is printed once when the run ends. A
+  `… N earlier package(s) finished` (routed log lines fold too) instead of
+  leaving stale frames in the scrollback; every finished package is printed
+  once when the run ends, an interrupted run included. A
   failed package's row is one line, ending with the `--repair` command when a
   repair bundle was left. A build gate's output goes to the package's tail
   instead of tearing the region. In the Apply Result, a failed Manifest run's
   output is printed once, its last 40 lines without download progress, then
   the path of the run's 0600 log. The LLM agents no longer run blind:
   each tool call and refused tool shows as a line under the package, and the
-  full event stream is kept beside the run logs with secrets masked. See
+  full event stream is kept beside the run logs with secrets masked; dropped
+  progress lines are reported in the log. A killed run's leftover output file
+  is removed by the next `--apply`. See
   "What `--apply` prints" in docs/autoupdate.md.
 
 ## [0.35.0] - 2026-10-10

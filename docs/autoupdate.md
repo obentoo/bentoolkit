@@ -593,8 +593,9 @@ off. The region keeps to the terminal:
   finished packages fold into one line, `… N earlier package(s) finished`;
   if that is not enough, the running packages' output tails lose their oldest
   lines. The header and the row of each running package are never dropped.
-  Log lines bentoo routes into the region are not folded, so a run that logs
-  many of them can still outgrow the terminal.
+  Log lines bentoo routes into the region fold the same way, oldest first,
+  into `… N earlier log line(s)`, after the finished packages and before any
+  tail is cut; the run summary and a confirmation prompt are never dropped.
 - A failed package's `✗` row shows only the first line of its error. When the
   failure left a repair bundle (see
   [Repairing a failed bump](#repairing-a-failed-bump)), the row ends with
@@ -607,7 +608,9 @@ off. The region keeps to the terminal:
 
 When the run ends, the region is released and every finished package's
 `✓`/`✗` row is printed once below it, oldest first, neither folded nor cut.
-After a `Ctrl-C`, the last frame of the region can stay on screen above them.
+A `Ctrl-C` or an interrupted run releases the region the same way, so its rows
+are printed once too; the package still running at that moment is reported in
+the Apply Result.
 
 Without the live region (plain mode), each package event is a
 `[<cat/pkg>] …` line on stderr, as before. A build gate's output is not
@@ -635,7 +638,10 @@ masked, is written in mode 0600 to
 `re-check-after-llm-fix.log`), where `<logs>` is the `logs` directory of the
 autoupdate state (`$XDG_CONFIG_HOME/bentoo/autoupdate/logs`, else
 `~/.config/bentoo/autoupdate/logs`). A later run of the same version replaces
-it. No flag or config key moves it.
+it. No flag or config key moves it. While the run is going, its output is kept
+in a hidden `.childrun-spill-*.log` file in `<logs>`, removed when the run
+ends; a spill older than one hour, left by a run that was killed, is removed
+when the next `--apply` starts.
 
 The Manifest step of an apply that does not stage its tree still prints the
 run's output inside the error, with no log file.
@@ -658,7 +664,9 @@ The target is the file path, else the first word of the command (leading
 known secrets and capped at 160 characters. Each tool the agent was refused
 adds a `<stage>: <tool> denied` line when its run ends. The model's text is
 never shown. The lines are best-effort: a burst faster than the region takes
-them can lose some. In plain mode they are `[<cat/pkg>] …` lines on stderr.
+them can lose some, and bentoo then logs one warning with the package, the
+stage and how many were dropped. No line is added once the agent's run has
+returned. In plain mode they are `[<cat/pkg>] …` lines on stderr.
 
 The whole event stream is kept in
 `<logs>/<category>/<package>/<version>/<stage>-agent.jsonl` (mode 0600), with

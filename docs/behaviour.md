@@ -57,14 +57,16 @@ manifest` render a live terminal UI while long subprocesses run: a per-package
 status, an overall progress indicator, and a bounded tail of the running
 `pkgdev`/`wget` fetch — so you can see what is downloading instead of a frozen
 line. When the work finishes, each package leaves a `✓`/`✗` history line in the
-scrollback.
+scrollback. What `--apply` prints in detail — folding, failure rows, run logs
+and the LLM agents' lines — is in
+[What `--apply` prints](autoupdate.md#what---apply-prints).
 
 The live UI activates only on an interactive terminal. It falls back
 automatically to plain, ANSI-free streaming output (still showing the fetch tail
 on stderr) when any of the following holds:
 
 - stdout is not a TTY (e.g. piped into a file or `tee`, or run under CI);
-- the `--no-tui` flag is passed;
+- `--ui plain` is passed (or its deprecated alias `--no-tui`);
 - the `NO_COLOR` environment variable is set;
 - the `BENTOO_NO_TUI` environment variable is set.
 
