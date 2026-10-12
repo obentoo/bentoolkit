@@ -456,7 +456,7 @@ func sanitizeConfiguredDir(log *slog.Logger, key, path string) string {
 // All three opt-outs are still honoured, the --no-tui flag among them;
 // resolveUIMode folds it together with NO_COLOR and BENTOO_NO_TUI.
 func (ar *autoupdateRun) tuiEnabledForApply() bool {
-	return ar.autoupdateUsesTUI()
+	return ar.autoupdateUsesTUI() && liveRegionStdinOK(ar.log(), ar.deps)
 }
 
 // buildApplyReporter selects the apply backend per the gate (tuiEnabledForApply)
@@ -1029,6 +1029,27 @@ func sweepStaleTemps(log *slog.Logger, overlayPath, configDir string) {
 func stdinIsTerminal() bool {
 	fi, err := os.Stdin.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// stdinIsPollable reports whether the current stdin is a character device, a
+// pipe or a socket — the kinds epoll accepts. A regular file, a directory or a
+// stdin that cannot be stat'ed is not.
+func stdinIsPollable() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&(os.ModeCharDevice|os.ModeNamedPipe|os.ModeSocket) != 0
+}
+
+// liveRegionStdinOK is the stdin half of the live-region gate: a stdin the
+// terminal UI cannot poll sends the run to plain output instead.
+func liveRegionStdinOK(log *slog.Logger, d *deps) bool {
+	if d.stdinPollable == nil || d.stdinPollable() {
+		return true
+	}
+	logging.OrDiscard(log).Debug("live region off: stdin cannot be polled (a regular file?), using plain output")
+	return false
 }
 
 // ---------------------------------------------------------------------------

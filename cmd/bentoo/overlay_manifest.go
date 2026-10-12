@@ -213,7 +213,7 @@ func chooseManifestReporter(log *slog.Logger, d *deps, cfg *config.Config, dryRu
 	if dryRun {
 		return tui.Noop(), func() {}
 	}
-	if manifestUsesTUI(log, cfg, d.uiIsTerminal) {
+	if manifestUsesTUI(log, cfg, d.uiIsTerminal) && liveRegionStdinOK(log, d) {
 		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 		prog.Start()
 		return r, func() { prog.Stop(); _ = prog.Wait() }

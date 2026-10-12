@@ -63,6 +63,11 @@ type deps struct {
 	// terminal?". A `go test` binary writes to a pipe, so without it the
 	// on-a-terminal half of the --ui mode selection could not be checked at all.
 	uiIsTerminal func() bool
+	// stdinPollable asks whether stdin can be registered with epoll. The live
+	// region needs it: bubbletea starts its renderer before it registers stdin,
+	// and a regular file fails that registration after the first frame was
+	// queued, leaving a renderer that writes it to stdout once the run is over.
+	stdinPollable func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
 	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (autoupdate.SweepBatch, error)
@@ -162,6 +167,7 @@ func defaultDeps() *deps {
 		resolveGentooProvider:       resolveGentooProvider,
 		setVersionsForCheck:         registry.SetPackageVersions,
 		uiIsTerminal:                output.IsTerminal,
+		stdinPollable:               stdinIsPollable,
 		sweepPlanner:                autoupdate.PlanOverlaySweep,
 		sweepExecutor:               autoupdate.ExecuteOverlaySweep,
 		confirmSweep:                confirmAction,
