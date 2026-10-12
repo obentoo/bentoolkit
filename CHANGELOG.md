@@ -59,7 +59,7 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   v0.157.8.** The script evaluator behind `-tags chromedp` is ported to the
   new typed API and keeps its behaviour: extra headers are sent, promises are
   awaited, the caller's deadline is honoured, and a JavaScript `null` still
-  reads as an empty string. chromedp's websocket dependencies (`gobwas/*`,
+  reads as an empty string. chromedp's former websocket and system-utility dependencies (`gobwas/*`,
   `chromedp/sysutil`) are no longer pulled in. The default build is unchanged.
 
 ## [0.35.0] - 2026-10-10
