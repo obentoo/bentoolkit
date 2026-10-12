@@ -104,17 +104,18 @@ func TestAgentProgressHygieneAbandonedCallbackAddsNothingLate(t *testing.T) {
 		tmp := t.TempDir()
 		agent := newS092v2LateAgent(fixer.StageBumpReview)
 		rec := &recordingReporter{}
-		a, err := NewApplier(filepath.Join(tmp, "overlay"), filepath.Join(tmp, "config"),
-			WithApplierDistdir(t.TempDir(), ""),
+		const pkg = "media-plugins/gst-plugins-qt6"
+		b := newReviewableBump(t, tmp, pkg, "1.28.6", "1.29.2")
+		a, err := NewApplier(b.overlay, filepath.Join(tmp, "config"),
+			WithApplierDistdir(b.distdir, ""),
 			WithApplierBumpReviewer(agent),
 			WithApplierReporter(rec),
 		)
 		if err != nil {
 			t.Fatal(err)
 		}
-		const pkg = "media-plugins/gst-plugins-qt6"
 		var gates []validate.GateResult
-		a.reviewBump(t.Context(), candidatePaths{staged: true, pkgDir: filepath.Join(tmp, "staged", pkg)},
+		a.reviewBump(t.Context(), b.cand,
 			pkg, "1.28.6", "1.29.2", validate.DepthDecision{Depth: validate.DepthOptions, Reason: "policy"}, &gates)
 		s092v2AssertNoLateLine(t, rec, agent, pkg)
 	})
