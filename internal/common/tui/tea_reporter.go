@@ -12,8 +12,9 @@ type sender interface{ Send(tea.Msg) }
 // Compile-time guarantees: *Program is a usable sink, and teaReporter is a
 // Reporter.
 var (
-	_ sender   = (*Program)(nil)
-	_ Reporter = (*teaReporter)(nil)
+	_ sender       = (*Program)(nil)
+	_ Reporter     = (*teaReporter)(nil)
+	_ HintReporter = (*teaReporter)(nil)
 )
 
 // teaReporter implements Reporter by translating each call into the matching
@@ -49,7 +50,11 @@ func (r *teaReporter) TaskLine(id string, stream Stream, text string, eol bool) 
 }
 
 func (r *teaReporter) TaskDone(id string, ok bool, summary, capturedOutput string) {
-	r.s.Send(TaskDoneMsg{ID: id, OK: ok, Summary: summary, CapturedOutput: capturedOutput})
+	r.TaskDoneHint(id, ok, summary, "", capturedOutput)
+}
+
+func (r *teaReporter) TaskDoneHint(id string, ok bool, summary, hint, capturedOutput string) {
+	r.s.Send(TaskDoneMsg{ID: id, OK: ok, Summary: summary, CapturedOutput: capturedOutput, Hint: hint})
 }
 
 func (r *teaReporter) Log(level, text string) {

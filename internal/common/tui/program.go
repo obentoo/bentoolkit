@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"sync"
 
@@ -72,9 +73,26 @@ func (p *Program) Wait() error {
 
 // Stop signals the program to quit gracefully. It is non-blocking and safe to
 // call before Start or multiple times; pair it with Wait to block until the
-// program has actually exited.
+// program has actually exited. The model drops its history rows from the frame
+// it leaves on screen, so PrintHistory is what puts them in the scrollback.
 func (p *Program) Stop() {
-	p.prog.Quit()
+	p.prog.Send(releaseMsg{})
+}
+
+// PrintHistory writes every finished task's row to w, oldest first, one per
+// line, unfolded and not cut to the terminal width. It waits for the program
+// to exit first, so it reads the final model and prints below the released
+// live region; like Wait, it must follow Start. A killed program (a cancelled
+// context) skips bubbletea's final render, so its last live frame stays on
+// screen above these rows.
+func (p *Program) PrintHistory(w io.Writer) error {
+	<-p.done
+	for _, line := range p.model.historyLines() {
+		if _, err := io.WriteString(w, line+"\n"); err != nil {
+			return fmt.Errorf("print the run history: %w", err)
+		}
+	}
+	return nil
 }
 
 // Send forwards a message to the running program. This is the documented

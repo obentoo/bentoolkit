@@ -63,11 +63,14 @@ type (
 
 	// TaskDoneMsg terminates a task. CapturedOutput carries the full buffered
 	// child output for the error path (the model never renders it in full).
+	// Hint is an optional next step shown at the end of the task's history row;
+	// empty means none.
 	TaskDoneMsg struct {
 		ID             string
 		OK             bool
 		Summary        string
 		CapturedOutput string
+		Hint           string
 	}
 
 	// LogMsg routes a logger/output line into the TUI scrollback so stray

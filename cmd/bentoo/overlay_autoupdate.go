@@ -471,8 +471,8 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // (Apply runs under it) and triggers the existing orphan rollback. The extra
 // options also route the in-UI y/n confirm and release the terminal for the
 // compile step's sudo/doas prompt while teeing the child's output to a capture
-// buffer the failure path still logs. finish stops the program and waits for
-// it to exit, so the terminal is restored before the summary is printed.
+// buffer the failure path still logs. finish stops the program, waits for it
+// to exit (the terminal is restored before the summary) and prints the history.
 //
 // finish is idempotent (sync.Once): the caller defers it, so every early return
 // closes the batch and restores the terminal, and also calls it before the
@@ -490,6 +490,8 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 	r.BatchStart(total)
 	extra := []autoupdate.ApplierOption{
 		autoupdate.WithApplierReporter(r),
+		// A failure that left a repair bundle names --repair on its row.
+		autoupdate.WithApplierOutcomeHint(applyRepairHint),
 		// In-UI y/n confirmation rendered by the model instead of reading stdin
 		// behind the program.
 		autoupdate.WithConfirmFunc(prog.Confirm),
@@ -522,8 +524,24 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 			ar.log().Debug("apply: live TUI program exited with error", "err", err)
 		}
+		// The live region folded the history to the terminal height and left
+		// no history row on screen at exit, so the whole of it is printed here,
+		// once, before the summary.
+		if err := prog.PrintHistory(os.Stdout); err != nil {
+			ar.log().Debug("apply: could not print the run history", "err", err)
+		}
 	})
 	return extra, finish
+}
+
+// applyRepairHint is the live ✗ row's pointer at --repair: the command that
+// resumes a failed apply from the repair bundle it left, or "" when it left
+// none (a success, or a failure that kept no staged tree).
+func applyRepairHint(result *autoupdate.ApplyResult) string {
+	if result == nil || result.Success || result.RepairBundle == "" {
+		return ""
+	}
+	return "(repair: bentoo overlay autoupdate --repair " + result.Package + ")"
 }
 
 // runAutoupdate is the RunE of `overlay autoupdate`: o holds the flags of the

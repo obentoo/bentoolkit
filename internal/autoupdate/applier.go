@@ -418,6 +418,10 @@ type Applier struct {
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
 	// every existing test stays byte-identical.
 	reporter tui.Reporter
+	// outcomeHint, when non-nil, names a next step for an apply's outcome; the
+	// reporter shows it beside the task's row (see tui.TaskDoneWithHint). Set
+	// via WithApplierOutcomeHint.
+	outcomeHint func(*ApplyResult) string
 	// runAttached executes the compile-test command and returns its combined
 	// output. The privileged child needs the REAL terminal for the sudo/doas
 	// password prompt, which rules out capturing its stdout/stderr through
@@ -698,6 +702,15 @@ func WithApplierReporter(r tui.Reporter) ApplierOption {
 	}
 }
 
+// WithApplierOutcomeHint makes Apply ask hint for a next step to show beside
+// the package's outcome in the progress reporter, e.g. the command that repairs
+// a failure. The applier only relays the text; an empty answer shows nothing.
+func WithApplierOutcomeHint(hint func(*ApplyResult) string) ApplierOption {
+	return func(a *Applier) {
+		a.outcomeHint = hint
+	}
+}
+
 // WithApplierRunAttached overrides how the compile test executes. The default
 // (cmd.CombinedOutput) buffers the child's output, which is byte-identical to the
 // pre-TUI behaviour but swallows the sudo/doas password prompt. The apply
@@ -942,7 +955,11 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 			a.reporter.TaskDone(pkg, false, "", "")
 			return
 		}
-		a.reporter.TaskDone(pkg, result.Success, applySummary(result), "")
+		hint := ""
+		if a.outcomeHint != nil {
+			hint = a.outcomeHint(result)
+		}
+		tui.TaskDoneWithHint(a.reporter, pkg, result.Success, applySummary(result), hint, "")
 	}()
 
 	run := &applyRun{a: a, pkg: pkg, compile: compile, result: result}
