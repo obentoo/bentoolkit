@@ -48,6 +48,7 @@ func displayChildRuns(err error) {
 // after its last '\r'.
 func childRunTail(out string) (lines []string, omitted int) {
 	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if i := strings.LastIndexByte(line, '\r'); i >= 0 {
 			line = line[i+1:]
 		}

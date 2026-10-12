@@ -68,9 +68,9 @@ func New(opts Options) (*slog.Logger, func() error, error) {
 	}
 	file := slog.NewJSONHandler(f, &slog.HandlerOptions{Level: FileLevel(opts.Level)})
 
-	// The redactor sits outside the multi-handler so both sinks receive the
-	// same scrubbed record.
-	l := slog.New(NewRedactingHandler(slog.NewMultiHandler(text, file), opts.Resolved))
+	// The redactor sits outside the fan-out so both sinks receive the same
+	// scrubbed record; the fan-out names the terminal so Hold can hold it alone.
+	l := slog.New(NewRedactingHandler(newSinksHandler(text, file), opts.Resolved))
 
 	var (
 		once     sync.Once

@@ -420,6 +420,7 @@ var errorLineMarkers = []string{"error", "!!!", "fail", "fatal", "not found", "d
 // was left on screen: the text after its last '\r'.
 func firstErrorLine(output string) string {
 	for line := range strings.SplitSeq(output, "\n") {
+		line = strings.TrimSuffix(line, "\r")
 		if i := strings.LastIndexByte(line, '\r'); i >= 0 {
 			line = line[i+1:]
 		}

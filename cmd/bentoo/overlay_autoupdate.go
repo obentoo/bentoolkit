@@ -476,8 +476,8 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 //
 // finish is idempotent (sync.Once): the caller defers it, so every early return
 // closes the batch and restores the terminal, and also calls it before the
-// summary, which must print after the TUI is gone. It writes nothing on disk,
-// so its order relative to the overlay lock's release does not matter.
+// summary, which must print after the TUI is gone. Its only file is the log
+// file, never the overlay, so its order against the lock's release is free.
 func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) ([]autoupdate.ApplierOption, func()) {
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
@@ -548,13 +548,14 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 	return extra, finish
 }
 
-// holdLogUnderRegion replaces the run's logger with one that keeps every
-// record back (logging.Hold) and returns the func that puts the original
-// logger back and prints the kept records. A record written to the terminal
-// under the live frame moves the cursor behind the renderer's back, and its
-// next redraw leaves rows of the old frame on screen. The applier must be
-// built after the hold so that it takes the held logger, which writes straight
-// through once it is released.
+// holdLogUnderRegion replaces the run's logger with one that keeps the
+// terminal copy of every record back (logging.Hold) while the log file still
+// gets it at once, and returns the func that puts the original logger back and
+// prints the kept records. A record written to the terminal under the live
+// frame moves the cursor behind the renderer's back, and its next redraw leaves
+// rows of the old frame on screen. The applier must be built after the hold so
+// that it takes the held logger, which writes straight through once it is
+// released.
 func (ar *autoupdateRun) holdLogUnderRegion() (release func()) {
 	orig := ar.lg
 	held, releaseHeld := logging.Hold(ar.log())
