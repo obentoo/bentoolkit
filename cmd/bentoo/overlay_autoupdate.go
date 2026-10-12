@@ -472,12 +472,12 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // options also route the in-UI y/n confirm and release the terminal for the
 // compile step's sudo/doas prompt while teeing the child's output to a capture
 // buffer the failure path still logs. finish stops the program, waits for it
-// to exit (the terminal is restored before the summary) and prints the history.
+// to exit, prints the history and releases the run's held logger.
 //
 // finish is idempotent (sync.Once): the caller defers it, so every early return
 // closes the batch and restores the terminal, and also calls it before the
-// summary, which must print after the TUI is gone. It writes no state, so its
-// order relative to the overlay lock's release does not matter.
+// summary, which must print after the TUI is gone. It writes nothing on disk,
+// so its order relative to the overlay lock's release does not matter.
 func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) ([]autoupdate.ApplierOption, func()) {
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
@@ -485,6 +485,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		return []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r), autoupdate.WithApplierQuietGateOutput()}, sync.OnceFunc(func() { r.BatchDone("") })
 	}
 
+	releaseLog := ar.holdLogUnderRegion()
 	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 	prog.Start()
 	r.BatchStart(total)
@@ -540,8 +541,28 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		if err := prog.PrintHistory(os.Stdout); err != nil {
 			ar.log().Debug("apply: could not print the run history", "err", err)
 		}
+		// The terminal is the run's again: the records kept while the region
+		// was up print below its history, before the summary.
+		releaseLog()
 	})
 	return extra, finish
+}
+
+// holdLogUnderRegion replaces the run's logger with one that keeps every
+// record back (logging.Hold) and returns the func that puts the original
+// logger back and prints the kept records. A record written to the terminal
+// under the live frame moves the cursor behind the renderer's back, and its
+// next redraw leaves rows of the old frame on screen. The applier must be
+// built after the hold so that it takes the held logger, which writes straight
+// through once it is released.
+func (ar *autoupdateRun) holdLogUnderRegion() (release func()) {
+	orig := ar.lg
+	held, releaseHeld := logging.Hold(ar.log())
+	ar.lg = held
+	return func() {
+		ar.lg = orig
+		releaseHeld()
+	}
 }
 
 // applyRepairHint is the live ✗ row's pointer at --repair: the command that
