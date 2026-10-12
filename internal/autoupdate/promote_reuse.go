@@ -349,26 +349,17 @@ func short(digest string) string {
 
 // recordStagedProof writes the record beside the staged tree this run built.
 //
-// # It runs for failures too, and that is the requirement
-//
-// The tree of every bump that was not promoted is retained, so the record beside
-// a failure is what tells the NEXT run that this tree is evidence of a rejection
-// rather than of a proof. Writing one only for successes would leave every failed
-// tree unrecorded — and an unrecorded tree revalidates, which is safe but
-// throws away the one fact worth keeping.
-//
-// # A record that cannot be written never fails a bump
-//
-// The cost of a missing record is exactly one revalidation, which is the
-// behaviour every release before this one had. Failing an otherwise good apply
-// over a bookkeeping file would trade an hour saved for a bump not published.
+// It runs for failures too: the record beside a failure tells the NEXT run that
+// the retained tree is evidence of a rejection rather than of a proof, and an
+// unrecorded tree revalidates, which is safe but throws that fact away. A
+// record that cannot be written never fails a bump: the cost is one
+// revalidation, which is what every release before this one did.
 //
 // validatedEbuild is the candidate the gates read when they passed, "" when
 // they did not: its bytes are digested at this moment into ValidatedDigest.
-//
 // vendorUnpublished is the vendor tarball the run generated and did not publish
-// (see unpublishedVendor); the record carries it so the next apply does not
-// promote a Manifest that digests a tarball nobody serves.
+// (see unpublishedVendor), so the next apply does not promote a Manifest that
+// digests a tarball nobody serves.
 func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth, validatedEbuild, vendorUnpublished string) {
 	if root == "" {
 		return
