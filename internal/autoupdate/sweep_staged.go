@@ -127,12 +127,16 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 
 	// Streamed live as TaskLine events under the package's own task id, and
 	// captured into the error's *ChildRunError, so a red gate says what pkgdev
-	// said. One
-	// StreamCapture for both streams gives the child a single pipe, which keeps
-	// the captured bytes identical to CombinedOutput's.
+	// said. The capture keeps the tail; the spill keeps everything for the
+	// run's log file and is removed on every return. One writer for both
+	// streams gives the child a single pipe, which keeps the bytes in the
+	// order CombinedOutput would have them.
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
-	cmd.Stdout = sc
-	cmd.Stderr = sc
+	spill := s.openChildRunSpill()
+	defer spill.discard()
+	out := spill.tee(sc)
+	cmd.Stdout = out
+	cmd.Stderr = out
 	// A lingering helper after a 0 exit is a success, not exec.ErrWaitDelay.
 	runErr := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
@@ -147,7 +151,7 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 		if supplied {
 			label = childRunManifestRecheck
 		}
-		run := s.newChildRunError(label, pkg, version, sc.Captured(), runErr)
+		run := s.newChildRunError(label, pkg, version, sc.Captured(), spill, runErr)
 		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w",
 			ErrManifestFailed, pkg, version, stagedPkgDir, run)
 	}

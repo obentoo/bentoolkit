@@ -1,11 +1,16 @@
 package autoupdate
 
 import (
+	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -18,20 +23,23 @@ const (
 	childRunManifestRecheck = "re-check after LLM fix"
 )
 
-// ChildRunError is one failed child process run: what the run was, everything it
-// printed, and where that output was kept.
+// ChildRunError is one failed child process run: what the run was, the tail of
+// what it printed, and where the whole of it was kept.
 //
 // Error() is a single line — the label, the run error and the first line of
 // Output that reads as an error — so an error holding several runs stays short
-// wherever it is printed whole. The output itself travels in Output, for a
-// renderer that bounds it, and in the file at LogPath, which keeps all of it.
+// wherever it is printed whole. The output itself travels in Output, its last
+// tui.MaxCapturedBytes, for a renderer that bounds it, and in the file at
+// LogPath, which keeps all of it.
 type ChildRunError struct {
 	// Label names the run, e.g. "first manifest run".
 	Label string
-	// Output is everything the run printed, stdout and stderr interleaved, with
-	// every resolved secret masked.
+	// Output is the last tui.MaxCapturedBytes the run printed, stdout and
+	// stderr interleaved, with every resolved secret masked. When the run
+	// printed more, a first line states how many earlier bytes were dropped.
 	Output string
-	// LogPath is the file holding the whole Output; empty when it could not be
+	// LogPath is the file holding everything the run printed, from its first
+	// byte, with every resolved secret masked; empty when it could not be
 	// written or no logs directory was configured.
 	LogPath string
 	// Err is how the run ended (an *exec.ExitError, a timeout); Unwrap returns
@@ -105,18 +113,18 @@ func childRunDetail(err error) string {
 }
 
 // newChildRunError builds the error of a failed run, masking every resolved
-// secret in its output and keeping the whole output in
-// <logsDir>/<category>/<package>/<version>/<label>.log. A log that cannot be
+// secret in output, the run's captured tail, and keeping everything spill holds
+// in <logsDir>/<category>/<package>/<version>/<label>.log. A log that cannot be
 // written is a WARN and leaves LogPath empty: the run's failure is the news, and
-// the output still travels in the error. An empty logsDir writes nothing.
-func (s *sweeper) newChildRunError(label, pkg, version, output string, runErr error) *ChildRunError {
+// the tail still travels in the error. An empty logsDir writes nothing.
+func (s *sweeper) newChildRunError(label, pkg, version, output string, spill *childRunSpill, runErr error) *ChildRunError {
 	run := &ChildRunError{Label: label, Output: scrubResolvedSecrets(output), Err: runErr}
 	if s.childLogsDir == "" {
 		return run
 	}
-	path, err := writeChildRunLog(s.childLogsDir, pkg, version, label, run.Output)
+	path, err := spill.keep(s.childLogsDir, pkg, version, label)
 	if err != nil {
-		s.log.Warn("could not keep the child run's output in its log file (the output still travels in the error)",
+		s.log.Warn("could not keep the child run's output in its log file (its tail still travels in the error)",
 			"package", pkg, "version", version, "run", label, "err", err)
 		return run
 	}
@@ -124,11 +132,100 @@ func (s *sweeper) newChildRunError(label, pkg, version, output string, runErr er
 	return run
 }
 
-// writeChildRunLog writes output to the run's log file and returns its path.
-// The file is written beside its final name and renamed into place, so it is
-// 0600 even when an earlier run's log already exists, and a reader never sees
-// half of it.
-func writeChildRunLog(logsDir, pkg, version, label, output string) (string, error) {
+// childRunSpill holds a run's whole output on disk while the run lasts, so a
+// failure can keep all of it however much the run printed, while memory holds
+// only the tail. Write never fails: a spill error is kept, and later turns into
+// a missing log rather than into a failed write the child would see.
+type childRunSpill struct {
+	mu   sync.Mutex
+	file *os.File
+	err  error
+}
+
+// openChildRunSpill starts a run's spill file in the logs directory. It is nil
+// when no logs directory is configured; a spill that could not be created
+// carries its error and drops what it is given.
+func (s *sweeper) openChildRunSpill() *childRunSpill {
+	if s.childLogsDir == "" {
+		return nil
+	}
+	sp := &childRunSpill{}
+	if err := os.MkdirAll(s.childLogsDir, 0o750); err != nil {
+		sp.err = fmt.Errorf("creating %s: %w", s.childLogsDir, err)
+		return sp
+	}
+	f, err := os.CreateTemp(s.childLogsDir, ".childrun-spill-*.log")
+	if err != nil {
+		sp.err = fmt.Errorf("creating a spill file in %s: %w", s.childLogsDir, err)
+		return sp
+	}
+	sp.file = f
+	return sp
+}
+
+// Write appends p to the spill file and always reports success.
+func (sp *childRunSpill) Write(p []byte) (int, error) {
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.file != nil && sp.err == nil {
+		if _, err := sp.file.Write(p); err != nil {
+			sp.err = fmt.Errorf("writing %s: %w", sp.file.Name(), err)
+		}
+	}
+	return len(p), nil
+}
+
+// tee returns the one writer a child's stdout and stderr both go to: sc, plus
+// the spill when there is one. A single writer gives the child a single pipe,
+// which keeps the bytes in the order the child wrote them.
+func (sp *childRunSpill) tee(sc io.Writer) io.Writer {
+	if sp == nil {
+		return sc
+	}
+	return io.MultiWriter(sc, sp)
+}
+
+// keep writes the spilled output, secrets masked, to the run's log file and
+// returns its path. It must be called once the run has ended.
+func (sp *childRunSpill) keep(logsDir, pkg, version, label string) (string, error) {
+	if sp == nil {
+		return "", errors.New("the run's output was not spilled")
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.err != nil {
+		return "", sp.err
+	}
+	if sp.file == nil {
+		return "", errors.New("the run's spill file is already discarded")
+	}
+	if _, err := sp.file.Seek(0, io.SeekStart); err != nil {
+		return "", fmt.Errorf("rewinding %s: %w", sp.file.Name(), err)
+	}
+	return writeChildRunLog(logsDir, pkg, version, label, sp.file)
+}
+
+// discard closes and removes the spill file, which holds unmasked output and so
+// never outlives the run. It is safe on nil and safe to call twice.
+func (sp *childRunSpill) discard() {
+	if sp == nil {
+		return
+	}
+	sp.mu.Lock()
+	defer sp.mu.Unlock()
+	if sp.file == nil {
+		return
+	}
+	_ = sp.file.Close()
+	_ = os.Remove(sp.file.Name())
+	sp.file = nil
+}
+
+// writeChildRunLog copies src, every resolved secret masked, to the run's log
+// file and returns its path. The file is written beside its final name and
+// renamed into place, so it is 0600 even when an earlier run's log already
+// exists, and a reader never sees half of it.
+func writeChildRunLog(logsDir, pkg, version, label string, src io.Reader) (string, error) {
 	dir, err := packageLogDir(logsDir, pkg, version)
 	if err != nil {
 		return "", err
@@ -142,7 +239,11 @@ func writeChildRunLog(logsDir, pkg, version, label, output string) (string, erro
 		return "", fmt.Errorf("creating a log file in %s: %w", dir, err)
 	}
 	tmpName := tmp.Name()
-	_, writeErr := tmp.WriteString(output)
+	w := bufio.NewWriter(tmp)
+	writeErr := copyScrubbed(w, src, maskableSecrets())
+	if writeErr == nil {
+		writeErr = w.Flush()
+	}
 	closeErr := tmp.Close()
 	if err := errors.Join(writeErr, closeErr); err != nil {
 		_ = os.Remove(tmpName)
@@ -153,6 +254,114 @@ func writeChildRunLog(logsDir, pkg, version, label, output string) (string, erro
 		return "", fmt.Errorf("renaming %s to %s: %w", tmpName, path, err)
 	}
 	return path, nil
+}
+
+// scrubChunkBytes is how much output copyScrubbed masks and writes at a time.
+const scrubChunkBytes = 64 << 10
+
+// secretMask replaces each masked secret, as secrets.Scrub does.
+var secretMask = []byte("***")
+
+// copyScrubbed copies src to dst with every occurrence of each secret replaced
+// by the mask, a chunk at a time so output of any size is masked in bounded
+// memory. Each chunk is scanned together with a look-ahead one byte shorter
+// than the longest secret, so a secret split across two reads is found whole.
+// Occurrences that overlap are masked as one, which hides at least what
+// scrubResolvedSecrets hides.
+func copyScrubbed(dst io.Writer, src io.Reader, secretVals []string) error {
+	if len(secretVals) == 0 {
+		_, err := io.Copy(dst, src)
+		return err
+	}
+	needles := make([][]byte, len(secretVals))
+	lookahead := 0
+	for i, v := range secretVals {
+		needles[i] = []byte(v)
+		lookahead = max(lookahead, len(v)-1)
+	}
+	buf := make([]byte, scrubChunkBytes+lookahead)
+	held, masked := 0, 0
+	for {
+		n, err := io.ReadFull(src, buf[held:])
+		end := held + n
+		last := errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+		if err != nil && !last {
+			return err
+		}
+		cut := end
+		if !last {
+			cut = end - lookahead
+		}
+		masked, err = writeMasked(dst, buf[:cut], secretSpans(buf[:end], needles, masked))
+		if err != nil || last {
+			return err
+		}
+		held = copy(buf, buf[cut:end])
+	}
+}
+
+// maskSpan is a byte range of a chunk to mask. written marks the range a mask
+// was already written for, the part of an earlier chunk's span carried over.
+type maskSpan struct {
+	start, end int
+	written    bool
+}
+
+// secretSpans returns the ranges of b holding a secret, sorted and with
+// overlapping ranges merged. The first carried bytes are a range already
+// masked.
+func secretSpans(b []byte, needles [][]byte, carried int) []maskSpan {
+	var spans []maskSpan
+	if carried > 0 {
+		spans = append(spans, maskSpan{start: 0, end: carried, written: true})
+	}
+	for _, needle := range needles {
+		for i := 0; i < len(b); {
+			j := bytes.Index(b[i:], needle)
+			if j < 0 {
+				break
+			}
+			spans = append(spans, maskSpan{start: i + j, end: i + j + len(needle)})
+			i += j + 1
+		}
+	}
+	slices.SortFunc(spans, func(x, y maskSpan) int { return x.start - y.start })
+	merged := spans[:0]
+	for _, sp := range spans {
+		if n := len(merged); n > 0 && sp.start < merged[n-1].end {
+			merged[n-1].end = max(merged[n-1].end, sp.end)
+			merged[n-1].written = merged[n-1].written || sp.written
+			continue
+		}
+		merged = append(merged, sp)
+	}
+	return merged
+}
+
+// writeMasked writes b with each span masked and returns how many bytes past
+// the end of b a span written here still covers. A span starting at or past
+// the end of b is left for the next chunk, which still holds it whole.
+func writeMasked(dst io.Writer, b []byte, spans []maskSpan) (int, error) {
+	pos := 0
+	for _, sp := range spans {
+		if sp.start >= len(b) {
+			break
+		}
+		if _, err := dst.Write(b[pos:sp.start]); err != nil {
+			return 0, err
+		}
+		if !sp.written {
+			if _, err := dst.Write(secretMask); err != nil {
+				return 0, err
+			}
+		}
+		if sp.end > len(b) {
+			return sp.end - len(b), nil
+		}
+		pos = sp.end
+	}
+	_, err := dst.Write(b[pos:])
+	return 0, err
 }
 
 // packageLogDir is <logsDir>/<category>/<package>/<version>, the directory a
@@ -180,14 +389,22 @@ func childRunLogName(label string) string {
 // scrubResolvedSecrets masks every secret value resolved so far in this
 // process, longest first so a value that contains another is masked whole.
 func scrubResolvedSecrets(s string) string {
-	for _, v := range secrets.Resolved() {
-		// A blank value would mask every space.
-		if strings.TrimSpace(v) == "" {
-			continue
-		}
+	for _, v := range maskableSecrets() {
 		s = secrets.Scrub(s, v)
 	}
 	return s
+}
+
+// maskableSecrets is every secret value resolved so far in this process,
+// longest first, without the blank ones: a blank value would mask every space.
+func maskableSecrets() []string {
+	var out []string
+	for _, v := range secrets.Resolved() {
+		if strings.TrimSpace(v) != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // errorLineMarkers are the case-insensitive fragments that make an output line
