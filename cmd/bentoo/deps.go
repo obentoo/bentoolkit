@@ -152,6 +152,9 @@ type deps struct {
 	// confirmRepair is the y/N question before --repair starts its session.
 	// --yes never answers it: the session is only for an operator who is there.
 	confirmRepair func(prompt string) bool
+	// newApplier is how every `overlay autoupdate` mode builds its Applier, so
+	// a test can read the option set each construction site ships with.
+	newApplier func(overlayPath, configDir string, opts ...autoupdate.ApplierOption) (*autoupdate.Applier, error)
 }
 
 // defaultDeps returns the production wiring: the values the replaced package
@@ -193,6 +196,7 @@ func defaultDeps() *deps {
 		resolvedSecrets:         secrets.Resolved,
 		lookPath:                exec.LookPath,
 		confirmRepair:           confirmAction,
+		newApplier:              autoupdate.NewApplier,
 	}
 }
 

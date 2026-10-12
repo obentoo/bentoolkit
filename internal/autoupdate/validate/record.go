@@ -142,6 +142,14 @@ type StageRecord struct {
 	// staging and promotion moves it — at which point every gate's answer was
 	// about a source tree that is no longer the one being published.
 	DistfileDigest string `json:"distfile_digest,omitempty"`
+
+	// VendorUnpublished names the vendor tarball the proved run generated but did
+	// not publish, empty when it generated none or published the one it did. The
+	// tree's Manifest digests that tarball, so promoting the tree as it stands
+	// would publish an ebuild whose vendor distfile nobody serves; reuse refuses
+	// while it is set and the vendor step runs again. A record written before the
+	// field existed reads as empty.
+	VendorUnpublished string `json:"vendor_unpublished,omitempty"`
 }
 
 // stageRecordWire is the on-disk shape.
@@ -162,6 +170,7 @@ type stageRecordWire struct {
 	ValidatedDigest    string       `json:"validated_digest,omitempty"`
 	SubstitutionDigest string       `json:"substitution_digest,omitempty"`
 	DistfileDigest     string       `json:"distfile_digest,omitempty"`
+	VendorUnpublished  string       `json:"vendor_unpublished,omitempty"`
 }
 
 // StageRecordPath names the record of one staged tree. It is exported so an
@@ -205,6 +214,7 @@ func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 		ValidatedDigest:    rec.ValidatedDigest,
 		SubstitutionDigest: rec.SubstitutionDigest,
 		DistfileDigest:     rec.DistfileDigest,
+		VendorUnpublished:  rec.VendorUnpublished,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding the validation record of %s: %w", stagedRoot, err)
@@ -281,6 +291,7 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 		ValidatedDigest:    wire.ValidatedDigest,
 		SubstitutionDigest: wire.SubstitutionDigest,
 		DistfileDigest:     wire.DistfileDigest,
+		VendorUnpublished:  wire.VendorUnpublished,
 	}, nil
 }
 

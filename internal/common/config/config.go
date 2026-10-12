@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -123,6 +124,62 @@ type AutoupdateConfig struct {
 	// to be mirrored into probeConfig by hand and a nested one inherits that
 	// mirror for free. ReviewConfig carries the whole of that reasoning.
 	Review ReviewConfig `yaml:"review,omitempty"`
+	// Vendor governs the Go vendor-tarball step: which distfile hosts the
+	// applier may regenerate a missing vendor tarball for, and the command that
+	// publishes one.
+	Vendor VendorConfig `yaml:"vendor,omitempty"`
+}
+
+// DefaultVendorHost is the distfiles host the overlay serves its Go vendor
+// tarballs from; it is the host list when autoupdate.vendor.hosts is absent.
+const DefaultVendorHost = "distfiles.obentoo.org"
+
+// errBadUploadCommand marks an upload_command element the loader refuses.
+var errBadUploadCommand = errors.New("upload command element is invalid")
+
+// uploadPlaceholder matches one {...} token inside an upload_command element.
+var uploadPlaceholder = regexp.MustCompile(`\{[^}]*\}`)
+
+// VendorConfig is the autoupdate.vendor block.
+type VendorConfig struct {
+	// Hosts lists the distfile hosts whose vendor tarballs the applier owns.
+	// A configured list replaces the default rather than extending it, so the
+	// default host can be taken out.
+	Hosts []string `yaml:"hosts,omitempty"`
+	// UploadCommand is the argv that publishes a generated tarball, run without
+	// a shell. {path} is replaced by the tarball's absolute path and {file} by
+	// its file name; no other placeholder exists. Unset means never upload.
+	UploadCommand []string `yaml:"upload_command,omitempty"`
+}
+
+// EffectiveHosts returns the configured hosts lower-cased, or the default host
+// when none is configured.
+func (v VendorConfig) EffectiveHosts() []string {
+	if len(v.Hosts) == 0 {
+		return []string{DefaultVendorHost}
+	}
+	hosts := make([]string, 0, len(v.Hosts))
+	for _, h := range v.Hosts {
+		hosts = append(hosts, strings.ToLower(h))
+	}
+	return hosts
+}
+
+// Validate refuses an upload command whose first element is empty or whose
+// elements carry a placeholder other than {path} and {file}. The error names
+// the key and the offending element's index.
+func (v VendorConfig) Validate() error {
+	for i, elem := range v.UploadCommand {
+		if i == 0 && elem == "" {
+			return fmt.Errorf("autoupdate.vendor.upload_command[%d]: %w: the first element must name a program", i, errBadUploadCommand)
+		}
+		for _, tok := range uploadPlaceholder.FindAllString(elem, -1) {
+			if tok != "{path}" && tok != "{file}" {
+				return fmt.Errorf("autoupdate.vendor.upload_command[%d]: %w: unknown placeholder %q (only {path} and {file} exist)", i, errBadUploadCommand, tok)
+			}
+		}
+	}
+	return nil
 }
 
 // ValidateConfig is the staged-bump validation policy: how much of a bump is
@@ -493,6 +550,13 @@ func LoadFrom(path string) (*Config, error) {
 
 	cfg.Autoupdate.LLM.normalize()
 	cfg.Autoupdate.Validate.normalize()
+
+	// The one hard refusal in an otherwise lenient loader: upload_command
+	// drives a remote write, so a typo in it must stop the run instead of
+	// becoming an argument the upload program receives verbatim.
+	if err := cfg.Autoupdate.Vendor.Validate(); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 
 	return &cfg, nil
 }

@@ -124,7 +124,7 @@ autoupdate:
 
 | Setting | Scope | Default |
 |---------|-------|---------|
-| `--timeout N` | This `--check` run | `0` (use config) |
+| `--timeout N` | This `--check` run, and the [vendor tarball](autoupdate.md#vendor-tarballs) probe of an `--apply` run | `0` (use config) |
 | `autoupdate.http_timeout` | Every run | `30` |
 | `timeout = N` (in `packages.toml`) | One package's per-operation budget | derived from the per-request timeout |
 

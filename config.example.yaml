@@ -124,6 +124,37 @@ autoupdate:
   #       reason: carries a local patch that only a build exercises
 
   # --------------------------------------------------------------------------
+  # vendor — the Go vendor-tarball step.
+  #
+  # A bumped Go ebuild that fetches `<name>-vendor.tar.xz` from one of `hosts`
+  # gets that tarball generated locally (`go mod vendor`, the overlay's
+  # scripts/go-vendor.sh recipe) when its URL answers 404, so the staged
+  # Manifest digests it instead of failing. `--check` never uploads it.
+  # --------------------------------------------------------------------------
+  # vendor:
+  #   # Distfile hosts whose vendor tarballs bentoo may generate. A list here
+  #   # replaces the default (default: [distfiles.obentoo.org]).
+  #   hosts: [distfiles.obentoo.org]
+  #
+  #   # Command that publishes a generated tarball during --apply, as an argv
+  #   # list run WITHOUT a shell. {path} becomes the tarball's absolute path and
+  #   # {file} its file name; any other {...} token is refused at load time.
+  #   # Credentials come from the command's own environment or profile.
+  #   # Unset (the default) means never upload: the package stops as
+  #   # "upload pending" with the kept tarball path and the URL to serve it at.
+  #   upload_command:
+  #     - npx
+  #     - --yes
+  #     - wrangler@4
+  #     - r2
+  #     - object
+  #     - put
+  #     - "obentoo-distfiles/{file}"
+  #     - "--file={path}"
+  #     - --content-type=application/x-xz
+  #     - --remote
+
+  # --------------------------------------------------------------------------
   # llm — AI provider used by the automatic repairs:
   #   * Manifest auto-fix during --apply (broken SRC_URI/Manifest)
   #   * registry entry repair at the end of --check

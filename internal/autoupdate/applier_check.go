@@ -153,12 +153,15 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	// recorded beside the tree they said it about — which is precisely what makes
 	// a later `--apply` able to promote this work instead of repeating it.
 	stagedRoot := local.StagedPath
+	// A check never publishes, so a tarball its vendor step generated is
+	// recorded as unpublished.
 	defer func() {
 		validatedEbuild := ""
 		if gatesPassed {
 			validatedEbuild = cand.ebuildPath
 		}
-		a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth, validatedEbuild)
+		a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth, validatedEbuild,
+			unpublishedVendor(local.Vendor, false))
 	}()
 
 	a.reporter.TaskStage(pkg, "manifest")
@@ -244,7 +247,7 @@ func checkResult(pkg, version string, local *ApplyResult, depth validate.DepthDe
 	if reached == "" {
 		reached = validate.DepthNone.String()
 	}
-	return validate.EbuildResult{
+	res := validate.EbuildResult{
 		Package:        pkg,
 		Version:        version,
 		Depth:          reached,
@@ -252,7 +255,15 @@ func checkResult(pkg, version string, local *ApplyResult, depth validate.DepthDe
 		DepthReason:    local.DepthReason,
 		Gates:          gates,
 	}
+	if local.Vendor.Generated {
+		res.Notes = append(res.Notes, VendorGeneratedNote)
+	}
+	return res
 }
+
+// VendorGeneratedNote marks a check whose gates ran on a vendor tarball this
+// run generated: a check never uploads one.
+const VendorGeneratedNote = "vendor tarball generated locally, not uploaded"
 
 // checkSkipped is the answer for a package no gate could be run for at all.
 //

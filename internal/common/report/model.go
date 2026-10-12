@@ -310,4 +310,8 @@ type ValidationRow struct {
 	// in hand rather than by a renderer that would have to go looking for the
 	// plan entry.
 	SameReasonAsPlan bool `json:"same_reason_as_plan"`
+	// Notes are facts about how the outcome was reached that no gate carries,
+	// such as a vendor tarball generated for this check. They are printed with
+	// the row whether or not its reason is.
+	Notes []string `json:"notes"`
 }

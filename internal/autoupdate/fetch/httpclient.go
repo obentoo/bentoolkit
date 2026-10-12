@@ -183,6 +183,9 @@ type RetryableHTTPClient struct {
 	// jitter draws the wait before a retry from [0, ceiling]. Nil means
 	// defaultJitter; tests replace it to make waits exact.
 	jitter func(ceiling time.Duration) time.Duration
+	// delaysMu guards recordedDelays: one client is shared by concurrent
+	// workers, and every retry records its delay.
+	delaysMu sync.Mutex
 	// recordedDelays stores delays for testing purposes
 	recordedDelays []time.Duration
 	// defaultHeaders are headers applied to all requests
@@ -428,16 +431,22 @@ func ctxStopError(host, phase string, err error) error {
 // GetRecordedDelays returns the delays that were recorded during requests.
 // Only populated when using a custom delay function that records delays.
 func (c *RetryableHTTPClient) GetRecordedDelays() []time.Duration {
-	return c.recordedDelays
+	c.delaysMu.Lock()
+	defer c.delaysMu.Unlock()
+	return slices.Clone(c.recordedDelays)
 }
 
 // ClearRecordedDelays clears the recorded delays.
 func (c *RetryableHTTPClient) ClearRecordedDelays() {
+	c.delaysMu.Lock()
+	defer c.delaysMu.Unlock()
 	c.recordedDelays = nil
 }
 
 // recordDelay records a delay for testing purposes.
 func (c *RetryableHTTPClient) recordDelay(d time.Duration) {
+	c.delaysMu.Lock()
+	defer c.delaysMu.Unlock()
 	c.recordedDelays = append(c.recordedDelays, d)
 }
 
@@ -666,6 +675,42 @@ func (c *RetryableHTTPClient) Get(ctx context.Context, url string) (*http.Respon
 		return nil, err
 	}
 	return c.Do(req)
+}
+
+// Download performs one GET for a file whose transfer may outlast the
+// per-request timeout: http.Client.Timeout also bounds reading the body, so a
+// distfile larger than http_timeout allows would be cut off mid-transfer. The
+// request runs on a copy of the client with that timeout removed, so ctx alone
+// bounds the transfer; the transport's header wait still bounds a silent
+// server. It neither retries nor goes through the circuit breakers, and it
+// sends the client's default headers. The caller closes the body.
+func (c *RetryableHTTPClient) Download(ctx context.Context, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return c.DownloadRequest(req)
+}
+
+// DownloadRequest is Download for a request the caller built, so it can carry
+// headers of its own; the request's context bounds the transfer. A default
+// header the request already sets is left as the caller set it.
+func (c *RetryableHTTPClient) DownloadRequest(req *http.Request) (*http.Response, error) {
+	for k, v := range c.defaultHeaders {
+		if req.Header.Get(k) == "" {
+			req.Header.Set(k, v)
+		}
+	}
+	hc := *c.client
+	hc.Timeout = 0
+	return hc.Do(req)
+}
+
+// Wait blocks for d the way the client waits between its own retries: the
+// delay function set with SetDelayFunc runs in its place when there is one,
+// and ctx's error is returned as soon as ctx is done.
+func (c *RetryableHTTPClient) Wait(ctx context.Context, d time.Duration) error {
+	return c.wait(ctx, d)
 }
 
 // GetWithContext performs an HTTP GET request with retry logic and context support.

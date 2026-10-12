@@ -290,6 +290,15 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 		return stagedReuse{root: root, reason: "the per-package substitutions this bump carries changed since the retained tree was proved, so its candidate is not the one this run would stage"}
 	}
 
+	// Before the distfile comparison, which can stop the apply: a tree that
+	// cannot be promoted anyway is revalidated, and revalidating runs the vendor
+	// step again — the only thing that can generate the tarball and publish it.
+	if record.VendorUnpublished != "" {
+		a.logger().Info("vendor: the retained tree digests a tarball that was never published; validating again",
+			"package", pkg, "version", newVersion, "root", root, "file", record.VendorUnpublished)
+		return stagedReuse{root: root, reason: "vendor tarball generated but not published; re-validating"}
+	}
+
 	if record.DistfileDigest != inputs.distfile {
 		return stagedReuse{
 			root:   root,
@@ -340,23 +349,18 @@ func short(digest string) string {
 
 // recordStagedProof writes the record beside the staged tree this run built.
 //
-// # It runs for failures too, and that is the requirement
-//
-// The tree of every bump that was not promoted is retained, so the record beside
-// a failure is what tells the NEXT run that this tree is evidence of a rejection
-// rather than of a proof. Writing one only for successes would leave every failed
-// tree unrecorded — and an unrecorded tree revalidates, which is safe but
-// throws away the one fact worth keeping.
-//
-// # A record that cannot be written never fails a bump
-//
-// The cost of a missing record is exactly one revalidation, which is the
-// behaviour every release before this one had. Failing an otherwise good apply
-// over a bookkeeping file would trade an hour saved for a bump not published.
+// It runs for failures too: the record beside a failure tells the NEXT run that
+// the retained tree is evidence of a rejection rather than of a proof, and an
+// unrecorded tree revalidates, which is safe but throws that fact away. A
+// record that cannot be written never fails a bump: the cost is one
+// revalidation, which is what every release before this one did.
 //
 // validatedEbuild is the candidate the gates read when they passed, "" when
 // they did not: its bytes are digested at this moment into ValidatedDigest.
-func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth, validatedEbuild string) {
+// vendorUnpublished is the vendor tarball the run generated and did not publish
+// (see unpublishedVendor), so the next apply does not promote a Manifest that
+// digests a tarball nobody serves.
+func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth, validatedEbuild, vendorUnpublished string) {
 	if root == "" {
 		return
 	}
@@ -400,6 +404,7 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		ValidatedDigest:    a.validatedDigest(validatedEbuild, pkg, version),
 		SubstitutionDigest: inputs.substitutions,
 		DistfileDigest:     inputs.distfile,
+		VendorUnpublished:  vendorUnpublished,
 	})
 	if err != nil {
 		a.logger().Warn("could not record what the gates said beside the retained tree "+
@@ -422,4 +427,14 @@ func (a *Applier) validatedDigest(path, pkg, version string) string {
 		return ""
 	}
 	return validate.DigestBytes(body)
+}
+
+// unpublishedVendor names the vendor tarball out generated when published is
+// false, and is empty otherwise. published means the tarball was uploaded and
+// its served bytes verified; every other exit leaves it unserved.
+func unpublishedVendor(out VendorOutcome, published bool) string {
+	if !out.Generated || published {
+		return ""
+	}
+	return out.File
 }

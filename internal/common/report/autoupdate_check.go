@@ -204,10 +204,12 @@ func validationResultsSection(r AutoupdateCheck) Section {
 // already omit an empty detail rather than printing a bare indent, so there is
 // no second rule to keep in agreement.
 func resultDetail(result ValidationRow) string {
-	if result.SameReasonAsPlan {
-		return ""
+	parts := make([]string, 0, 1+len(result.Notes))
+	if !result.SameReasonAsPlan && result.Reason != "" {
+		parts = append(parts, result.Reason)
 	}
-	return result.Reason
+	parts = append(parts, result.Notes...)
+	return strings.Join(parts, "; ")
 }
 
 // validationSummarySection is the last thing a reader sees: the four counts, and

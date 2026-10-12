@@ -96,6 +96,19 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 		return distdir, fmt.Errorf("%w: staged manifest for %s-%s: %w", ErrManifestFailed, pkg, version, err)
 	}
 
+	// A Go vendor tarball nobody serves yet is generated into the distdir here,
+	// so pkgdev digests it rather than failing to fetch it. On the supplied path
+	// the tarball a first run generated is already in the directory, so this
+	// run produces nothing and the sink keeps the first outcome.
+	stagedRoot := filepath.Dir(filepath.Dir(stagedPkgDir))
+	vendored, err := s.prepareVendorDistfile(ctx, stagedRoot, pkg, version, distdir)
+	if err != nil {
+		return distdir, err
+	}
+	if (vendored.Generated || vendored.ProbeFailed) && s.vendorSink != nil {
+		*s.vendorSink = vendored
+	}
+
 	// Bound the invocation exactly as the apply path does: a stalled distfile
 	// fetch must not hang a gate forever, and cancelling either the parent
 	// (SIGINT) or this child (timeout) stops pkgdev and every process it

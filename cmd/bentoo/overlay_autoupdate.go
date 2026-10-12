@@ -171,6 +171,9 @@ type autoupdateRun struct {
 	dirs        autoupdateDistfileDirs
 	validate    autoupdateValidatePolicy
 	validateCfg config.ValidateConfig
+	// vendor is what the Applier's vendor step needs from the config: the
+	// autoupdate.vendor block and the per-request HTTP timeout its client uses.
+	vendor autoupdateVendorWiring
 	// uiConfig is the configuration the apply path resolves its renderer
 	// against. nil is legal and reads as "nothing configured".
 	uiConfig *config.Config
@@ -218,6 +221,17 @@ type autoupdateDistfileDirs struct {
 	// value because there is no second-chance rung below it: "" means the
 	// lookup is off.
 	Cache string
+}
+
+// autoupdateVendorWiring is resolved once in runAutoupdate and carried into every
+// Applier by applierVendorOptions. The zero value is usable: the default vendor
+// host, no upload command, and the client's own default request timeout.
+type autoupdateVendorWiring struct {
+	// Config is the autoupdate.vendor block, passed through unread.
+	Config config.VendorConfig
+	// HTTPTimeout is the per-request timeout of the vendor step's client,
+	// resolved exactly as the check's (--timeout, else autoupdate.http_timeout).
+	HTTPTimeout time.Duration
 }
 
 // autoupdateValidatePolicy is the staged-bump validation policy this run applies:
@@ -327,7 +341,7 @@ Examples:
 	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, "With --compile: SKIP the compile test rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
 	cmd.Flags().BoolVarP(&o.clean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
 	cmd.Flags().IntVar(&o.concurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured")
-	cmd.Flags().IntVar(&o.timeout, "timeout", 0, "per-request HTTP timeout in seconds for --check (0 = use config autoupdate.http_timeout, default 30)")
+	cmd.Flags().IntVar(&o.timeout, "timeout", 0, "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)")
 	cmd.Flags().StringVar(&o.only, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	cmd.Flags().StringVar(&o.revive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
@@ -694,6 +708,14 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// The same block, unresolved, for the two --llm capabilities: their keys are
 	// tri-state and only mean something next to the flag.
 	ar.validateCfg = appCtx.Config.Autoupdate.Validate
+
+	// The vendor step's inputs, resolved here so all four Applier construction
+	// sites read one answer: a site that missed it would silently skip the
+	// vendor tarball and fall back to a manifest that cannot fetch it.
+	ar.vendor = autoupdateVendorWiring{
+		Config:      appCtx.Config.Autoupdate.Vendor,
+		HTTPTimeout: ar.resolveHTTPTimeout(appCtx.Config),
+	}
 
 	// The renderer, resolved here for the same reason and in the same place as
 	// the two above: --ui, --no-tui and the ui.mode key are only all in scope
@@ -1545,6 +1567,22 @@ func (ar *autoupdateRun) applierDistfileOptions() []autoupdate.ApplierOption {
 	}
 }
 
+// applierVendorOptions hands an Applier the autoupdate.vendor block and a fresh
+// HTTP client for its vendor step, built as the check builds its own: the
+// retrying client, the run's logger, and the resolved per-request timeout.
+// One helper for every construction site, for the reason applierDistfileOptions
+// is one. The client is per Applier; under --apply all the worker pool shares
+// it, which http.Client allows.
+func (ar *autoupdateRun) applierVendorOptions() []autoupdate.ApplierOption {
+	client := fetch.NewRetryableHTTPClient()
+	client.SetLogger(ar.log())
+	client.SetRequestTimeout(ar.vendor.HTTPTimeout)
+	return []autoupdate.ApplierOption{
+		autoupdate.WithApplierVendorConfig(ar.vendor.Config),
+		autoupdate.WithApplierHTTPClient(client),
+	}
+}
+
 // resolveAutoupdateValidatePolicy translates `autoupdate.validate` and the
 // --depth flag into what the Applier reads.
 //
@@ -1745,11 +1783,12 @@ func (ar *autoupdateRun) newSingleApplier(overlayPath, configDir string, llmCfg 
 	}
 	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, ar.applierDistfileOptions()...)
+	opts = append(opts, ar.applierVendorOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 
-	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
 		return nil, failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
 	}
@@ -1810,6 +1849,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	}
 	opts = append(opts, applierGentooPathOption())
 	opts = append(opts, ar.applierDistfileOptions()...)
+	opts = append(opts, ar.applierVendorOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
 	// One Applier serves the whole batch, so the two agents are constructed ONCE
 	// here — a per-package construction would warn once per package on a host with
@@ -1817,7 +1857,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 
-	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
 		return failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
 	}
@@ -1950,6 +1990,15 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		}
 		output.Success.Println("\n✓ Update applied successfully")
 		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+	} else if action, ok := autoupdate.VendorUploadAction(result.Error); ok {
+		// Not a failure of the bump: the tarball it needs exists and was
+		// digested, and only its publication is owed by the operator.
+		output.Warning.Println("    Status:  Upload pending")
+		output.Warning.Printf("    Action:  %s\n", action)
+		output.Info.Println("             (then re-run --apply: the served tarball is fetched, not regenerated)")
+		if result.StagedPath != "" {
+			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
+		}
 	} else {
 		output.Error.Println("    Status:  Failed")
 		if result.Error != nil {
@@ -2220,6 +2269,7 @@ func (ar *autoupdateRun) reviveApplierOptions(overlayPath, configDir string, pen
 		autoupdate.WithApplierPendingList(pending),
 	}
 	reviveOpts = append(reviveOpts, ar.applierDistfileOptions()...)
+	reviveOpts = append(reviveOpts, ar.applierVendorOptions()...)
 	// The ::gentoo tree too, as on the apply paths: a revived package whose
 	// `requires` is met only by ::gentoo would otherwise always read as waiting.
 	reviveOpts = append(reviveOpts, applierGentooPathOption())
@@ -2301,7 +2351,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 
 	reviveOpts := ar.reviveApplierOptions(overlayPath, configDir, pending)
 
-	applier, err := autoupdate.NewApplier(overlayPath, configDir, reviveOpts...)
+	applier, err := ar.deps.newApplier(overlayPath, configDir, reviveOpts...)
 	if err != nil {
 		return failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
 	}
