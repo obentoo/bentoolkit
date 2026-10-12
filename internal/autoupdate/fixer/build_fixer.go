@@ -16,9 +16,7 @@ package fixer
 // the caller's own re-run of the same gate, never the agent's self-report.
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -156,6 +154,17 @@ type BuildFixRequest struct {
 	// read as the first attempt; anything above buildFixMaxAttempts is refused
 	// with ErrBuildFixAttemptsExhausted.
 	Attempt int
+	// Progress, when set, receives one line per tool call the agent makes and
+	// per tool it was refused, as `llm-build-fix: <tool> <target>`. It is called
+	// from a goroutine of its own and never holds up the agent: a line it is
+	// too slow to take is dropped, and every line it takes is taken before the
+	// call returns. A callback still blocked progressDrainGrace after the
+	// agent's output ended is abandoned and gets no further line; the one call
+	// already running then may finish after the call returns.
+	Progress func(string)
+	// LogPath, when set, is the file the agent's whole event stream is written
+	// to, 0600, with every known secret masked.
+	LogPath string
 }
 
 // BuildFixResult reports the outcome of an agentic build-fix attempt. Summary is
@@ -226,8 +235,8 @@ type ClaudeCodeBuildFixer struct {
 	// execCommand creates the *exec.Cmd bound to a context. Defaults to
 	// exec.CommandContext and is injectable for testing.
 	execCommand func(ctx context.Context, name string, arg ...string) *exec.Cmd
-	// log receives the build fixer's diagnostics. The fixer emits none of its
-	// own today; the field keeps its option in line with the other agents'.
+	// log receives the build fixer's diagnostics: the stream parser's DEBUG
+	// records and a WARN when the agent log cannot be written.
 	log *slog.Logger
 }
 
@@ -337,9 +346,9 @@ func (f *ClaudeCodeBuildFixer) buildArgs(instruction, pkgDir, pkg string) ([]str
 	}
 	args := []string{
 		"-p", instruction,
-		"--output-format", "json",
-		"--add-dir", pkgDir,
 	}
+	args = append(args, streamOutputArgs...)
+	args = append(args, "--add-dir", pkgDir)
 	args = append(args, perms...)
 	args = append(args,
 		"--append-system-prompt", buildFixGuidance,
@@ -539,8 +548,9 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 
 	// Bound post-cancellation cleanup: WaitDelay makes the runtime force-close the
 	// inherited pipes a bounded time after the context is cancelled or the process
-	// exits, so FixBuild always returns within timeout + manifestFixWaitDelay even
-	// if a child holds the stdout pipe open.
+	// exits, so FixBuild always returns within timeout + manifestFixWaitDelay +
+	// progressDrainGrace even if a child holds the stdout pipe open or the
+	// progress callback blocks.
 	cmd.WaitDelay = manifestFixWaitDelay
 
 	// Resolve the child environment from the auth mode: bare injects the API key
@@ -548,27 +558,27 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 	// the CLI uses its logged-in session.
 	cmd.Env = llm.ChildEnv(f.bareMode, f.apiKeyEnv, f.apiKey, llm.AgentEnvExtra{})
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-
-	var env llm.ClaudeCodeEnvelope
-	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
-	stderrStr := strings.TrimSpace(stderr.String())
+	run := runAgentStream(cmd, agentStreamSpec{
+		stage:    StageBuildFix,
+		progress: req.Progress,
+		logPath:  req.LogPath,
+		apiKey:   f.apiKey,
+		pkg:      req.Package,
+		log:      logging.OrDiscard(f.log),
+	})
+	env := run.env
 
 	// Every terminal failure funnels through the shared formatFixerError so each
 	// carries the same bounded set of signals (exit code or cancellation cause,
-	// subtype, result, stderr, and raw stdout on a parse failure). The model
+	// subtype, result, stderr, and the stream on a parse failure). The model
 	// record travels on the failure path too: the invocation still spent a model
 	// call and may have left a half-finished edit in the staged tree.
-	if runErr != nil || jsonErr != nil || env.IsError {
+	if run.runErr != nil || run.parseErr != nil || env.IsError {
 		return BuildFixResult{
 			Model:        f.model,
 			ModelIsAlias: isModelAlias(f.model),
 			Attempt:      attempt,
-		}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
+		}, formatFixerError(runCtx.Err(), run.runErr, env, run.parseErr, run.stdout, run.stderr)
 	}
 
 	return BuildFixResult{

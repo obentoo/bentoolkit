@@ -21,7 +21,6 @@ package fixer
 // model resolution, childEnv, the exec seam, the envelope, truncateMiddle).
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -155,6 +154,17 @@ type BumpReviewRequest struct {
 	// NewArchive is the path to the candidate version's release archive, already
 	// on disk. Used only when BuildFileDiff is empty.
 	NewArchive string
+	// Progress, when set, receives one line per tool call the agent makes and
+	// per tool it was refused, as `review: <tool> <target>`. It is called
+	// from a goroutine of its own and never holds up the agent: a line it is
+	// too slow to take is dropped, and every line it takes is taken before the
+	// call returns. A callback still blocked progressDrainGrace after the
+	// agent's output ended is abandoned and gets no further line; the one call
+	// already running then may finish after the call returns.
+	Progress func(string)
+	// LogPath, when set, is the file the agent's whole event stream is written
+	// to, 0600, with every known secret masked.
+	LogPath string
 }
 
 // BumpReviewReport is what one review produced.
@@ -380,7 +390,8 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	// Bound post-cancellation cleanup: WaitDelay makes the runtime force-close
 	// the inherited pipes a bounded time after the context is cancelled or the
 	// process exits, so ReviewBump always returns within timeout +
-	// manifestFixWaitDelay even if a child holds the stdout pipe open.
+	// manifestFixWaitDelay + progressDrainGrace even if a child holds the stdout
+	// pipe open or the progress callback blocks.
 	cmd.WaitDelay = manifestFixWaitDelay
 
 	// Resolve the child environment from the auth mode: bare injects the API key
@@ -388,24 +399,24 @@ func (r *ClaudeCodeBumpReviewer) ReviewBump(ctx context.Context, req BumpReviewR
 	// the CLI uses its logged-in session.
 	cmd.Env = llm.ChildEnv(r.bareMode, r.apiKeyEnv, r.apiKey, llm.AgentEnvExtra{})
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	run := runAgentStream(cmd, agentStreamSpec{
+		stage:    StageBumpReview,
+		progress: req.Progress,
+		logPath:  req.LogPath,
+		apiKey:   r.apiKey,
+		pkg:      req.Package,
+		log:      r.logger(),
+	})
+	env := run.env
 
-	runErr := cmd.Run()
-
-	var env llm.ClaudeCodeEnvelope
-	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
-	stderrStr := strings.TrimSpace(stderr.String())
-
-	if runErr != nil || jsonErr != nil || env.IsError {
+	if run.runErr != nil || run.parseErr != nil || env.IsError {
 		// formatFixerError is the package's single funnel for a failed `claude`
 		// invocation, so this failure carries the same bounded set of signals as
 		// every other one (cancellation cause or exit code, subtype, envelope
-		// errors, result, stderr, and raw stdout on a parse failure). Its
+		// errors, result, stderr, and the stream on a parse failure). Its
 		// wording says "fixer" because the fixers needed it first; the sentence
 		// it is quoted inside names what actually happened here.
-		diag := formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
+		diag := formatFixerError(runCtx.Err(), run.runErr, env, run.parseErr, run.stdout, run.stderr)
 		return bumpReviewSkipped(r.classifyRunFailure(ctx, runCtx, env, diag)), nil
 	}
 
@@ -446,8 +457,8 @@ func (r *ClaudeCodeBumpReviewer) buildArgs(instruction, dir string) ([]string, e
 	}
 	args := []string{
 		"-p", instruction,
-		"--output-format", "json",
 	}
+	args = append(args, streamOutputArgs...)
 	args = append(args, perms...)
 	args = append(args,
 		"--append-system-prompt", bumpReviewGuidance,

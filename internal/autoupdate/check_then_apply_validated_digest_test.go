@@ -34,10 +34,10 @@ func scriptedBuildApplier(t *testing.T, run buildRun, builds *int) (a *Applier, 
 		WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}),
-		WithApplierRunAttached(func(*exec.Cmd) ([]byte, error) {
+		WithApplierRunCaptured(capturedFrom(func(*exec.Cmd) ([]byte, error) {
 			*builds++
 			return []byte(run.output), run.err
-		}),
+		})),
 		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(t.TempDir(), ""),

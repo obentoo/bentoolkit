@@ -3,10 +3,12 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // tailCap is the exact capacity of each task's bounded tail ring. Once a
@@ -14,6 +16,16 @@ import (
 // so the rendered tail never exceeds the last tailCap committed lines (plus the
 // current live line, if any).
 const tailCap = 10
+
+// defaultWidth and defaultHeight size the frame until the program reports the
+// real terminal size through a tea.WindowSizeMsg.
+const (
+	defaultWidth  = 80
+	defaultHeight = 24
+)
+
+// ellipsis ends a row cut to fit the terminal width.
+const ellipsis = "…" // U+2026
 
 // Glyphs used in history and active rows. They are fixed code points so the
 // ANSI-stripped View is deterministic and matches the documented frame exactly.
@@ -85,11 +97,12 @@ func (t *task) tailLines() []string {
 }
 
 // historyEntry is a terminal task rendered above the active block as a one-line
-// ✓/✗ summary.
+// ✓/✗ summary, ending with its hint when it carries one.
 type historyEntry struct {
 	ok      bool
 	label   string
 	summary string
+	hint    string
 }
 
 // model is the single tea.Model backing the live TUI. It holds an ordered set
@@ -102,14 +115,22 @@ type model struct {
 	total     int
 	completed int
 
-	tasks   []*task          // ordered active tasks
-	index   map[string]*task // id -> active task, for O(1) event routing
-	history []historyEntry
-	logs    []string
+	tasks []*task          // ordered active tasks
+	index map[string]*task // id -> active task, for O(1) event routing
+	// history is appended under historyMu so Program.PrintHistory can read it
+	// from another goroutine even when the run goroutine never returned.
+	historyMu sync.Mutex
+	history   []historyEntry
+	logs      []string
 
 	spinner      spinner.Model
 	batchDone    bool
 	batchSummary string
+
+	// width and height are the terminal size from the last tea.WindowSizeMsg
+	// (80x24 until one arrives). Every rendered row is cut to width-1 cells.
+	width  int
+	height int
 
 	// cancel is the caller's cancellation hook (the signal/cancel chain that
 	// cancels the operation context and kills child processes). It is injected
@@ -123,7 +144,17 @@ type model struct {
 	confirmPending bool
 	confirmPrompt  string
 	confirmReply   chan bool
+
+	// released is set once the program is asked to stop: the history rows
+	// leave the frame, because Program.PrintHistory writes them to the
+	// scrollback after the live region is gone.
+	released bool
 }
+
+// releaseMsg asks the model to drop the history from its frame and quit. It is
+// what Program.Stop sends, so the frame bubbletea leaves on screen at exit
+// carries no history row PrintHistory then prints again.
+type releaseMsg struct{}
 
 // withCancel injects the caller's cancellation hook and returns the model so the
 // call can be chained at construction. Ctrl-C invokes this hook.
@@ -142,6 +173,8 @@ func newModel() *model {
 		header:  "Applying updates",
 		index:   make(map[string]*task),
 		spinner: sp,
+		width:   defaultWidth,
+		height:  defaultHeight,
 	}
 }
 
@@ -155,13 +188,20 @@ func (m *model) Init() tea.Cmd {
 // corresponding state transition and advances the shared spinner on its tick.
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.resize(msg)
+		return m, nil
+
 	case tea.KeyMsg:
 		// Ctrl-C reconciles with the caller's cancellation: invoke
 		// the injected cancel synchronously so the operation context is cancelled
 		// and child processes are killed, then quit. Bubble Tea installs no signal
 		// handler here (WithoutSignalHandler), so this is the only path that turns
-		// a Ctrl-C keypress into cancellation. Other keys keep prior behavior.
+		// a Ctrl-C keypress into cancellation. The quit releases the region as
+		// Stop does, so the history reaches the scrollback once, through
+		// Program.PrintHistory. Other keys keep prior behavior.
 		if msg.Type == tea.KeyCtrlC {
+			m.released = true
 			if m.cancel != nil {
 				m.cancel()
 			}
@@ -241,12 +281,27 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.batchSummary = msg.Summary
 		return m, nil
 
+	case releaseMsg:
+		m.released = true
+		return m, tea.Quit
+
 	case spinner.TickMsg:
 		var cmd tea.Cmd
 		m.spinner, cmd = m.spinner.Update(msg)
 		return m, cmd
 	}
 	return m, nil
+}
+
+// resize records the terminal size so the next View fits it. A non-positive
+// dimension (a terminal that cannot report its size) keeps the previous value.
+func (m *model) resize(msg tea.WindowSizeMsg) {
+	if msg.Width > 0 {
+		m.width = msg.Width
+	}
+	if msg.Height > 0 {
+		m.height = msg.Height
+	}
 }
 
 // answerConfirm delivers the user's yes/no decision on the pending reply channel
@@ -266,13 +321,17 @@ func (m *model) answerConfirm(v bool) {
 }
 
 // finishTask moves a task out of the ordered active set into history and bumps
-// the completed counter. CapturedOutput is intentionally not rendered.
+// the completed counter. CapturedOutput is intentionally not rendered, and only
+// the summary's first line is kept: an error that embeds a child's output would
+// otherwise turn one history row into a screenful.
 func (m *model) finishTask(msg TaskDoneMsg) {
+	summary, _, _ := strings.Cut(msg.Summary, "\n")
+	entry := historyEntry{ok: msg.OK, label: msg.ID, summary: summary, hint: msg.Hint}
 	t := m.index[msg.ID]
 	if t == nil {
 		// Done for an unknown task: still count it and record the summary so the
 		// overall progress and history stay consistent.
-		m.history = append(m.history, historyEntry{ok: msg.OK, label: msg.ID, summary: msg.Summary})
+		m.recordHistory(entry)
 		m.completed++
 		return
 	}
@@ -285,8 +344,16 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 			break
 		}
 	}
-	m.history = append(m.history, historyEntry{ok: msg.OK, label: t.label, summary: msg.Summary})
+	entry.label = t.label
+	m.recordHistory(entry)
 	m.completed++
+}
+
+// recordHistory appends a finished task's entry under historyMu.
+func (m *model) recordHistory(entry historyEntry) {
+	m.historyMu.Lock()
+	defer m.historyMu.Unlock()
+	m.history = append(m.history, entry)
 }
 
 // View implements tea.Model. It composes the frame inline (no alt-screen):
@@ -294,40 +361,109 @@ func (m *model) finishTask(msg TaskDoneMsg) {
 //	<header>  <done>/<total>
 //	<history lines, ✓/✗ above>
 //	<active task blocks: spinner+label[+stage], indented tail beneath each>
+//	<routed log lines>
 //	<batch summary, when the run is done>
 //
-// When no active task remains the frame is fully static (no spinner glyph), so a
-// driven-to-done model renders deterministically for the golden test.
+// Every row is cut to the terminal width minus one column, and the frame is
+// folded to at most height-1 rows (see frame.fold), so the terminal never wraps
+// or scrolls the live region and the inline redraw erases exactly the rows it
+// drew. When no active task remains the frame is fully static (no spinner
+// glyph), so a driven-to-done model renders deterministically for the golden
+// test.
+//
+// Once released, the frame drops the history, keeps every log line unfolded
+// and ends with an empty row: bubbletea erases the row under the cursor (the
+// last one) as it exits, and the history is printed below the frame by
+// Program.PrintHistory instead.
 func (m *model) View() string {
-	var b strings.Builder
-
-	// Header with overall done/total when a denominator is known.
-	if m.total > 0 {
-		b.WriteString(styleHeader.Render(fmt.Sprintf("%s  %d/%d", m.header, m.completed, m.total)))
-	} else {
-		b.WriteString(styleHeader.Render(m.header))
+	f := frame{
+		head:  splitRows(m.headerRow()),
+		tasks: m.taskBlocks(),
 	}
-
-	// History block (✓/✗), above the active tasks.
+	if m.released {
+		// Nothing else prints the routed log lines to the scrollback, so the
+		// released frame keeps every one of them among the rows never dropped.
+		f.trailer = splitRows(append(append([]string(nil), m.logs...), m.closingRows()...)...)
+		return m.fitRows(append(f.fold(m.height-1), ""))
+	}
 	for _, h := range m.history {
-		glyph, gs := glyphOK, styleOK
-		if !h.ok {
-			glyph, gs = glyphFail, styleFail
-		}
-		line := glyph + " " + h.label
-		if h.summary != "" {
-			line += " — " + h.summary
-		}
-		b.WriteByte('\n')
-		b.WriteString(gs.Render(line))
+		f.history = append(f.history, splitRows(historyRow(h, m.width)))
 	}
+	for _, l := range m.logs {
+		f.logs = append(f.logs, splitRows(l))
+	}
+	f.trailer = splitRows(m.closingRows()...)
+	return m.fitRows(f.fold(m.height - 1))
+}
 
-	// Active task blocks. Each task is its own region: a header row carrying the
-	// spinner glyph + label (+ optional [stage]), then its bounded tail indented
-	// beneath it, so two tasks never share a rendered line.
+// historyLines renders every history row, oldest first, neither folded nor cut
+// to the terminal width: the scrollback they are printed to wraps a long row
+// instead of losing its end.
+func (m *model) historyLines() []string {
+	m.historyMu.Lock()
+	defer m.historyMu.Unlock()
+	lines := make([]string, 0, len(m.history))
+	for _, h := range m.history {
+		lines = append(lines, historyRow(h, 0))
+	}
+	return lines
+}
+
+// closingRows renders what follows the routed log lines: the final batch
+// summary once the run is closed, and a pending in-UI confirmation.
+func (m *model) closingRows() []string {
+	var rows []string
+	if m.batchDone && m.batchSummary != "" {
+		rows = append(rows, styleSummary.Render(m.batchSummary))
+	}
+	// The confirmation is answered inside the frame instead of reading
+	// os.Stdin behind the program; answerConfirm removes the line.
+	if m.confirmPending {
+		rows = append(rows, styleSummary.Render(m.confirmPrompt+" [y/n]"))
+	}
+	return rows
+}
+
+// headerRow renders the header with overall done/total when a denominator is
+// known.
+func (m *model) headerRow() string {
+	if m.total > 0 {
+		return styleHeader.Render(fmt.Sprintf("%s  %d/%d", m.header, m.completed, m.total))
+	}
+	return styleHeader.Render(m.header)
+}
+
+// historyRow renders a finished task's ✓/✗ row. With a hint and a width > 0 the
+// summary is the part cut to fit, so the hint at the end of the row stays
+// readable; a row whose label and hint alone overflow is left to fitWidth.
+func historyRow(h historyEntry, width int) string {
+	glyph, gs := glyphOK, styleOK
+	if !h.ok {
+		glyph, gs = glyphFail, styleFail
+	}
+	head := glyph + " " + h.label
+	body := ""
+	if h.summary != "" {
+		body = " — " + h.summary
+	}
+	tail := ""
+	if h.hint != "" {
+		tail = " " + h.hint
+	}
+	if room := width - 1 - ansi.StringWidth(head+tail); tail != "" && width > 0 && room > 1 {
+		body = ansi.Truncate(body, room, ellipsis)
+	}
+	return gs.Render(head + body + tail)
+}
+
+// taskBlocks renders the active task blocks. Each task is its own region: a row
+// carrying the spinner glyph + label (+ optional [stage] and percentage), then
+// its bounded tail indented beneath it, so two tasks never share a row.
+func (m *model) taskBlocks() []taskBlock {
+	blocks := make([]taskBlock, 0, len(m.tasks))
 	spin := m.spinner.View()
 	for _, t := range m.tasks {
-		b.WriteByte('\n')
+		var b strings.Builder
 		b.WriteString(spin)
 		b.WriteByte(' ')
 		b.WriteString(t.label)
@@ -338,33 +474,152 @@ func (m *model) View() string {
 		if t.hasFrac {
 			fmt.Fprintf(&b, "  %d%%", int(t.frac*100+0.5))
 		}
+		blk := taskBlock{row: splitRows(b.String())}
 		for _, line := range t.tailLines() {
-			b.WriteString("\n    ")
-			b.WriteString(styleTail.Render(line))
+			blk.tail = append(blk.tail, splitRows("    "+styleTail.Render(line))...)
+		}
+		blocks = append(blocks, blk)
+	}
+	return blocks
+}
+
+// frame is a rendered View split into sections of physical rows, so the height
+// fold can drop history, log and tail rows while the header, the task rows and
+// the trailer stay.
+type frame struct {
+	head    []string
+	history [][]string // the rows of each finished task, oldest first
+	tasks   []taskBlock
+	logs    [][]string // the rows of each routed log line, oldest first
+	trailer []string
+}
+
+// taskBlock is one active task: its own row (never dropped) and its tail rows,
+// which the height fold trims from the top.
+type taskBlock struct {
+	row  []string
+	tail []string
+}
+
+// fold returns the frame as at most budget rows. History entries go first,
+// oldest first, replaced by one line counting them; then routed log lines go
+// the same way; then tail rows go from the top of the longest tail, so every
+// task keeps its newest lines the longest. The header, the task rows and the
+// trailer are never dropped, so a frame made of those alone can still exceed
+// the budget. The model keeps every history entry and log line; only this
+// rendering drops them.
+func (f frame) fold(budget int) []string {
+	n := len(f.head) + len(f.trailer) + entryRows(f.history) + entryRows(f.logs)
+	for _, t := range f.tasks {
+		n += len(t.row) + len(t.tail)
+	}
+
+	history, n := dropOldest(f.history, n, budget)
+	logs, n := dropOldest(f.logs, n, budget)
+	tails := trimTails(f.tasks, n, budget)
+
+	rows := append(make([]string, 0, n), f.head...)
+	rows = appendFolded(rows, f.history, history, "earlier package(s) finished")
+	for i, t := range f.tasks {
+		rows = append(rows, t.row...)
+		rows = append(rows, t.tail[tails[i]:]...)
+	}
+	rows = appendFolded(rows, f.logs, logs, "earlier log line(s)")
+	return append(rows, f.trailer...)
+}
+
+// entryRows counts the physical rows of entries.
+func entryRows(entries [][]string) int {
+	n := 0
+	for _, e := range entries {
+		n += len(e)
+	}
+	return n
+}
+
+// dropOldest drops entries, oldest first, while a frame of n rows exceeds
+// budget, counting the one fold line that takes their place. It returns how
+// many entries went and the frame's new row count.
+func dropOldest(entries [][]string, n, budget int) (dropped, rows int) {
+	for n > budget && dropped < len(entries) {
+		if dropped == 0 {
+			n++ // the fold line takes the place of the dropped entries
+		}
+		n -= len(entries[dropped])
+		dropped++
+	}
+	return dropped, n
+}
+
+// trimTails returns how many tail rows to take from the top of each task's tail
+// so a frame of n rows fits budget, always trimming the longest tail left.
+func trimTails(tasks []taskBlock, n, budget int) []int {
+	trimmed := make([]int, len(tasks))
+	for n > budget {
+		i := longestTail(tasks, trimmed)
+		if i < 0 {
+			break
+		}
+		trimmed[i]++
+		n--
+	}
+	return trimmed
+}
+
+// appendFolded appends the entries kept after the dropped oldest ones, behind
+// one `… N <what>` line when any entry was dropped.
+func appendFolded(rows []string, entries [][]string, dropped int, what string) []string {
+	if dropped > 0 {
+		rows = append(rows, styleTail.Render(fmt.Sprintf("%s %d %s", ellipsis, dropped, what)))
+	}
+	for _, e := range entries[dropped:] {
+		rows = append(rows, e...)
+	}
+	return rows
+}
+
+// longestTail returns the index of the task with the most tail rows left after
+// trimmed[i] rows were taken from task i, or -1 when no tail row is left. Ties
+// go to the earliest task.
+func longestTail(tasks []taskBlock, trimmed []int) int {
+	best, most := -1, 0
+	for i, t := range tasks {
+		if left := len(t.tail) - trimmed[i]; left > most {
+			best, most = i, left
 		}
 	}
+	return best
+}
 
-	// Log scrollback, if any stray writes were routed here.
-	for _, l := range m.logs {
-		b.WriteByte('\n')
-		b.WriteString(l)
+// splitRows splits rows on embedded newlines into the physical rows the
+// terminal draws, so the height fold counts each of them.
+func splitRows(rows ...string) []string {
+	out := make([]string, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, strings.Split(row, "\n")...)
 	}
+	return out
+}
 
-	// Final batch summary line when the run is closed.
-	if m.batchDone && m.batchSummary != "" {
-		b.WriteByte('\n')
-		b.WriteString(styleSummary.Render(m.batchSummary))
+// fitRows joins physical rows into the frame, cutting each one with fitWidth.
+func (m *model) fitRows(rows []string) string {
+	for i, row := range rows {
+		rows[i] = fitWidth(row, m.width)
 	}
+	return strings.Join(rows, "\n")
+}
 
-	// Pending in-UI confirmation: render the prompt with a [y/n] hint
-	// so the decision is made inside the frame instead of reading os.Stdin behind
-	// the program. The line is removed once answered (answerConfirm clears it).
-	if m.confirmPending {
-		b.WriteByte('\n')
-		b.WriteString(styleSummary.Render(m.confirmPrompt + " [y/n]"))
+// fitWidth cuts line to at most width-1 display cells, ending a cut line with
+// the ellipsis. Width is measured in terminal cells, not bytes or runes: escape
+// sequences count as zero cells and wide runes as two, and the escape sequences
+// past the cut are kept so styling is still closed. The last column stays free
+// so a full row never triggers the terminal's auto-wrap.
+func fitWidth(line string, width int) string {
+	limit := width - 1
+	if limit < 1 {
+		return line
 	}
-
-	return b.String()
+	return ansi.Truncate(line, limit, ellipsis)
 }
 
 // formatLog renders a single scrollback line; an empty level degrades to the

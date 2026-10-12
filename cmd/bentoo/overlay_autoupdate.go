@@ -466,47 +466,58 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // Plain branch (non-TTY / opt-out): a rate-limited plainReporter streams the tail
 // to stderr with NO ANSI; finish closes the batch.
 //
-// TUI branch: a Bubble Tea Program is started and bound to ctx so Ctrl-C invokes
-// cancel — cancelling the apply context, which kills the in-flight child
-// (Apply runs under it) and triggers the existing orphan rollback. The extra
+// TUI branch: a Bubble Tea Program starts with ctx and cancel. Ctrl-C invokes
+// cancel, killing the in-flight child (the orphan rollback follows); a
+// cancelled ctx releases the live region as a normal end does. The extra
 // options also route the in-UI y/n confirm and release the terminal for the
 // compile step's sudo/doas prompt while teeing the child's output to a capture
-// buffer the failure path still logs. finish stops the program and waits for
-// it to exit, so the terminal is restored before the summary is printed.
+// buffer the failure path still logs. finish stops the program, waits for it
+// to exit, prints the history and releases the run's held logger.
 //
 // finish is idempotent (sync.Once): the caller defers it, so every early return
 // closes the batch and restores the terminal, and also calls it before the
-// summary, which must print after the TUI is gone. It writes no state, so its
-// order relative to the overlay lock's release does not matter.
+// summary, which must print after the TUI is gone. Its only file is the log
+// file, never the overlay, so its order against the lock's release is free.
 func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) ([]autoupdate.ApplierOption, func()) {
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
 		r.BatchStart(total)
-		return []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, sync.OnceFunc(func() { r.BatchDone("") })
+		return []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r), autoupdate.WithApplierQuietGateOutput()}, sync.OnceFunc(func() { r.BatchDone("") })
 	}
 
+	releaseLog := ar.holdLogUnderRegion()
 	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 	prog.Start()
 	r.BatchStart(total)
 	extra := []autoupdate.ApplierOption{
 		autoupdate.WithApplierReporter(r),
+		// A failure that left a repair bundle names --repair on its row.
+		autoupdate.WithApplierOutcomeHint(applyRepairHint),
 		// In-UI y/n confirmation rendered by the model instead of reading stdin
 		// behind the program.
 		autoupdate.WithConfirmFunc(prog.Confirm),
-		// Hand the real terminal to the compile child so a sudo/doas password
-		// prompt is visible, while teeing its stdout+stderr to a capture
-		// buffer the failure path still saves (the applier's Output: %s contract).
+		// Hand the real terminal to the compile child (nil stdin) so a sudo/doas
+		// password prompt is visible, while teeing its stdout+stderr to a
+		// capture buffer the failure path still saves (the applier's Output: %s
+		// contract). A child with its own stdin never gets the terminal.
 		autoupdate.WithApplierRunAttached(func(cmd *exec.Cmd) ([]byte, error) {
 			var buf bytes.Buffer
+			// Only a Stdin the caller left nil gets the terminal. The privileged
+			// compile leaves it nil so sudo/doas can prompt. A child that set its
+			// own (a build gate's `ebuild`, in its own process group, where
+			// reading the terminal stops it on SIGTTIN) is run captured while the
+			// live region keeps drawing; its output written to the terminal
+			// would tear the frame. The applier already routes such children to
+			// the task tail, so this branch is the backstop, not the route.
+			if cmd.Stdin != nil {
+				cmd.Stdout = &buf
+				cmd.Stderr = &buf
+				err := cmd.Run()
+				return buf.Bytes(), err
+			}
 			cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 			cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
-			// Only a Stdin the caller left nil gets the terminal. The privileged
-			// compile leaves it nil so sudo/doas can prompt; the build gates'
-			// `ebuild` sets an empty one, because it runs in its own process
-			// group and reading the terminal from there stops it on SIGTTIN.
-			if cmd.Stdin == nil {
-				cmd.Stdin = os.Stdin
-			}
+			cmd.Stdin = os.Stdin
 			err := tui.RunAttached(prog, cmd)
 			return buf.Bytes(), err
 		}),
@@ -515,15 +526,54 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		r.BatchDone("")
 		prog.Stop()
 		// Wait for the program goroutine to exit so the terminal is restored
-		// before the summary prints. A context-cancel (Ctrl-C) outcome surfaces as
-		// tea.ErrProgramKilled here — the EXPECTED cancellation result, not a
-		// failure — so it is intentionally not escalated; the manual TTY
-		// gate covers a program that never started cleanly.
+		// before the summary prints. An interrupt releases the region like a
+		// normal end; only a program that did not exit within Wait's grace is
+		// killed, which surfaces as tea.ErrProgramKilled — expected, not a
+		// failure, so it is intentionally not escalated. Wait gives up on a
+		// program that survives the kill, so a stuck terminal cannot hold the
+		// exit; the manual TTY gate covers a program that never started cleanly.
 		if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
 			ar.log().Debug("apply: live TUI program exited with error", "err", err)
 		}
+		// The live region folded the history to the terminal height and left
+		// no history row on screen at exit, so the whole of it is printed here,
+		// once, before the summary.
+		if err := prog.PrintHistory(os.Stdout); err != nil {
+			ar.log().Debug("apply: could not print the run history", "err", err)
+		}
+		// The terminal is the run's again: the records kept while the region
+		// was up print below its history, before the summary.
+		releaseLog()
 	})
 	return extra, finish
+}
+
+// holdLogUnderRegion replaces the run's logger with one that keeps the
+// terminal copy of every record back (logging.Hold) while the log file still
+// gets it at once, and returns the func that puts the original logger back and
+// prints the kept records. A record written to the terminal under the live
+// frame moves the cursor behind the renderer's back, and its next redraw leaves
+// rows of the old frame on screen. The applier must be built after the hold so
+// that it takes the held logger, which writes straight through once it is
+// released.
+func (ar *autoupdateRun) holdLogUnderRegion() (release func()) {
+	orig := ar.lg
+	held, releaseHeld := logging.Hold(ar.log())
+	ar.lg = held
+	return func() {
+		ar.lg = orig
+		releaseHeld()
+	}
+}
+
+// applyRepairHint is the live ✗ row's pointer at --repair: the command that
+// resumes a failed apply from the repair bundle it left, or "" when it left
+// none (a success, or a failure that kept no staged tree).
+func applyRepairHint(result *autoupdate.ApplyResult) string {
+	if result == nil || result.Success || result.RepairBundle == "" {
+		return ""
+	}
+	return "(repair: bentoo overlay autoupdate --repair " + result.Package + ")"
 }
 
 // runAutoupdate is the RunE of `overlay autoupdate`: o holds the flags of the
@@ -1904,6 +1954,7 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		output.Error.Println("    Status:  Failed")
 		if result.Error != nil {
 			output.Error.Printf("    Error:   %v\n", result.Error)
+			displayChildRuns(result.Error)
 		}
 		if result.LogPath != "" {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)

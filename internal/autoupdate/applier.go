@@ -348,6 +348,9 @@ type Applier struct {
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
 	logsDir string
+	// spillSweep runs sweepChildRunSpills once per Applier, on its first Apply.
+	// It is a pointer so the copies withoutAgents makes share it.
+	spillSweep *sync.Once
 	// configDir is the bentoo autoupdate config directory — in production
 	// ~/.config/bentoo/autoupdate — and it is held for exactly one purpose: the
 	// cache.json in it is where a host-caused build failure records the
@@ -418,6 +421,10 @@ type Applier struct {
 	// so the silent, fully-buffered behaviour predating the TUI is preserved and
 	// every existing test stays byte-identical.
 	reporter tui.Reporter
+	// outcomeHint, when non-nil, names a next step for an apply's outcome; the
+	// reporter shows it beside the task's row (see tui.TaskDoneWithHint). Set
+	// via WithApplierOutcomeHint.
+	outcomeHint func(*ApplyResult) string
 	// runAttached executes the compile-test command and returns its combined
 	// output. The privileged child needs the REAL terminal for the sudo/doas
 	// password prompt, which rules out capturing its stdout/stderr through
@@ -428,6 +435,16 @@ type Applier struct {
 	// terminal for the prompt and tee the raw output to the TTY and a capture
 	// buffer. A nil override is normalized back to the CombinedOutput default.
 	runAttached func(cmd *exec.Cmd) ([]byte, error)
+	// runCaptured runs a build-gate child that brings its own stdin. Its
+	// Stdout and Stderr are already bound to the package's StreamCapture (see
+	// recordingRunner), so the default is cmd.Run; tests replace it via
+	// WithApplierRunCaptured to script the child. A nil value means cmd.Run.
+	runCaptured func(cmd *exec.Cmd) error
+	// quietGateOutput keeps a build-gate child's output out of the reporter:
+	// it is still captured whole for the verdict and the failure, but no line
+	// reaches the task tail. The plain backend sets it, so a non-terminal run
+	// stays as terse as it was before the gates stopped taking the terminal.
+	quietGateOutput bool
 	// distdir, configuredDistdir and distfilesCache are carried, unread, from
 	// the CLI to the sweeper this applier builds for the Manifest step: the
 	// --distdir flag, autoupdate.distdir, and the read-only cache named by
@@ -698,6 +715,15 @@ func WithApplierReporter(r tui.Reporter) ApplierOption {
 	}
 }
 
+// WithApplierOutcomeHint makes Apply ask hint for a next step to show beside
+// the package's outcome in the progress reporter, e.g. the command that repairs
+// a failure. The applier only relays the text; an empty answer shows nothing.
+func WithApplierOutcomeHint(hint func(*ApplyResult) string) ApplierOption {
+	return func(a *Applier) {
+		a.outcomeHint = hint
+	}
+}
+
 // WithApplierRunAttached overrides how the compile test executes. The default
 // (cmd.CombinedOutput) buffers the child's output, which is byte-identical to the
 // pre-TUI behaviour but swallows the sudo/doas password prompt. The apply
@@ -711,6 +737,25 @@ func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOptio
 			fn = func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() }
 		}
 		a.runAttached = fn
+	}
+}
+
+// WithApplierRunCaptured overrides how a build-gate child that set its own
+// stdin is run. Such a child never gets the terminal: its stdout and stderr are
+// bound to the package's StreamCapture before fn is called, so fn only runs the
+// command (the default is cmd.Run) and whatever it writes to cmd.Stdout reaches
+// the task tail and the returned output. A nil fn is normalized back to cmd.Run.
+func WithApplierRunCaptured(fn func(cmd *exec.Cmd) error) ApplierOption {
+	return func(a *Applier) {
+		a.runCaptured = fn
+	}
+}
+
+// WithApplierQuietGateOutput keeps build-gate children's output out of the
+// reporter's task tail. The output is still captured whole and returned.
+func WithApplierQuietGateOutput() ApplierOption {
+	return func(a *Applier) {
+		a.quietGateOutput = true
 	}
 }
 
@@ -845,6 +890,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	logsDir := filepath.Join(configDir, "logs")
 
 	applier := &Applier{
+		spillSweep:  &sync.Once{},
 		overlayPath: overlayPath,
 		logsDir:     logsDir,
 		configDir:   configDir,
@@ -921,6 +967,9 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	result = &ApplyResult{
 		Package: pkg,
 	}
+	if a.spillSweep != nil {
+		a.spillSweep.Do(a.sweepChildRunSpills)
+	}
 
 	// A context that is already done stops Apply before it reads the pending
 	// list or touches the overlay, so the pending entry stays and the deferred
@@ -942,7 +991,11 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 			a.reporter.TaskDone(pkg, false, "", "")
 			return
 		}
-		a.reporter.TaskDone(pkg, result.Success, applySummary(result), "")
+		hint := ""
+		if a.outcomeHint != nil {
+			hint = a.outcomeHint(result)
+		}
+		tui.TaskDoneWithHint(a.reporter, pkg, result.Success, applySummary(result), hint, "")
 	}()
 
 	run := &applyRun{a: a, pkg: pkg, compile: compile, result: result}
@@ -1744,10 +1797,11 @@ func (a *Applier) writeRepairBundle(pkg string, result *ApplyResult) {
 		CurrentVersion: result.OldVersion,
 		Candidate:      result.NewVersion,
 		Stage:          result.FailedStage,
-		Failure:        repair.Redact(result.Error.Error(), secrets.Resolved()),
-		RefusedTools:   result.RefusedTools,
-		StagedRoot:     result.StagedPath,
-		EbuildPath:     result.StagedEbuild,
+		// With each child run's output: the error text itself is one line.
+		Failure:      repair.Redact(childRunDetail(result.Error), secrets.Resolved()),
+		RefusedTools: result.RefusedTools,
+		StagedRoot:   result.StagedPath,
+		EbuildPath:   result.StagedEbuild,
 		// The zero config of a package with no entry yields no URL.
 		UpstreamURLs: a.configs[pkg].UpstreamURLs(),
 		Created:      time.Now().UTC(),
@@ -2075,6 +2129,7 @@ func (a *Applier) sweeper() *sweeper {
 		// sweeper.
 		withSweeperDistdir(a.distdir, a.configuredDistdir),
 		withSweeperDistfilesCache(a.distfilesCache),
+		withSweeperChildLogsDir(a.logsDir),
 		withSweeperLogger(a.logger()),
 	)
 }
@@ -2493,18 +2548,24 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	distdir = fixDistdir
 
 	a.logger().Info("manifest failed; invoking LLM fixer to repair the ebuild", "package", pkg, "version", version)
-	a.substage(result, pkg, "llm-fix")
+	a.substage(result, pkg, fixer.StageManifestFix)
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
+	progress, progressDone := a.agentProgress(pkg)
 	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
-		Package:       pkg,
-		Version:       version,
-		PkgDir:        pkgDir,
-		EbuildPath:    cand.ebuildPath,
-		ManifestError: firstErr.Error(),
+		Package:    pkg,
+		Version:    version,
+		PkgDir:     pkgDir,
+		EbuildPath: cand.ebuildPath,
+		// The failure WITH pkgdev's output: the agent reads the 404 in it, and
+		// its fetch allowlist is taken from the URLs it names.
+		ManifestError: childRunDetail(firstErr),
 		DistDir:       fixDistdir,
 		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
+		Progress:      progress,
+		LogPath:       a.agentLogPath(pkg, version, fixer.StageManifestFix),
 	})
+	progressDone()
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
@@ -2531,7 +2592,11 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
+		// Both runs stay in the chain, each with its own output: a renderer
+		// walking Unwrap() []error reaches the first run and the re-check apart.
+		// Two %w rather than errors.Join, whose newline separator would make the
+		// error two lines.
+		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %w)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools))
 	}
 
 	result.Fixed = true
@@ -2844,6 +2909,9 @@ const compileGatePhase = validate.GateCompile
 // buildAttempt is one invocation of the build child: what it printed, where its
 // log was retained on failure, and how it failed. A nil err is a passing build.
 type buildAttempt struct {
+	// pkg is the package the attempt builds: the task id a build-gate child's
+	// streamed output is reported under. Set by the caller before the run.
+	pkg string
 	// transcript is the child's captured output — the evidence the attribution
 	// gate reasons from and the log the fixer is given.
 	transcript string
@@ -3158,9 +3226,10 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", compileGatePhase, pkg, version)
 	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
 		"gate", compileGatePhase, "package", pkg, "version", version)
-	a.substage(result, pkg, "llm-build-fix")
+	a.substage(result, pkg, fixer.StageBuildFix)
 	a.reporter.Log("info", fixLine)
 
+	progress, progressDone := a.agentProgress(pkg)
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
 		Package:    pkg,
 		Version:    version,
@@ -3170,8 +3239,11 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		BuildLog:   first.transcript,
 		// One attempt per apply; FixBuild owns the bound and this states
 		// which try it is rather than counting tries here.
-		Attempt: 1,
+		Attempt:  1,
+		Progress: progress,
+		LogPath:  a.agentLogPath(pkg, version, fixer.StageBuildFix),
 	})
+	progressDone()
 	switch {
 	case errors.Is(fixErr, fixer.ErrBuildFixAttemptsExhausted):
 		// "We stopped on purpose" is different news from "the agent failed", and

@@ -14,9 +14,7 @@ package fixer
 // apply as recovered if THAT succeeds (see runManifestWithFix in applier.go).
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -116,6 +114,17 @@ type ManifestFixRequest struct {
 	// caller holds a config for it. Their hosts, with the hosts of the http(s)
 	// URLs in ManifestError, are the only ones the agent's WebFetch reaches.
 	UpstreamURLs []string
+	// Progress, when set, receives one line per tool call the agent makes and
+	// per tool it was refused, as `llm-fix: <tool> <target>`. It is called
+	// from a goroutine of its own and never holds up the agent: a line it is
+	// too slow to take is dropped, and every line it takes is taken before the
+	// call returns. A callback still blocked progressDrainGrace after the
+	// agent's output ended is abandoned and gets no further line; the one call
+	// already running then may finish after the call returns.
+	Progress func(string)
+	// LogPath, when set, is the file the agent's whole event stream is written
+	// to, 0600, with every known secret masked.
+	LogPath string
 }
 
 // ManifestFixResult reports the outcome of an agentic fix attempt. Summary is a
@@ -355,9 +364,9 @@ func (f *ClaudeCodeFixer) buildFixArgs(instruction string, req ManifestFixReques
 	}
 	args := []string{
 		"-p", instruction,
-		"--output-format", "json",
-		"--add-dir", req.PkgDir,
 	}
+	args = append(args, streamOutputArgs...)
+	args = append(args, "--add-dir", req.PkgDir)
 	args = append(args, perms...)
 	args = append(args,
 		"--append-system-prompt", bentooEbuildGuidance,
@@ -405,8 +414,12 @@ func truncateMiddle(s string, budget int, label string) string {
 	head := budget / 2
 	tail := budget - head
 	elided := len(s) - head - tail
-	marker := fmt.Sprintf("\n...[%s truncated: %d bytes elided]...\n", label, elided)
-	return strings.ToValidUTF8(s[:head], "") + marker + strings.ToValidUTF8(s[len(s)-tail:], "")
+	return strings.ToValidUTF8(s[:head], "") + elisionMarker(label, elided) + strings.ToValidUTF8(s[len(s)-tail:], "")
+}
+
+// elisionMarker is the line truncateMiddle puts where it elided n bytes.
+func elisionMarker(label string, n int) string {
+	return fmt.Sprintf("\n...[%s truncated: %d bytes elided]...\n", label, n)
 }
 
 // truncateManifestError bounds s to roughly manifestErrorBudget bytes, preserving
@@ -495,11 +508,11 @@ func exitCodeString(runErr error) string {
 //     contradiction ("exited N but reported success"), never an empty tail;
 //   - a generic non-zero exit, with the parsed subtype when available;
 //   - an explicit error envelope (is_error) with its subtype;
-//   - a parse failure (non-JSON stdout).
+//   - a parse failure (stdout without a result envelope).
 //
 // It then appends, each bounded by truncateDiagnostic, the envelope errors, the
-// result, the stderr and, on a parse failure, the raw stdout. The error wraps
-// ErrLLMRequestFailed; the API key is never an input, so it never appears.
+// result, the stderr and, on a parse failure, the stdout as the caller kept it
+// (masked, for a stream agent). It wraps ErrLLMRequestFailed; no key is input.
 func formatFixerError(ctxErr, runErr error, env llm.ClaudeCodeEnvelope, jsonErr error, stdout, stderr string) error {
 	var sb strings.Builder
 
@@ -601,7 +614,8 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// pipe open, which would block cmd.Wait() far past the timeout. WaitDelay makes
 	// the runtime force-close the inherited pipes (and kill the process if still
 	// running) a bounded time after the context is cancelled or the process exits,
-	// so FixManifest always returns within timeout + manifestFixWaitDelay.
+	// so FixManifest always returns within timeout + manifestFixWaitDelay +
+	// progressDrainGrace: the progress callback never blocks the output copy.
 	cmd.WaitDelay = manifestFixWaitDelay
 
 	// The child environment is the agent allow-list (childEnv), plus what pkgdev
@@ -611,28 +625,28 @@ func (f *ClaudeCodeFixer) FixManifest(ctx context.Context, req ManifestFixReques
 	// CLI uses its logged-in session.
 	cmd.Env = llm.ChildEnv(f.bareMode, f.apiKeyEnv, f.apiKey, llm.AgentEnvExtra{Portage: true, DistDir: req.DistDir})
 
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-
-	runErr := cmd.Run()
-
-	var env llm.ClaudeCodeEnvelope
-	jsonErr := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &env)
-	stderrStr := strings.TrimSpace(stderr.String())
+	run := runAgentStream(cmd, agentStreamSpec{
+		stage:    StageManifestFix,
+		progress: req.Progress,
+		logPath:  req.LogPath,
+		apiKey:   f.apiKey,
+		pkg:      req.Package,
+		log:      f.logger(),
+	})
+	env := run.env
 
 	// Every terminal failure funnels through formatFixerError so each carries the
 	// full, bounded set of signals (exit code or cancellation cause, subtype,
-	// result, stderr, and raw stdout on a parse failure). runCtx.Err() captures both a timeout (DeadlineExceeded)
+	// result, stderr, and the stream on a parse failure). runCtx.Err() captures both a timeout (DeadlineExceeded)
 	// and a parent cancellation (Canceled), since runCtx derives from ctx.
-	if runErr != nil || jsonErr != nil || env.IsError {
+	if run.runErr != nil || run.parseErr != nil || env.IsError {
 		// The model record travels on the FAILURE path too: it records what
 		// was invoked, and an invocation that failed still spent a model call and
 		// may have left a half-finished edit behind.
 		return ManifestFixResult{
 			Model:        f.model,
 			ModelIsAlias: isModelAlias(f.model),
-		}, formatFixerError(runCtx.Err(), runErr, env, jsonErr, stdout.String(), stderrStr)
+		}, formatFixerError(runCtx.Err(), run.runErr, env, run.parseErr, run.stdout, run.stderr)
 	}
 
 	return ManifestFixResult{

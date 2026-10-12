@@ -126,21 +126,39 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	procgroup.Group(cmd)
 
 	// Streamed live as TaskLine events under the package's own task id, and
-	// captured into the error, so a red gate says what pkgdev said. One
-	// StreamCapture for both streams gives the child a single pipe, which keeps
-	// the captured bytes identical to CombinedOutput's.
+	// captured into the error's *ChildRunError, so a red gate says what pkgdev
+	// said. The capture keeps the tail; the spill keeps everything for the
+	// run's log file and is removed on every return. One writer for both
+	// streams gives the child a single pipe, which keeps the bytes in the
+	// order CombinedOutput would have them.
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
-	cmd.Stdout = sc
-	cmd.Stderr = sc
+	spill := s.openChildRunSpill()
+	defer func() {
+		if err := spill.discard(); err != nil {
+			s.log.Warn("could not remove the child run's spill file; it holds unmasked output",
+				"package", pkg, "error", err)
+		}
+	}()
+	out := spill.tee(sc)
+	cmd.Stdout = out
+	cmd.Stderr = out
 	// A lingering helper after a 0 exit is a success, not exec.ErrWaitDelay.
 	runErr := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
 	if runErr != nil {
 		// ErrManifestFailed first, because the promotion decision classifies on
 		// that sentinel; the package and version next, because inside a sweep one
-		// line of output has to say which of forty packages it belongs to.
-		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w\nOutput: %s",
-			ErrManifestFailed, pkg, version, stagedPkgDir, runErr, sc.Captured())
+		// line of output has to say which of forty packages it belongs to. The
+		// output travels in the *ChildRunError, not in the text: the text stays
+		// one line, and the run's whole output is in its log file. A supplied
+		// distdir is the post-fix re-check, so that is the run it names.
+		label := childRunFirstManifest
+		if supplied {
+			label = childRunManifestRecheck
+		}
+		run := s.newChildRunError(label, pkg, version, sc.Captured(), spill, runErr)
+		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w",
+			ErrManifestFailed, pkg, version, stagedPkgDir, run)
 	}
 	return distdir, nil
 }

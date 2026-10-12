@@ -119,7 +119,7 @@ func TestBumpReviewer_RisksAreNeverEmittedAtSeverityError(t *testing.T) {
 	stubLookPathFound(t)
 	// The agent's own words, at maximum alarm — including the literal word
 	// "error", which must not become a SEVERITY.
-	envelope := `{"result":"{\"risks\":[` +
+	envelope := `{"type":"result","result":"{\"risks\":[` +
 		`{\"severity\":\"error\",\"detail\":\"upstream removed the plugin registration API; this bump WILL fail to build\"},` +
 		`{\"severity\":\"critical\",\"detail\":\"meson.build dropped two options the ebuild passes\"}` +
 		`],\"proposed_depth\":\"compile\",\"reason\":\"the build files moved substantially\"}"}`
@@ -174,7 +174,7 @@ func TestBumpReviewer_ReadsThePreparedDiffAndReachesNoNetwork(t *testing.T) {
 	stubLookPathFound(t)
 	spy := &reviewSeam{}
 	reviewer, err := NewClaudeCodeBumpReviewer(llm.LLMConfig{Provider: "claude-code"},
-		WithBumpReviewerExecCommand(newReviewSeam(spy, `{"result":"{\"risks\":[]}"}`)))
+		WithBumpReviewerExecCommand(newReviewSeam(spy, `{"type":"result","result":"{\"risks\":[]}"}`)))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestBumpReviewer_ChildEnvironmentFollowsTheStrippingDiscipline(t *testing.T
 	spy := &reviewSeam{}
 	reviewer, err := NewClaudeCodeBumpReviewer(
 		llm.LLMConfig{Provider: "claude-code", Bare: "false"},
-		WithBumpReviewerExecCommand(newReviewSeam(spy, `{"result":"{\"risks\":[]}"}`)))
+		WithBumpReviewerExecCommand(newReviewSeam(spy, `{"type":"result","result":"{\"risks\":[]}"}`)))
 	if err != nil {
 		t.Fatalf("constructing the reviewer: %v", err)
 	}

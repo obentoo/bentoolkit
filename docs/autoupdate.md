@@ -581,6 +581,99 @@ when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
 set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
 check off.
 
+#### What `--apply` prints
+
+On a terminal, `--apply` draws a live region;
+[Live output](behaviour.md#live-output) says when it does and how to turn it
+off. The region keeps to the terminal:
+
+- Every row is cut to the terminal width minus one column and ends in `…` when
+  cut. The region is redrawn when the terminal is resized, so it never wraps.
+- When the region would be taller than the terminal minus one row, the oldest
+  finished packages fold into one line, `… N earlier package(s) finished`;
+  if that is not enough, the running packages' output tails lose their oldest
+  lines. The header and the row of each running package are never dropped.
+  Log lines bentoo routes into the region fold the same way, oldest first,
+  into `… N earlier log line(s)`, after the finished packages and before any
+  tail is cut; the run summary and a confirmation prompt are never dropped.
+- A failed package's `✗` row shows only the first line of its error. When the
+  failure left a repair bundle (see
+  [Repairing a failed bump](#repairing-a-failed-bump)), the row ends with
+  `(repair: bentoo overlay autoupdate --repair <cat/pkg>)`;
+  on a narrow terminal the error text is what gets cut, so the hint stays
+  readable.
+- A build gate's `ebuild` streams its output into its package's tail instead
+  of writing to the terminal. Only the compile step's `sudo`/`doas` password
+  prompt still gets the terminal.
+
+When the run ends, the region is released and every finished package's
+`✓`/`✗` row is printed once below it, oldest first, neither folded nor cut.
+A `Ctrl-C` or an interrupted run releases the region the same way, so its rows
+are printed once too; the package still running at that moment is reported in
+the Apply Result.
+
+Without the live region (plain mode), each package event is a
+`[<cat/pkg>] …` line on stderr, as before. A build gate's output is not
+streamed there; it is captured for the build verdict and the failure.
+
+##### The output of a failed manifest run
+
+When the staged Manifest step failed, the Apply Result prints the error on
+one line, then the output of each failed `pkgdev manifest` run once, under its
+label: `first manifest run`, then `re-check after LLM fix` when the manifest
+fixer ran and the check after it failed too.
+
+```text
+    first manifest run output:
+      … 212 earlier line(s) omitted
+      <the last 40 lines>
+      Full log: ~/.config/bentoo/autoupdate/logs/dev-go/govulncheck/1.9.0/first-manifest-run.log
+```
+
+At most the last 40 lines are shown. Blank lines and `wget` dot-progress rows
+are dropped before counting, and the `… N earlier line(s) omitted` line
+appears only when lines were cut. The run's log, with every resolved secret
+masked, is written in mode 0600 to
+`<logs>/<category>/<package>/<version>/first-manifest-run.log` (or
+`re-check-after-llm-fix.log`), where `<logs>` is the `logs` directory of the
+autoupdate state (`$XDG_CONFIG_HOME/bentoo/autoupdate/logs`, else
+`~/.config/bentoo/autoupdate/logs`). A later run of the same version replaces
+it. No flag or config key moves it. While the run is going, its output is kept
+in a hidden `.childrun-spill-*.log` file in `<logs>`, removed when the run
+ends; a spill older than one hour, left by a run that was killed, is removed
+when the next `--apply` starts.
+
+The Manifest step of an apply that does not stage its tree still prints the
+run's output inside the error, with no log file.
+
+##### What the LLM agents are doing
+
+The manifest fixer (`llm-fix`), the build fixer (`llm-build-fix`) and the bump
+reviewer (`review`) run `claude` with `--output-format stream-json --verbose`
+and report as they go. Each tool call adds a line to the package's tail:
+
+```text
+llm-fix: Read <staged package dir>/govulncheck-1.9.0.ebuild
+llm-fix: Bash pkgdev
+llm-fix: WebFetch go.dev
+llm-fix: WebFetch(proxy.golang.org) denied
+```
+
+The target is the file path, else the first word of the command (leading
+`NAME=value` assignments are skipped), else the URL's host; it is masked for
+known secrets and capped at 160 characters. Each tool the agent was refused
+adds a `<stage>: <tool> denied` line when its run ends. The model's text is
+never shown. The lines are best-effort: a burst faster than the region takes
+them can lose some, and bentoo then logs one warning with the package, the
+stage and how many were dropped. No line is added once the agent's run has
+returned. In plain mode they are `[<cat/pkg>] …` lines on stderr.
+
+The whole event stream is kept in
+`<logs>/<category>/<package>/<version>/<stage>-agent.jsonl` (mode 0600), with
+every known secret masked, JSON-escaped forms included. bentoo never writes it
+through a symlink. The registry fixer still uses plain JSON output and reports
+no lines.
+
 #### Repairing a failed bump
 
 When `--apply` fails a package after staging it, the staged tree is kept and a

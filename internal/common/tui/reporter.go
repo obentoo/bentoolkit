@@ -30,6 +30,25 @@ type Reporter interface {
 	BatchDone(summary string)
 }
 
+// HintReporter is a Reporter that can show a short next step beside a finished
+// task's outcome. It is optional: the plain and no-op backends do not implement
+// it, so a hint reaches only the live region.
+type HintReporter interface {
+	Reporter
+	// TaskDoneHint is TaskDone with hint shown at the end of the task's row.
+	TaskDoneHint(id string, ok bool, summary, hint, capturedOutput string)
+}
+
+// TaskDoneWithHint closes a task on r, showing hint beside its outcome when r
+// is a HintReporter and the hint is not empty; otherwise it is r.TaskDone.
+func TaskDoneWithHint(r Reporter, id string, ok bool, summary, hint, capturedOutput string) {
+	if hr, can := r.(HintReporter); can && hint != "" {
+		hr.TaskDoneHint(id, ok, summary, hint, capturedOutput)
+		return
+	}
+	r.TaskDone(id, ok, summary, capturedOutput)
+}
+
 // noopReporter discards every event. It is the default so command code that
 // supplies no reporter behaves exactly as before this package existed.
 type noopReporter struct{}

@@ -80,6 +80,10 @@ type sweeper struct {
 	// /var/cache/distfiles default, so a sweeper built inside a test reads no
 	// directory that test did not name.
 	distfilesCache string
+	// childLogsDir is where a failed staged manifest run keeps its whole output
+	// (see newChildRunError). Empty, the default, keeps none, so a sweeper built
+	// inside a test writes no file that test did not ask for.
+	childLogsDir string
 	// log receives the sweeper's diagnostics. newSweeper makes it discarding
 	// when withSweeperLogger is absent.
 	log *slog.Logger
@@ -123,6 +127,12 @@ func withSweeperDistdir(explicit, configured string) sweeperOption {
 // /var/cache/distfiles are the same directory, so there is nothing to link.
 func withSweeperDistfilesCache(dir string) sweeperOption {
 	return func(s *sweeper) { s.distfilesCache = dir }
+}
+
+// withSweeperChildLogsDir supplies the directory failed child runs keep their
+// output in; empty keeps none.
+func withSweeperChildLogsDir(dir string) sweeperOption {
+	return func(s *sweeper) { s.childLogsDir = dir }
 }
 
 // newSweeper builds a sweeper and normalises every injectable field.

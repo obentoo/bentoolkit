@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
@@ -216,7 +218,17 @@ func chooseManifestReporter(log *slog.Logger, d *deps, cfg *config.Config, dryRu
 	if manifestUsesTUI(log, cfg, d.uiIsTerminal) && liveRegionStdinOK(log, d) {
 		prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
 		prog.Start()
-		return r, func() { prog.Stop(); _ = prog.Wait() }
+		return r, func() {
+			prog.Stop()
+			if err := prog.Wait(); err != nil && !errors.Is(err, tea.ErrProgramKilled) {
+				logging.OrDiscard(log).Debug("manifest: live TUI program exited with error", "err", err)
+			}
+			// The released region leaves no history row on screen, so the
+			// whole history is printed here once.
+			if err := prog.PrintHistory(os.Stdout); err != nil {
+				logging.OrDiscard(log).Debug("manifest: could not print the run history", "err", err)
+			}
+		}
 	}
 	return tui.NewPlainReporter(os.Stderr, time.Second), func() {}
 }
