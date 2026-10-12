@@ -1496,6 +1496,12 @@ func findDistfile(pkgDir, distdir, version string) (string, error) {
 	return selectDistfile(manifestDistNames(pkgDir), manifestSource(pkgDir), distdir, version)
 }
 
+// FindDistfile returns the one archive of version listed in pkgDir's Manifest
+// and present in distdir, by the same rules the options gate applies.
+func FindDistfile(pkgDir, distdir, version string) (string, error) {
+	return findDistfile(pkgDir, distdir, version)
+}
+
 // selectDistfile is the frozen selection core: given the candidate names, their
 // source, the directory to search and the version, it returns the one archive
 // of this ebuild version — or a refusal naming what it declined, where it
@@ -1562,13 +1568,12 @@ func selectDistfile(names []string, source distNameSource, distdir, version stri
 			"reading it would answer about a different release%s", distdir, only, version, source.attributed)
 	}
 
-	// Exact rather than carriesVersion: with several archives present a revision
-	// suffix can be the ONLY thing telling two names apart.
-	var matching []string
-	for _, name := range present {
-		if strings.Contains(name, version) {
-			matching = append(matching, name)
-		}
+	// The full version first: with several archives present a revision suffix
+	// can be the ONLY thing telling two names apart. Only when no name carries
+	// it does the revision-stripped version decide.
+	matching := namesMatchingVersion(present, version)
+	if len(matching) == 0 {
+		matching = namesMatchingVersion(present, revisionSuffix.ReplaceAllString(version, ""))
 	}
 	if len(matching) == 1 {
 		return filepath.Join(distdir, matching[0]), nil
@@ -1601,8 +1606,62 @@ var (
 // would make every revbumped ebuild in the overlay decline to validate. That is
 // a false SKIP, and a gate that skips silently is as useless as one that lies.
 func carriesVersion(name, version string) bool {
-	return strings.Contains(name, revisionSuffix.ReplaceAllString(version, ""))
+	return matchesVersionToken(name, revisionSuffix.ReplaceAllString(version, ""))
 }
+
+// namesMatchingVersion returns the names carrying version as a whole token.
+func namesMatchingVersion(names []string, version string) []string {
+	var matching []string
+	for _, name := range names {
+		if matchesVersionToken(name, version) {
+			matching = append(matching, name)
+		}
+	}
+	return matching
+}
+
+// matchesVersionToken reports whether name carries version as a whole version
+// token rather than inside a longer one: `m-1.0.1.tar.gz`, `m-11.0.tar.gz` and
+// `m-2.1.0.tar.gz` all contain "1.0", and none of them is version 1.0's
+// archive. The occurrence must not be preceded by a digit or a dot, nor
+// followed by a digit or by a dot or underscore that starts another number.
+func matchesVersionToken(name, version string) bool {
+	if version == "" {
+		return false
+	}
+	for from := 0; ; {
+		i := strings.Index(name[from:], version)
+		if i < 0 {
+			return false
+		}
+		start := from + i
+		end := start + len(version)
+		if versionTokenBoundary(name, start, end) {
+			return true
+		}
+		from = start + 1
+	}
+}
+
+func versionTokenBoundary(name string, start, end int) bool {
+	if start > 0 {
+		if c := name[start-1]; isDigit(c) || c == '.' {
+			return false
+		}
+	}
+	if end < len(name) {
+		c := name[end]
+		if isDigit(c) {
+			return false
+		}
+		if (c == '.' || c == '_') && end+1 < len(name) && isDigit(name[end+1]) {
+			return false
+		}
+	}
+	return true
+}
+
+func isDigit(c byte) bool { return c >= '0' && c <= '9' }
 
 // anyNameCarriesAVersion reports whether the candidate names distinguish
 // releases at all — whoever supplied them. When they do not, one present

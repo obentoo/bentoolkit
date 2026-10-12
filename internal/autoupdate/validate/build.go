@@ -416,6 +416,12 @@ func eachBuildGate(d Depth, visit func(gate string, phase buildPhase)) {
 	}
 }
 
+// AllowedBuildEnv is the allow-listed subset of parent a Portage child gets,
+// for callers outside this package that spawn `ebuild` themselves.
+func AllowedBuildEnv(parent []string) []string {
+	return allowedBuildEnv(parent)
+}
+
 // allowedBuildEnv is the environment the build child receives: the allow-listed
 // variables of the parent's, and nothing else.
 //

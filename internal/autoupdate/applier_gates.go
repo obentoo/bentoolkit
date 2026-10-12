@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
@@ -259,7 +260,8 @@ func stagedTreeNamesArchive(cand candidatePaths) bool {
 // The published Manifest is a legitimate source of NAMES, never of hashes: the
 // gate decides on the archive's CONTENTS, and selectDistfile still requires
 // exactly one present name carrying THIS version before it reads a byte. It is
-// the same record presentArchive and the manifest step's prefetch already use.
+// the same record the bump reviewer's archive search and the manifest step's
+// prefetch use.
 // A DIST line ("<name> <size> BLAKE2B … SHA512 …") handed over verbatim would
 // miss every os.Stat and report a silent SKIPPED, so the shared parser answers.
 //
@@ -374,7 +376,37 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	}
 
 	a.reporter.TaskStage(pkg, fixer.StageBumpReview)
-	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
+	if a.resolvedPackageType(pkg, oldVersion) == "bin" {
+		*gates = append(*gates, reviewSkipped("binary package: there are no upstream build declarations to review"))
+		return floor
+	}
+	newArchive, searched := a.candidateReviewArchive(ctx, cand, newVersion)
+	if newArchive == "" {
+		*gates = append(*gates, reviewSkipped(archiveNotFoundReason("candidate", pkg, newVersion, searched)))
+		return floor
+	}
+	// Checked before the previous side is searched or fetched: a project this
+	// reviewer cannot read is not worth a download.
+	system, err := validate.ArchiveBuildSystem(ctx, newArchive)
+	if err != nil {
+		*gates = append(*gates, reviewSkipped(fmt.Sprintf("the candidate archive of %s-%s could not be read: %v", pkg, newVersion, err)))
+		return floor
+	}
+	if system != "meson" {
+		*gates = append(*gates, reviewSkipped(notMesonReason(filepath.Base(newArchive), system)))
+		return floor
+	}
+	oldArchive, searched := a.previousReviewArchive(ctx, pkg, oldVersion)
+	if oldArchive == "" {
+		fetched, dir, err := a.fetchPreviousArchive(ctx, pkg, oldVersion)
+		defer removeStagedDistdir(a.logger(), dir)
+		if err != nil {
+			*gates = append(*gates, reviewSkipped(archiveNotFoundReason("previous", pkg, oldVersion, searched)+
+				fmt.Sprintf("; fetching it failed: %v", err)))
+			return floor
+		}
+		oldArchive = fetched
+	}
 	progress, progressDone := a.agentProgress(pkg)
 	report, err := withSlot(ctx, a.slots.llm, func() (fixer.BumpReviewReport, error) {
 		return a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
@@ -437,48 +469,150 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 	return validate.DepthDecision{Depth: depth, Reason: reason, SkippedByPolicy: floor.SkippedByPolicy && depth <= floor.Depth}
 }
 
-// reviewArchives names the two release archives the reviewer compares, when both
-// are already on disk. Either may come back empty, and empty is a legitimate
-// answer the reviewer renders as a skip that NAMES the archive it wanted — which
-// is more use than an anonymous failure.
-//
-// The two sides are read from different Manifests on purpose: the previous
-// version's from the PUBLISHED package directory, which is the only place that
-// still describes it, and the candidate's from the staged tree, which is the only
-// place that describes it yet.
-func (a *Applier) reviewArchives(ctx context.Context, cand candidatePaths, pkg, oldVersion, newVersion string) (oldArchive, newArchive string) {
-	distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir)
-	if !ok {
-		return "", ""
-	}
-
-	publishedDir := filepath.Dir(a.EbuildPath(pkg, oldVersion))
-	return presentArchive(distdir, filepath.Join(publishedDir, "Manifest"), oldVersion),
-		presentArchive(distdir, filepath.Join(cand.pkgDir, "Manifest"), newVersion)
+// archiveSearch records where one side's archive was looked for, and why the
+// last directory tried did not settle on one, so a skip can say both.
+type archiveSearch struct {
+	dirs    []string
+	lastErr error
 }
 
-// presentArchive returns the path of the distfile a Manifest names for exactly
-// this version and that distdir actually holds, or "" when there is no single
-// unambiguous answer.
-//
-// Ambiguity answers "" rather than guessing. Handing the reviewer the wrong
-// version's tarball would produce a confident opinion about a difference nobody
-// asked about, which is worse than no opinion at all.
-func presentArchive(distdir, manifestPath, version string) string {
-	var found string
-	for _, name := range distfiles.ParseManifestDistFilenames(manifestPath) {
-		if !strings.Contains(name, version) {
+// candidateReviewArchive finds the candidate's archive: first where the staged
+// manifest step just downloaded it, then --distdir, then the distfiles cache.
+// The names come from the staged Manifest, the only one that describes it yet.
+func (a *Applier) candidateReviewArchive(ctx context.Context, cand candidatePaths, version string) (string, archiveSearch) {
+	dirs := []string{cand.fetchedDistdir}
+	if distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir); ok {
+		dirs = append(dirs, distdir)
+	}
+	dirs = append(dirs, a.distfilesCache)
+	return findReviewArchive(cand.pkgDir, version, dirs)
+}
+
+// previousReviewArchive finds the previous version's archive in --distdir, then
+// the distfiles cache. The names come from the PUBLISHED Manifest, the only one
+// that still describes that version.
+func (a *Applier) previousReviewArchive(ctx context.Context, pkg, version string) (string, archiveSearch) {
+	var dirs []string
+	if distdir, ok := distfiles.Locate(ctx, a.distdir, a.configuredDistdir); ok {
+		dirs = append(dirs, distdir)
+	}
+	dirs = append(dirs, a.distfilesCache)
+	return findReviewArchive(filepath.Dir(a.EbuildPath(pkg, version)), version, dirs)
+}
+
+// findReviewArchive returns the archive the options gate's own selection
+// settles on in the first directory that holds exactly one, passing over a
+// directory that is unset, missing or ambiguous. A guess is never returned:
+// the wrong release's tarball would produce a confident review of a difference
+// nobody asked about.
+func findReviewArchive(pkgDir, version string, dirs []string) (string, archiveSearch) {
+	var searched archiveSearch
+	for _, dir := range dirs {
+		if dir == "" {
 			continue
 		}
-		if found != "" {
-			return ""
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			continue
 		}
-		path := filepath.Join(distdir, name)
-		if info, err := os.Stat(path); err == nil && !info.IsDir() {
-			found = path
+		searched.dirs = append(searched.dirs, dir)
+		archive, err := validate.FindDistfile(pkgDir, dir, version)
+		if err == nil {
+			return archive, searched
+		}
+		searched.lastErr = err
+	}
+	return "", searched
+}
+
+// fetchPreviousArchive downloads the previous version's distfiles with
+// Portage's own `ebuild <published ebuild> fetch` into a fresh private
+// directory, so the published Manifest checks every checksum and nothing here
+// expands SRC_URI. The caller owns dir and removes it; it is returned even on
+// an error once created. Nothing is written to --distdir, the distfiles cache
+// or the host DISTDIR: DISTDIR is the only destination the child is given.
+func (a *Applier) fetchPreviousArchive(ctx context.Context, pkg, version string) (archive, dir string, err error) {
+	ebuildPath := a.EbuildPath(pkg, version)
+	if ebuildPath == "" {
+		return "", "", fmt.Errorf("no published ebuild of %s-%s to fetch from", pkg, version)
+	}
+	dir, err = os.MkdirTemp(fixSandboxRoot(ctx), "bentoo-review-distfiles-")
+	if err != nil {
+		return "", "", fmt.Errorf("creating a private distdir for %s-%s: %w", pkg, version, err)
+	}
+
+	start := time.Now()
+	cmd := a.execCommand(ctx, "ebuild", ebuildPath, "fetch")
+	cmd.Dir = a.overlayPath
+	cmd.Env = append(validate.AllowedBuildEnv(os.Environ()), "DISTDIR="+dir)
+	cmd.Stdin = strings.NewReader("")
+	procgroup.Group(cmd)
+	if out, runErr := cmd.CombinedOutput(); runErr != nil {
+		return "", dir, fmt.Errorf("ebuild fetch of %s-%s into %s: %w: %s", pkg, version, dir, runErr, lastOutput(out))
+	}
+
+	archive, err = validate.FindDistfile(filepath.Dir(ebuildPath), dir, version)
+	if err != nil {
+		return "", dir, fmt.Errorf("after fetching %s-%s: %w", pkg, version, err)
+	}
+	a.logger().Info("bump review: fetched the previous archive",
+		"package", pkg, "version", version, "bytes", dirBytes(dir), "duration", time.Since(start))
+	return archive, dir, nil
+}
+
+// lastOutput is the tail of a child's output, enough to name its failure.
+func lastOutput(out []byte) string {
+	const keep = 500
+	text := strings.TrimSpace(string(out))
+	if len(text) > keep {
+		text = "…" + text[len(text)-keep:]
+	}
+	return text
+}
+
+// dirBytes sums the sizes of the regular files directly in dir.
+func dirBytes(dir string) int64 {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return 0
+	}
+	var total int64
+	for _, e := range entries {
+		if info, err := e.Info(); err == nil && info.Mode().IsRegular() {
+			total += info.Size()
 		}
 	}
-	return found
+	return total
+}
+
+// archiveNotFoundReason says which side's archive is missing, for which
+// version, and every directory that was searched for it.
+func archiveNotFoundReason(side, pkg, version string, searched archiveSearch) string {
+	where := "no directory to search was configured"
+	if len(searched.dirs) > 0 {
+		where = "searched " + strings.Join(searched.dirs, ", ")
+	}
+	reason := fmt.Sprintf("no archive of the %s version (%s) of %s was found, so there is no build-declaration difference to review; %s",
+		side, version, pkg, where)
+	if searched.lastErr != nil {
+		reason += fmt.Sprintf(" (last: %v)", searched.lastErr)
+	}
+	return reason
+}
+
+// notMesonReason says why a candidate that is not a Meson project is not
+// reviewed. system is validate.ArchiveBuildSystem's answer: a bare name
+// ("cmake"), a phrase with its own article ("a configure script") or
+// "undetermined", so it is never spliced in after an article.
+func notMesonReason(archive, system string) string {
+	if system == "undetermined" {
+		return fmt.Sprintf("the candidate archive %s has no meson.build and no build system file this recognises; the bump reviewer reads Meson build options only", archive)
+	}
+	return fmt.Sprintf("the candidate archive %s is built with %s, not Meson; the bump reviewer reads Meson build options only", archive, system)
+}
+
+// reviewSkipped is the review gate of a bump the reviewer was not asked about.
+func reviewSkipped(reason string) validate.GateResult {
+	return validate.GateResult{Gate: validate.GateReview, Outcome: validate.OutcomeSkipped, Reason: reason}
 }
 
 // hostDeclinedGates is validate.SkippedGates with the cause stamped on every

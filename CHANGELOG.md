@@ -45,6 +45,23 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   is removed by the next `--apply`. See
   "What `--apply` prints" in docs/autoupdate.md.
 
+- **The `--llm` bump reviewer now runs when both archives can be found.**
+  It skipped almost every bump: it looked only in `--distdir`, matched
+  archive names with the `-rN` revision attached, and never saw the
+  candidate archive the apply had just downloaded. It now looks in the
+  apply's own download directory, `--distdir` and the distfiles cache,
+  ignores `-rN` when matching, and fetches a previous archive that is no
+  longer on disk with `ebuild … fetch` into a private directory removed
+  afterwards. A binary package is skipped without a search. For a project
+  that is not Meson, only the candidate archive is read, to name its build
+  system; the previous archive is neither searched for nor fetched. Either
+  way the bump's review gate records why.
+
+- **An archive of a neighbour version is no longer taken for this one.**
+  A lone `m-1.0.1.tar.gz`, `m-11.0.tar.gz` or `m-2.1.0.tar.gz` was accepted
+  as version `1.0`'s archive, by the bump reviewer and by the options gate
+  alike. The version must now appear as a whole token in the name.
+
 ### Changed
 
 - **`overlay autoupdate --apply all` always runs packages in parallel.**

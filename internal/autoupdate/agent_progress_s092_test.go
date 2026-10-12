@@ -199,22 +199,59 @@ func (s *bumpReviewSpy) ReviewBump(_ context.Context, req fixer.BumpReviewReques
 	return fixer.BumpReviewReport{Skipped: true, SkipReason: "spy"}, nil
 }
 
+// reviewableBump is a bump the reviewer is not skipped for: a published
+// oldVersion and a staged newVersion, each with a Manifest naming a Meson
+// archive that sits where the reviewer looks for it.
+type reviewableBump struct {
+	overlay string
+	distdir string
+	cand    candidatePaths
+}
+
+func newReviewableBump(t *testing.T, root, pkg, oldVersion, newVersion string) reviewableBump {
+	t.Helper()
+	pn := filepath.Base(pkg)
+	oldArchive, newArchive := pn+"-"+oldVersion+".tar.gz", pn+"-"+newVersion+".tar.gz"
+	b := reviewableBump{
+		overlay: filepath.Join(root, "overlay"),
+		distdir: filepath.Join(root, "distdir"),
+	}
+	published := filepath.Join(b.overlay, pkg)
+	s089aPut(t, published, pn+"-"+oldVersion+".ebuild", "EAPI=8\n")
+	s089aPut(t, published, "Manifest", s089aManifest([]string{oldArchive}))
+	s089aPut(t, b.distdir, oldArchive, "old")
+	staged := filepath.Join(root, "staged", pkg)
+	s089aPut(t, staged, pn+"-"+newVersion+".ebuild", "EAPI=8\n")
+	s089aPut(t, staged, "Manifest", s089aManifest([]string{newArchive}))
+	fetched := filepath.Join(root, "fetched")
+	s089aPut(t, fetched, newArchive, "new")
+	b.cand = candidatePaths{
+		staged:         true,
+		repoRoot:       filepath.Join(root, "staged"),
+		pkgDir:         staged,
+		ebuildPath:     filepath.Join(staged, pn+"-"+newVersion+".ebuild"),
+		fetchedDistdir: fetched,
+	}
+	return b
+}
+
 // The bump reviewer: its log is keyed by the candidate version.
 func TestAgentProgressBumpReview(t *testing.T) {
 	tmp := t.TempDir()
 	spy := &bumpReviewSpy{}
 	rec := &recordingReporter{}
-	a, err := NewApplier(filepath.Join(tmp, "overlay"), filepath.Join(tmp, "config"),
-		WithApplierDistdir(t.TempDir(), ""),
+	const pkg = "media-plugins/gst-plugins-qt6"
+	b := newReviewableBump(t, tmp, pkg, "1.28.6", "1.29.2")
+	a, err := NewApplier(b.overlay, filepath.Join(tmp, "config"),
+		WithApplierDistdir(b.distdir, ""),
 		WithApplierBumpReviewer(spy),
 		WithApplierReporter(rec),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	const pkg = "media-plugins/gst-plugins-qt6"
 	var gates []validate.GateResult
-	a.reviewBump(t.Context(), candidatePaths{staged: true, pkgDir: filepath.Join(tmp, "staged", pkg)},
+	a.reviewBump(t.Context(), b.cand,
 		pkg, "1.28.6", "1.29.2", validate.DepthDecision{Depth: validate.DepthOptions, Reason: "policy"}, &gates)
 	if len(spy.calls) != 1 {
 		t.Fatalf("the reviewer ran %d time(s), want 1", len(spy.calls))
