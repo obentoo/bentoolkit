@@ -110,6 +110,7 @@ func buildFixFixture(t *testing.T, spy *buildFixSpy, script ...buildRun) *buildF
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
 		WithApplierRunAttached(attached),
+		WithApplierRunCaptured(capturedFrom(attached)),
 		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierBuildFixer(spy),
@@ -120,6 +121,19 @@ func buildFixFixture(t *testing.T, spy *buildFixSpy, script ...buildRun) *buildF
 	}
 	h.applier = applier
 	return h
+}
+
+// capturedFrom adapts a scripted attached runner to the captured runner a
+// build-gate child (one that sets its own stdin) goes through: the scripted
+// output is written to the stream the applier bound, and its error returned.
+func capturedFrom(attached func(cmd *exec.Cmd) ([]byte, error)) func(cmd *exec.Cmd) error {
+	return func(cmd *exec.Cmd) error {
+		out, err := attached(cmd)
+		if _, werr := cmd.Stdout.Write(out); werr != nil {
+			return werr
+		}
+		return err
+	}
 }
 
 // The three build logs this sub-task classifies. They reuse the phase markers

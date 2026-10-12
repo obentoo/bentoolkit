@@ -1,9 +1,11 @@
 package autoupdate
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
 // This file is the validation pipeline Apply runs between the manifest step and
@@ -634,7 +637,7 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	// The child's own failure, captured through the runner seam. RunBuildGates
 	// deliberately reports a failing build as gates plus a nil error, so the only
 	// place the exit status is observable is the runner this applier supplies.
-	var attempt buildAttempt
+	attempt := buildAttempt{pkg: pkg}
 	deps.RunAttached = a.recordingRunner(ctx, &attempt)
 
 	req := validate.BuildRequest{
@@ -674,15 +677,25 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	return fixed, nil
 }
 
-// recordingRunner wraps this applier's runAttached so the build child's exit
-// status and transcript survive RunBuildGates, which by design returns neither.
+// recordingRunner runs the build child so its exit status and transcript
+// survive RunBuildGates, which by design returns neither.
+//
+// A child that set its own stdin (the gates' `ebuild`, in a process group of its
+// own) is run captured, under the package's task (runCaptured); only a child
+// that left stdin nil goes through runAttached, which may hand it the terminal.
 //
 // It is a seam and not a field because the capture is scoped to ONE call: the
 // build runs at most once per invocation, and a shared field would make the
 // attribution of a concurrent apply depend on which package finished last.
 func (a *Applier) recordingRunner(ctx context.Context, into *buildAttempt) func(cmd *exec.Cmd) ([]byte, error) {
 	return func(cmd *exec.Cmd) ([]byte, error) {
-		output, err := a.runAttached(cmd)
+		var output []byte
+		var err error
+		if cmd.Stdin != nil {
+			output, err = a.runCapturedChild(cmd, into.pkg)
+		} else {
+			output, err = a.runAttached(cmd)
+		}
 		// The build runs in procgroup's group mode, whose WaitDelay also runs
 		// after a NORMAL exit: a build that exited 0 while a helper it left behind
 		// still held the output pipe comes back as exec.ErrWaitDelay. RunBuildGates
@@ -703,6 +716,39 @@ func (a *Applier) recordingRunner(ctx context.Context, into *buildAttempt) func(
 		}
 		return output, err
 	}
+}
+
+// runCapturedChild runs cmd with its stdout and stderr streamed into the task
+// tail of pkg and kept whole for the caller, never handing it the terminal: a
+// child released the terminal while the live region draws writes over it, and
+// one in a background process group that reads it is stopped by SIGTTIN.
+//
+// The returned bytes are the WHOLE output, as the attached runner returns them,
+// not the StreamCapture's bounded tail: the build verdict reads every phase
+// marker of the transcript. One writer for both streams gives the child a single
+// pipe, so the bytes are ordered as CombinedOutput would order them. The error
+// is the runner's own, unwrapped, so an *exec.ExitError stays reachable.
+func (a *Applier) runCapturedChild(cmd *exec.Cmd, pkg string) ([]byte, error) {
+	var whole bytes.Buffer
+	var w io.Writer = &whole
+	var sc *tui.StreamCapture
+	if !a.quietGateOutput {
+		sc = tui.NewStreamCapture(a.reporter, pkg, tui.StreamStdout)
+		w = io.MultiWriter(sc, &whole)
+	}
+	cmd.Stdout = w
+	cmd.Stderr = w
+	run := a.runCaptured
+	if run == nil {
+		run = (*exec.Cmd).Run
+	}
+	err := run(cmd)
+	if sc != nil {
+		if cerr := sc.Close(); cerr != nil {
+			a.logger().Debug("gate capture close failed", "package", pkg, "error", cerr)
+		}
+	}
+	return whole.Bytes(), err
 }
 
 // repairBuildGatesAndRerun is what happens after the build gates' child has
@@ -772,7 +818,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	// The authoritative re-run: bentoo's own build of the same gates, never
 	// the agent's account of what it did.
 	a.substage(result, pkg, "re-check")
-	var second buildAttempt
+	second := buildAttempt{pkg: pkg}
 	deps.RunAttached = a.recordingRunner(ctx, &second)
 	gates, err := validate.RunBuildGates(ctx, req, deps)
 	if err != nil {

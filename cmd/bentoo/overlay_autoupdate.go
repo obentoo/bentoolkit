@@ -482,7 +482,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
 		r.BatchStart(total)
-		return []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r)}, sync.OnceFunc(func() { r.BatchDone("") })
+		return []autoupdate.ApplierOption{autoupdate.WithApplierReporter(r), autoupdate.WithApplierQuietGateOutput()}, sync.OnceFunc(func() { r.BatchDone("") })
 	}
 
 	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
@@ -495,20 +495,28 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		// In-UI y/n confirmation rendered by the model instead of reading stdin
 		// behind the program.
 		autoupdate.WithConfirmFunc(prog.Confirm),
-		// Hand the real terminal to the compile child so a sudo/doas password
-		// prompt is visible, while teeing its stdout+stderr to a capture
-		// buffer the failure path still saves (the applier's Output: %s contract).
+		// Hand the real terminal to the compile child (nil stdin) so a sudo/doas
+		// password prompt is visible, while teeing its stdout+stderr to a
+		// capture buffer the failure path still saves (the applier's Output: %s
+		// contract). A child with its own stdin never gets the terminal.
 		autoupdate.WithApplierRunAttached(func(cmd *exec.Cmd) ([]byte, error) {
 			var buf bytes.Buffer
+			// Only a Stdin the caller left nil gets the terminal. The privileged
+			// compile leaves it nil so sudo/doas can prompt. A child that set its
+			// own (a build gate's `ebuild`, in its own process group, where
+			// reading the terminal stops it on SIGTTIN) is run captured while the
+			// live region keeps drawing; its output written to the terminal
+			// would tear the frame. The applier already routes such children to
+			// the task tail, so this branch is the backstop, not the route.
+			if cmd.Stdin != nil {
+				cmd.Stdout = &buf
+				cmd.Stderr = &buf
+				err := cmd.Run()
+				return buf.Bytes(), err
+			}
 			cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
 			cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
-			// Only a Stdin the caller left nil gets the terminal. The privileged
-			// compile leaves it nil so sudo/doas can prompt; the build gates'
-			// `ebuild` sets an empty one, because it runs in its own process
-			// group and reading the terminal from there stops it on SIGTTIN.
-			if cmd.Stdin == nil {
-				cmd.Stdin = os.Stdin
-			}
+			cmd.Stdin = os.Stdin
 			err := tui.RunAttached(prog, cmd)
 			return buf.Bytes(), err
 		}),

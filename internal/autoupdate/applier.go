@@ -432,6 +432,16 @@ type Applier struct {
 	// terminal for the prompt and tee the raw output to the TTY and a capture
 	// buffer. A nil override is normalized back to the CombinedOutput default.
 	runAttached func(cmd *exec.Cmd) ([]byte, error)
+	// runCaptured runs a build-gate child that brings its own stdin. Its
+	// Stdout and Stderr are already bound to the package's StreamCapture (see
+	// recordingRunner), so the default is cmd.Run; tests replace it via
+	// WithApplierRunCaptured to script the child. A nil value means cmd.Run.
+	runCaptured func(cmd *exec.Cmd) error
+	// quietGateOutput keeps a build-gate child's output out of the reporter:
+	// it is still captured whole for the verdict and the failure, but no line
+	// reaches the task tail. The plain backend sets it, so a non-terminal run
+	// stays as terse as it was before the gates stopped taking the terminal.
+	quietGateOutput bool
 	// distdir, configuredDistdir and distfilesCache are carried, unread, from
 	// the CLI to the sweeper this applier builds for the Manifest step: the
 	// --distdir flag, autoupdate.distdir, and the read-only cache named by
@@ -724,6 +734,25 @@ func WithApplierRunAttached(fn func(cmd *exec.Cmd) ([]byte, error)) ApplierOptio
 			fn = func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() }
 		}
 		a.runAttached = fn
+	}
+}
+
+// WithApplierRunCaptured overrides how a build-gate child that set its own
+// stdin is run. Such a child never gets the terminal: its stdout and stderr are
+// bound to the package's StreamCapture before fn is called, so fn only runs the
+// command (the default is cmd.Run) and whatever it writes to cmd.Stdout reaches
+// the task tail and the returned output. A nil fn is normalized back to cmd.Run.
+func WithApplierRunCaptured(fn func(cmd *exec.Cmd) error) ApplierOption {
+	return func(a *Applier) {
+		a.runCaptured = fn
+	}
+}
+
+// WithApplierQuietGateOutput keeps build-gate children's output out of the
+// reporter's task tail. The output is still captured whole and returned.
+func WithApplierQuietGateOutput() ApplierOption {
+	return func(a *Applier) {
+		a.quietGateOutput = true
 	}
 }
 
@@ -2871,6 +2900,9 @@ const compileGatePhase = validate.GateCompile
 // buildAttempt is one invocation of the build child: what it printed, where its
 // log was retained on failure, and how it failed. A nil err is a passing build.
 type buildAttempt struct {
+	// pkg is the package the attempt builds: the task id a build-gate child's
+	// streamed output is reported under. Set by the caller before the run.
+	pkg string
 	// transcript is the child's captured output — the evidence the attribution
 	// gate reasons from and the log the fixer is given.
 	transcript string
