@@ -45,6 +45,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   is removed by the next `--apply`. See
   "What `--apply` prints" in docs/autoupdate.md.
 
+### Changed
+
+- **`overlay autoupdate --apply all` always runs packages in parallel.**
+  Before, one bump that needed a build, or `--compile`, made the whole
+  batch run one package at a time. Now the batch always uses the
+  `--concurrency` pool, and only the expensive steps get lower limits:
+  at most 2 builds at once, at most 2 LLM agents (manifest fixer, build
+  fixer, bump reviewer) at once, and one `--compile` step at a time, so its
+  confirmation prompt and sudo call never overlap.
+
 ## [0.35.0] - 2026-10-10
 
 ### Added

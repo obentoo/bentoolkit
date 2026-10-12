@@ -10,19 +10,18 @@ package autoupdate
 // The batch policy lives in this package now, so every assertion here drives
 // the real Applier with no cmd/bentoo code involved (R1.6):
 //
-//   - compile requested: one package at a time, in input order (R1.1);
-//   - any bump at a depth that starts a build: one at a time, and the
-//     privileged compile step is NOT acquired (R1.2) — and the converse, a
-//     batch whose depths start no build keeps the pool;
-//   - otherwise a pool of at most `concurrency`, clamped to [1, len] (R1.3);
+//   - compile requested: the pool still runs, but the privileged compile step
+//     (prompt and sudo) is taken one package at a time (R1.1);
+//   - a bump at a depth that starts a build keeps the pool, and the privileged
+//     compile step is NOT acquired (R1.2);
+//   - a pool of at most `concurrency`, clamped to [1, len] (R1.3);
 //   - one non-nil result per update, in input order, and a failure count that
 //     counts only an Apply that returned an error (R1.4);
 //   - the story 059 cancellation contract (R1.5, R1.7).
 //
-// Serial is observed two ways at once: the reporter's TaskStart/TaskDone
-// sequence must alternate in input order, and the first child spawned lingers
-// until a second Apply reaches the exec seam (or 300 ms pass), so a pool cannot
-// avoid overlapping by luck.
+// Overlap is observed at the exec seam: the first child spawned lingers until a
+// second Apply reaches it (or 300 ms pass), so a pool cannot avoid overlapping
+// by luck.
 //
 // Red on arrival: (*Applier).ApplyAll does not exist.
 
@@ -33,11 +32,13 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
@@ -83,6 +84,30 @@ func (o *s060Overlap) maxSeen() int {
 	return o.peak
 }
 
+// s060Gauge counts callers inside a section at once and keeps the peak.
+type s060Gauge struct {
+	mu           sync.Mutex
+	active, peak int
+}
+
+// enter holds the section for d, so callers that overlap are observed doing so.
+func (g *s060Gauge) enter(d time.Duration) {
+	g.mu.Lock()
+	g.active++
+	g.peak = max(g.peak, g.active)
+	g.mu.Unlock()
+	time.Sleep(d)
+	g.mu.Lock()
+	g.active--
+	g.mu.Unlock()
+}
+
+func (g *s060Gauge) maxSeen() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.peak
+}
+
 // s060Batch is one ApplyAll fixture: an overlay holding the packages, a
 // pending list, and an applier whose exec seam, reporter and confirm prompt are
 // all observed.
@@ -92,6 +117,8 @@ type s060Batch struct {
 	updates  []PendingUpdate
 	reporter *recordingReporter
 	overlay  *s060Overlap
+	// prompting counts compile prompts in flight at once.
+	prompting s060Gauge
 
 	mu      sync.Mutex
 	prompts []string
@@ -118,6 +145,8 @@ type s060BatchSetup struct {
 	staged bool
 	// onSpawn runs inside the exec seam before the child is returned.
 	onSpawn func(ctx context.Context)
+	// onSpawnNamed runs inside the exec seam with the command's name.
+	onSpawnNamed func(name string)
 	// failChild makes every spawned child exit non-zero.
 	failChild bool
 	opts      []ApplierOption
@@ -153,6 +182,9 @@ func newS060Batch(t *testing.T, setup s060BatchSetup) *s060Batch {
 		if setup.onSpawn != nil {
 			setup.onSpawn(ctx)
 		}
+		if setup.onSpawnNamed != nil {
+			setup.onSpawnNamed(name)
+		}
 		if name == "emerge" {
 			// The dependency pre-check: answer that only the package itself
 			// would be merged, whichever package asked.
@@ -181,6 +213,8 @@ func newS060Batch(t *testing.T, setup s060BatchSetup) *s060Batch {
 			b.mu.Lock()
 			b.prompts = append(b.prompts, prompt)
 			b.mu.Unlock()
+			// Held briefly so two prompts asked at once are observed overlapping.
+			b.prompting.enter(20 * time.Millisecond)
 			return false
 		}),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -245,53 +279,30 @@ func assertOneResultPerUpdate(t *testing.T, results []*ApplyResult, updates []Pe
 	}
 }
 
-// assertSerialInOrder reads the reporter: every Apply must open and close
-// before the next one opens, and they must open in input order.
-func assertSerialInOrder(t *testing.T, b *s060Batch) {
-	t.Helper()
-	var lifecycle []string
-	for _, e := range b.reporter.snapshot() {
-		if strings.HasPrefix(e, "TaskStart:") || strings.HasPrefix(e, "TaskDone:") {
-			lifecycle = append(lifecycle, e)
-		}
-	}
-	var want []string
-	for _, u := range b.updates {
-		want = append(want, "TaskStart:"+u.Package, "TaskDone:"+u.Package)
-	}
-	if len(lifecycle) != len(want) {
-		t.Fatalf("reporter saw %d task events, want %d (one start and one done per package): %v", len(lifecycle), len(want), lifecycle)
-	}
-	for i := range want {
-		if !strings.HasPrefix(lifecycle[i], want[i]) {
-			t.Errorf("task event %d = %q, want %q — the batch did not apply one package at a time in pending-list order\nall: %v", i, lifecycle[i], want[i], lifecycle)
-			return
-		}
-	}
-	if peak := b.overlay.maxSeen(); peak != 1 {
-		t.Errorf("%d applies were inside the exec seam at once; a serial batch has exactly 1", peak)
-	}
-}
-
-// TestS060ApplyAllSerialWhenCompileRequested is R1.1. A concurrency of 4 is
-// passed on purpose: compile must win over it.
-func TestS060ApplyAllSerialWhenCompileRequested(t *testing.T) {
+// TestS060ApplyAllCompileRunsThePoolWithOnePromptAtATime is R1.1. compile
+// no longer narrows the batch: the applies overlap, and only the privileged
+// compile step — its prompt and its sudo invocation — is taken one at a time.
+func TestS060ApplyAllCompileRunsThePoolWithOnePromptAtATime(t *testing.T) {
 	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(4, "1.0.0", "2.0.0")})
 
 	results, failures := b.runApplyAll(t, t.Context(), true, 4)
 
 	assertOneResultPerUpdate(t, results, b.updates)
-	assertSerialInOrder(t, b)
+	if peak := b.overlay.maxSeen(); peak < 2 {
+		t.Errorf("peak concurrency = %d; --compile must not serialise the whole batch", peak)
+	}
+	if peak := b.prompting.maxSeen(); peak != 1 {
+		t.Errorf("%d compile prompts were asked at once; the privileged step takes one package at a time", peak)
+	}
 
-	// compile reached every Apply: each one asked to run the compile test, and
-	// in input order.
+	// compile reached every Apply: each one asked to run the compile test.
 	prompts := b.confirmPrompts()
 	if len(prompts) != len(b.updates) {
 		t.Fatalf("the compile prompt was asked %d times, want %d — compile must reach every apply (R1.1)", len(prompts), len(b.updates))
 	}
-	for i, u := range b.updates {
-		if !strings.Contains(prompts[i], u.Package+"-") {
-			t.Errorf("compile prompt %d = %q, want it to name %s — applies out of pending-list order", i, prompts[i], u.Package)
+	for _, u := range b.updates {
+		if !slices.ContainsFunc(prompts, func(p string) bool { return strings.Contains(p, u.Package+"-") }) {
+			t.Errorf("no compile prompt names %s: %q", u.Package, prompts)
 		}
 	}
 	// Every compile was declined, so every apply returned an error.
@@ -300,56 +311,37 @@ func TestS060ApplyAllSerialWhenCompileRequested(t *testing.T) {
 	}
 }
 
-// TestS060ApplyAllSerialWhenADepthStartsABuild is R1.2. 1.28.6 → 1.29.2 is a
-// series crossing, which the gate policy sends to the configure gate: a depth
-// that starts a build. The batch is serial, and because compile was NOT
-// requested, the privileged compile step is never acquired.
-func TestS060ApplyAllSerialWhenADepthStartsABuild(t *testing.T) {
+// TestS060ApplyAllKeepsThePoolWhenADepthStartsABuild is R1.2. 1.28.6 → 1.29.2
+// is a series crossing, which the gate policy sends to the configure gate: a
+// depth that starts a build. The batch still runs on the pool, and because
+// compile was NOT requested, the privileged compile step is never acquired.
+func TestS060ApplyAllKeepsThePoolWhenADepthStartsABuild(t *testing.T) {
 	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(3, "1.28.6", "1.29.2"), staged: true})
-
-	if !b.applier.SerialApplyRequired(b.updates) {
-		t.Fatal("fixture defect: SerialApplyRequired is false for a series crossing under the gate policy")
-	}
 
 	results, _ := b.runApplyAll(t, t.Context(), false, 3)
 
 	assertOneResultPerUpdate(t, results, b.updates)
-	assertSerialInOrder(t, b)
-
+	if peak := b.overlay.maxSeen(); peak < 2 {
+		t.Errorf("peak concurrency = %d; a build depth must not serialise the whole batch", peak)
+	}
+	if !slices.Contains(b.spawnNames(), "ebuild") {
+		t.Fatalf("fixture defect: no build was spawned for a series crossing: %v", b.spawnNames())
+	}
 	if prompts := b.confirmPrompts(); len(prompts) != 0 {
-		t.Errorf("a depth-driven serial batch asked for the privileged compile %d time(s): %q — compile was never requested (R1.2)", len(prompts), prompts)
+		t.Errorf("a build-depth batch asked for the privileged compile %d time(s): %q — compile was never requested (R1.2)", len(prompts), prompts)
 	}
 	for _, name := range b.spawnNames() {
 		if name == "sudo" || name == "doas" {
-			t.Errorf("a depth-driven serial batch spawned %q — compile was never requested (R1.2)", name)
+			t.Errorf("a build-depth batch spawned %q — compile was never requested (R1.2)", name)
 		}
 	}
 }
 
-// TestS060ApplyAllSerialWhenOnlyTheLastBumpStartsABuild is R1.2's "any": two
-// patch bumps and, LAST, one series crossing. A rule that looked only at the
-// first update would run the pool.
-func TestS060ApplyAllSerialWhenOnlyTheLastBumpStartsABuild(t *testing.T) {
-	b := newS060Batch(t, s060BatchSetup{
-		bumps:  [][2]string{{"1.28.5", "1.28.6"}, {"1.28.5", "1.28.6"}, {"1.28.6", "1.29.2"}},
-		staged: true,
-	})
-
-	results, _ := b.runApplyAll(t, t.Context(), false, 3)
-
-	assertOneResultPerUpdate(t, results, b.updates)
-	assertSerialInOrder(t, b)
-}
-
 // TestS060ApplyAllKeepsThePoolBelowABuildDepth is the converse of R1.2: the
 // same staged applier and policy, but patch bumps only (depth options, no
-// build). Serialising them would be the rule firing wrongly (R1.3).
+// build) (R1.3).
 func TestS060ApplyAllKeepsThePoolBelowABuildDepth(t *testing.T) {
 	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(3, "1.28.5", "1.28.6"), staged: true})
-
-	if b.applier.SerialApplyRequired(b.updates) {
-		t.Fatal("fixture defect: SerialApplyRequired is true for patch bumps under the gate policy")
-	}
 
 	results, _ := b.runApplyAll(t, t.Context(), false, 3)
 
@@ -357,8 +349,78 @@ func TestS060ApplyAllKeepsThePoolBelowABuildDepth(t *testing.T) {
 	if peak := b.overlay.maxSeen(); peak < 2 {
 		t.Errorf("peak concurrency = %d; patch bumps start no build, so the pool must run (R1.3)", peak)
 	}
+	if slices.Contains(b.spawnNames(), "ebuild") {
+		t.Errorf("fixture defect: a patch bump spawned a build: %v", b.spawnNames())
+	}
 	if prompts := b.confirmPrompts(); len(prompts) != 0 {
 		t.Errorf("the pool asked for the privileged compile: %q", prompts)
+	}
+}
+
+// TestApplyAllBoundsBuildsBySlots: with every bump at a build depth, the
+// builds in flight never exceed the build limit, while the batch as a whole
+// still overlaps.
+func TestApplyAllBoundsBuildsBySlots(t *testing.T) {
+	for _, limit := range []int{1, 2} {
+		t.Run(fmt.Sprintf("limit %d", limit), func(t *testing.T) {
+			var builds s060Gauge
+			b := newS060Batch(t, s060BatchSetup{
+				bumps:  s060Bumps(4, "1.28.6", "1.29.2"),
+				staged: true,
+				opts:   []ApplierOption{WithApplierBuildConcurrency(limit)},
+				onSpawnNamed: func(name string) {
+					if name == "ebuild" {
+						builds.enter(30 * time.Millisecond)
+					}
+				},
+			})
+
+			results, _ := b.runApplyAll(t, t.Context(), false, 4)
+
+			assertOneResultPerUpdate(t, results, b.updates)
+			if peak := builds.maxSeen(); peak > limit {
+				t.Errorf("%d builds ran at once, want at most %d", peak, limit)
+			}
+			if peak := builds.maxSeen(); peak < limit {
+				t.Errorf("%d builds ran at once, want %d — the build slots went unused", peak, limit)
+			}
+			if peak := b.overlay.maxSeen(); peak < 2 {
+				t.Errorf("peak concurrency = %d; the batch must overlap outside the builds", peak)
+			}
+		})
+	}
+}
+
+// s060Reviewer is a BumpReviewer that only counts how many reviews run at once.
+type s060Reviewer struct{ gauge s060Gauge }
+
+func (r *s060Reviewer) ReviewBump(context.Context, fixer.BumpReviewRequest) (fixer.BumpReviewReport, error) {
+	r.gauge.enter(30 * time.Millisecond)
+	return fixer.BumpReviewReport{}, nil
+}
+
+// TestApplyAllBoundsLLMAgentsBySlots: every staged bump asks the reviewer, and
+// the reviews in flight never exceed the LLM limit even on a wider pool.
+func TestApplyAllBoundsLLMAgentsBySlots(t *testing.T) {
+	const limit = 2
+	reviewer := &s060Reviewer{}
+	b := newS060Batch(t, s060BatchSetup{
+		bumps:  s060Bumps(5, "1.28.5", "1.28.6"),
+		staged: true,
+		opts: []ApplierOption{
+			WithApplierBumpReviewer(reviewer),
+			WithApplierLLMConcurrency(limit),
+		},
+	})
+
+	results, _ := b.runApplyAll(t, t.Context(), false, 5)
+
+	assertOneResultPerUpdate(t, results, b.updates)
+	if peak := reviewer.gauge.maxSeen(); peak > limit {
+		t.Errorf("%d LLM reviews ran at once, want at most %d", peak, limit)
+	}
+	if peak := reviewer.gauge.maxSeen(); peak < limit {
+		t.Errorf("%d LLM reviews ran at once, want %d — the LLM slots went unused", peak, limit)
 	}
 }
 

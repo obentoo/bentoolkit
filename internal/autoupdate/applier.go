@@ -488,6 +488,12 @@ type Applier struct {
 	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
 	// nil skips the review entirely.
 	reviewer fixer.BumpReviewer
+	// buildLimit and llmLimit size slots; set by WithApplierBuildConcurrency
+	// and WithApplierLLMConcurrency, defaulted in NewApplier.
+	buildLimit, llmLimit int
+	// slots holds the per-stage limits Apply enforces, so ApplyAll can run every
+	// package concurrently (apply_slots.go).
+	slots applySlots
 	// lookPath answers "is this tool installed at all" for the build gates,
 	// which ask it before spawning so an absent Portage is reported as a named
 	// SKIP rather than as an opaque failure. It defaults to exec.LookPath and is
@@ -908,12 +914,15 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
 		log:         logging.OrDiscard(nil),
 		reenabled:   &reenabledSet{},
+		buildLimit:  DefaultApplyBuildConcurrency,
+		llmLimit:    DefaultApplyLLMConcurrency,
 	}
 
 	// Apply options first
 	for _, opt := range opts {
 		opt(applier)
 	}
+	applier.slots = newApplySlots(applier.buildLimit, applier.llmLimit)
 
 	// Initialize pending list if not provided
 	if applier.pending == nil {
@@ -1594,7 +1603,7 @@ func (r *applyRun) runDepthGates(ctx context.Context) error {
 	// path, and running the depth gates beside it would build the same tree twice.
 	if !r.compile {
 		r.stage("build gates")
-		buildGates, buildErr := r.a.runBuildGates(ctx, r.cand, r.pkg, r.newVersion, r.depth.Depth, r.result)
+		buildGates, buildErr := r.runBuildGatesInSlot(ctx)
 		r.gates = append(r.gates, buildGates...)
 		if buildErr != nil {
 			r.gateFailed(gateForDepth(r.depth.Depth))
@@ -1608,7 +1617,9 @@ func (r *applyRun) runDepthGates(ctx context.Context) error {
 	// the staged path is the staged tree: a gate that built out of the published
 	// overlay would be reading a candidate that is not there yet.
 	r.stage("compile")
-	logPath, err := r.a.runCompile(ctx, r.cand, r.pkg, r.newVersion, r.result)
+	logPath, err := withSlot(ctx, r.a.slots.compile, func() (string, error) {
+		return r.a.runCompile(ctx, r.cand, r.pkg, r.newVersion, r.result)
+	})
 	if err != nil {
 		r.gateFailed(compileGatePhase)
 		r.result.LogPath = logPath
@@ -1625,6 +1636,19 @@ func (r *applyRun) gateFailed(gate string) {
 	if r.result.FailedStage == "" {
 		r.result.FailedStage = "gate:" + gate
 	}
+}
+
+// runBuildGatesInSlot runs the build gates holding a build slot, but only at a
+// depth that starts a build: below it runBuildGates returns at once, and taking
+// a slot there would make cheap bumps queue behind real builds.
+func (r *applyRun) runBuildGatesInSlot(ctx context.Context) ([]validate.GateResult, error) {
+	run := func() ([]validate.GateResult, error) {
+		return r.a.runBuildGates(ctx, r.cand, r.pkg, r.newVersion, r.depth.Depth, r.result)
+	}
+	if !r.cand.staged || !RequiresBuildSlot(r.depth.Depth) {
+		return run()
+	}
+	return withSlot(ctx, r.a.slots.build, run)
 }
 
 // promotionRefusal returns the first reason the candidate may not be
@@ -2552,18 +2576,20 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
 	progress, progressDone := a.agentProgress(pkg)
-	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
-		Package:    pkg,
-		Version:    version,
-		PkgDir:     pkgDir,
-		EbuildPath: cand.ebuildPath,
-		// The failure WITH pkgdev's output: the agent reads the 404 in it, and
-		// its fetch allowlist is taken from the URLs it names.
-		ManifestError: childRunDetail(firstErr),
-		DistDir:       fixDistdir,
-		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
-		Progress:      progress,
-		LogPath:       a.agentLogPath(pkg, version, fixer.StageManifestFix),
+	fixRes, fixErr := withSlot(ctx, a.slots.llm, func() (fixer.ManifestFixResult, error) {
+		return a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
+			Package:    pkg,
+			Version:    version,
+			PkgDir:     pkgDir,
+			EbuildPath: cand.ebuildPath,
+			// The failure WITH pkgdev's output: the agent reads the 404 in it, and
+			// its fetch allowlist is taken from the URLs it names.
+			ManifestError: childRunDetail(firstErr),
+			DistDir:       fixDistdir,
+			UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
+			Progress:      progress,
+			LogPath:       a.agentLogPath(pkg, version, fixer.StageManifestFix),
+		})
 	})
 	progressDone()
 	if fixErr != nil {
@@ -3230,18 +3256,20 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	a.reporter.Log("info", fixLine)
 
 	progress, progressDone := a.agentProgress(pkg)
-	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
-		Package:    pkg,
-		Version:    version,
-		Gate:       compileGatePhase,
-		StagedDir:  cand.repoRoot,
-		EbuildPath: cand.ebuildPath,
-		BuildLog:   first.transcript,
-		// One attempt per apply; FixBuild owns the bound and this states
-		// which try it is rather than counting tries here.
-		Attempt:  1,
-		Progress: progress,
-		LogPath:  a.agentLogPath(pkg, version, fixer.StageBuildFix),
+	fixRes, fixErr := withSlot(ctx, a.slots.llm, func() (fixer.BuildFixResult, error) {
+		return a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
+			Package:    pkg,
+			Version:    version,
+			Gate:       compileGatePhase,
+			StagedDir:  cand.repoRoot,
+			EbuildPath: cand.ebuildPath,
+			BuildLog:   first.transcript,
+			// One attempt per apply; FixBuild owns the bound and this states
+			// which try it is rather than counting tries here.
+			Attempt:  1,
+			Progress: progress,
+			LogPath:  a.agentLogPath(pkg, version, fixer.StageBuildFix),
+		})
 	})
 	progressDone()
 	switch {
