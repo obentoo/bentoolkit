@@ -398,7 +398,7 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 		return floor
 	}
 
-	a.reporter.TaskStage(pkg, "review")
+	a.reporter.TaskStage(pkg, fixer.StageBumpReview)
 	oldArchive, newArchive := a.reviewArchives(ctx, cand, pkg, oldVersion, newVersion)
 	report, err := a.reviewer.ReviewBump(ctx, fixer.BumpReviewRequest{
 		Package:    pkg,
@@ -406,6 +406,8 @@ func (a *Applier) reviewBump(ctx context.Context, cand candidatePaths, pkg, oldV
 		NewVersion: newVersion,
 		OldArchive: oldArchive,
 		NewArchive: newArchive,
+		Progress:   a.agentProgress(pkg),
+		LogPath:    a.agentLogPath(pkg, newVersion, fixer.StageBumpReview),
 	})
 	if err != nil {
 		// Unstamped: the reviewer is an optional capability outside
@@ -740,7 +742,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", gate, pkg, version)
 	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
 		"gate", gate, "package", pkg, "version", version)
-	a.substage(result, pkg, "llm-build-fix")
+	a.substage(result, pkg, fixer.StageBuildFix)
 	a.reporter.Log("info", fixLine)
 
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
@@ -751,6 +753,8 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 		EbuildPath: cand.ebuildPath,
 		BuildLog:   first.transcript,
 		Attempt:    1,
+		Progress:   a.agentProgress(pkg),
+		LogPath:    a.agentLogPath(pkg, version, fixer.StageBuildFix),
 	})
 	if fixErr != nil {
 		return nil, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)

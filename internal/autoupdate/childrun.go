@@ -129,16 +129,10 @@ func (s *sweeper) newChildRunError(label, pkg, version, output string, runErr er
 // 0600 even when an earlier run's log already exists, and a reader never sees
 // half of it.
 func writeChildRunLog(logsDir, pkg, version, label, output string) (string, error) {
-	category, name, ok := ebuilds.SplitPkgAtom(pkg)
-	if !ok {
-		return "", fmt.Errorf("invalid package name format: %q", pkg)
+	dir, err := packageLogDir(logsDir, pkg, version)
+	if err != nil {
+		return "", err
 	}
-	for _, part := range []string{category, name, version} {
-		if part == "" || part == "." || part == ".." || strings.ContainsRune(part, filepath.Separator) {
-			return "", fmt.Errorf("unusable log path component %q for %s-%s", part, pkg, version)
-		}
-	}
-	dir := filepath.Join(logsDir, category, name, version)
 	if err := os.MkdirAll(dir, 0o755); err != nil { //nolint:gosec // G301: the operator's own logs directory, read with ordinary tools; the files in it are 0600
 		return "", fmt.Errorf("creating %s: %w", dir, err)
 	}
@@ -159,6 +153,22 @@ func writeChildRunLog(logsDir, pkg, version, label, output string) (string, erro
 		return "", fmt.Errorf("renaming %s to %s: %w", tmpName, path, err)
 	}
 	return path, nil
+}
+
+// packageLogDir is <logsDir>/<category>/<package>/<version>, the directory a
+// package version's run logs are kept in. A name that would leave it is an
+// error.
+func packageLogDir(logsDir, pkg, version string) (string, error) {
+	category, name, ok := ebuilds.SplitPkgAtom(pkg)
+	if !ok {
+		return "", fmt.Errorf("invalid package name format: %q", pkg)
+	}
+	for _, part := range []string{category, name, version} {
+		if part == "" || part == "." || part == ".." || strings.ContainsRune(part, filepath.Separator) {
+			return "", fmt.Errorf("unusable log path component %q for %s-%s", part, pkg, version)
+		}
+	}
+	return filepath.Join(logsDir, category, name, version), nil
 }
 
 // childRunLogName is the label as a file name: lower case, spaces as hyphens,

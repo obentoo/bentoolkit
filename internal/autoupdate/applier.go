@@ -2512,7 +2512,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	distdir = fixDistdir
 
 	a.logger().Info("manifest failed; invoking LLM fixer to repair the ebuild", "package", pkg, "version", version)
-	a.substage(result, pkg, "llm-fix")
+	a.substage(result, pkg, fixer.StageManifestFix)
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
 	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
@@ -2525,6 +2525,8 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		ManifestError: childRunDetail(firstErr),
 		DistDir:       fixDistdir,
 		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
+		Progress:      a.agentProgress(pkg),
+		LogPath:       a.agentLogPath(pkg, version, fixer.StageManifestFix),
 	})
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
@@ -3183,7 +3185,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", compileGatePhase, pkg, version)
 	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
 		"gate", compileGatePhase, "package", pkg, "version", version)
-	a.substage(result, pkg, "llm-build-fix")
+	a.substage(result, pkg, fixer.StageBuildFix)
 	a.reporter.Log("info", fixLine)
 
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
@@ -3195,7 +3197,9 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 		BuildLog:   first.transcript,
 		// One attempt per apply; FixBuild owns the bound and this states
 		// which try it is rather than counting tries here.
-		Attempt: 1,
+		Attempt:  1,
+		Progress: a.agentProgress(pkg),
+		LogPath:  a.agentLogPath(pkg, version, fixer.StageBuildFix),
 	})
 	switch {
 	case errors.Is(fixErr, fixer.ErrBuildFixAttemptsExhausted):
