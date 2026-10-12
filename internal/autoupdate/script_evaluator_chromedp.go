@@ -15,11 +15,12 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/chromedp/cdproto/cdp"
 	"github.com/chromedp/cdproto/network"
-	"github.com/chromedp/cdproto/runtime"
 	"github.com/chromedp/chromedp"
 )
 
@@ -35,7 +36,7 @@ func defaultLiveEvaluator(opTimeout time.Duration) (liveEvaluator, error) {
 	browserCtx, browserCancel := chromedp.NewContext(allocCtx)
 	// Start the browser now so a missing/broken Chrome fails fast with a
 	// launch error, rather than on first use.
-	if err := chromedp.Run(browserCtx); err != nil {
+	if err := chromedp.Do(browserCtx); err != nil {
 		browserCancel()
 		allocCancel()
 		return nil, fmt.Errorf("could not launch headless Chrome (chromedp): %w", err)
@@ -58,10 +59,11 @@ type chromedpEvaluator struct {
 }
 
 // Evaluate opens a fresh tab, navigates to url, and evaluates script against the
-// rendered DOM. WithAwaitPromise makes the evaluation wait for a returned
+// rendered DOM. EvalAwaitPromise makes the evaluation wait for a returned
 // Promise to settle, so an `(async () => {...})()` IIFE resolves to its string
-// result rather than returning an unresolved Promise. The result is unmarshalled
-// into a string, so a non-string JS result (e.g. `1 + 1`) surfaces as an error.
+// result rather than returning an unresolved Promise. The result is decoded
+// into a string, so a non-string JS result (e.g. `1 + 1`) surfaces as an error,
+// `undefined` surfaces as an error, and `null` reads as the empty string.
 func (e *chromedpEvaluator) Evaluate(ctx context.Context, url, script string, headers map[string]string) (string, error) {
 	// Derive a per-call tab from the shared browser.
 	tabCtx, cancel := chromedp.NewContext(e.browserCtx)
@@ -78,32 +80,51 @@ func (e *chromedpEvaluator) Evaluate(ctx context.Context, url, script string, he
 		defer tcancel()
 	}
 
-	actions := make([]chromedp.Action, 0, 4)
+	steps := make([]chromedp.Action[chromedp.Void], 0, 2)
 	if len(headers) > 0 {
-		h := make(network.Headers, len(headers))
-		for k, v := range headers {
-			h[k] = v
-		}
-		actions = append(actions, network.Enable(), network.SetExtraHTTPHeaders(h))
+		steps = append(steps, sendExtraHeaders(headers))
 	}
-
-	var res string
-	actions = append(actions,
-		chromedp.Navigate(url),
-		chromedp.Evaluate(script, &res,
-			func(p *runtime.EvaluateParams) *runtime.EvaluateParams {
-				return p.WithAwaitPromise(true)
-			}),
-	)
+	steps = append(steps, chromedp.Navigate(url))
+	evaluate := chromedp.Evaluate[string](script, chromedp.EvalAwaitPromise)
 
 	// contextcheck flags tabCtx as not derived from ctx. It cannot be: a tab has
 	// to descend from the browser context or chromedp has no browser to attach
 	// it to. The caller's ctx reaches it through the AfterFunc bridge above,
 	// which cancels this tab when ctx ends — the linter does not model that.
-	if err := chromedp.Run(tabCtx, actions...); err != nil { //nolint:contextcheck // bridged via context.AfterFunc above
+	res, err := chromedp.Run(tabCtx, func(actCtx context.Context, t *chromedp.Target) (string, error) { //nolint:contextcheck // bridged via context.AfterFunc above
+		if _, err := chromedp.Steps(steps...)(actCtx, t); err != nil {
+			return "", err
+		}
+		return evaluate(actCtx, t)
+	})
+	// chromedp reports a JS null as ErrJSNull for a string result. The
+	// evaluator has always read it as the empty string, so a script that
+	// yields null hands its caller an empty result, not an evaluation failure.
+	if errors.Is(err, chromedp.ErrJSNull) {
+		return "", nil
+	}
+	if err != nil {
 		return "", fmt.Errorf("chromedp evaluation of %q failed: %w", url, err)
 	}
 	return res, nil
+}
+
+// sendExtraHeaders is the step that makes the tab attach headers to every
+// request it issues: the navigation and the script's own fetches alike.
+func sendExtraHeaders(headers map[string]string) chromedp.Action[chromedp.Void] {
+	h := make(network.Headers, len(headers))
+	for k, v := range headers {
+		h[k] = v
+	}
+	return chromedp.Func(func(ctx context.Context, t *chromedp.Target) error {
+		if _, err := cdp.Call(ctx, t, network.Enable, network.EnableParams{}); err != nil {
+			return fmt.Errorf("enabling the network domain: %w", err)
+		}
+		if _, err := cdp.Call(ctx, t, network.SetExtraHTTPHeaders, network.SetExtraHTTPHeadersParams{Headers: h}); err != nil {
+			return fmt.Errorf("setting extra HTTP headers: %w", err)
+		}
+		return nil
+	})
 }
 
 // Close tears down the browser context and its allocator.

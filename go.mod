@@ -22,8 +22,8 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20260920004010-53e2afe73ae5
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/chromedp/cdproto v0.0.0-20260912003405-686a5c723acc
-	github.com/chromedp/chromedp v0.16.0
+	github.com/chromedp/cdproto v0.157.8
+	github.com/chromedp/chromedp v0.20.1
 	github.com/fatih/color v1.19.0
 	github.com/godbus/dbus/v5 v5.2.2
 	github.com/leanovate/gopter v0.2.11
@@ -42,14 +42,10 @@ require (
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/x/cellbuf v0.0.15 // indirect
 	github.com/charmbracelet/x/exp/golden v0.0.0-20260920004010-53e2afe73ae5 // indirect
-	github.com/chromedp/sysutil v1.1.0 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
 	github.com/erikgeiser/coninput v0.0.0-20211004153227-1c3628e74d0f // indirect
 	github.com/go-json-experiment/json v0.0.0-20260820222146-c27c302e5fc3 // indirect
-	github.com/gobwas/httphead v0.1.0 // indirect
-	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.4.0 // indirect
 	github.com/golang/groupcache v0.0.0-20241129210726-2c02b8208cf8 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
