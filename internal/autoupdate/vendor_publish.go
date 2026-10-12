@@ -83,7 +83,8 @@ func (a *Applier) uploadVendorTarball(ctx context.Context, pkg, version string, 
 	argv := vendorUploadArgv(a.vendorConfig.UploadCommand, out.Tarball, out.File)
 	a.logger().Info("vendor: uploading the generated tarball",
 		"package", pkg, "version", version, "program", argv[0], "uri", out.URI)
-	a.logger().Debug("vendor: upload command", "package", pkg, "version", version, "argv", argv)
+	a.logger().Debug("vendor: upload command", "package", pkg, "version", version,
+		"command", loggableUploadCommand(a.vendorConfig.UploadCommand))
 
 	uctx, cancel := context.WithTimeout(ctx, vendorUploadTimeout)
 	defer cancel()
@@ -118,6 +119,26 @@ func redactArgv(text string, args []string) string {
 		}
 	}
 	return text
+}
+
+// loggableUploadCommand is the configured upload command as the debug log may
+// show it: the program, then each argument with the same rule redactArgv
+// applies to the output, an argument of eight bytes or more masked, unless it
+// carries a {path} or {file} placeholder and so says where the tarball goes.
+// It reads the template, never the substituted argv, so a literal credential
+// written into the command is never logged.
+func loggableUploadCommand(command []string) []string {
+	shown := make([]string, len(command))
+	for i, elem := range command {
+		switch {
+		case i == 0, len(elem) < 8,
+			strings.Contains(elem, "{path}"), strings.Contains(elem, "{file}"):
+			shown[i] = elem
+		default:
+			shown[i] = "<argv>"
+		}
+	}
+	return shown
 }
 
 // vendorUploadArgv substitutes {path} and {file} inside every element of

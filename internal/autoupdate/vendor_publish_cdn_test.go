@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -57,5 +58,15 @@ func TestRedactArgvMasksLongValues(t *testing.T) {
 		[]string{"-H", "Authorization: Bearer s3cr3t-token-value", "-v"})
 	if strings.Contains(got, "s3cr3t") || !strings.Contains(got, "<argv>") || !strings.Contains(got, "-v ok") {
 		t.Fatalf("redactArgv = %q", got)
+	}
+}
+
+// The debug line naming the upload command shows the program and the
+// placeholders, and masks a literal credential written into the command.
+func TestLoggableUploadCommandMasksLiteralCredentials(t *testing.T) {
+	got := loggableUploadCommand([]string{"curl", "-H", "Authorization: Bearer s3cr3t-token-value", "-T", "{path}", "https://up.example.org/{file}"})
+	want := []string{"curl", "-H", "<argv>", "-T", "{path}", "https://up.example.org/{file}"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("loggableUploadCommand = %q, want %q", got, want)
 	}
 }
