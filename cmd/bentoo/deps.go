@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"os/exec"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -62,6 +63,11 @@ type deps struct {
 	// terminal?". A `go test` binary writes to a pipe, so without it the
 	// on-a-terminal half of the --ui mode selection could not be checked at all.
 	uiIsTerminal func() bool
+	// stdinPollable asks whether stdin can be registered with epoll. The live
+	// region needs it: bubbletea starts its renderer before it registers stdin,
+	// and a regular file fails that registration after the first frame was
+	// queued, leaving a renderer that writes it to stdout once the run is over.
+	stdinPollable func() bool
 	// sweepPlanner, sweepExecutor and confirmSweep drive `--clean`. The
 	// check's validation prompt asks through confirmSweep too.
 	sweepPlanner  func(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, target string) (autoupdate.SweepBatch, error)
@@ -140,6 +146,12 @@ type deps struct {
 	// a test binary is every test: a test narrows its own tree's list to the
 	// values it resolved itself, so another test's secret never masks its output.
 	resolvedSecrets func() []string
+	// lookPath resolves an executable on PATH; --repair asks it for claude
+	// before it reads anything, so a missing CLI is refused up front.
+	lookPath func(file string) (string, error)
+	// confirmRepair is the y/N question before --repair starts its session.
+	// --yes never answers it: the session is only for an operator who is there.
+	confirmRepair func(prompt string) bool
 }
 
 // defaultDeps returns the production wiring: the values the replaced package
@@ -155,6 +167,7 @@ func defaultDeps() *deps {
 		resolveGentooProvider:       resolveGentooProvider,
 		setVersionsForCheck:         registry.SetPackageVersions,
 		uiIsTerminal:                output.IsTerminal,
+		stdinPollable:               stdinIsPollable,
 		sweepPlanner:                autoupdate.PlanOverlaySweep,
 		sweepExecutor:               autoupdate.ExecuteOverlaySweep,
 		confirmSweep:                confirmAction,
@@ -178,6 +191,8 @@ func defaultDeps() *deps {
 		snapshotRollbackConfirm: nil,
 		snapshotRestoreConfirm:  nil,
 		resolvedSecrets:         secrets.Resolved,
+		lookPath:                exec.LookPath,
+		confirmRepair:           confirmAction,
 	}
 }
 

@@ -89,6 +89,11 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	if depth.Depth == validate.DepthNone {
 		return checkSkipped(pkg, newVersion, depth.Reason)
 	}
+	// The refusal Apply makes, before anything under the staging root is
+	// removed: a repair in progress is not restaged over by a check either.
+	if _, _, err := a.repairPending(pkg, newVersion); err != nil {
+		return checkSkipped(pkg, newVersion, err.Error())
+	}
 
 	inputs, err := a.stagedInputsFor(pkg, currentVersion, update)
 	if err != nil {
@@ -105,6 +110,10 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	// emits reports the VERDICT rather than merely that the function returned.
 	// It is also what the record below is written from, however this returns.
 	var gates []validate.GateResult
+	// gatesPassed is set only at the end, once the gates would allow
+	// promotion; only then does the record name the bytes the gates read, so a
+	// later apply may promote them.
+	var gatesPassed bool
 	a.reporter.TaskStart(pkg, pkg)
 	defer func() {
 		worst := validate.EbuildResult{Gates: gates}.WorstOutcome()
@@ -144,7 +153,13 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	// recorded beside the tree they said it about — which is precisely what makes
 	// a later `--apply` able to promote this work instead of repeating it.
 	stagedRoot := local.StagedPath
-	defer func() { a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth) }()
+	defer func() {
+		validatedEbuild := ""
+		if gatesPassed {
+			validatedEbuild = cand.ebuildPath
+		}
+		a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth, validatedEbuild)
+	}()
 
 	a.reporter.TaskStage(pkg, "manifest")
 	fetchedDistdir, err := a.runManifestWithFix(ctx, cand, pkg, newVersion, local)
@@ -195,6 +210,7 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	}
 
 	a.recordDepthReached(local, gates, depth.Depth)
+	gatesPassed, _ = validate.PromotionDecision(gates, nil)
 	return checkResult(pkg, newVersion, local, depth, gates)
 }
 

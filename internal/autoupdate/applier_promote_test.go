@@ -548,10 +548,13 @@ func stageCandidateFor(t *testing.T, stagingRoot, overlayDir, body string) strin
 }
 
 // provedRecord is the record a successful validation leaves beside its tree:
-// every gate clean, at the given depth, over the given inputs.
+// every gate clean, at the given depth, over the given inputs. The gates read
+// the candidate as staged, so its validated digest is the staged bytes' digest;
+// a fixture whose candidate was edited before the proof overrides it.
 func provedRecord(depth validate.Depth, ebuildDigest, distfileDigest string) validate.StageRecord {
 	return validate.StageRecord{
-		Depth: depth,
+		ValidatedDigest: ebuildDigest,
+		Depth:           depth,
 		Gates: []validate.GateResult{
 			{Gate: validate.GateOptions, Outcome: validate.OutcomePass},
 			{Gate: validate.GatePatches, Outcome: validate.OutcomePass},
@@ -751,8 +754,9 @@ func TestApplierPromote_ARecordOfSkippedGatesIsStillPromotable(t *testing.T) {
 			{Gate: validate.GatePatches, Outcome: validate.OutcomeSkipped, Reason: "dev-qt/qtbase-6.9.1 is not installed"},
 			{Gate: validate.GateConfigure, Outcome: validate.OutcomeSkipped, Reason: "dev-qt/qtbase-6.9.1 is not installed"},
 		},
-		EbuildDigest:   digestOf(body),
-		DistfileDigest: stagedDistfileDigest,
+		EbuildDigest:    digestOf(body),
+		ValidatedDigest: digestOf(body),
+		DistfileDigest:  stagedDistfileDigest,
 	}
 	if err := validate.WriteStageRecord(staged, skipped); err != nil {
 		t.Fatalf("writing the record: %v", err)
@@ -827,14 +831,21 @@ func TestApplierPromote_ATreeTheFixerModifiedIsStillPromotable(t *testing.T) {
 	applier, overlayDir, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 	asStaged := candidateBody(t, overlayDir)
 
-	staged := stageProvedCandidate(t, applier.StagingRoot(), overlayDir, asStaged, validate.DepthConfigure)
+	staged := stageCandidateFor(t, applier.StagingRoot(), overlayDir, asStaged)
 
-	// The fixer's edit: the staged ebuild on disk no longer matches the bytes
-	// that were staged, and the record deliberately still names the original.
+	// The fixer's edit, made before the proof as in a real run: the staged
+	// ebuild on disk no longer matches the bytes that were staged, and the
+	// record deliberately still names the original as its ebuild digest while
+	// its validated digest names the repaired bytes the re-run read.
 	repaired := asStaged + "\n# the build fixer dropped -Daalib= and -Dlibcaca=\n"
 	candidate := filepath.Join(staged, "media-plugins", "gst-plugins-qt6", "gst-plugins-qt6-1.29.2.ebuild")
 	if err := os.WriteFile(candidate, []byte(repaired), 0o644); err != nil {
 		t.Fatalf("simulating the fixer's edit: %v", err)
+	}
+	record := provedRecord(validate.DepthConfigure, digestOf(asStaged), stagedDistfileDigest)
+	record.ValidatedDigest = digestOf(repaired)
+	if err := validate.WriteStageRecord(staged, record); err != nil {
+		t.Fatalf("writing the stage record: %v", err)
 	}
 
 	spawnsBefore := watch.spawns

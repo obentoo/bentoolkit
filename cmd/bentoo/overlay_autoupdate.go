@@ -83,6 +83,10 @@ type autoupdateOptions struct {
 	// revive performs the full revive for a single "category/pkg" or
 	// "all": seed from ::gentoo, re-enable, then bump to the upstream version
 	revive string
+	// repair names the "category/pkg" whose kept staged tree is handed to an
+	// interactive claude session, then re-validated and promoted. It is a mode
+	// of its own and refuses every other mode beside it.
+	repair string
 	// revivable, with --check, also reports revivable orphans (disabled
 	// entries absent from the overlay whose upstream is newer than ::gentoo) in
 	// the same pass — read-only, no mutation
@@ -289,6 +293,7 @@ Examples:
   bentoo overlay autoupdate --check --revivable   Check active packages AND report revivable orphans
   bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump
   bentoo overlay autoupdate --revive all          Revive every revivable orphan
+  bentoo overlay autoupdate --repair net-misc/foo Repair a failed bump in its staged tree with claude
   bentoo overlay autoupdate --lint                Check packages.toml against the record model
   bentoo overlay autoupdate --lint --fix          Repair what the linter can, after showing the diff
   bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)
@@ -326,6 +331,7 @@ Examples:
 	cmd.Flags().StringVar(&o.only, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	cmd.Flags().StringVar(&o.revive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
+	cmd.Flags().StringVar(&o.repair, "repair", "", "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH")
 	cmd.Flags().BoolVar(&o.revivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
 	// --no-tui is DEPRECATED IN ITS HELP TEXT ONLY. Its behaviour is
 	// untouched: it still disables the live TUI, it still answers to NO_COLOR
@@ -450,7 +456,7 @@ func sanitizeConfiguredDir(log *slog.Logger, key, path string) string {
 // All three opt-outs are still honoured, the --no-tui flag among them;
 // resolveUIMode folds it together with NO_COLOR and BENTOO_NO_TUI.
 func (ar *autoupdateRun) tuiEnabledForApply() bool {
-	return ar.autoupdateUsesTUI()
+	return ar.autoupdateUsesTUI() && liveRegionStdinOK(ar.log(), ar.deps)
 }
 
 // buildApplyReporter selects the apply backend per the gate (tuiEnabledForApply)
@@ -531,6 +537,13 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		minConcurrency = 1
 		maxConcurrency = 100
 	)
+
+	// --repair before every other flag check: it is the one mode that needs a
+	// person at a terminal, so a conflict or a missing terminal is reported
+	// first and before the config or the overlay lock is touched.
+	if err := ar.refuseRepairMisuse(); err != nil {
+		return err
+	}
 
 	// Validate --concurrency BEFORE any package work so a bad value fails fast
 	// with a clear message and a non-zero exit. The accepted range
@@ -689,6 +702,9 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// is the command's: the deferred lock release runs before func main maps it
 	// to the exit status.
 	switch {
+	case ar.opts.repair != "":
+		// First: refuseRepairMisuse already rejected every other mode beside it.
+		return ar.runRepair(runCtx, overlayPath, configDir, appCtx.Config.Autoupdate)
 	case ar.opts.lint:
 		return ar.runLint(overlayPath)
 	case ar.opts.markAutoDisabled:
@@ -960,6 +976,10 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 // only read and take no lock; every other mode takes it.
 func (ar *autoupdateRun) autoupdateNeedsOverlayLock() bool {
 	switch {
+	case ar.opts.repair != "":
+		// The only lock of the repair mode: it is held across the session and
+		// the re-validation, and the mode never takes it a second time.
+		return true
 	case ar.opts.lint:
 		return ar.opts.fix
 	case ar.opts.markAutoDisabled, ar.opts.check:
@@ -1009,6 +1029,27 @@ func sweepStaleTemps(log *slog.Logger, overlayPath, configDir string) {
 func stdinIsTerminal() bool {
 	fi, err := os.Stdin.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// stdinIsPollable reports whether the current stdin is a character device, a
+// pipe or a socket — the kinds epoll accepts. A regular file, a directory or a
+// stdin that cannot be stat'ed is not.
+func stdinIsPollable() bool {
+	fi, err := os.Stdin.Stat()
+	if err != nil {
+		return false
+	}
+	return fi.Mode()&(os.ModeCharDevice|os.ModeNamedPipe|os.ModeSocket) != 0
+}
+
+// liveRegionStdinOK is the stdin half of the live-region gate: a stdin the
+// terminal UI cannot poll sends the run to plain output instead.
+func liveRegionStdinOK(log *slog.Logger, d *deps) bool {
+	if d.stdinPollable == nil || d.stdinPollable() {
+		return true
+	}
+	logging.OrDiscard(log).Debug("live region off: stdin cannot be polled (a regular file?), using plain output")
+	return false
 }
 
 // ---------------------------------------------------------------------------
@@ -1619,20 +1660,9 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// call before the summary below is the one that does the work there.
 	defer finish()
 
-	opts := []autoupdate.ApplierOption{
-		autoupdate.WithApplierClean(ar.opts.clean),
-		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
-		applierFixerOption(ar.log(), llmCfg),
-	}
-	opts = append(opts, applierGentooPathOption())
-	opts = append(opts, ar.applierDistfileOptions()...)
-	opts = append(opts, ar.applierValidateOptions(configDir)...)
-	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
-	opts = append(opts, extra...)
-
-	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
-		return failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
+		return err
 	}
 
 	// The applier's TaskStart now surfaces "applying <pkg>" through the reporter
@@ -1652,6 +1682,28 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	ar.displayApplyResult(result)
 	return nil
+}
+
+// newSingleApplier builds the Applier a one-package apply runs with — the
+// options --apply passes, followed by extra — or the exit-1 error naming why
+// it could not.
+func (ar *autoupdateRun) newSingleApplier(overlayPath, configDir string, llmCfg config.LLMConfig, extra ...autoupdate.ApplierOption) (*autoupdate.Applier, error) {
+	opts := []autoupdate.ApplierOption{
+		autoupdate.WithApplierClean(ar.opts.clean),
+		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
+		applierFixerOption(ar.log(), llmCfg),
+	}
+	opts = append(opts, applierGentooPathOption())
+	opts = append(opts, ar.applierDistfileOptions()...)
+	opts = append(opts, ar.applierValidateOptions(configDir)...)
+	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
+	opts = append(opts, extra...)
+
+	applier, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+	if err != nil {
+		return nil, failWith(1, fmt.Errorf("failed to initialize applier: %w", err))
+	}
+	return applier, nil
 }
 
 // runApplyAll handles `--apply all`: it applies every pending update, reusing a
@@ -1868,6 +1920,9 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 			// a tree whose bytes are already in the overlay.
 			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
 			output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
+		}
+		if result.RepairBundle != "" {
+			output.Info.Printf("    Repair:  bentoo overlay autoupdate --repair %s\n", result.Package)
 		}
 	}
 }

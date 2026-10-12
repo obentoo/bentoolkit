@@ -3,6 +3,7 @@ package autoupdate
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -25,12 +26,14 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/repair"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
+	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
@@ -102,6 +105,10 @@ var (
 	// ErrRequirementPinNotFound is returned (wrapped) when the record declares a
 	// pin the new ebuild does not carry: the registry and the ebuild disagree.
 	ErrRequirementPinNotFound = errors.New("pinned requirement not found in ebuild")
+	// ErrRepairPending is returned when the package's staged tree carries a
+	// repair bundle and the run is not adopting that tree: restaging would
+	// delete the operator's pending repair, so the package is refused instead.
+	ErrRepairPending = errors.New("repair pending")
 )
 
 // auxValueRe and commitHashRe are the shapes an upstream-supplied value must
@@ -258,6 +265,20 @@ type ApplyResult struct {
 	// evidence of what went wrong". Empty, therefore, after a successful apply,
 	// an apply with no staging root, and one that failed before staging.
 	StagedPath string
+	// StagedEbuild is the candidate ebuild inside StagedPath. It is set and
+	// cleared together with StagedPath.
+	StagedEbuild string
+	// FailedStage names the step a failed apply stopped in: manifest, llm-fix,
+	// re-check, gate:<name>, or one of the run's own stages (substitute,
+	// coverage, promotion, promote, retained). "apply" is the fallback for an
+	// exit that entered no stage. Empty unless the apply failed.
+	FailedStage string
+	// RefusedTools lists the tools an LLM fixer was refused during this apply,
+	// each label once, in the order they were first refused.
+	RefusedTools []string
+	// RepairBundle is the repair bundle written beside the kept staged tree of
+	// a failed apply. Empty when no bundle was written.
+	RepairBundle string
 	// DepthRequested is how far this bump was ASKED to be validated: the depth
 	// class, tier, configuration and the operator's flags resolved to, raised by
 	// a reviewer escalation where one applied.
@@ -319,9 +340,10 @@ type Applier struct {
 	// reenabled holds packages re-enabled in packages.toml after this Applier
 	// loaded it (--revive enables an orphan's entry, then applies it). Their
 	// enabled = false snapshot in configs is stale and must not refuse the bump.
-	// Guarded by reenabledMu: revives run concurrently on one Applier.
-	reenabledMu sync.Mutex
-	reenabled   map[string]bool
+	// Revives run concurrently on one Applier, so the set carries its own lock;
+	// it is held by pointer so a per-run copy of the Applier (withoutAgents)
+	// shares it instead of copying a lock.
+	reenabled *reenabledSet
 	// pending manages pending updates
 	pending *PendingList
 	// logsDir is the directory for storing compile logs
@@ -460,6 +482,36 @@ type Applier struct {
 	// NewApplier leaves it discarding when the option is absent. Read it
 	// through logger().
 	log *slog.Logger
+
+	// adoptedRoot, when non-empty, is a staged tree an earlier run kept and an
+	// operator edited: Apply validates and promotes that tree as it stands
+	// instead of staging a fresh one. Set via WithAdoptedStagedTree.
+	adoptedRoot string
+}
+
+// reenabledSet is the set of packages re-enabled after the Applier loaded
+// packages.toml, guarded for concurrent revives.
+type reenabledSet struct {
+	mu   sync.Mutex
+	pkgs map[string]bool
+}
+
+func (s *reenabledSet) add(pkg string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pkgs == nil {
+		s.pkgs = make(map[string]bool)
+	}
+	s.pkgs[pkg] = true
+}
+
+func (s *reenabledSet) has(pkg string) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.pkgs[pkg]
 }
 
 // logger returns the applier's logger, or a discarding one for an applier that
@@ -763,6 +815,30 @@ func WithApplierBumpReviewer(reviewer fixer.BumpReviewer) ApplierOption {
 	}
 }
 
+// WithAdoptedStagedTree makes Apply adopt the staged tree at root, kept by an
+// earlier failed apply and edited since, instead of staging a fresh candidate:
+// the manifest step, the gates and promotion run on that tree's bytes exactly
+// as they stand. No LLM agent runs on an adopted tree — the manifest fixer,
+// the build fixer and the bump reviewer are left out of the run, whatever was
+// wired — because its candidate is the operator's work, not an agent's input.
+// The tree is never removed by the run; a failure keeps it and rewrites its
+// repair bundle. An empty root leaves the applier as it was.
+func WithAdoptedStagedTree(root string) ApplierOption {
+	return func(a *Applier) {
+		a.adoptedRoot = root
+	}
+}
+
+// withoutAgents returns a copy of a with no LLM agent wired, for one run. The
+// copy, not a, is changed, so an Applier shared across runs keeps its agents.
+func (a *Applier) withoutAgents() *Applier {
+	view := *a
+	view.fixer = nil
+	view.buildFixer = nil
+	view.reviewer = nil
+	return &view
+}
+
 // NewApplier creates a new applier instance for the given overlay.
 // It initializes the pending list and logs directory.
 func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier, error) {
@@ -785,6 +861,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// path is byte-identical; replaced by WithApplierRunAttached.
 		runAttached: func(c *exec.Cmd) ([]byte, error) { return c.CombinedOutput() },
 		log:         logging.OrDiscard(nil),
+		reenabled:   &reenabledSet{},
 	}
 
 	// Apply options first
@@ -869,6 +946,9 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	}()
 
 	run := &applyRun{a: a, pkg: pkg, compile: compile, result: result}
+	if a.adoptedRoot != "" {
+		run.a = a.withoutAgents()
+	}
 	if done, err := run.preflight(); done != nil {
 		return done, err
 	}
@@ -926,6 +1006,54 @@ type applyRun struct {
 	inputs          stagedInputs
 	retainedVerdict string
 	cand            candidatePaths
+
+	// gatesPassed is set once every gate allowed promotion; only then does the
+	// record beside the staged tree name the bytes the gates read.
+	gatesPassed bool
+
+	// stageName is the last stage this run entered through stage; fail copies
+	// it into the result.
+	stageName string
+}
+
+// stageFallback is the stage a failure is reported in when its exit entered
+// none.
+const stageFallback = "apply"
+
+// stage enters the named stage: it is recorded on the run and reported to the
+// progress reporter. A sub-stage recorded on the result by an earlier step is
+// over once a new stage begins, so it is cleared here.
+func (r *applyRun) stage(name string) {
+	r.stageName = name
+	r.result.FailedStage = ""
+	r.a.reporter.TaskStage(r.pkg, name)
+}
+
+// fail ends the apply with err through failApply, naming the stage it failed
+// in: the sub-stage a step recorded on the result, else the run's stage, else
+// stageFallback.
+func (r *applyRun) fail(err error) (*ApplyResult, error) {
+	r.result.FailedStage = cmp.Or(r.result.FailedStage, r.stageName, stageFallback)
+	return r.a.failApply(r.pkg, r.result, err)
+}
+
+// substage reports a step inside the current stage and records it on result as
+// the stage a failure from here on belongs to. It is kept on the result rather
+// than on an applyRun because the steps that report one run on Applier methods
+// --check shares; applyRun.stage clears it when the next stage begins.
+func (a *Applier) substage(result *ApplyResult, pkg, name string) {
+	result.FailedStage = name
+	a.reporter.TaskStage(pkg, name)
+}
+
+// appendRefusedTools adds each label not already in result.RefusedTools, in
+// order.
+func appendRefusedTools(result *ApplyResult, labels []string) {
+	for _, l := range labels {
+		if !slices.Contains(result.RefusedTools, l) {
+			result.RefusedTools = append(result.RefusedTools, l)
+		}
+	}
 }
 
 // preflight runs every check that precedes staging: the hold refusal, the
@@ -948,7 +1076,7 @@ func (r *applyRun) preflight() (*ApplyResult, error) {
 	r.result.OldVersion = update.CurrentVersion
 
 	if err := r.resolveTarget(); err != nil {
-		return r.a.failApply(r.pkg, r.result, err)
+		return r.fail(err)
 	}
 	if done, err := r.resolveCurrent(); done != nil {
 		return done, err
@@ -1040,7 +1168,7 @@ func (r *applyRun) resolveCurrent() (*ApplyResult, error) {
 		// the package is present, its key is wrong. Pruning would delete the
 		// pending record and report success-ish, hiding the typo. Fail loudly.
 		if errors.Is(err, ebuilds.ErrSlotNotFound) {
-			return r.a.failApply(r.pkg, r.result, err)
+			return r.fail(err)
 		}
 		// Package no longer present in the overlay (removed/renamed). The pending
 		// entry is obsolete — prune it and report, not as a failure.
@@ -1070,7 +1198,7 @@ func (r *applyRun) awaitRequirements() (*ApplyResult, error) {
 	waiting, err := r.a.unmetRequirements(r.pkg, r.update)
 	if err != nil {
 		if !errors.Is(err, ErrRequirementsNotCaptured) {
-			return r.a.failApply(r.pkg, r.result, err)
+			return r.fail(err)
 		}
 		r.result.Waiting = []string{err.Error()}
 		return r.result, nil
@@ -1086,8 +1214,15 @@ func (r *applyRun) awaitRequirements() (*ApplyResult, error) {
 // gates. It owns the two cleanups armed during staging, so they run before
 // Apply's own on every exit.
 func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
-	if done, err := r.reuseRetainedTree(ctx); done != nil {
-		return done, err
+	// An adopted tree is not a reuse question: it is promoted only on the gates
+	// this run runs over it.
+	if r.a.adoptedRoot == "" {
+		if done, err := r.refuseRepairPending(); done != nil {
+			return done, err
+		}
+		if done, err := r.reuseRetainedTree(ctx); done != nil {
+			return done, err
+		}
 	}
 
 	// Materialise the candidate where the gates will read it: in a staged tree
@@ -1096,8 +1231,13 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// Only the pre-staging branch arms the rollback, and it arms it with the one
 	// path it just wrote. The staged branch leaves it nil, because after it there
 	// is still nothing in the published overlay to take back.
+	if r.a.adoptedRoot != "" {
+		r.stage("adopt")
+	} else {
+		r.stage("substitute")
+	}
 	if prepErr := r.prepareCandidate(); prepErr != nil {
-		return r.a.failApply(r.pkg, r.result, prepErr)
+		return r.fail(prepErr)
 	}
 
 	// A record of what the gates said, beside the tree they said it about,
@@ -1110,7 +1250,11 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// records the final list and the depth a reviewer's escalation may have raised.
 	if stagedRoot := r.result.StagedPath; stagedRoot != "" {
 		defer func() {
-			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth)
+			validatedEbuild := ""
+			if r.gatesPassed {
+				validatedEbuild = r.cand.ebuildPath
+			}
+			r.a.recordStagedProof(ctx, stagedRoot, r.pkg, r.newVersion, r.inputs, r.gates, r.depth.Depth, validatedEbuild)
 		}()
 	}
 
@@ -1119,7 +1263,7 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// outcome (including whether a fix was applied) is recorded on result. On the
 	// staged path this is `pkgdev manifest` inside the staged tree against a
 	// private distdir, so no directory the host shares changes while it runs.
-	r.a.reporter.TaskStage(r.pkg, "manifest")
+	r.stage("manifest")
 	fetchedDistdir, manifestErr := r.a.runManifestWithFix(ctx, r.cand, r.pkg, r.newVersion, r.result)
 	// Armed the instant the directory can exist, so every exit below — the six
 	// failing ones included — takes it back. A removal added after
@@ -1130,14 +1274,64 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// only copy of the candidate's archive in existence locally.
 	r.cand.fetchedDistdir = fetchedDistdir
 	if manifestErr != nil {
-		return r.a.failApply(r.pkg, r.result, fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
+		return r.fail(fmt.Errorf("%w: %w", ErrManifestFailed, manifestErr))
 	}
 	// pkgdev exiting 0 does not prove every SRC_URI file got a DIST line.
+	r.stage("coverage")
 	if err := r.a.checkManifestCoverage(ctx, r.cand.pkgDir, r.pkg, r.newVersion); err != nil {
-		return r.a.failApply(r.pkg, r.result, err)
+		return r.fail(err)
 	}
 
 	return r.gateAndPromote(ctx)
+}
+
+// refuseRepairPending ends the apply when the staged tree this run would
+// replace holds a repair the operator has not finished (see repairPending).
+//
+// It returns without fail on purpose: failApply would mark the pending entry
+// failed and rewrite the bundle, and both belong to the pending repair.
+func (r *applyRun) refuseRepairPending() (*ApplyResult, error) {
+	root, bundle, err := r.a.repairPending(r.pkg, r.newVersion)
+	if err == nil {
+		return nil, nil
+	}
+	r.result.StagedPath = root
+	r.result.RepairBundle = bundle
+	r.result.Error = err
+	return r.result, err
+}
+
+// repairPending checks the staged tree a restage of pkg at version would
+// remove. When its repair bundle carries the repair mark, the tree holds a
+// --repair session's work, and the returned error, wrapping ErrRepairPending,
+// names the command that resumes it and the bundle whose deletion gives the
+// repair up; root and bundle locate the tree. A tree
+// with no bundle, or with the unmarked bundle a plain failed apply leaves, may
+// be restaged, and the error is nil.
+//
+// A bundle that cannot be read is logged and restaged over: --repair refuses
+// such a bundle too, so keeping the tree would leave the package stuck.
+func (a *Applier) repairPending(pkg, version string) (root, bundle string, err error) {
+	if a.stagingRoot == "" {
+		return "", "", nil
+	}
+	root, pathErr := validate.StagedTreePath(a.stagingRoot, pkg, version)
+	if pathErr != nil {
+		// Staging refuses the same key and version and reports why.
+		return "", "", nil //nolint:nilerr // staging reports it as the package's failure
+	}
+	bundle = filepath.Join(root, repair.BundleFile)
+	marked, readErr := repair.HasRepairMark(root)
+	if readErr != nil {
+		a.logger().Warn("repair: the repair bundle of the staged tree could not be read; restaging over it",
+			"package", pkg, "path", bundle, "err", readErr)
+		return "", "", nil
+	}
+	if !marked {
+		return "", "", nil
+	}
+	return root, bundle, fmt.Errorf("%w: %s-%s: staged tree kept for repair: bentoo overlay autoupdate --repair %s, or delete %s to give the repair up",
+		ErrRepairPending, pkg, version, pkg, bundle)
 }
 
 // reuseRetainedTree asks what an earlier run already proved about this exact
@@ -1161,16 +1355,10 @@ func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) 
 	if r.a.stagingRoot == "" {
 		return nil, nil
 	}
-	captured, err := r.a.stagedInputsFor(r.pkg, r.currentVersion, r.update)
-	if err != nil {
-		return r.a.failApply(r.pkg, r.result, err)
+	r.stage("retained")
+	if err := r.captureInputs(); err != nil {
+		return r.fail(err)
 	}
-	r.inputs = captured
-
-	// One of the two answers is recorded on every staged apply, and
-	// the default is the honest one — the gates below run in this run unless
-	// the retained tree takes their place.
-	r.result.ValidationSource = ValidationSourceThisRun
 
 	reuse := r.a.reusableStagedTree(r.pkg, r.newVersion, r.inputs, r.depth.Depth)
 	if reuse.root != "" {
@@ -1187,12 +1375,29 @@ func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) 
 		// what the decision was taken on — nothing was validated here.
 		r.result.ValidationSource = ValidationSourceStaged
 		r.result.StagedPath = reuse.root
-		return r.a.failApply(r.pkg, r.result, reuse.err)
+		r.result.StagedEbuild = reuse.cand.ebuildPath
+		return r.fail(reuse.err)
 	}
 	if !reuse.promote {
 		return nil, nil
 	}
 	return r.promoteRetained(ctx, reuse)
+}
+
+// captureInputs records on the run the inputs the staged tree's record is
+// written against, and marks the gates as this run's.
+func (r *applyRun) captureInputs() error {
+	captured, err := r.a.stagedInputsFor(r.pkg, r.currentVersion, r.update)
+	if err != nil {
+		return err
+	}
+	r.inputs = captured
+
+	// One of the two answers is recorded on every staged apply, and
+	// the default is the honest one — the gates below run in this run unless
+	// the retained tree takes their place.
+	r.result.ValidationSource = ValidationSourceThisRun
+	return nil
 }
 
 // promoteRetained publishes a retained tree that was already proved, with no
@@ -1204,11 +1409,13 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 	// `--apply` stops running the check first.
 	r.result.ValidationSource = ValidationSourceStaged
 	r.result.StagedPath = reuse.root
+	r.result.StagedEbuild = reuse.cand.ebuildPath
 	r.result.DepthReached = reuse.reached
 
+	r.stage("promote")
 	promoted, err := r.a.promote(ctx, reuse.cand, r.pkg, r.newVersion)
 	if err != nil {
-		return r.a.failApply(r.pkg, r.result, err)
+		return r.fail(err)
 	}
 	r.rollbackPublished = promoted
 
@@ -1216,13 +1423,18 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 	// Retention's other direction, exactly as on the validating path: the
 	// retained tree is a failure's evidence, and there is no failure here.
 	r.result.StagedPath = ""
+	r.result.StagedEbuild = ""
 	r.a.completeApply(ctx, r.pkg, r.newVersion, r.result)
 	return r.result, nil
 }
 
 // prepareCandidate materialises the candidate in the published overlay or in a
-// staged tree; only the overlay route arms rollbackPublished.
+// staged tree, or adopts a kept one; only the overlay route arms
+// rollbackPublished.
 func (r *applyRun) prepareCandidate() error {
+	if r.a.adoptedRoot != "" {
+		return r.adoptCandidate(r.a.adoptedRoot)
+	}
 	var prepErr error
 	if r.a.stagingRoot == "" {
 		r.cand, r.rollbackPublished, prepErr = r.a.prepareInOverlay(r.pkg, r.currentVersion, r.newVersion, r.update)
@@ -1269,25 +1481,28 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	result.DepthReason = appendDepthReason(r.depth.Reason, r.retainedVerdict)
 
 	if err := r.runDepthGates(ctx); err != nil {
-		return a.failApply(pkg, result, err)
+		return r.fail(err)
 	}
 
 	// The outcome states its own reach, and says why it stops
 	// where it does, whether or not this apply is about to succeed.
 	a.recordDepthReached(result, r.gates, r.depth.Depth)
 
+	r.stage("promotion")
 	if err := r.promotionRefusal(ctx); err != nil {
-		return a.failApply(pkg, result, err)
+		return r.fail(err)
 	}
+	r.gatesPassed = true
 
 	// The published overlay's first and only write of this apply. On the
 	// pre-staging path there is nothing to promote: copyEbuild already put the
 	// candidate there and `pkgdev manifest` already regenerated the Manifest in
 	// place.
 	if r.cand.staged {
+		r.stage("promote")
 		promoted, err := a.promote(ctx, r.cand, pkg, r.newVersion)
 		if err != nil {
-			return a.failApply(pkg, result, err)
+			return r.fail(err)
 		}
 		// Armed only now: from this point a failure DOES have something published
 		// to take back, and promotion's own rollback is what knows the difference
@@ -1310,6 +1525,7 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	// the next attempt at this same package and version restages over it, so
 	// what is left is one directory per version, not a growing pile per run.
 	result.StagedPath = ""
+	result.StagedEbuild = ""
 
 	a.completeApply(ctx, pkg, r.newVersion, result)
 	return result, nil
@@ -1324,10 +1540,11 @@ func (r *applyRun) runDepthGates(ctx context.Context) error {
 	// --compile the shipped gate keeps its prompt, its privilege and its repair
 	// path, and running the depth gates beside it would build the same tree twice.
 	if !r.compile {
-		r.a.reporter.TaskStage(r.pkg, "build gates")
+		r.stage("build gates")
 		buildGates, buildErr := r.a.runBuildGates(ctx, r.cand, r.pkg, r.newVersion, r.depth.Depth, r.result)
 		r.gates = append(r.gates, buildGates...)
 		if buildErr != nil {
+			r.gateFailed(gateForDepth(r.depth.Depth))
 			r.a.recordDepthReached(r.result, r.gates, r.depth.Depth)
 			return buildErr
 		}
@@ -1337,15 +1554,24 @@ func (r *applyRun) runDepthGates(ctx context.Context) error {
 	// Run compile test if requested. It runs against cand's repository, which on
 	// the staged path is the staged tree: a gate that built out of the published
 	// overlay would be reading a candidate that is not there yet.
-	r.a.reporter.TaskStage(r.pkg, "compile")
+	r.stage("compile")
 	logPath, err := r.a.runCompile(ctx, r.cand, r.pkg, r.newVersion, r.result)
 	if err != nil {
+		r.gateFailed(compileGatePhase)
 		r.result.LogPath = logPath
 		r.a.recordDepthReached(r.result, r.gates, r.depth.Depth)
 		return err
 	}
 	r.gates = append(r.gates, r.a.compileGateResult(r.cand, r.pkg, r.newVersion, r.result)...)
 	return nil
+}
+
+// gateFailed names the gate a failed build stage stopped in, unless a repair
+// step inside it already recorded the sub-stage it failed in.
+func (r *applyRun) gateFailed(gate string) {
+	if r.result.FailedStage == "" {
+		r.result.FailedStage = "gate:" + gate
+	}
 }
 
 // promotionRefusal returns the first reason the candidate may not be
@@ -1491,13 +1717,52 @@ func appendDepthReason(existing, added string) string {
 // returns, because the deferred rollback keys on it, and a SetStatus that itself
 // fails must be appended to the original error rather than replacing it. One
 // helper is one place for both rules.
+//
+// It is also where a failure that kept a staged tree leaves its repair bundle,
+// written after the status so the bundle records the final error text.
 func (a *Applier) failApply(pkg string, result *ApplyResult, err error) (*ApplyResult, error) {
 	result.Error = err
 	if serr := a.pending.SetStatus(pkg, StatusFailed, result.Error.Error()); serr != nil {
 		// Keep the original error; just say that the status could not be recorded.
 		result.Error = fmt.Errorf("%w (also failed to update status: %v)", result.Error, serr) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
 	}
+	a.writeRepairBundle(pkg, result)
 	return result, result.Error
+}
+
+// writeRepairBundle writes the repair bundle of a failed apply into its kept
+// staged tree and records its path on result. It does nothing when no staged
+// tree was kept. A bundle that cannot be written is a WARN: the apply's outcome
+// is already decided and is left exactly as it is.
+func (a *Applier) writeRepairBundle(pkg string, result *ApplyResult) {
+	if result.StagedPath == "" || result.Error == nil {
+		return
+	}
+	bundle := repair.Bundle{
+		Schema:         repair.SchemaVersion,
+		Package:        pkg,
+		CurrentVersion: result.OldVersion,
+		Candidate:      result.NewVersion,
+		Stage:          result.FailedStage,
+		Failure:        repair.Redact(result.Error.Error(), secrets.Resolved()),
+		RefusedTools:   result.RefusedTools,
+		StagedRoot:     result.StagedPath,
+		EbuildPath:     result.StagedEbuild,
+		// The zero config of a package with no entry yields no URL.
+		UpstreamURLs: a.configs[pkg].UpstreamURLs(),
+		Created:      time.Now().UTC(),
+	}
+	// A failure of an adopted tree is a --repair session that did not pass.
+	if a.adoptedRoot != "" {
+		bundle.RepairedAt = bundle.Created
+	}
+	path := filepath.Join(result.StagedPath, repair.BundleFile)
+	if err := repair.WriteBundle(bundle); err != nil {
+		a.logger().Warn("repair: could not write the repair bundle beside the kept staged tree "+
+			"(the apply outcome is unchanged)", "package", pkg, "path", path, "err", err)
+		return
+	}
+	result.RepairBundle = path
 }
 
 // prepareInOverlay materialises the candidate the way every release before
@@ -1605,6 +1870,7 @@ func (a *Applier) prepareInStagingTree(pkg, currentVersion, newVersion string, u
 	if err != nil {
 		return candidatePaths{}, err
 	}
+	result.StagedEbuild = cand.ebuildPath
 	// The same advisory prepareInOverlay gives, on the path --apply and --check
 	// actually take once a staging root is configured; wired into the overlay
 	// path alone it never reached a real bump.
@@ -2227,7 +2493,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	distdir = fixDistdir
 
 	a.logger().Info("manifest failed; invoking LLM fixer to repair the ebuild", "package", pkg, "version", version)
-	a.reporter.TaskStage(pkg, "llm-fix")
+	a.substage(result, pkg, "llm-fix")
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
 	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
@@ -2242,6 +2508,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	if fixErr != nil {
 		return distdir, fmt.Errorf("%w (LLM fix attempt failed: %v)", firstErr, fixErr) //nolint:errorlint // secondary context; the manifest failure is the cause
 	}
+	appendRefusedTools(result, fixRes.DeniedTools)
 
 	// Authoritative re-check: trust bentoo's own manifest run, not the agent's
 	// self-report.
@@ -2260,7 +2527,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	//
 	// The path returned is whatever the re-check ran against, on its failure paths
 	// too — the caller must be able to take the directory back however this ends.
-	a.reporter.TaskStage(pkg, "re-check")
+	a.substage(result, pkg, "re-check")
 	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
@@ -2891,7 +3158,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", compileGatePhase, pkg, version)
 	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
 		"gate", compileGatePhase, "package", pkg, "version", version)
-	a.reporter.TaskStage(pkg, "llm-build-fix")
+	a.substage(result, pkg, "llm-build-fix")
 	a.reporter.Log("info", fixLine)
 
 	fixRes, fixErr := a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
@@ -2913,6 +3180,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 	case fixErr != nil:
 		return first.logPath, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)
 	}
+	appendRefusedTools(result, fixRes.DeniedTools)
 
 	// An empty summary is the agent reporting NO CHANGE (see BuildFixResult.Summary),
 	// and a re-run of an untouched tree can only reproduce the failure it already
@@ -2926,7 +3194,7 @@ func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, 
 
 	// The authoritative re-run: bentoo's own build of the same phase, never
 	// the agent's account of what it did.
-	a.reporter.TaskStage(pkg, "re-check")
+	a.substage(result, pkg, "re-check")
 	second := a.compileOnce(ctx, cand, pkg, version, privTool)
 	// The re-run is the verdict, so its distdir facts are the ones the
 	// gate must report: this build is the one the PASS would be about.
@@ -3230,24 +3498,16 @@ func copyTree(src, dst string) error {
 // MarkReenabled tells the Applier that pkg's entry was re-enabled in
 // packages.toml after the Applier loaded it, so its stale enabled = false no
 // longer refuses the bump. hold = true still does.
+// It needs an Applier built by NewApplier, which allocates the set.
 func (a *Applier) MarkReenabled(pkg string) {
-	a.reenabledMu.Lock()
-	defer a.reenabledMu.Unlock()
-	if a.reenabled == nil {
-		a.reenabled = make(map[string]bool)
-	}
-	a.reenabled[pkg] = true
+	a.reenabled.add(pkg)
 }
 
 // refusal is refusedBy with the run's re-enables applied.
 func (a *Applier) refusal(pkg string) string {
 	reason := registry.RefusedBy(a.configs, pkg)
-	if reason == "enabled = false" {
-		a.reenabledMu.Lock()
-		defer a.reenabledMu.Unlock()
-		if a.reenabled[pkg] {
-			return ""
-		}
+	if reason == "enabled = false" && a.reenabled.has(pkg) {
+		return ""
 	}
 	return reason
 }

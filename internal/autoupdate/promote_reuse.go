@@ -293,12 +293,30 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 	if record.DistfileDigest != inputs.distfile {
 		return stagedReuse{
 			root:   root,
+			cand:   cand,
 			reason: "the retained tree matches this bump exactly, but the distfile it was validated against changed under it",
 			err: fmt.Errorf("not promoted: the distfile of %s-%s was validated as %s and the published Manifest now records %s; "+
 				"an archive re-rolled upstream under the same name is a different source tree, and every gate's answer was about the old one. "+
 				"Re-run `overlay autoupdate --check` for this package to restage and re-prove it against the archive on disk now",
 				pkg, newVersion, record.DistfileDigest, inputs.distfile),
 		}
+	}
+
+	// The digests above say the tree is about this bump; this one says its
+	// candidate still holds the bytes the gates read. An edit made after the
+	// proof, or a record from before the field existed, is validated again.
+	current, err := os.ReadFile(cand.ebuildPath)
+	if err != nil {
+		return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree's candidate %s could not be read (%v), so the gates run in this run", cand.ebuildPath, err)}
+	}
+	switch currentDigest := validate.DigestBytes(current); {
+	case record.ValidatedDigest == "":
+		return stagedReuse{root: root, reason: "the record carries no validated digest, so it does not say which bytes the gates read and the gates run in this run"}
+	case record.ValidatedDigest != currentDigest:
+		return stagedReuse{root: root, reason: fmt.Sprintf(
+			"the retained tree's gates read a candidate whose bytes digest to %s and the staged candidate now digests to %s, "+
+				"so it was edited after its proof and the gates run in this run",
+			short(record.ValidatedDigest), short(currentDigest))}
 	}
 
 	return stagedReuse{
@@ -335,7 +353,10 @@ func short(digest string) string {
 // The cost of a missing record is exactly one revalidation, which is the
 // behaviour every release before this one had. Failing an otherwise good apply
 // over a bookkeeping file would trade an hour saved for a bump not published.
-func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth) {
+//
+// validatedEbuild is the candidate the gates read when they passed, "" when
+// they did not: its bytes are digested at this moment into ValidatedDigest.
+func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version string, inputs stagedInputs, gates []validate.GateResult, depth validate.Depth, validatedEbuild string) {
 	if root == "" {
 		return
 	}
@@ -376,6 +397,7 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		Depth:              depth,
 		Gates:              gates,
 		EbuildDigest:       inputs.ebuild,
+		ValidatedDigest:    a.validatedDigest(validatedEbuild, pkg, version),
 		SubstitutionDigest: inputs.substitutions,
 		DistfileDigest:     inputs.distfile,
 	})
@@ -384,4 +406,20 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 			"(the bump itself is unaffected; the next run validates it again instead of promoting the retained tree)",
 			"package", pkg, "version", version, "root", root, "err", err)
 	}
+}
+
+// validatedDigest digests the candidate the gates read, "" when path is empty.
+// A candidate that cannot be read is a WARN and records no digest, which costs
+// the next run one revalidation and never fails the bump.
+func (a *Applier) validatedDigest(path, pkg, version string) string {
+	if path == "" {
+		return ""
+	}
+	body, err := os.ReadFile(path) //nolint:gosec // the path is the candidate inside the staged tree this run validated
+	if err != nil {
+		a.logger().Warn("could not read the validated candidate to record its digest; the next run validates it again",
+			"package", pkg, "version", version, "path", path, "err", err)
+		return ""
+	}
+	return validate.DigestBytes(body)
 }

@@ -67,15 +67,16 @@ var manifestFixAllowedTools = []string{
 	"WebFetch",
 }
 
-// bentooEbuildGuidance is appended to the agent's system prompt via
+// EbuildGuidance is appended to the agent's system prompt via
 // --append-system-prompt so the fix is QA-aware even in --bare mode (where plugin
 // sync and CLAUDE.md auto-discovery are skipped and the /bentoo skill may not
 // resolve). It is a faithful condensation of the bentoo-dev "10 critical ebuild
 // gotchas" reference — the same knowledge the /bentoo skill's ebuild-editor and
 // qa-checker carry — so an edit to SRC_URI / S= / MY_P* does not silently
 // introduce a QA regression. Kept terse on purpose: the agent reads the real
-// ebuild for specifics.
-const bentooEbuildGuidance = `You are editing a Gentoo ebuild in the Bentoo overlay. Honour these critical QA rules (the "10 gotchas"):
+// ebuild for specifics. It is exported so the interactive repair session
+// carries the same text verbatim.
+const EbuildGuidance = `You are editing a Gentoo ebuild in the Bentoo overlay. Honour these critical QA rules (the "10 gotchas"):
 1. eapply_user: if you override src_prepare(), call ` + "`default`" + ` (or eapply_user explicitly) or user patches are silently dropped.
 2. || die: shell commands (cp, mv, sed, rm, find, chmod, mkdir) need ` + "`|| die`" + `; EAPI 8 builtins (econf/emake/dobin) auto-die.
 3. Live ebuilds (PV=9999) must have KEYWORDS="" or no KEYWORDS line.
@@ -87,6 +88,10 @@ const bentooEbuildGuidance = `You are editing a Gentoo ebuild in the Bentoo over
 9. In src_prepare, ` + "`default`" + ` applies the PATCHES array AND eapply_user — never loop over PATCHES manually.
 10. When upstream naming/versioning differs from ${PN}/${PV}, bridge it with MY_PN/MY_P/MY_PV (e.g. MY_PV="${PV/_rc/-rc}") rather than hardcoding.
 Do NOT change PN or the version (PV) encoded in the ebuild filename. Prefer the smallest edit that fixes the fetch; preserve the ebuild's existing style.`
+
+// bentooEbuildGuidance is the name the unattended fixers build their argv
+// with; it is EbuildGuidance itself, so their argv is unchanged.
+const bentooEbuildGuidance = EbuildGuidance
 
 // ManifestFixRequest carries everything the agent needs to repair a failed
 // manifest step for a single package bump.

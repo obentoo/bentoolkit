@@ -178,6 +178,9 @@ type BuildFixResult struct {
 	// Attempt is the normalized attempt number this result belongs to, so a
 	// report can say which of the buildFixMaxAttempts tries produced the change.
 	Attempt int
+	// DeniedTools names the tools the CLI refused during a run that nonetheless
+	// ended successfully, labelled as ManifestFixResult.DeniedTools is.
+	DeniedTools []string
 }
 
 // BuildFixer is the optional capability an LLM provider may implement to repair a
@@ -574,5 +577,6 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 		Model:        f.model,
 		ModelIsAlias: isModelAlias(f.model),
 		Attempt:      attempt,
+		DeniedTools:  llm.RefusedToolLabels(env.PermissionDenials),
 	}, nil
 }
