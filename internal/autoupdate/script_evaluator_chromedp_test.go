@@ -10,6 +10,7 @@ package autoupdate
 
 import (
 	"context"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -62,7 +63,7 @@ func libreofficeLikeSite() *httptest.Server {
 
 // TestChromedpEvaluator_Integration verifies what the script parser needs from
 // its browser backend: post-render DOM access, Promise auto-await
-// (WithAwaitPromise makes chromedp.Evaluate resolve a returned Promise), the
+// (EvalAwaitPromise makes chromedp.Evaluate resolve a returned Promise), the
 // real multi-step libreoffice.js logic, and the non-string-result guard.
 func TestChromedpEvaluator_Integration(t *testing.T) {
 	eval := newIntegrationEvaluator(t)
@@ -108,6 +109,80 @@ func TestChromedpEvaluator_Integration(t *testing.T) {
 	t.Run("rejects non-string result", func(t *testing.T) {
 		if _, err := eval.Evaluate(ctx, srv.URL, `1 + 1`, nil); err == nil {
 			t.Fatal("expected an error for a non-string script result")
+		}
+	})
+}
+
+// probeHeader is the header the echo page reflects into its body.
+const probeHeader = "X-Bentoo-Probe"
+
+// headerEchoSite serves a page whose body is the value of probeHeader on the
+// request that fetched it, so a script can read back what the browser sent.
+func headerEchoSite() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `<html><body><p id="echo">`+html.EscapeString(r.Header.Get(probeHeader))+`</p></body></html>`)
+	}))
+}
+
+// TestChromedpEvaluator_IntegrationHeadersPromisesDeadline pins the rest of the
+// evaluator's contract against a real browser: extra headers reach the server,
+// a Promise that settles after a delay is awaited, a JS null reads as "" while
+// undefined is an error, and the caller's deadline aborts a script that never
+// settles.
+func TestChromedpEvaluator_IntegrationHeadersPromisesDeadline(t *testing.T) {
+	eval := newIntegrationEvaluator(t)
+	srv := headerEchoSite()
+	defer srv.Close()
+	ctx := context.Background()
+
+	t.Run("sends extra headers and awaits a delayed promise", func(t *testing.T) {
+		script := `new Promise(resolve => setTimeout(
+			() => resolve(document.getElementById('echo').textContent + '/late'), 300))`
+		got, err := eval.Evaluate(ctx, srv.URL, script, map[string]string{probeHeader: "probe-42"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "probe-42/late" {
+			t.Fatalf("got %q, want %q (header echoed, promise resolved after the delay)", got, "probe-42/late")
+		}
+	})
+
+	t.Run("sends no header when none is given", func(t *testing.T) {
+		got, err := eval.Evaluate(ctx, srv.URL, `document.getElementById('echo').textContent`, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got != "" {
+			t.Fatalf("got %q, want an empty echo: a previous tab's headers leaked", got)
+		}
+	})
+
+	t.Run("null reads as the empty string", func(t *testing.T) {
+		got, err := eval.Evaluate(ctx, srv.URL, `null`, nil)
+		if err != nil {
+			t.Fatalf("a null result must not be an error, got %v", err)
+		}
+		if got != "" {
+			t.Fatalf("got %q, want the empty string", got)
+		}
+	})
+
+	t.Run("undefined is an error", func(t *testing.T) {
+		if _, err := eval.Evaluate(ctx, srv.URL, `undefined`, nil); err == nil {
+			t.Fatal("expected an error for an undefined script result")
+		}
+	})
+
+	t.Run("honours the caller's deadline", func(t *testing.T) {
+		dctx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+		defer cancel()
+		start := time.Now()
+		_, err := eval.Evaluate(dctx, srv.URL, `new Promise(() => {})`, nil)
+		if err == nil {
+			t.Fatal("expected an error when the caller's deadline passes before the promise settles")
+		}
+		if elapsed := time.Since(start); elapsed > 10*time.Second {
+			t.Fatalf("Evaluate returned after %v; the 500ms caller deadline was not honoured", elapsed)
 		}
 	})
 }
