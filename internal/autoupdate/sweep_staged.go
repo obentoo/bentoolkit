@@ -126,7 +126,8 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	procgroup.Group(cmd)
 
 	// Streamed live as TaskLine events under the package's own task id, and
-	// captured into the error, so a red gate says what pkgdev said. One
+	// captured into the error's *ChildRunError, so a red gate says what pkgdev
+	// said. One
 	// StreamCapture for both streams gives the child a single pipe, which keeps
 	// the captured bytes identical to CombinedOutput's.
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
@@ -138,9 +139,17 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	if runErr != nil {
 		// ErrManifestFailed first, because the promotion decision classifies on
 		// that sentinel; the package and version next, because inside a sweep one
-		// line of output has to say which of forty packages it belongs to.
-		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w\nOutput: %s",
-			ErrManifestFailed, pkg, version, stagedPkgDir, runErr, sc.Captured())
+		// line of output has to say which of forty packages it belongs to. The
+		// output travels in the *ChildRunError, not in the text: the text stays
+		// one line, and the run's whole output is in its log file. A supplied
+		// distdir is the post-fix re-check, so that is the run it names.
+		label := childRunFirstManifest
+		if supplied {
+			label = childRunManifestRecheck
+		}
+		run := s.newChildRunError(label, pkg, version, sc.Captured(), runErr)
+		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w",
+			ErrManifestFailed, pkg, version, stagedPkgDir, run)
 	}
 	return distdir, nil
 }

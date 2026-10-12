@@ -1761,10 +1761,11 @@ func (a *Applier) writeRepairBundle(pkg string, result *ApplyResult) {
 		CurrentVersion: result.OldVersion,
 		Candidate:      result.NewVersion,
 		Stage:          result.FailedStage,
-		Failure:        repair.Redact(result.Error.Error(), secrets.Resolved()),
-		RefusedTools:   result.RefusedTools,
-		StagedRoot:     result.StagedPath,
-		EbuildPath:     result.StagedEbuild,
+		// With each child run's output: the error text itself is one line.
+		Failure:      repair.Redact(childRunDetail(result.Error), secrets.Resolved()),
+		RefusedTools: result.RefusedTools,
+		StagedRoot:   result.StagedPath,
+		EbuildPath:   result.StagedEbuild,
 		// The zero config of a package with no entry yields no URL.
 		UpstreamURLs: a.configs[pkg].UpstreamURLs(),
 		Created:      time.Now().UTC(),
@@ -2092,6 +2093,7 @@ func (a *Applier) sweeper() *sweeper {
 		// sweeper.
 		withSweeperDistdir(a.distdir, a.configuredDistdir),
 		withSweeperDistfilesCache(a.distfilesCache),
+		withSweeperChildLogsDir(a.logsDir),
 		withSweeperLogger(a.logger()),
 	)
 }
@@ -2514,11 +2516,13 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
 	fixRes, fixErr := a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
-		Package:       pkg,
-		Version:       version,
-		PkgDir:        pkgDir,
-		EbuildPath:    cand.ebuildPath,
-		ManifestError: firstErr.Error(),
+		Package:    pkg,
+		Version:    version,
+		PkgDir:     pkgDir,
+		EbuildPath: cand.ebuildPath,
+		// The failure WITH pkgdev's output: the agent reads the 404 in it, and
+		// its fetch allowlist is taken from the URLs it names.
+		ManifestError: childRunDetail(firstErr),
 		DistDir:       fixDistdir,
 		UpstreamURLs:  a.configs[pkg].UpstreamURLs(),
 	})
@@ -2548,7 +2552,11 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	recheckDistdir, secondErr := a.runManifestForIn(ctx, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
-		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %v)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools)) //nolint:errorlint // secondary context; the manifest failure is the cause
+		// Both runs stay in the chain, each with its own output: a renderer
+		// walking Unwrap() []error reaches the first run and the re-check apart.
+		// Two %w rather than errors.Join, whose newline separator would make the
+		// error two lines.
+		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %w)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools))
 	}
 
 	result.Fixed = true

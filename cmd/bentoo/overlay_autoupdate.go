@@ -1922,6 +1922,7 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		output.Error.Println("    Status:  Failed")
 		if result.Error != nil {
 			output.Error.Printf("    Error:   %v\n", result.Error)
+			displayChildRuns(result.Error)
 		}
 		if result.LogPath != "" {
 			output.Info.Printf("    Log:     %s\n", result.LogPath)
