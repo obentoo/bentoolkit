@@ -597,7 +597,12 @@ the failed stage (`manifest`, `llm-fix`, `llm-build-fix`, `re-check`,
 redaction as the log, last 16 KiB), the tools the unattended agent was refused,
 the staged tree, the candidate ebuild, the upstream URLs and its creation
 time. The staged sweep (`bentoo overlay staged`) keeps any tree that carries a
-bundle.
+bundle. After a `--repair` that did not pass, the bundle carries a
+`repaired_at` mark, and a later `--apply` or `--check` of that package does not
+restage over the tree: it refuses the package with `staged tree kept for
+repair: bentoo overlay autoupdate --repair <cat/pkg>`, leaving the tree, its
+bundle and the pending entry as they were. A bundle without the mark, as a
+plain failed `--apply` writes it, is restaged over as before.
 
 `--repair <cat/pkg>` cannot be combined with another mode and needs a terminal
 on stdin and stdout and `claude` on `PATH`. It refuses, with exit 1 and before
@@ -628,10 +633,11 @@ exactly as `--apply` would — manifest, then the gates, at no less than the
 depth recorded for the tree, with `--compile` when the bundle failed at the
 compile gate or `--compile` was given — with no LLM agent, and promotes it on
 success: the bundle is removed and the pending entry is completed. A failed
-re-validation rewrites the bundle with the new stage and failure text and
-exits 1. Two cases skip the re-validation and leave everything as the session
-left it, exit 1: bentoo received SIGTERM or SIGHUP during the session (run
-`--repair` again), or the run was interrupted before it.
+re-validation rewrites the bundle with the new stage, the failure text and the
+`repaired_at` mark, and exits 1. Two cases skip the re-validation, leave the
+tree as the session left it and mark the bundle, exit 1: bentoo received
+SIGTERM or SIGHUP during the session (run `--repair` again), or the run was
+interrupted before it.
 
 Promotion publishes only the ebuild and its Manifest. A repair that changes
 `files/` or `metadata.xml` in the staged tree is refused, naming the first

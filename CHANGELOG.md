@@ -14,6 +14,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 - **`overlay autoupdate --repair <pkg>`: repair a failed bump in an
   interactive claude session.** A failed `--apply` that keeps its staged tree
   now writes `.bentoo-repair.json` beside it and prints the `--repair` command.
+  After a `--repair` that did not pass, a later `--apply` or `--check` of that
+  package refuses it instead of restaging over the repair tree.
   `--repair` shows the failure, asks before starting, runs `claude` in the
   foreground in permission mode `default` (every action is asked for, editing
   the published overlay and reading or editing the secrets files are denied,

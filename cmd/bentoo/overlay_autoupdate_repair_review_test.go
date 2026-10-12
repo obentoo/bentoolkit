@@ -2,15 +2,18 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/repair"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 )
 
@@ -49,13 +52,32 @@ func TestRepairSkipsRevalidationAfterTermOrHangup(t *testing.T) {
 			if code != 1 || !strings.Contains(out, "re-validation was skipped because bentoo received "+sig.String()) {
 				t.Fatalf("exit %d, want 1 naming %v:\n%s", code, sig, out)
 			}
-			if readFileOrEmpty(f.bundlePath) != before {
-				t.Fatalf("the bundle changed although the re-validation was skipped")
-			}
+			assertBundleOnlyMarked(t, f, before)
 			if _, err := os.Stat(filepath.Join(f.overlay, "dev-go", "repairdemo", "repairdemo-"+repairCand+".ebuild")); err == nil {
 				t.Fatalf("the candidate was published although the re-validation was skipped")
 			}
 		})
+	}
+}
+
+// assertBundleOnlyMarked fails unless the bundle at f.bundlePath is the one
+// whose JSON was before, with the repair mark added.
+func assertBundleOnlyMarked(t *testing.T, f *repairFix, before string) {
+	t.Helper()
+	after, err := repair.ReadBundle(f.bundlePath)
+	if err != nil {
+		t.Fatalf("the bundle is gone: %v", err)
+	}
+	if after.RepairedAt.IsZero() {
+		t.Fatalf("the bundle carries no repair mark although a session ran")
+	}
+	var want repair.Bundle
+	if err := json.Unmarshal([]byte(before), &want); err != nil {
+		t.Fatal(err)
+	}
+	after.RepairedAt = time.Time{}
+	if !reflect.DeepEqual(after, want) {
+		t.Fatalf("the bundle changed beyond its repair mark:\nbefore %+v\nafter  %+v", want, after)
 	}
 }
 

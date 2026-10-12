@@ -105,6 +105,10 @@ var (
 	// ErrRequirementPinNotFound is returned (wrapped) when the record declares a
 	// pin the new ebuild does not carry: the registry and the ebuild disagree.
 	ErrRequirementPinNotFound = errors.New("pinned requirement not found in ebuild")
+	// ErrRepairPending is returned when the package's staged tree carries a
+	// repair bundle and the run is not adopting that tree: restaging would
+	// delete the operator's pending repair, so the package is refused instead.
+	ErrRepairPending = errors.New("repair pending")
 )
 
 // auxValueRe and commitHashRe are the shapes an upstream-supplied value must
@@ -1213,6 +1217,9 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	// An adopted tree is not a reuse question: it is promoted only on the gates
 	// this run runs over it.
 	if r.a.adoptedRoot == "" {
+		if done, err := r.refuseRepairPending(); done != nil {
+			return done, err
+		}
 		if done, err := r.reuseRetainedTree(ctx); done != nil {
 			return done, err
 		}
@@ -1276,6 +1283,54 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	}
 
 	return r.gateAndPromote(ctx)
+}
+
+// refuseRepairPending ends the apply when the staged tree this run would
+// replace holds a repair the operator has not finished (see repairPending).
+//
+// It returns without fail on purpose: failApply would mark the pending entry
+// failed and rewrite the bundle, and both belong to the pending repair.
+func (r *applyRun) refuseRepairPending() (*ApplyResult, error) {
+	root, bundle, err := r.a.repairPending(r.pkg, r.newVersion)
+	if err == nil {
+		return nil, nil
+	}
+	r.result.StagedPath = root
+	r.result.RepairBundle = bundle
+	r.result.Error = err
+	return r.result, err
+}
+
+// repairPending checks the staged tree a restage of pkg at version would
+// remove. When its repair bundle carries the repair mark, the tree holds a
+// --repair session's work, and the returned error, wrapping ErrRepairPending,
+// names the command that resumes it; root and bundle locate the tree. A tree
+// with no bundle, or with the unmarked bundle a plain failed apply leaves, may
+// be restaged, and the error is nil.
+//
+// A bundle that cannot be read is logged and restaged over: --repair refuses
+// such a bundle too, so keeping the tree would leave the package stuck.
+func (a *Applier) repairPending(pkg, version string) (root, bundle string, err error) {
+	if a.stagingRoot == "" {
+		return "", "", nil
+	}
+	root, pathErr := validate.StagedTreePath(a.stagingRoot, pkg, version)
+	if pathErr != nil {
+		// Staging refuses the same key and version and reports why.
+		return "", "", nil //nolint:nilerr // staging reports it as the package's failure
+	}
+	bundle = filepath.Join(root, repair.BundleFile)
+	marked, readErr := repair.HasRepairMark(root)
+	if readErr != nil {
+		a.logger().Warn("repair: the repair bundle of the staged tree could not be read; restaging over it",
+			"package", pkg, "path", bundle, "err", readErr)
+		return "", "", nil
+	}
+	if !marked {
+		return "", "", nil
+	}
+	return root, bundle, fmt.Errorf("%w: %s-%s: staged tree kept for repair: bentoo overlay autoupdate --repair %s",
+		ErrRepairPending, pkg, version, pkg)
 }
 
 // reuseRetainedTree asks what an earlier run already proved about this exact
@@ -1695,6 +1750,10 @@ func (a *Applier) writeRepairBundle(pkg string, result *ApplyResult) {
 		// The zero config of a package with no entry yields no URL.
 		UpstreamURLs: a.configs[pkg].UpstreamURLs(),
 		Created:      time.Now().UTC(),
+	}
+	// A failure of an adopted tree is a --repair session that did not pass.
+	if a.adoptedRoot != "" {
+		bundle.RepairedAt = bundle.Created
 	}
 	path := filepath.Join(result.StagedPath, repair.BundleFile)
 	if err := repair.WriteBundle(bundle); err != nil {

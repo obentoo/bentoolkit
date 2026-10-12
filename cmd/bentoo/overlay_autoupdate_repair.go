@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
@@ -103,9 +104,20 @@ func (ar *autoupdateRun) runRepair(ctx context.Context, overlayPath, configDir s
 		return err
 	}
 	if err := ctx.Err(); err != nil {
-		return repairInterrupted(pkg, "before the re-validation", err)
+		ar.markRepaired(b)
+		return failWith(1, fmt.Errorf("--repair %s: interrupted before the re-validation; the staged tree is kept as the session left it: %w", pkg, err))
 	}
 	return ar.revalidateRepair(ctx, overlayPath, configDir, auCfg.LLM, b)
+}
+
+// markRepaired sets the repair mark on b's bundle once a session has run and
+// its tree was not promoted, so a later --apply or --check keeps the tree. A
+// mark that cannot be written is a WARN: the run's outcome is already decided.
+func (ar *autoupdateRun) markRepaired(b repair.Bundle) {
+	if err := repair.MarkRepaired(b.StagedRoot, time.Now()); err != nil {
+		ar.log().Warn("the repair bundle could not be marked as repaired; a later --apply may restage over the session's work",
+			"package", b.Package, "staged_root", b.StagedRoot, "err", err)
+	}
 }
 
 // repairInterrupted is the exit-1 outcome of a cancelled run that stopped
@@ -189,14 +201,15 @@ func (ar *autoupdateRun) runRepairSession(ctx context.Context, claudePath string
 	ar.log().Info("the repair session ended",
 		"package", pkg, "exit_status", session.ProcessState.ExitCode(), "err", err)
 	if received != nil {
+		ar.markRepaired(spec.Bundle)
 		return ar.repairStoppedBy(pkg, received)
 	}
 	return nil
 }
 
 // repairStoppedBy is the exit-1 outcome of a run that received SIGTERM or
-// SIGHUP during the session: nothing is re-validated or promoted, and the
-// bundle and the staged tree are left as the session left them.
+// SIGHUP: nothing is re-validated or promoted, and the staged tree is left as
+// the session left it.
 func (ar *autoupdateRun) repairStoppedBy(pkg string, sig os.Signal) error {
 	ar.log().Warn("re-validation skipped: a signal arrived during the repair session", "package", pkg, "signal", sig.String())
 	return failWith(1, fmt.Errorf("--repair %s: the re-validation was skipped because bentoo received %s during the session; run it again with --repair %s",
@@ -206,7 +219,8 @@ func (ar *autoupdateRun) repairStoppedBy(pkg string, sig os.Signal) error {
 // revalidateRepair puts the adopted staged tree through the apply path once,
 // under the lock the run already holds; adopting the tree disables the LLM
 // agents for that run. Only a promoted
-// tree removes the bundle; a failed one has had it rewritten by the applier.
+// tree removes the bundle; a failed one has had it rewritten by the applier,
+// and the bundle carries the repair mark on every way out that did not promote.
 func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig, b repair.Bundle) error {
 	applyCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -220,6 +234,11 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	}
 	result, err := applier.Apply(applyCtx, b.Package, ar.opts.compile || repairNeedsCompile(b))
 	finish()
+	if err != nil || result == nil || !result.Success {
+		// The applier marks the bundle it rewrites; an exit before it reached
+		// the tree rewrote nothing.
+		ar.markRepaired(b)
+	}
 
 	switch {
 	case err != nil:

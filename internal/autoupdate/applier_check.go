@@ -89,6 +89,11 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	if depth.Depth == validate.DepthNone {
 		return checkSkipped(pkg, newVersion, depth.Reason)
 	}
+	// The refusal Apply makes, before anything under the staging root is
+	// removed: a repair in progress is not restaged over by a check either.
+	if _, _, err := a.repairPending(pkg, newVersion); err != nil {
+		return checkSkipped(pkg, newVersion, err.Error())
+	}
 
 	inputs, err := a.stagedInputsFor(pkg, currentVersion, update)
 	if err != nil {

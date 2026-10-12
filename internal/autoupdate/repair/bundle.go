@@ -46,6 +46,11 @@ type Bundle struct {
 	EbuildPath   string    `json:"ebuild_path"`
 	UpstreamURLs []string  `json:"upstream_urls,omitempty"`
 	Created      time.Time `json:"created"`
+	// RepairedAt marks a bundle written after a --repair session that did not
+	// pass: the staged tree holds the operator's work, so a plain --apply or
+	// --check must not restage over it. A bundle without it counts as not
+	// repaired.
+	RepairedAt time.Time `json:"repaired_at,omitzero"`
 }
 
 // Redact masks every non-empty value in secretValues with the logger's "***"
@@ -147,4 +152,43 @@ func ReadBundle(path string) (Bundle, error) {
 			path, ErrUnknownSchema, b.Schema, SchemaVersion)
 	}
 	return b, nil
+}
+
+// Repaired reports whether b carries the repair mark.
+func (b Bundle) Repaired() bool {
+	return !b.RepairedAt.IsZero()
+}
+
+// HasRepairMark reports whether the bundle in stagedRoot carries the repair
+// mark, and nothing else about it: the --apply and --check paths learn only
+// that a repair is pending, never the bundle's failure text. A tree with no
+// bundle has no mark.
+func HasRepairMark(stagedRoot string) (bool, error) {
+	b, err := ReadBundle(filepath.Join(stagedRoot, BundleFile))
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		return false, nil
+	case err != nil:
+		return false, err
+	}
+	return b.Repaired(), nil
+}
+
+// MarkRepaired sets the repair mark, at, on the bundle in stagedRoot and
+// writes it back. A bundle that already carries the mark is left as it is.
+func MarkRepaired(stagedRoot string, at time.Time) error {
+	b, err := ReadBundle(filepath.Join(stagedRoot, BundleFile))
+	if err != nil {
+		return err
+	}
+	if b.Repaired() {
+		return nil
+	}
+	// WriteBundle writes into the root the bundle names; one naming another
+	// tree must not have a bundle written there.
+	if filepath.Clean(b.StagedRoot) != filepath.Clean(stagedRoot) {
+		return fmt.Errorf("mark repair bundle in %s: it names the staged tree %s", stagedRoot, b.StagedRoot)
+	}
+	b.RepairedAt = at.UTC()
+	return WriteBundle(b)
 }
