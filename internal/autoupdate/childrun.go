@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -207,18 +208,22 @@ func (sp *childRunSpill) keep(logsDir, pkg, version, label string) (string, erro
 
 // discard closes and removes the spill file, which holds unmasked output and so
 // never outlives the run. It is safe on nil and safe to call twice.
-func (sp *childRunSpill) discard() {
+func (sp *childRunSpill) discard() error {
 	if sp == nil {
-		return
+		return nil
 	}
 	sp.mu.Lock()
 	defer sp.mu.Unlock()
 	if sp.file == nil {
-		return
+		return nil
 	}
-	_ = sp.file.Close()
-	_ = os.Remove(sp.file.Name())
+	name := sp.file.Name()
+	closeErr := sp.file.Close()
 	sp.file = nil
+	if err := os.Remove(name); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return errors.Join(closeErr, fmt.Errorf("removing %s: %w", name, err))
+	}
+	return nil
 }
 
 // writeChildRunLog copies src, every resolved secret masked, to the run's log
@@ -246,12 +251,10 @@ func writeChildRunLog(logsDir, pkg, version, label string, src io.Reader) (strin
 	}
 	closeErr := tmp.Close()
 	if err := errors.Join(writeErr, closeErr); err != nil {
-		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("writing %s: %w", tmpName, err)
+		return "", fmt.Errorf("writing %s: %w", tmpName, errors.Join(err, os.Remove(tmpName)))
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		_ = os.Remove(tmpName)
-		return "", fmt.Errorf("renaming %s to %s: %w", tmpName, path, err)
+		return "", fmt.Errorf("renaming %s to %s: %w", tmpName, path, errors.Join(err, os.Remove(tmpName)))
 	}
 	return path, nil
 }

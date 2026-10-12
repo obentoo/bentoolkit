@@ -133,7 +133,12 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	// order CombinedOutput would have them.
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
 	spill := s.openChildRunSpill()
-	defer spill.discard()
+	defer func() {
+		if err := spill.discard(); err != nil {
+			s.log.Warn("could not remove the child run's spill file; it holds unmasked output",
+				"package", pkg, "error", err)
+		}
+	}()
 	out := spill.tee(sc)
 	cmd.Stdout = out
 	cmd.Stderr = out
