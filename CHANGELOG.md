@@ -94,6 +94,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   reads as an empty string. chromedp's former websocket and system-utility dependencies (`gobwas/*`,
   `chromedp/sysutil`) are no longer pulled in. The default build is unchanged.
 
+- **Dependencies refreshed: chromedp v0.21.0, cdproto v0.157.10, godbus/dbus
+  v5.2.3, charmbracelet/x/ansi v0.11.9, golang.org/x/vuln v1.9.0 and the other
+  golang.org/x modules, go-colorable v0.1.16, go-runewidth v0.0.31.** chromedp
+  v0.21.0 replaces its WebSocket transport and keeps its public API. CI now
+  runs zizmor 1.30.1 (was 1.25.2) and osv-scanner-action v2.7.0. No
+  advisory affected the previous versions.
+
 ## [0.35.0] - 2026-10-10
 
 ### Added
