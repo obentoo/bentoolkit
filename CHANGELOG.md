@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.36.0] - 2026-10-12
+
 ### Added
 
 - **`overlay autoupdate --repair <pkg>`: repair a failed bump in an
@@ -91,12 +93,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   v0.157.8.** The script evaluator behind `-tags chromedp` is ported to the
   new typed API and keeps its behaviour: extra headers are sent, promises are
   awaited, the caller's deadline is honoured, and a JavaScript `null` still
-  reads as an empty string. chromedp's former websocket and system-utility dependencies (`gobwas/*`,
-  `chromedp/sysutil`) are no longer pulled in. The default build is unchanged.
+  reads as an empty string. chromedp's former websocket and system-utility
+  dependencies (`gobwas/*`, `chromedp/sysutil`) are no longer pulled in. The default build is unchanged.
 
 - **Dependencies refreshed: chromedp v0.21.0, cdproto v0.157.10, godbus/dbus
-  v5.2.3, charmbracelet/x/ansi v0.11.9, golang.org/x/vuln v1.9.0 and the other
-  golang.org/x modules, go-colorable v0.1.16, go-runewidth v0.0.31.** chromedp
+  v5.2.3, charmbracelet/x/ansi v0.11.9, antchfx/htmlquery v1.3.7,
+  golang.org/x/vuln v1.9.0 and the other golang.org/x modules, go-colorable
+  v0.1.16, go-runewidth v0.0.31.** chromedp
   v0.21.0 replaces its WebSocket transport and keeps its public API. CI now
   runs zizmor 1.30.1 (was 1.25.2) and osv-scanner-action v2.7.0. No
   advisory affected the previous versions.
@@ -1491,7 +1494,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/obentoo/bentoolkit/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/obentoo/bentoolkit/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/obentoo/bentoolkit/compare/v0.33.3...v0.34.0
 [0.33.3]: https://github.com/obentoo/bentoolkit/compare/v0.33.2...v0.33.3
