@@ -10,6 +10,8 @@
 # The tarball is built from `git archive v<version>`, never from the working
 # tree, and is byte-reproducible. Signing uses a key outside the repository
 # (COSIGN_KEY) and a signing config with no Rekor log, so nothing is uploaded.
+# The key password comes from COSIGN_PASSWORD, else from the Secret Service
+# keyring entry `service bentoolkit-release key cosign`, else cosign's prompt.
 # Exit codes: 0 ok, 1 a check or a step failed, 2 a precondition failed.
 set -euo pipefail
 
@@ -49,6 +51,18 @@ if [[ $mode == generate ]]; then
 		for o in "${outputs[@]}"; do
 			[[ ! -e $dist/$o ]] || die 2 "$(printf '%q' "$dist/$o") already exists; set FORCE=1 to overwrite"
 		done
+	fi
+	# Only an unset COSIGN_PASSWORD reaches the keyring: an empty one is a
+	# valid password and is used as given.
+	if [[ -z ${COSIGN_PASSWORD+set} ]]; then
+		if command -v secret-tool >/dev/null 2>&1 &&
+			pw=$(secret-tool lookup service bentoolkit-release key cosign 2>/dev/null) && [[ -n $pw ]]; then
+			export COSIGN_PASSWORD=$pw
+			log "step=password source=keyring"
+		else
+			log "step=password source=prompt"
+		fi
+		unset pw
 	fi
 else
 	[[ -f $top/cosign.pub ]] || die 2 "public key $top/cosign.pub does not exist"
