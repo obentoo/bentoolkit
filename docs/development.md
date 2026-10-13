@@ -110,6 +110,14 @@ version's files, such as `X.Y.Z0`.
   `cosign.pub` at the repository root is its public half. Create the pair once
   with `cosign generate-key-pair --output-key-prefix
   ~/.config/bentoolkit-release/cosign`.
+- The key password is taken from `COSIGN_PASSWORD` when it is set (an empty
+  value counts as set). Otherwise it is read from the Secret Service keyring
+  (KWallet, GNOME Keyring) through `secret-tool`, so `make release-deps` runs
+  without a prompt; with no entry it falls back to cosign's prompt. Store it
+  once, typed at the hidden prompt:
+  `secret-tool store --label="bentoolkit release cosign" service bentoolkit-release key cosign`.
+  While the keyring is unlocked, any process of the session can sign with the
+  key; leave the entry out to keep the prompt as the gate.
 - Signatures are not uploaded to the public Rekor transparency log, so no
   identity or key fingerprint is published. The cost is that verification has
   to skip the log check.

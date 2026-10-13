@@ -94,6 +94,23 @@ setup_file() {
 	COSIGN_PASSWORD="$PW_SENTINEL" cosign generate-key-pair --output-key-prefix "$FX/kpw/cosign" >/dev/null 2>&1
 	printf '%s\n' "$SIGNING_CONFIG" >"$FX/signing-config.json"
 
+	# A fake secret-tool ahead of the real one, so no test reads the
+	# maintainer's keyring. It records every call in FAKE_SECRET_TOOL_LOG and
+	# answers only the release key's lookup, with FAKE_SECRET_TOOL_PW; unset,
+	# it finds nothing, like an empty keyring.
+	mkdir -p "$FX/stubbin"
+	cat >"$FX/stubbin/secret-tool" <<'STUB'
+#!/usr/bin/env bash
+[[ -n ${FAKE_SECRET_TOOL_LOG:-} ]] && printf '%s\n' "$*" >>"$FAKE_SECRET_TOOL_LOG"
+if [[ $* == "lookup service bentoolkit-release key cosign" && -n ${FAKE_SECRET_TOOL_PW+set} ]]; then
+	printf '%s' "$FAKE_SECRET_TOOL_PW"
+	exit 0
+fi
+exit 1
+STUB
+	chmod +x "$FX/stubbin/secret-tool"
+	export PATH="$FX/stubbin:$PATH"
+
 	# Fixture repository. Its directory name is NOT bentoolkit, so a prefix
 	# derived from the checkout's name is caught.
 	local r="$FX/fixture-repo"
@@ -443,6 +460,33 @@ use_golden() {
 	grep -q 'Enter password' "$log" || fail "no password prompt was shown on the terminal: $(cat -v "$log")"
 	assert_generated dist
 	! grep -qF "$PW_SENTINEL" "$log" || fail "the password was echoed to the terminal"
+}
+
+@test "generate: with COSIGN_PASSWORD unset, the keyring's password signs with no prompt and is never printed" {
+	unset COSIGN_PASSWORD
+	export COSIGN_KEY="$FX/kpw/cosign.key" FAKE_SECRET_TOOL_PW="$PW_SENTINEL"
+	rd generate "$VERSION" dist </dev/null
+	assert_status 0
+	assert_generated dist
+	grep -qE '^release-deps: .*step=password source=keyring' <<<"$stderr" || fail "no step=password source=keyring line"
+	! grep -qF "$PW_SENTINEL" <<<"$output"$'\n'"$stderr" || fail "the password was printed"
+	cosign_verify "$FX/kpw/cosign.pub" "dist/$TARBALL.sigstore.json" "dist/$TARBALL" || fail "the tarball bundle does not verify"
+}
+
+@test "generate: a set COSIGN_PASSWORD, even empty, is used as given and the keyring is not asked" {
+	export FAKE_SECRET_TOOL_LOG="$BATS_TEST_TMPDIR/secret-tool.calls" FAKE_SECRET_TOOL_PW="wrong-password"
+	rd generate "$VERSION" dist
+	assert_status 0
+	assert_generated dist
+	[ ! -e "$FAKE_SECRET_TOOL_LOG" ] || fail "secret-tool was called: $(cat "$FAKE_SECRET_TOOL_LOG")"
+	! grep -qE 'step=password' <<<"$stderr" || fail "a step=password line was logged for a set COSIGN_PASSWORD"
+}
+
+@test "generate: with COSIGN_PASSWORD unset and no secret-tool, the run falls back to cosign's prompt" {
+	unset COSIGN_PASSWORD
+	PATH="$(path_without secret-tool)" COSIGN_KEY="$FX/kpw/cosign.key" rd generate "$VERSION" dist </dev/null
+	[ "$status" -ne 0 ] || fail "signing with no password source succeeded"
+	grep -qE '^release-deps: .*step=password source=prompt' <<<"$stderr" || fail "no step=password source=prompt line"
 }
 
 @test "generate: logs one structured release-deps step line per step; the tar step names the tarball digest" {

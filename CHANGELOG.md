@@ -9,6 +9,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **`make release-deps` can sign without a password prompt.** When
+  `COSIGN_PASSWORD` is not set, the signing key's password is read from the
+  Secret Service keyring entry `service bentoolkit-release key cosign` (KWallet,
+  GNOME Keyring) with `secret-tool`; with no entry, cosign prompts as before.
+  The run logs which source it used, never the password. See "Release assets"
+  in docs/development.md.
+
 ## [0.36.0] - 2026-10-12
 
 ### Added
