@@ -43,6 +43,48 @@ const (
 	// SummaryNewNotices is the burst summary notification; %d is the count,
 	// always more than three.
 	SummaryNewNotices
+
+	// SysDiskSummary is the low-disk notification summary; %s is the watched
+	// path, shown verbatim.
+	SysDiskSummary
+	// SysDiskBody is the low-disk notification body; %s is the free space in
+	// human units, %.1f the free share of the filesystem in percent.
+	SysDiskBody
+	// SysMemorySummary is the low-memory notification summary.
+	SysMemorySummary
+	// SysMemoryBody is the low-memory notification body; the three %s are the
+	// available memory, the total memory and the free swap, in human units.
+	SysMemoryBody
+	// SysCPUSummary is the CPU-pressure notification summary.
+	SysCPUSummary
+	// SysCPUBody is the CPU-pressure notification body; %.0f is the pressure
+	// in percent, %d how many minutes it has lasted.
+	SysCPUBody
+	// SysNetDownSummary is the summary of the notification sent when the
+	// network has been down long enough.
+	SysNetDownSummary
+	// SysNetDownBody is the body of the network-down notification.
+	SysNetDownBody
+	// SysNetBackSummary is the summary of the notification that replaces the
+	// network-down one once the network is back.
+	SysNetBackSummary
+	// SysAlertDisk is the tooltip line of a disk condition; %s is the watched
+	// path, %s the free space in human units, %.1f the free share in percent.
+	SysAlertDisk
+	// SysAlertMemory is the tooltip line of the memory condition; the two %s
+	// are the available and the total memory, in human units.
+	SysAlertMemory
+	// SysAlertCPU is the tooltip line of the CPU condition; %.0f is the
+	// pressure in percent, %d how many minutes it has lasted.
+	SysAlertCPU
+	// SysAlertNetwork is the tooltip line shown while the network is down.
+	SysAlertNetwork
+	// SysAlertsOne is the tooltip title suffix for exactly one active system
+	// alert; %d is the count.
+	SysAlertsOne
+	// SysAlertsMany is the tooltip title suffix for any other count of active
+	// system alerts; %d is the count.
+	SysAlertsMany
 )
 
 // catalog is the English text of every Key. The ellipsis is written as an
@@ -60,6 +102,22 @@ var catalog = map[Key]string{
 	ActionOpen:        "Open",
 	ActionMarkRead:    "Mark as read",
 	SummaryNewNotices: "%d new notices",
+
+	SysDiskSummary:    "Low disk space on %s",
+	SysDiskBody:       "%s free (%.1f%%)",
+	SysMemorySummary:  "Memory almost exhausted",
+	SysMemoryBody:     "%s of %s available; swap %s free",
+	SysCPUSummary:     "CPU saturated",
+	SysCPUBody:        "Pressure %.0f%% for %d min",
+	SysNetDownSummary: "Network down",
+	SysNetDownBody:    "No network connection is available.",
+	SysNetBackSummary: "Network back",
+	SysAlertDisk:      "Disk %s: %s free (%.1f%%)",
+	SysAlertMemory:    "Memory: %s of %s available",
+	SysAlertCPU:       "CPU pressure: %.0f%% for %d min",
+	SysAlertNetwork:   "Network: down",
+	SysAlertsOne:      "%d system alert",
+	SysAlertsMany:     "%d system alerts",
 }
 
 // Text returns k's catalog text. A key with no entry, which the catalog test

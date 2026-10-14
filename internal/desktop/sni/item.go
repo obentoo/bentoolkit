@@ -88,14 +88,20 @@ type MenuEntry struct {
 }
 
 // View is what the tray shows. Critical means at least one unread notice is
-// critical; it has no effect when Unread is zero. Paused, Entries and More
-// feed the menu.
+// critical; it has no effect when Unread is zero. Alerts are the active
+// system conditions, one tooltip line each, and AlertCritical means at least
+// one of them is critical. AlertTitle is appended to the tooltip title while
+// it is non-empty; the caller words it, so the item adds no text of its own.
+// Paused, Entries and More feed the menu.
 type View struct {
-	Unread   int
-	Critical bool
-	Paused   bool
-	Entries  []MenuEntry
-	More     int
+	Unread        int
+	Critical      bool
+	Alerts        []string
+	AlertCritical bool
+	AlertTitle    string
+	Paused        bool
+	Entries       []MenuEntry
+	More          int
 }
 
 // Event is a click on the menu item ItemID. NoticeID is the notice that item
@@ -126,24 +132,60 @@ const (
 
 // shown is what the item's mutable properties hold.
 type shown struct {
-	variant variant
-	status  string
-	tooltip string
+	variant     variant
+	status      string
+	tooltip     string
+	description string
 }
 
-// render maps a View to what the item shows.
+// toolTip returns the ToolTip property value for s.
+func (s shown) toolTip() toolTip {
+	return toolTip{Title: s.tooltip, Description: s.description}
+}
+
+// titleSeparator joins the unread-count text and the caller's AlertTitle.
+const titleSeparator = ", "
+
+// render maps a View to what the item shows. Unread notices and alerts both
+// ask for attention; the critical variant needs a critical unread notice or a
+// critical alert, so a critical notice already read never makes a warning
+// alert look critical.
 func render(v View) shown {
 	unread := max(v.Unread, 0)
 	s := shown{variant: variantPlain, status: statusActive}
 	switch {
-	case unread == 0:
-	case v.Critical:
+	case (unread > 0 && v.Critical) || v.AlertCritical:
 		s.variant, s.status = variantCritical, statusNeedsAttention
-	default:
+	case unread > 0 || len(v.Alerts) > 0:
 		s.variant, s.status = variantUnread, statusNeedsAttention
 	}
 	s.tooltip = messages.Count(messages.TooltipOne, messages.TooltipMany, unread)
+	if v.AlertTitle != "" {
+		s.tooltip += titleSeparator + v.AlertTitle
+	}
+	s.description = alertLines(v.Alerts)
 	return s
+}
+
+// lineBreaks turns every line break inside one alert into a space, so one
+// alert always renders as one tooltip line.
+var lineBreaks = strings.NewReplacer(
+	"\r\n", " ", "\n", " ", "\r", " ", "\v", " ", "\f", " ",
+	"\u0085", " ", "\u2028", " ", "\u2029", " ",
+)
+
+// tooltipMarkup escapes the characters the rich-text subset hosts render in a
+// tooltip description, so an alert (a path, say) never becomes markup.
+var tooltipMarkup = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
+// alertLines is the tooltip description: one escaped line per alert, in
+// order.
+func alertLines(alerts []string) string {
+	lines := make([]string, len(alerts))
+	for n, a := range alerts {
+		lines[n] = tooltipMarkup.Replace(lineBreaks.Replace(a))
+	}
+	return strings.Join(lines, "\n")
 }
 
 // Item is a StatusNotifierItem on one connection. It is safe for concurrent
@@ -414,7 +456,7 @@ func (i *Item) propMap() prop.Map {
 		"IconName":            {Value: "", Emit: prop.EmitConst},
 		"IconPixmap":          {Value: px, Emit: prop.EmitFalse},
 		"AttentionIconPixmap": {Value: slices.Clone(px), Emit: prop.EmitFalse},
-		"ToolTip":             {Value: toolTip{Title: i.cur.tooltip}, Emit: prop.EmitFalse},
+		"ToolTip":             {Value: i.cur.toolTip(), Emit: prop.EmitFalse},
 		"ItemIsMenu":          {Value: true, Emit: prop.EmitConst},
 		"Menu":                {Value: menuPath, Emit: prop.EmitConst},
 	}}
@@ -466,7 +508,7 @@ func (itemObject) ContextMenu(_, _ int32) *dbus.Error { return nil }
 func (itemObject) Scroll(_ int32, _ string) *dbus.Error { return nil }
 
 // SetState shows v: the icon variant and status, the
-// unread count in the tooltip and the menu. Before
+// unread count and the alerts in the tooltip, and the menu. Before
 // Start it only records v. It emits NewIcon and NewAttentionIcon when the
 // variant changes, NewStatus when the status does, NewToolTip when the
 // tooltip does, and ItemsPropertiesUpdated for the entries whose label
@@ -497,8 +539,8 @@ func (i *Item) SetState(v View) {
 	if next.status != prev.status {
 		i.props.SetMust(itemIface, "Status", next.status)
 	}
-	if next.tooltip != prev.tooltip {
-		i.props.SetMust(itemIface, "ToolTip", toolTip{Title: next.tooltip})
+	if next.tooltip != prev.tooltip || next.description != prev.description {
+		i.props.SetMust(itemIface, "ToolTip", next.toolTip())
 		signals = append(signals, "NewToolTip")
 	}
 

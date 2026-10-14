@@ -37,6 +37,7 @@ const (
 	busIface               = "org.freedesktop.DBus"
 	memberNameOwnerChanged = "NameOwnerChanged"
 	errNameHasNoOwner      = "org.freedesktop.DBus.Error.NameHasNoOwner"
+	errServiceUnknown      = "org.freedesktop.DBus.Error.ServiceUnknown"
 	nameOwnerChangedName   = busIface + "." + memberNameOwnerChanged
 )
 
@@ -92,18 +93,38 @@ type Message struct {
 	// can mark each of them notified once it is sent. It is empty for a
 	// single-notice message and never sent on the wire: Send ignores it.
 	Covers []string
+	// System marks a notification about the host's health rather than a
+	// notice. Its NoticeID is empty, like a summary's; the Events of a click
+	// on it carry System so the two can be told apart.
+	System bool
+	// Key names the condition a system notification reports (a monitor and
+	// its target, say "disk:/var/tmp/portage"); it is empty for notices.
+	// ReplacesID is the ID of the earlier notification to replace. Send
+	// passes it on only when this Notifier recorded that ID under the current
+	// server with the same non-empty Key; otherwise the message goes out as
+	// a new notification.
+	Key        string
+	ReplacesID uint32
 }
 
 // Event is an action the user took on a notification this Notifier sent.
 // ActivationToken is the token the server issued for that notification just
-// before the action, or empty when it issued none.
+// before the action, or empty when it issued none. System is true for a
+// system notification, whose NoticeID is empty like a summary's.
 type Event struct {
 	NoticeID, Action, ActivationToken string
+	System                            bool
 }
 
 // sentNotification is one notification this Notifier sent.
 type sentNotification struct {
-	noticeID string // "" for a summary
+	noticeID string // "" for a summary or a system notification
+	system   bool
+	key      string // the condition key of a system notification, else ""
+	// replaced is set when the server returned the replaces_id Send passed:
+	// a NotificationClosed for this ID older than seq then ended the
+	// notification this one replaced, not this one.
+	replaced bool
 	// seq orders the Notify reply against the connection's signals: an owner
 	// change with a later sequence means the server that assigned this ID is
 	// gone.
@@ -295,6 +316,16 @@ func (n *Notifier) bodyMarkup(ctx context.Context) (bool, error) {
 	return n.loadCapabilities(ctx, ownerSeq)
 }
 
+// withDefaultTimeout bounds ctx by defaultCallTimeout when it carries no
+// deadline of its own, so a server that never answers cannot hold a call
+// forever. The returned cancel must always be called.
+func withDefaultTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, defaultCallTimeout)
+}
+
 // removeMatches undoes AddMatchSignal for rules, best effort: it runs only on
 // a path that already returns an error.
 func removeMatches(conn *dbus.Conn, rules [][]dbus.MatchOption) {
@@ -332,7 +363,18 @@ func (n *Notifier) Events() <-chan Event {
 // Send shows m and returns the ID the server assigned to it. The summary is
 // sent as plain text; the body is escaped only when the server
 // advertises body-markup, and sent as is otherwise. m.Actions are sent
-// in order as key/label pairs. Errors name the notice.
+// in order as key/label pairs. Errors name the notice, or the condition key
+// of a system notification.
+//
+// m.ReplacesID goes out as replaces_id only when this Notifier recorded it
+// under the current server owner for the same non-empty m.Key; otherwise it
+// is 0 and the server shows a new notification. A restarted server numbers
+// its notifications from 1 again, so an ID kept from before the restart may
+// name another application's notification or another of this Notifier's,
+// which must not be overwritten. For the same reason a replacement is sent to
+// the owner its ID was checked against, by unique name; when that owner has
+// left the bus by the time of the call, the message is sent once more by the
+// well-known name, as a new notification.
 //
 // ctx should carry a deadline: a server that accepts the call and never
 // answers is otherwise waited for up to 25 s. A slow or hung server delays
@@ -346,11 +388,8 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 		"urgency":       dbus.MakeVariant(m.Urgency),
 		"desktop-entry": dbus.MakeVariant(desktopEntry),
 	}
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, defaultCallTimeout)
-		defer cancel()
-	}
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
 
 	body := m.Body
 	markup, capsErr := n.bodyMarkup(ctx)
@@ -358,26 +397,49 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 		body = Escape(m.Body)
 	}
 
+	// A replacement goes to the owner its ID was checked against, by unique
+	// name: by the well-known name it would reach a server that took the name
+	// since, where the ID may be another application's.
+	dest := serverName
 	n.mu.Lock()
 	n.inflight++
+	replaces := uint32(0)
+	if _, ok := n.ownedLocked(m.ReplacesID, m.Key); ok {
+		replaces, dest = m.ReplacesID, n.owner
+	}
 	n.mu.Unlock()
 
-	call := n.conn.Object(serverName, serverPath).CallWithContext(ctx, serverIface+".Notify", 0,
-		appName, uint32(0), appIcon, m.Summary, body, actions, hints, expireTimeout,
-	)
+	callNotify := func(dest string, replaces uint32) *dbus.Call {
+		return n.conn.Object(dest, serverPath).CallWithContext(ctx, serverIface+".Notify", 0,
+			appName, replaces, appIcon, m.Summary, body, actions, hints, expireTimeout,
+		)
+	}
+	call := callNotify(dest, replaces)
 	var id uint32
 	err := call.Store(&id)
+	if err != nil && replaces != 0 && ownerGone(err) {
+		// The checked owner left before the call: what it showed died with
+		// it, so the message goes to whoever owns the name now, as new.
+		n.log.Debug("notification server left before the replacement; sending it as new",
+			"key", m.Key, "replaces_id", replaces, "owner", dest)
+		replaces = 0
+		call = callNotify(serverName, replaces)
+		err = call.Store(&id)
+	}
 	if capsErr != nil && err == nil {
 		// The server is there but would not say what it supports.
 		n.log.Warn("notification body sent as plain text: server capabilities unavailable",
-			"notice", m.NoticeID, "err", capsErr)
+			"notice", m.NoticeID, "key", m.Key, "err", capsErr)
 	}
 
 	n.mu.Lock()
 	defer n.unlockAndReport()
 	n.inflight--
 	if err == nil {
-		n.recordLocked(id, sentNotification{noticeID: m.NoticeID, seq: call.ResponseSequence})
+		n.recordLocked(id, sentNotification{
+			noticeID: m.NoticeID, system: m.System, key: m.Key,
+			replaced: replaces != 0 && id == replaces, seq: call.ResponseSequence,
+		})
 	}
 	if n.inflight == 0 {
 		// Every reply that preceded a parked signal has been recorded and
@@ -385,12 +447,71 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 		n.parked = nil
 	}
 	if err != nil {
+		if m.System {
+			return 0, fmt.Errorf("sending the system notification for %q: %w", m.Key, err)
+		}
 		if m.NoticeID == "" {
 			return 0, fmt.Errorf("sending the summary notification: %w", err)
 		}
 		return 0, fmt.Errorf("sending the notification for notice %q: %w", m.NoticeID, err)
 	}
 	return id, nil
+}
+
+// Close withdraws the notification Send returned as id for the condition
+// key, with CloseNotification. It calls the server only when id passes the
+// same check as Send's ReplacesID (see ownedLocked): a stale, foreign or
+// unknown id, or an empty key, sends nothing and returns nil, so neither
+// another application's notification nor another of this Notifier's is ever
+// closed. The call goes to the owner id was checked against, by unique name,
+// so a server that took the name since never receives it: the call fails
+// instead.
+//
+// The spec lets a server answer with an error for a notification that no
+// longer exists, and some do: the error, wrapped with the id, is for the
+// caller to log at DEBUG, never to retry. ctx bounds the call as it does
+// for Send.
+func (n *Notifier) Close(ctx context.Context, id uint32, key string) error {
+	n.mu.Lock()
+	s, ok := n.ownedLocked(id, key)
+	dest := n.owner
+	n.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	ctx, cancel := withDefaultTimeout(ctx)
+	defer cancel()
+	call := n.conn.Object(dest, serverPath).CallWithContext(ctx, serverIface+".CloseNotification", 0, id)
+	if call.Err != nil {
+		return fmt.Errorf("closing notification %d on %s (owner %s): %w", id, serverName, dest, call.Err)
+	}
+
+	// The server closed it, so the id is no longer this condition's even
+	// before its NotificationClosed arrives. An entry recorded since, by a
+	// Send that replaced the id while this call was in flight, is left alone.
+	n.mu.Lock()
+	defer n.unlockAndReport()
+	if cur, ok := n.sent[id]; ok && cur.seq == s.seq {
+		delete(n.sent, id)
+		delete(n.tokens, id)
+	}
+	return nil
+}
+
+// ownedLocked returns the record of id when this Notifier may replace or
+// close it on behalf of the condition key: the key is not empty, and id was
+// recorded for that same key from a reply of the current server owner (one
+// the server has not reported closed since). With no owner there is nothing
+// to replace or close. n.mu must be held.
+func (n *Notifier) ownedLocked(id uint32, key string) (sentNotification, bool) {
+	if id == 0 || key == "" || n.owner == "" {
+		return sentNotification{}, false
+	}
+	s, ok := n.sent[id]
+	if !ok || s.key != key || s.seq <= n.ownerSeq {
+		return sentNotification{}, false
+	}
+	return s, true
 }
 
 // recordLocked records a notification the server just accepted and replays
@@ -527,8 +648,15 @@ func (n *Notifier) applyLocked(p serverSignal) {
 		}
 		token := n.tokens[p.id]
 		delete(n.tokens, p.id)
-		n.emitLocked(Event{NoticeID: s.noticeID, Action: key, ActivationToken: token})
+		n.emitLocked(Event{NoticeID: s.noticeID, Action: key, ActivationToken: token, System: s.system})
 	case memberNotificationClosed:
+		if s.replaced && p.sig.Sequence < s.seq {
+			// The server kept the ID for a replacement, and the signal
+			// precedes the reply that named it: it ended the notification
+			// that was replaced. The reader and Send race for n.mu, so it
+			// can arrive after the replacement was recorded.
+			return
+		}
 		delete(n.sent, p.id)
 		delete(n.tokens, p.id)
 	}
@@ -554,7 +682,7 @@ func (n *Notifier) unlockAndReport() {
 	n.mu.Unlock()
 	for _, ev := range lost {
 		n.log.Warn("notification event dropped: events channel full",
-			"notice", ev.NoticeID, "action", ev.Action, "dropped_total", total)
+			"notice", ev.NoticeID, "system", ev.System, "action", ev.Action, "dropped_total", total)
 	}
 }
 
@@ -597,6 +725,23 @@ func (n *Notifier) handleOwnerChanged(sig *dbus.Signal) {
 		// this one.
 		go n.refreshCapabilities(sig.Sequence)
 	}
+}
+
+// ownerGone reports whether err says a call's destination has no owner: the
+// connection it was addressed to left the bus.
+func ownerGone(err error) bool {
+	var name string
+	var dbusErr dbus.Error
+	var dbusErrPtr *dbus.Error
+	switch {
+	case errors.As(err, &dbusErr):
+		name = dbusErr.Name
+	case errors.As(err, &dbusErrPtr):
+		name = dbusErrPtr.Name
+	default:
+		return false
+	}
+	return name == errServiceUnknown || name == errNameHasNoOwner
 }
 
 // markupEscaper replaces the three characters the notification markup treats
