@@ -129,6 +129,16 @@ type sentNotification struct {
 	// change with a later sequence means the server that assigned this ID is
 	// gone.
 	seq dbus.Sequence
+	// owner is the unique name that owned serverName, in this Notifier's
+	// view, when the Notify went out. godbus does not expose a reply's
+	// sender, and a reply can arrive after the name changed hands, so the
+	// owner is taken at send time, never at reply time: the record is valid
+	// only while that owner is still the current one. "" means no owner was
+	// known: the server that answered is then the first owner applied after
+	// the send, recognisable only while exactly one change has followed it.
+	owner string
+	// changes is the Notifier's ownerChanges when the Notify went out.
+	changes uint64
 }
 
 // capabilities is what one owner of serverName advertised.
@@ -170,6 +180,9 @@ type Notifier struct {
 	// order cannot overwrite a newer one.
 	owner    string
 	ownerSeq dbus.Sequence
+	// ownerChanges counts the owner changes applied, so a record can tell
+	// whether exactly one has followed its send.
+	ownerChanges uint64
 	// caps is what the server advertised, nil until it has answered. They are
 	// read in New, again on every change of owner, and by Send whenever they
 	// do not belong to the current owner.
@@ -262,6 +275,14 @@ func (n *Notifier) currentOwnerSeq() dbus.Sequence {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 	return n.ownerSeq
+}
+
+// ownerView returns the owner of serverName as last applied and the number
+// of owner changes applied so far.
+func (n *Notifier) ownerView() (owner string, changes uint64) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return n.owner, n.ownerChanges
 }
 
 // refreshCapabilities asks the server for its capabilities on behalf of the
@@ -407,6 +428,7 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 	if _, ok := n.ownedLocked(m.ReplacesID, m.Key); ok {
 		replaces, dest = m.ReplacesID, n.owner
 	}
+	sentOwner, sentChanges := n.owner, n.ownerChanges
 	n.mu.Unlock()
 
 	callNotify := func(dest string, replaces uint32) *dbus.Call {
@@ -419,10 +441,13 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 	err := call.Store(&id)
 	if err != nil && replaces != 0 && ownerGone(err) {
 		// The checked owner left before the call: what it showed died with
-		// it, so the message goes to whoever owns the name now, as new.
+		// it, so the message goes to whoever owns the name now, as new. A
+		// lagging reader can still show the owner that left: that view is
+		// ambiguous, and recordLocked drops the reply recorded under it.
 		n.log.Debug("notification server left before the replacement; sending it as new",
 			"key", m.Key, "replaces_id", replaces, "owner", dest)
 		replaces = 0
+		sentOwner, sentChanges = n.ownerView()
 		call = callNotify(serverName, replaces)
 		err = call.Store(&id)
 	}
@@ -439,6 +464,7 @@ func (n *Notifier) Send(ctx context.Context, m Message) (uint32, error) {
 		n.recordLocked(id, sentNotification{
 			noticeID: m.NoticeID, system: m.System, key: m.Key,
 			replaced: replaces != 0 && id == replaces, seq: call.ResponseSequence,
+			owner: sentOwner, changes: sentChanges,
 		})
 	}
 	if n.inflight == 0 {
@@ -500,15 +526,16 @@ func (n *Notifier) Close(ctx context.Context, id uint32, key string) error {
 
 // ownedLocked returns the record of id when this Notifier may replace or
 // close it on behalf of the condition key: the key is not empty, and id was
-// recorded for that same key from a reply of the current server owner (one
-// the server has not reported closed since). With no owner there is nothing
-// to replace or close. n.mu must be held.
+// recorded for that same key from a Notify sent to, and answered after the
+// last change of, the current server owner (one the server has not reported
+// closed since). With no owner there is nothing to replace or close. n.mu
+// must be held.
 func (n *Notifier) ownedLocked(id uint32, key string) (sentNotification, bool) {
 	if id == 0 || key == "" || n.owner == "" {
 		return sentNotification{}, false
 	}
 	s, ok := n.sent[id]
-	if !ok || s.key != key || s.seq <= n.ownerSeq {
+	if !ok || s.key != key || s.seq <= n.ownerSeq || s.owner != n.owner {
 		return sentNotification{}, false
 	}
 	return s, true
@@ -517,16 +544,24 @@ func (n *Notifier) ownedLocked(id uint32, key string) (sentNotification, bool) {
 // recordLocked records a notification the server just accepted and replays
 // the parked signals that name it. n.mu must be held.
 func (n *Notifier) recordLocked(id uint32, s sentNotification) {
-	// A restarted server hands out IDs again: a token buffered for an older
-	// notification must not reach this one.
-	if s.seq <= n.ownerSeq {
-		// The server that assigned id lost its name after replying, and the
-		// change has already been applied: the notification died with it.
-		// handleOwnerChanged already forgot every older entry, so whatever
-		// n.sent or n.tokens now holds for id belongs to the new server and
-		// must be left alone.
+	// The name changed hands after the call went out and the change has
+	// already been applied: either the server that assigned id lost its name
+	// after replying (the reply is older than the change), or the old owner
+	// answered late, after the change (the owner the call went to is no
+	// longer the current one). Either way id is not the current server's, and
+	// handleOwnerChanged already forgot every entry of the earlier owner, so
+	// whatever n.sent or n.tokens now holds for id belongs to the new server
+	// and must be left alone.
+	if s.owner == "" && n.owner != "" && n.ownerChanges == s.changes+1 && n.ownerSeq < s.seq {
+		// Sent while no owner was known, and the one change applied since is
+		// older than the reply: the server it brought answered.
+		s.owner = n.owner
+	}
+	if s.seq <= n.ownerSeq || s.owner != n.owner {
 		return
 	}
+	// A restarted server hands out IDs again: a token buffered for an older
+	// notification must not reach this one.
 	delete(n.tokens, id)
 	n.sent[id] = s
 
@@ -689,8 +724,9 @@ func (n *Notifier) unlockAndReport() {
 // handleOwnerChanged follows serverName to its new owner. The notifications
 // the old owner assigned die with it, without a NotificationClosed, and a new
 // server numbers its own from the start again: every ID recorded from a reply
-// older than the change is forgotten, so the new server's IDs are never taken
-// for ours. A change older than the owner already known is stale and ignored.
+// older than the change, or from a Notify sent to an earlier owner, is
+// forgotten, so the new server's IDs are never taken for ours. A change older
+// than the owner already known is stale and ignored.
 func (n *Notifier) handleOwnerChanged(sig *dbus.Signal) {
 	if sig.Sender != busName || sig.Path != busPath || len(sig.Body) < 3 {
 		return
@@ -712,8 +748,16 @@ func (n *Notifier) handleOwnerChanged(sig *dbus.Signal) {
 	// The cached capabilities now belong to an earlier owner: n.caps.ownerSeq
 	// no longer matches, so they are no longer used.
 	n.owner, n.ownerSeq = newOwner, sig.Sequence
+	n.ownerChanges++
 	for id, s := range n.sent {
-		if s.seq < sig.Sequence {
+		if s.owner == "" && newOwner != "" && s.seq > sig.Sequence && n.ownerChanges == s.changes+1 {
+			// Recorded while no owner was known, from a reply younger than
+			// this first change since its send: the new owner answered it.
+			s.owner = newOwner
+			n.sent[id] = s
+			continue
+		}
+		if s.seq < sig.Sequence || s.owner != newOwner {
 			delete(n.sent, id)
 			delete(n.tokens, id)
 		}
