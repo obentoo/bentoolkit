@@ -110,6 +110,10 @@ func TestExampleConfig_MonitorsBlockIsStrictAndShowsDefaults(t *testing.T) {
 	if err := dec.Decode(&cfg); err != nil {
 		t.Fatalf("the uncommented example tray block does not decode strictly: %v\n%s", err, block)
 	}
+	// The strict decode stops at the raw monitors node; its keys are checked here.
+	if unknown := cfg.Tray.unknownMonitorKeys(); len(unknown) != 0 {
+		t.Errorf("the example monitors block carries unknown keys %q", unknown)
+	}
 	got, warns := cfg.Tray.GetMonitors()
 	if len(warns) != 0 {
 		t.Errorf("the example monitors block warned %q", warns)

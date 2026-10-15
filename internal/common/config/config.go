@@ -527,6 +527,11 @@ func LoadFrom(path string) (*Config, error) {
 	if perr := pd.Decode(&probe); perr != nil {
 		fmt.Fprintf(os.Stderr, "warning: %s: %v\n", path, perr)
 	}
+	// tray.monitors is a raw yaml.Node, which the strict decode accepts whole
+	// without looking inside; its unknown keys are reported here instead.
+	for _, unknown := range cfg.Tray.unknownMonitorKeys() {
+		fmt.Fprintf(os.Stderr, "warning: %s: %s\n", path, unknown)
+	}
 
 	// Migration diagnostics: a config still carrying a secret that this
 	// release no longer reads gets exactly one actionable warning per key,

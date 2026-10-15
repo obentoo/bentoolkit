@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	yaml "go.yaml.in/yaml/v3"
 )
@@ -41,8 +43,10 @@ type TrayConfig struct {
 	// SkipMetered is a pointer so an explicit false stays distinct from an
 	// absent key, whose default is true.
 	SkipMetered *bool `yaml:"skip_metered,omitempty"`
-	// Monitors is the raw system health block; GetMonitors resolves it.
-	Monitors MonitorsConfig `yaml:"monitors,omitempty"`
+	// Monitors is the raw system health section, kept as a node so a section
+	// of the wrong shape reaches GetMonitors as a warning instead of failing
+	// the whole config load. GetMonitors decodes it into MonitorsConfig.
+	Monitors yaml.Node `yaml:"monitors,omitempty"`
 }
 
 // GetInterval returns the check interval: DefaultTrayInterval when unset or
@@ -124,17 +128,18 @@ const (
 	DefaultNetworkBackAfter        = 10 * time.Second
 )
 
-// MonitorsConfig is the raw `tray.monitors:` block. Every leaf is a yaml.Node,
-// so an absent key stays distinct from a zero and a value of the wrong YAML
-// type ("10%", "maybe") reaches GetMonitors as a warning instead of failing
-// the whole config load.
+// MonitorsConfig is the decoded `tray.monitors:` section. Every leaf and
+// every block is a yaml.Node, so an absent key stays distinct from a zero and
+// a value of the wrong YAML type ("10%", "maybe") or a block of the wrong
+// shape (`disk: 5`) reaches GetMonitors as a warning instead of failing the
+// whole config load. Each block decodes into its own *MonitorConfig type.
 type MonitorsConfig struct {
-	SampleInterval yaml.Node            `yaml:"sample_interval,omitempty"`
-	Reminder       yaml.Node            `yaml:"reminder,omitempty"`
-	Disk           DiskMonitorConfig    `yaml:"disk,omitempty"`
-	Memory         MemoryMonitorConfig  `yaml:"memory,omitempty"`
-	CPU            CPUMonitorConfig     `yaml:"cpu,omitempty"`
-	Network        NetworkMonitorConfig `yaml:"network,omitempty"`
+	SampleInterval yaml.Node `yaml:"sample_interval,omitempty"`
+	Reminder       yaml.Node `yaml:"reminder,omitempty"`
+	Disk           yaml.Node `yaml:"disk,omitempty"`
+	Memory         yaml.Node `yaml:"memory,omitempty"`
+	CPU            yaml.Node `yaml:"cpu,omitempty"`
+	Network        yaml.Node `yaml:"network,omitempty"`
 }
 
 // DiskMonitorConfig is the raw `tray.monitors.disk:` block.
@@ -228,19 +233,58 @@ type NetworkMonitor struct {
 
 // GetMonitors resolves tray.monitors. An absent key takes its default; an
 // unparsable or out-of-range value takes its default too and comes back as
-// one warning naming the full key and the configured value.
+// one warning naming the full key and the configured value. A section or
+// block that is not a mapping warns the same way and takes the defaults of
+// everything inside it; a null one is absent.
 func (t TrayConfig) GetMonitors() (Monitors, []string) {
 	var r monitorResolver
-	c := &t.Monitors
+	c := decodeBlock[MonitorsConfig](&r, "", &t.Monitors)
+	disk := decodeBlock[DiskMonitorConfig](&r, "disk", &c.Disk)
+	memory := decodeBlock[MemoryMonitorConfig](&r, "memory", &c.Memory)
+	cpu := decodeBlock[CPUMonitorConfig](&r, "cpu", &c.CPU)
+	network := decodeBlock[NetworkMonitorConfig](&r, "network", &c.Network)
 	m := Monitors{
 		SampleInterval: r.duration("sample_interval", &c.SampleInterval, DefaultMonitorSampleInterval, MinMonitorSampleInterval),
 		Reminder:       r.duration("reminder", &c.Reminder, DefaultMonitorReminder, MinMonitorReminder),
-		Disk:           r.disk(&c.Disk),
-		Memory:         r.memory(&c.Memory),
-		CPU:            r.cpu(&c.CPU),
-		Network:        r.network(&c.Network),
+		Disk:           r.disk(&disk),
+		Memory:         r.memory(&memory),
+		CPU:            r.cpu(&cpu),
+		Network:        r.network(&network),
 	}
 	return m, r.warnings
+}
+
+// monitorKey is the full path of key, which is relative to tray.monitors; an
+// empty key names the section itself.
+func monitorKey(key string) string {
+	if key == "" {
+		return "tray.monitors"
+	}
+	return "tray.monitors." + key
+}
+
+// decodeBlock decodes the block n into a T. An absent or null block yields
+// the zero T, whose leaves all take their defaults; a block that is not a
+// mapping, or does not decode, yields the zero T plus one warning naming the
+// block and its value.
+func decodeBlock[T any](r *monitorResolver, key string, n *yaml.Node) T {
+	var c T
+	n, ok := presentNode(n)
+	if !ok {
+		return c
+	}
+	if n.Kind != yaml.MappingNode {
+		r.warnings = append(r.warnings, fmt.Sprintf(
+			"%s %q is not a mapping; using its defaults", monitorKey(key), nodeText(n)))
+		return c
+	}
+	if err := n.Decode(&c); err != nil {
+		r.warnings = append(r.warnings, fmt.Sprintf(
+			"%s %q cannot be read (%v); using its defaults", monitorKey(key), nodeText(n), err))
+		var zero T
+		return zero
+	}
+	return c
 }
 
 // monitorResolver collects the warnings of one GetMonitors call. Its key
@@ -260,7 +304,7 @@ func resolveKey[T any](r *monitorResolver, key string, n *yaml.Node, def T,
 	v, err := parse(n)
 	if err != nil {
 		r.warnings = append(r.warnings, fmt.Sprintf(
-			"tray.monitors.%s %q %v; using %s", key, nodeText(n), err, show(def)))
+			"%s %q %v; using %s", monitorKey(key), nodeText(n), err, show(def)))
 		return def
 	}
 	return v
@@ -345,6 +389,80 @@ func defaultClearPSI(warn float64) float64 {
 		return DefaultCPUClearPSI
 	}
 	return warn * DefaultCPUClearPSI / DefaultCPUWarnPSI
+}
+
+// unknownMonitorKeys lists every key under tray.monitors that no field reads,
+// by its full path and line ("line 5: unknown key tray.monitors.disk.bogus").
+// The strict re-decode in LoadFrom cannot see inside the raw section, so this
+// walk stands in for it there. Blocks that are not mappings are skipped:
+// GetMonitors already reports them. A YAML merge key ("<<") is accepted and
+// its merged keys are not checked.
+func (t TrayConfig) unknownMonitorKeys() []string {
+	sec, ok := presentNode(&t.Monitors)
+	if !ok || sec.Kind != yaml.MappingNode {
+		return nil
+	}
+	blocks := map[string]reflect.Type{
+		"disk":    reflect.TypeFor[DiskMonitorConfig](),
+		"memory":  reflect.TypeFor[MemoryMonitorConfig](),
+		"cpu":     reflect.TypeFor[CPUMonitorConfig](),
+		"network": reflect.TypeFor[NetworkMonitorConfig](),
+	}
+	unknown := unknownKeys("", sec, reflect.TypeFor[MonitorsConfig]())
+	for i := 0; i+1 < len(sec.Content); i += 2 {
+		key := sec.Content[i].Value
+		typ, isBlock := blocks[key]
+		if !isBlock {
+			continue
+		}
+		if block, ok := presentNode(sec.Content[i+1]); ok && block.Kind == yaml.MappingNode {
+			unknown = append(unknown, unknownKeys(key, block, typ)...)
+		}
+	}
+	return unknown
+}
+
+// unknownKeys lists the keys of the mapping n, which sits at key under
+// tray.monitors, that the struct typ has no yaml field for.
+func unknownKeys(key string, n *yaml.Node, typ reflect.Type) []string {
+	known := yamlKeys(typ)
+	var unknown []string
+	for i := 0; i+1 < len(n.Content); i += 2 {
+		k := n.Content[i]
+		if k.ShortTag() == "!!merge" || slices.Contains(known, k.Value) {
+			continue
+		}
+		unknown = append(unknown, fmt.Sprintf("line %d: unknown key %s.%s", k.Line, monitorKey(key), escapeControl(k.Value)))
+	}
+	return unknown
+}
+
+// escapeControl writes control characters in s as Go escapes, so a key read
+// from the file cannot start a forged line or a terminal sequence on stderr.
+func escapeControl(s string) string {
+	if !strings.ContainsFunc(s, unicode.IsControl) {
+		return s
+	}
+	q := strconv.Quote(s)
+	return q[1 : len(q)-1]
+}
+
+// yamlKeys lists the keys the struct typ decodes, as yaml.v3 names them: the
+// tag's name, or the lower-cased field name when the tag carries none.
+func yamlKeys(typ reflect.Type) []string {
+	keys := make([]string, 0, typ.NumField())
+	for i := range typ.NumField() {
+		f := typ.Field(i)
+		name, _, _ := strings.Cut(f.Tag.Get("yaml"), ",")
+		switch {
+		case name == "-" || !f.IsExported():
+			continue
+		case name == "":
+			name = strings.ToLower(f.Name)
+		}
+		keys = append(keys, name)
+	}
+	return keys
 }
 
 // presentNode follows aliases and reports whether n carries a value; an
