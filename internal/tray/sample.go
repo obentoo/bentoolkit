@@ -84,7 +84,7 @@ func (a *App) sampleDisks(ctx context.Context, now time.Time) {
 		key := condKey{Monitor: monitorDisk, Target: path}
 		d, err := a.d.Sys.Disk(path)
 		if a.readFailed(key, path, err) {
-			a.keepDisk(owner, path)
+			a.keepDisk(ctx, owner, key, path)
 			continue
 		}
 		if ctx.Err() != nil {
@@ -114,22 +114,32 @@ func (a *App) sampleDisks(ctx context.Context, now time.Time) {
 }
 
 // keepDisk makes path, whose reading failed, the owner of the filesystem it
-// last resolved to, unless an earlier path of this sample owns it already. A
-// path that never read has no filesystem and claims nothing.
-func (a *App) keepDisk(owner map[uint64]string, path string) {
+// last resolved to. When an earlier path of this sample owns that filesystem
+// already, path gives its condition up instead. A path that never read has no
+// filesystem and claims nothing.
+func (a *App) keepDisk(ctx context.Context, owner map[uint64]string, key condKey, path string) {
 	dev, known := a.diskDev[path]
 	if !known {
 		return
 	}
-	if _, taken := owner[dev]; !taken {
-		owner[dev] = path
+	if _, taken := owner[dev]; taken {
+		a.yieldDisk(ctx, key)
+		return
 	}
+	owner[dev] = path
 }
 
 // dropDisk forgets the condition of a watched path whose filesystem is now
-// evaluated under an earlier path, d being its reading. An active condition
-// is cleared: its notification is withdrawn and the move to ok is logged.
+// evaluated under an earlier path, d being its reading.
 func (a *App) dropDisk(ctx context.Context, key condKey, d sysmon.Disk) {
+	a.yieldDisk(ctx, key, "value", percentOf(d.Free, d.Size))
+}
+
+// yieldDisk forgets the condition of a watched path whose filesystem is
+// evaluated under an earlier path. An active condition is cleared: its
+// notification is withdrawn and the move to ok is logged with the reading's
+// attributes, none when the path could not be read.
+func (a *App) yieldDisk(ctx context.Context, key condKey, reading ...any) {
 	c, ok := a.health[key]
 	if !ok {
 		return
@@ -138,9 +148,11 @@ func (a *App) dropDisk(ctx context.Context, key condKey, d sysmon.Disk) {
 	if c.level == levelOK {
 		return
 	}
-	a.log.Info("system condition changed", "monitor", key.Monitor, "target", key.Target,
-		"level", levelOK.String(), "from", c.level.String(), "value", percentOf(d.Free, d.Size),
-		"threshold", a.mon.Disk.WarnPercent, "reason", "the path shares the filesystem of an earlier watched path")
+	attrs := append([]any{"monitor", key.Monitor, "target", key.Target,
+		"level", levelOK.String(), "from", c.level.String()}, reading...)
+	attrs = append(attrs, "threshold", a.mon.Disk.WarnPercent,
+		"reason", "the path shares the filesystem of an earlier watched path")
+	a.log.Info("system condition changed", attrs...)
 	a.withdraw(ctx, key, c)
 }
 
