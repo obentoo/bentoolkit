@@ -73,7 +73,8 @@ func (a *App) sample(ctx context.Context) {
 }
 
 // sampleDisks evaluates each filesystem once, under the first watched path
-// that resolved to it.
+// that resolved to it. A path whose reading fails keeps owning the
+// filesystem it last resolved to, so a later path on it raises nothing.
 func (a *App) sampleDisks(ctx context.Context, now time.Time) {
 	owner := map[uint64]string{} // the watched path each filesystem is evaluated under
 	for _, path := range a.d.DiskPaths {
@@ -82,10 +83,15 @@ func (a *App) sampleDisks(ctx context.Context, now time.Time) {
 		}
 		key := condKey{Monitor: monitorDisk, Target: path}
 		d, err := a.d.Sys.Disk(path)
-		if a.readFailed(key, path, err) || ctx.Err() != nil {
+		if a.readFailed(key, path, err) {
+			a.keepDisk(owner, path)
+			continue
+		}
+		if ctx.Err() != nil {
 			continue
 		}
 		a.readSucceeded(key)
+		a.diskDev[path] = d.Dev
 		if first, dup := owner[d.Dev]; dup {
 			if first != path {
 				a.dropDisk(ctx, key, d)
@@ -104,6 +110,19 @@ func (a *App) sampleDisks(ctx context.Context, now time.Time) {
 		}
 		a.apply(ctx, key, c, tr, changed, func(u byte) (notify.Message, string) { return diskSysMessage(d, c, u) },
 			reading{value: percentOf(d.Free, d.Size), threshold: threshold})
+	}
+}
+
+// keepDisk makes path, whose reading failed, the owner of the filesystem it
+// last resolved to, unless an earlier path of this sample owns it already. A
+// path that never read has no filesystem and claims nothing.
+func (a *App) keepDisk(owner map[uint64]string, path string) {
+	dev, known := a.diskDev[path]
+	if !known {
+		return
+	}
+	if _, taken := owner[dev]; !taken {
+		owner[dev] = path
 	}
 }
 

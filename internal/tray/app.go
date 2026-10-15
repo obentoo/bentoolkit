@@ -237,11 +237,13 @@ type App struct {
 
 	// mon is the resolved monitors configuration. health holds one
 	// condition per monitor and target, failing the monitors and targets
-	// whose last reading failed, and emergeFailing whether the last emerge
-	// scan did; none of them is ever written to st.
+	// whose last reading failed, diskDev the device each watched path last
+	// resolved to, and emergeFailing whether the last emerge scan failed;
+	// none of them is ever written to st.
 	mon           config.Monitors
 	health        map[condKey]*condition
 	failing       map[condKey]bool
+	diskDev       map[string]uint64
 	emergeFailing bool
 
 	fetchAt  <-chan time.Time
@@ -287,6 +289,7 @@ func New(d Deps) *App {
 		mon:      mon,
 		health:   map[condKey]*condition{},
 		failing:  map[condKey]bool{},
+		diskDev:  map[string]uint64{},
 		openings: map[uint64]context.CancelFunc{},
 		opened:   make(chan openResult),
 		done:     make(chan struct{}),
