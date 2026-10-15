@@ -423,16 +423,25 @@ func (t TrayConfig) unknownMonitorKeys() []string {
 }
 
 // unknownKeys lists the keys of the mapping n, which sits at key under
-// tray.monitors, that the struct typ has no yaml field for.
+// tray.monitors, that the struct typ has no yaml field for. An alias key is
+// read as its target, as the decoder reads it.
 func unknownKeys(key string, n *yaml.Node, typ reflect.Type) []string {
 	known := yamlKeys(typ)
 	var unknown []string
 	for i := 0; i+1 < len(n.Content); i += 2 {
 		k := n.Content[i]
-		if k.ShortTag() == "!!merge" || slices.Contains(known, k.Value) {
+		if k.ShortTag() == "!!merge" {
 			continue
 		}
-		unknown = append(unknown, fmt.Sprintf("line %d: unknown key %s.%s", k.Line, monitorKey(key), escapeControl(k.Value)))
+		line := k.Line
+		for k.Kind == yaml.AliasNode && k.Alias != nil {
+			k = k.Alias
+		}
+		// A key that is not text fails the block's decode, which already warns.
+		if k.Kind != yaml.ScalarNode || slices.Contains(known, k.Value) {
+			continue
+		}
+		unknown = append(unknown, fmt.Sprintf("line %d: unknown key %s.%s", line, monitorKey(key), escapeControl(k.Value)))
 	}
 	return unknown
 }
@@ -463,6 +472,54 @@ func yamlKeys(typ reflect.Type) []string {
 		keys = append(keys, name)
 	}
 	return keys
+}
+
+// maxSavedMonitorNodes bounds how many nodes resolving the monitors node's
+// aliases may produce, so a few nested aliases cannot expand into a file of
+// gigabytes on save.
+const maxSavedMonitorNodes = 100_000
+
+// errMonitorsTooLarge reports a monitors node whose resolved copy would pass
+// maxSavedMonitorNodes.
+var errMonitorsTooLarge = errors.New("tray.monitors expands past the size a saved configuration may have")
+
+// resolvedCopy returns a deep copy of n with every alias replaced by a copy of
+// its target and every anchor cleared, so the copy marshals on its own. The
+// parser refuses self-referencing anchors, so the walk is finite; its size is
+// bounded by maxSavedMonitorNodes.
+func resolvedCopy(n *yaml.Node) (yaml.Node, error) {
+	budget := maxSavedMonitorNodes
+	return resolveNode(n, false, &budget)
+}
+
+// resolveNode copies n for resolvedCopy. isKey marks a mapping key: a key
+// written as an alias of a merge key is not a merge key to the decoder, so its
+// copy is a quoted string, which the decoder does not merge either.
+func resolveNode(n *yaml.Node, isKey bool, budget *int) (yaml.Node, error) {
+	if *budget--; *budget < 0 {
+		return yaml.Node{}, errMonitorsTooLarge
+	}
+	aliased := false
+	for n.Kind == yaml.AliasNode && n.Alias != nil {
+		n, aliased = n.Alias, true
+	}
+	out := *n
+	out.Anchor = ""
+	out.Alias = nil
+	if isKey && aliased && out.ShortTag() == "!!merge" {
+		out.Tag, out.Style = "!!str", yaml.DoubleQuotedStyle
+	}
+	if n.Content != nil {
+		out.Content = make([]*yaml.Node, len(n.Content))
+		for i, child := range n.Content {
+			c, err := resolveNode(child, n.Kind == yaml.MappingNode && i%2 == 0, budget)
+			if err != nil {
+				return yaml.Node{}, err
+			}
+			out.Content[i] = &c
+		}
+	}
+	return out, nil
 }
 
 // presentNode follows aliases and reports whether n carries a value; an

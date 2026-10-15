@@ -601,7 +601,16 @@ func (c *Config) SaveTo(path string) error {
 		return err
 	}
 
-	data, err := yaml.Marshal(c)
+	// The raw monitors node may hold aliases whose anchors live in typed
+	// fields, which Marshal re-emits without their anchor; a copy with every
+	// alias resolved keeps the saved file loadable.
+	out := *c
+	monitors, err := resolvedCopy(&c.Tray.Monitors)
+	if err != nil {
+		return fmt.Errorf("saving %s: %w", path, err)
+	}
+	out.Tray.Monitors = monitors
+	data, err := yaml.Marshal(&out)
 	if err != nil {
 		return err
 	}
