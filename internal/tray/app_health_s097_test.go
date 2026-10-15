@@ -825,8 +825,9 @@ func TestS097Sample_R6_13_OneInfoLinePerTransition(t *testing.T) {
 		t.Fatalf("INFO transition lines after becoming active = %d, want 1\n%s", n, strings.Join(s.logs.lines(), "\n"))
 	}
 	for _, l := range s.logs.lines() {
-		if strings.Contains(l, "monitor=memory") && strings.Contains(l, "threshold=") && strings.Count(l, "level=") < 2 {
-			t.Errorf("transition line has no level key besides the record level: %s", l)
+		if strings.Contains(l, "monitor=memory") && strings.Contains(l, "threshold=") &&
+			(strings.Count(l, "level=") != 1 || !strings.Contains(l, "state=")) {
+			t.Errorf("transition line must carry one level key and the condition under state: %s", l)
 		}
 	}
 

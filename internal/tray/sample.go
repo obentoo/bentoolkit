@@ -149,7 +149,7 @@ func (a *App) yieldDisk(ctx context.Context, key condKey, reading ...any) {
 		return
 	}
 	attrs := append([]any{"monitor", key.Monitor, "target", key.Target,
-		"level", levelOK.String(), "from", c.level.String()}, reading...)
+		"state", levelOK.String(), "from", c.level.String()}, reading...)
 	attrs = append(attrs, "threshold", a.mon.Disk.WarnPercent,
 		"reason", "the path shares the filesystem of an earlier watched path")
 	a.log.Info("system condition changed", attrs...)
@@ -290,7 +290,7 @@ func (a *App) apply(ctx context.Context, key condKey, c *condition, tr transitio
 	tr.Key = key
 	if tr.From != tr.To {
 		a.log.Info("system condition changed", "monitor", key.Monitor, "target", key.Target,
-			"level", tr.To.String(), "from", tr.From.String(), "value", r.value, "threshold", r.threshold)
+			"state", tr.To.String(), "from", tr.From.String(), "value", r.value, "threshold", r.threshold)
 	}
 	switch {
 	case tr.Notify:

@@ -72,7 +72,7 @@ func TestS097TaskFiveReview_DedupedPathKeepsNoAlert(t *testing.T) {
 	if !slices.Contains(s.out.closedKeys(), "disk:/var/tmp/portage") {
 		t.Errorf("closed notification keys = %v, want disk:/var/tmp/portage withdrawn", s.out.closedKeys())
 	}
-	if n := s.countLines("level=INFO", "monitor=disk", "target=/var/tmp/portage", "level=ok"); n != 1 {
+	if n := s.countLines("level=INFO", "monitor=disk", "target=/var/tmp/portage", "state=ok"); n != 1 {
 		t.Errorf("INFO lines of the deduplicated path returning to ok = %d, want 1\n%s",
 			n, strings.Join(s.logs.lines(), "\n"))
 	}

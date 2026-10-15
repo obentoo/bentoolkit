@@ -27,7 +27,7 @@ func handDropLines(s *s097Harness, path string) []string {
 	for _, l := range s.logs.lines() {
 		if strings.Contains(l, "level=INFO") && strings.Contains(l, `msg="system condition changed"`) &&
 			strings.Contains(l, "monitor=disk") && strings.Contains(l, "target="+path+" ") &&
-			strings.Contains(l, "level=ok") {
+			strings.Contains(l, "state=ok") {
 			out = append(out, l)
 		}
 	}
@@ -140,7 +140,7 @@ func TestS097Handover_R2_11_FailingPathYieldsToEarlierOwner(t *testing.T) {
 			t.Fatalf("INFO lines moving %s to ok = %q, want 1\n%s", downerB, got, strings.Join(s.logs.lines(), "\n"))
 		}
 		line := got[0]
-		for _, want := range []string{"monitor=disk", "target=" + downerB + " ", "level=ok", "from=warning"} {
+		for _, want := range []string{"monitor=disk", "target=" + downerB + " ", "state=ok", "from=warning"} {
 			if !strings.Contains(line, want) {
 				t.Errorf("INFO line %q lacks %q", line, want)
 			}

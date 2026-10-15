@@ -1048,7 +1048,7 @@ func (a *App) logNetwork(ev netEvent, now, at time.Time, notified bool) {
 		to, from = levelOK, levelWarning
 	}
 	a.log.Info("system condition changed", "monitor", monitorNetwork, "target", "",
-		"level", to.String(), "from", from.String(), "value", now.Sub(a.network.since),
+		"state", to.String(), "from", from.String(), "value", now.Sub(a.network.since),
 		"threshold", at.Sub(a.network.since), "notified", notified)
 }
 

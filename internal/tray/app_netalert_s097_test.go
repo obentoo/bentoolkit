@@ -307,7 +307,7 @@ func TestS097Network_R6_13_DownAndBackAreLogged(t *testing.T) {
 	lines := func() int {
 		n := 0
 		for _, l := range s.logs.lines() {
-			if strings.Contains(l, "level=INFO") && strings.Contains(l, "monitor=network") && strings.Count(l, "level=") >= 2 {
+			if strings.Contains(l, "level=INFO") && strings.Contains(l, "monitor=network") && strings.Contains(l, "state=") {
 				n++
 			}
 		}

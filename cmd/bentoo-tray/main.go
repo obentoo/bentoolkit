@@ -174,7 +174,7 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 		Stat:    os.Stat,
 	})
 
-	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state", statePath)
+	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state_file", statePath)
 
 	app := tray.New(tray.Deps{
 		Log:    log,
