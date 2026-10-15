@@ -9,6 +9,30 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **`bentoo-tray` warns when the machine runs short of disk, memory, CPU or
+  network.** Every 30 s it reads free disk space on `/`, `PORTAGE_TMPDIR` and
+  `DISTDIR` (resolved once at startup with `portageq`), available memory and
+  memory pressure, and CPU pressure; and it follows NetworkManager's
+  connectivity. A disk under 10% and 20 GiB free warns, under 2% or 2 GiB is
+  critical; memory under 10% available warns, under 5% with little or no swap
+  left (or sustained `full` memory pressure) is critical; CPU pressure at 80
+  or more for 5 minutes warns, and never while an `emerge` runs; "Network
+  down" comes after 30 s offline (60 s at startup) and "Network back" after
+  10 s online, only when "Network down" was shown. A condition must last its
+  sustain window before it notifies. Each problem has one notification, which
+  later ones replace and which is withdrawn when the problem clears; only a
+  critical alert repeats, every hour. A pause silences warnings, never
+  critical alerts. While an alert is active the icon asks for attention and
+  the tooltip lists it; alerts never reach the notices menu, the unread count
+  or `state.json`, and nothing about them survives a restart. `/home` is not
+  watched by default, since KDE Plasma and GNOME already warn about it. Every
+  threshold, window, path and monitor can be changed or switched off in the
+  new `tray.monitors` config section; a bad value warns and takes its
+  default. See "bentoo-tray health monitors" in the README. The tray's
+  version is 0.2.0.
+
 ### Changed
 
 - **`make release-deps` can sign without a password prompt.** When

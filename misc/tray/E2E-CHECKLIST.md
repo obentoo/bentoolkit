@@ -46,3 +46,65 @@ sees. Record the date, the commit and the result of every case.
 | Quit | the process exits 0 within 5 s; the unit does not restart it | | | n/a |
 | Logout | SIGHUP / SIGTERM; exit 0; `state.json` saved with mode 0600 | | | |
 | Second instance | `bentoo-tray` started again exits 0 with an INFO "already running" | | | |
+
+## Health monitors
+
+The disk, memory, CPU and network monitors. In E3 (no icon) check only the
+notification part of each expected result. The memory case can trigger the
+OOM killer: save your work, or run it in the VM.
+
+### Setup (each environment)
+
+- [ ] Install `app-benchmarks/stress-ng`
+- [ ] Create a 30 GiB test filesystem owned by you, attach it as a loop
+      device and mount it (sparse: it uses almost no real disk):
+
+      ```bash
+      truncate -s 30G /var/tmp/bt-health.img
+      mkfs.ext4 -q -m 0 -L bthealth -E root_owner="$(id -u):$(id -g)" /var/tmp/bt-health.img
+      udisksctl loop-setup -f /var/tmp/bt-health.img   # prints /dev/loopN
+      udisksctl mount -b /dev/loopN                    # mounts /run/media/$USER/bthealth
+      export M=/run/media/$USER/bthealth
+      avail() { df -BM --output=avail "$M" | tail -1 | tr -dc 0-9; }   # MiB free
+      ```
+
+- [ ] Watch only that filesystem and shorten the reminder, then restart with
+      `systemctl --user restart bentoo-tray.service`:
+
+      ```yaml
+      tray:
+        monitors:
+          reminder: 15m
+          disk:
+            paths: [/run/media/<user>/bthealth]
+      ```
+
+- [ ] Follow the readings beside the journal:
+      `watch -n 5 'df -h "$M"; grep -E "MemTotal|MemAvailable|SwapFree" /proc/meminfo; cat /proc/pressure/cpu /proc/pressure/memory'`
+- [ ] Network cut: E1 unplugs the cable (or `nmcli networking off`, then
+      `nmcli networking on`); E2/E3 run `virsh domif-setlink <vm> <iface> down`
+      / `up` on the host. While cut, `nmcli networking connectivity` must read
+      `none`, `portal` or `limited`
+- [ ] Afterwards: `rm -f "$M"/fill*`, `udisksctl unmount -b /dev/loopN`,
+      `udisksctl loop-delete -b /dev/loopN`, `rm /var/tmp/bt-health.img`, and
+      restore the config
+
+### Cases
+
+| Case | Expected | E1 | E2 | E3 |
+|---|---|---|---|---|
+| Disk warning: leave 2.5 GiB free with `fallocate -l $(( $(avail) - 2560 ))M "$M/fill1"` | within 90 s one normal-urgency "Low disk space on /run/media/…/bthealth", body with the free GiB and percentage; icon asks for attention; tooltip line `Disk …` beside the unread count | | | |
+| Disk critical: leave 1 GiB free with `fallocate -l $(( $(avail) - 1024 ))M "$M/fill2"` | within 90 s one critical notification that replaces the warning (one notification on screen and in the history, not two); critical icon variant; shown over Do Not Disturb | | | |
+| Disk reminder: keep it full 15 min | the critical notification is sent once more, still replacing the previous one | | | |
+| Disk recovery: `rm "$M"/fill*` | no new notification; the notification is withdrawn within 2 min; icon back to plain (or to the unread dot when notices are unread) | | | |
+| Disk paused: Pause for 1 hour, repeat the warning, then the critical step | the warning is not notified but shows in the icon and tooltip; the critical one is notified; Resume sends nothing for a warning still active | | | n/a |
+| Restart during an alert: `systemctl --user restart bentoo-tray.service` with the disk at 1 GiB free | the alert is announced again about 90 s after the start, not at once | | | |
+| Memory: `stress-ng --vm 1 --vm-bytes 95% --vm-keep --timeout 20m` (raise the percentage until `MemAvailable` stays under 5% of `MemTotal` and swap is almost full) | within 3 min a critical "Memory almost exhausted" with available, total and free swap; a warning sent before it is replaced, not stacked; one more after 15 min; after Ctrl+C the notification is withdrawn within 5 min | | | |
+| CPU outside emerge: `stress-ng --cpu $(( $(nproc) * 2 )) --timeout 8m` | `some avg60` in `/proc/pressure/cpu` reaches 80; about 5 min later one normal "CPU saturated", body "Pressure N% for M min"; never critical; after it stops the notification is withdrawn once the pressure stays under 70 for 5 min | | | |
+| CPU during emerge: a real build (`emerge -1 sys-devel/gcc`) or `sudo emerge --ask -1 app-misc/jq` left at its prompt, plus the same `stress-ng` run | `some avg60` reaches 80, no CPU notification during the 8 min; disk and memory still notify | | | |
+| Network cut for 10 s | no notification | | | |
+| Network cut for 40 s | one "Network down" at about 30 s; icon asks for attention, tooltip `Network: down`; 10 s after reconnecting one low-urgency "Network back" that replaces it; icon back to plain | | | |
+| Network: tray started offline | no "Network down" before 60 s after the start | | | |
+| Network cut 40 s while paused | neither "Network down" nor "Network back", also after Resume | | | n/a |
+| System notification click | opens nothing; no WARN in the journal | | | |
+| Mark all as read with an alert active | unread notices clear; the alert stays in the icon and tooltip | | | n/a |

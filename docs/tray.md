@@ -104,6 +104,14 @@ check time is kept there, a restart does not check again sooner than the server
 asked (`Retry-After`) or the backoff allows; a wait inherited from a previous
 run is capped at the larger of 1.2 × `interval` and 24 hours.
 
+### Health monitors
+
+Besides notices, the tray warns when the machine runs short of disk space,
+memory or CPU, and when the network goes down. These alerts are configured
+under `tray.monitors` in the same file. The monitors, their defaults, every
+key and the known limits are described in "bentoo-tray health monitors" in
+the [README](../README.md#bentoo-tray-health-monitors).
+
 ### Logging
 
 `bentoo-tray` logs one key=value event per line to standard error — the
