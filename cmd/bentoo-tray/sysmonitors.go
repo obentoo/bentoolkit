@@ -3,11 +3,10 @@ package main
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"log/slog"
-	"os"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
-	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
 	"github.com/obentoo/bentoolkit/internal/tray"
 )
@@ -38,21 +37,28 @@ func systemMonitors(log *slog.Logger, m config.Monitors, sys tray.SystemReader) 
 	return sys, m
 }
 
+// hostHealth is the host access healthDeps needs: the resource reader, the
+// two portageq questions and the existence check. start builds the real one;
+// tests pass fakes, so healthDeps never touches the host on its own.
+type hostHealth struct {
+	Reader  tray.SystemReader
+	TmpDir  func() string
+	DistDir func() string
+	Stat    func(string) (fs.FileInfo, error)
+}
+
 // healthDeps resolves the host reader, the monitor configuration and the
 // watched disk paths for the App. portageq runs only when the disk monitor is
 // enabled with no configured paths; diskPaths' warnings are logged here.
-func healthDeps(ctx context.Context, log *slog.Logger, cfg config.TrayConfig) (tray.SystemReader, *config.Monitors, []string) {
+func healthDeps(ctx context.Context, log *slog.Logger, cfg config.TrayConfig, h hostHealth) (tray.SystemReader, *config.Monitors, []string) {
 	m, _ := cfg.GetMonitors() // its warnings were logged by loadTrayConfig
-	sys, m := systemMonitors(log, m, sysmon.Reader{Root: "/"})
+	sys, m := systemMonitors(log, m, h.Reader)
 	var paths []string
 	if sys != nil && m.Disk.Enabled {
 		var warnings []string
-		paths, warnings = diskPaths(m.Disk.Paths,
-			func() string { return distfiles.TempRoot(ctx) },
-			func() string { return distfiles.HostDistdir(ctx) },
-			os.Stat)
+		paths, warnings = diskPaths(m.Disk.Paths, h.TmpDir, h.DistDir, h.Stat)
 		for _, w := range warnings {
-			log.Warn("disk monitor", "monitor", "disk", "warning", w)
+			log.WarnContext(ctx, "disk monitor", "monitor", "disk", "warning", w)
 		}
 	}
 	return sys, &m, paths

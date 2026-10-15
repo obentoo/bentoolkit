@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/obentoo/bentoolkit/internal/common/xdg"
 	"github.com/obentoo/bentoolkit/internal/desktop/dbusx"
@@ -30,6 +31,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/desktop/sni"
 	"github.com/obentoo/bentoolkit/internal/gentoo/news"
 	"github.com/obentoo/bentoolkit/internal/gentoo/pkgdb"
+	"github.com/obentoo/bentoolkit/internal/sysmon"
 	"github.com/obentoo/bentoolkit/internal/tray"
 	"github.com/obentoo/bentoolkit/internal/tray/feed"
 	"github.com/obentoo/bentoolkit/internal/tray/icons"
@@ -165,7 +167,12 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 	}
 	ticks, stopTicks := minuteTicks()
 	defer stopTicks()
-	sys, monitors, watched := healthDeps(ctx, log, trayCfg)
+	sys, monitors, watched := healthDeps(ctx, log, trayCfg, hostHealth{
+		Reader:  sysmon.Reader{Root: "/"},
+		TmpDir:  func() string { return distfiles.TempRoot(ctx) },
+		DistDir: func() string { return distfiles.HostDistdir(ctx) },
+		Stat:    os.Stat,
+	})
 
 	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state", statePath)
 

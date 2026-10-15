@@ -3,6 +3,7 @@ package main
 import (
 	"io/fs"
 	"slices"
+	"sync"
 )
 
 // diskPaths returns the paths the disk monitor watches and one warning per
@@ -10,7 +11,8 @@ import (
 // them the defaults are /, PORTAGE_TMPDIR and DISTDIR, in that order.
 //
 // tmpdir and distdir are the two portageq questions, passed as funcs so a
-// configured list never runs portageq. Each answers "" when it cannot, which
+// configured list never runs portageq. Both are asked at once, so startup
+// waits for the slower one only. Each answers "" when it cannot, which
 // warns naming the variable and keeps the remaining defaults. stat checks each
 // path once; a path it cannot find warns naming the path and is dropped until
 // the next start. The warnings are returned for main to log.
@@ -18,15 +20,13 @@ func diskPaths(configured []string, tmpdir, distdir func() string, stat func(str
 	candidates := slices.Clone(configured)
 	if len(candidates) == 0 {
 		candidates = []string{"/"}
-		for _, q := range []struct {
-			variable string
-			ask      func() string
-		}{
-			{"PORTAGE_TMPDIR", tmpdir},
-			{"DISTDIR", distdir},
+		tmp, dist := askBoth(tmpdir, distdir)
+		for _, q := range []struct{ variable, answer string }{
+			{"PORTAGE_TMPDIR", tmp},
+			{"DISTDIR", dist},
 		} {
-			if path := q.ask(); path != "" {
-				candidates = append(candidates, path)
+			if q.answer != "" {
+				candidates = append(candidates, q.answer)
 			} else {
 				warnings = append(warnings, "portageq did not answer "+q.variable+"; it is not watched")
 			}
@@ -40,4 +40,14 @@ func diskPaths(configured []string, tmpdir, distdir func() string, stat func(str
 		paths = append(paths, path)
 	}
 	return paths, warnings
+}
+
+// askBoth runs tmpdir and distdir on two goroutines and returns both answers
+// once each has returned. Each func bounds its own wait.
+func askBoth(tmpdir, distdir func() string) (tmp, dist string) {
+	var wg sync.WaitGroup
+	wg.Go(func() { tmp = tmpdir() })
+	wg.Go(func() { dist = distdir() })
+	wg.Wait()
+	return tmp, dist
 }
