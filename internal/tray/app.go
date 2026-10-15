@@ -19,7 +19,9 @@ import (
 	"github.com/obentoo/bentoolkit/internal/desktop/sni"
 	"github.com/obentoo/bentoolkit/internal/gentoo/pkgdb"
 	"github.com/obentoo/bentoolkit/internal/notices"
+	"github.com/obentoo/bentoolkit/internal/sysmon"
 	"github.com/obentoo/bentoolkit/internal/tray/feed"
+	"github.com/obentoo/bentoolkit/internal/tray/messages"
 	"github.com/obentoo/bentoolkit/internal/tray/schedule"
 	"github.com/obentoo/bentoolkit/internal/tray/state"
 )
@@ -98,11 +100,23 @@ type InstalledReader interface {
 	Installed(ctx context.Context) (pkgs []pkgdb.Package, skipped int, err error)
 }
 
-// Notifier sends desktop notifications and reports the actions taken on
-// them; *notify.Notifier implements it.
+// Notifier sends desktop notifications, withdraws the system ones and
+// reports the actions taken on them; *notify.Notifier implements it. Close
+// withdraws the notification Send returned as id for the condition key.
 type Notifier interface {
 	Send(ctx context.Context, m notify.Message) (uint32, error)
+	Close(ctx context.Context, id uint32, key string) error
 	Events() <-chan notify.Event
+}
+
+// SystemReader reads the host figures the health monitors watch;
+// sysmon.Reader implements it. Its reads take no context: each is a short
+// procfs or statfs call.
+type SystemReader interface {
+	Memory() (sysmon.Memory, error)
+	Pressure(resource string) (sysmon.Pressure, error)
+	Disk(path string) (sysmon.Disk, error)
+	EmergeRunning() (bool, error)
 }
 
 // TrayIcon is the StatusNotifierItem; *sni.Item implements it. The context
@@ -141,8 +155,9 @@ type BusOwner interface {
 // Deps is everything the App talks to. Feed is nil when the feed URL was
 // refused: the App then runs on the offline news alone. A nil Log
 // discards, a nil Clock is the SystemClock, a nil Rand is math/rand/v2's
-// Float64 and a nil Net behaves as netmon.Absent(); every other field is
-// required.
+// Float64 and a nil Net behaves as netmon.Absent(). A nil Sys turns the
+// disk, memory and CPU monitors off; DiskPaths are the watched paths, and a
+// nil Monitors is resolved from Config. Every other field is required.
 type Deps struct {
 	Log    *slog.Logger
 	Clock  Clock
@@ -157,6 +172,10 @@ type Deps struct {
 	Net    NetworkMonitor
 	Store  StateStore
 	Bus    BusOwner
+
+	Sys       SystemReader
+	DiskPaths []string
+	Monitors  *config.Monitors
 }
 
 // checkKind is what started a check.
@@ -208,8 +227,26 @@ type App struct {
 	skipped  bool // the last scheduled fetch was skipped for the network
 	nmAbsent bool // the NetworkManager-absent INFO was logged
 
-	fetchAt <-chan time.Time
-	pauseAt <-chan time.Time
+	// network debounces NetworkManager's verdicts into "network down" and
+	// "network back"; netAt fires when its next decision falls due.
+	// netSendFailing is set while a failed "network down" is being
+	// retried, so only the first failure of the streak is a WARN.
+	network        *netWatch
+	netAt          <-chan time.Time
+	netSendFailing bool
+
+	// mon is the resolved monitors configuration. health holds one
+	// condition per monitor and target, failing the monitors and targets
+	// whose last reading failed, and emergeFailing whether the last emerge
+	// scan did; none of them is ever written to st.
+	mon           config.Monitors
+	health        map[condKey]*condition
+	failing       map[condKey]bool
+	emergeFailing bool
+
+	fetchAt  <-chan time.Time
+	pauseAt  <-chan time.Time
+	sampleAt <-chan time.Time
 	// iconEvents is the menu's click channel, nil once closed. The loop
 	// reads it, and guard's helper while a blocking branch runs.
 	iconEvents <-chan sni.Event
@@ -236,11 +273,20 @@ func New(d Deps) *App {
 		d.Net = netmon.Absent()
 	}
 	interval, _ := d.Config.GetInterval() // its warnings are run's to log
+	var mon config.Monitors
+	if d.Monitors != nil {
+		mon = *d.Monitors
+	} else {
+		mon, _ = d.Config.GetMonitors() // its warnings are main's to log
+	}
 	return &App{
 		d:        d,
 		log:      d.Log,
 		interval: interval,
 		indexURL: noticesIndex(d.Config.GetFeedURL()),
+		mon:      mon,
+		health:   map[condKey]*condition{},
+		failing:  map[condKey]bool{},
 		openings: map[uint64]context.CancelFunc{},
 		opened:   make(chan openResult),
 		done:     make(chan struct{}),
@@ -341,6 +387,7 @@ func (a *App) Run(ctx context.Context) error {
 	}
 
 	now := a.d.Clock.Now()
+	a.network = newNetWatch(now, a.mon.Network)
 	a.expirePause(now)
 	if !a.st.PauseUntil.IsZero() {
 		a.pauseAt = a.d.Clock.After(a.st.PauseUntil.Sub(now))
@@ -349,6 +396,10 @@ func (a *App) Run(ctx context.Context) error {
 
 	delay := max(schedule.StartupDelay(a.d.Rand()), a.storedWait(now))
 	a.fetchAt = a.d.Clock.After(delay)
+	if a.sampling() {
+		a.sampleAt = a.d.Clock.After(a.mon.SampleInterval)
+	}
+	a.observeNetwork(ctx)
 	a.log.Info("bentoo-tray started", "first_check_in", delay, "interval", a.interval,
 		"feed", a.d.Feed != nil, "first_run", !a.st.Established)
 	return a.loop(ctx)
@@ -413,6 +464,10 @@ func (a *App) loop(ctx context.Context) error {
 			stop = a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkScheduled) })
 		case <-a.pauseAt:
 			stop = a.guard(ctx, a.pauseTimer)
+		case <-a.sampleAt:
+			stop = a.guard(ctx, a.sample)
+		case <-a.netAt:
+			stop = a.guard(ctx, a.netDue)
 		case ev, ok := <-notifyEvents:
 			if received(&notifyEvents, ok) {
 				a.onNotification(ctx, ev)
@@ -576,10 +631,7 @@ func (a *App) networkAllows(ctx context.Context) bool {
 		return true
 	case v.NMAbsent:
 		// Online and Metered mean nothing without NetworkManager.
-		if !a.nmAbsent {
-			a.nmAbsent = true
-			a.log.Info("NetworkManager is not on the system bus; fetching on schedule without network checks")
-		}
+		a.noteNMAbsent()
 		return true
 	case !v.Online:
 		a.log.Info("skipping the scheduled feed fetch: the network is offline; fetching when it comes back")
@@ -589,6 +641,18 @@ func (a *App) networkAllows(ctx context.Context) bool {
 		return false
 	}
 	return true
+}
+
+// noteNMAbsent logs, once per process, that NetworkManager is not on the
+// system bus. The one line covers both of its consumers: the network monitor
+// and the feed's network check.
+func (a *App) noteNMAbsent() {
+	if a.nmAbsent {
+		return
+	}
+	a.nmAbsent = true
+	a.log.Info("NetworkManager is not on the system bus; network monitoring is unavailable " +
+		"and feed fetches run on schedule")
 }
 
 // fetchFailed logs a failed fetch and schedules the backoff.
@@ -848,14 +912,141 @@ func (a *App) send(ctx context.Context, msgs []notify.Message) {
 	}
 }
 
-// onNetworkChanged fetches when the network changes after a skipped fetch;
-// otherwise there is nothing to catch up on.
+// onNetworkChanged feeds the new verdict to the network watch, then fetches
+// when the change follows a skipped fetch; otherwise there is nothing to
+// catch up on.
 func (a *App) onNetworkChanged(ctx context.Context) {
+	a.observeNetwork(ctx)
 	if !a.skipped {
 		a.log.Debug("network changed; no fetch was skipped")
 		return
 	}
 	a.check(ctx, checkNetwork)
+}
+
+// observeNetwork reads NetworkManager's verdict, feeds it to the network
+// watch and re-arms netAt. A failed read keeps the previous verdict and its
+// timer. With the network monitor disabled nothing is read.
+func (a *App) observeNetwork(ctx context.Context) {
+	if !a.mon.Network.Enabled {
+		return
+	}
+	callCtx, cancel := context.WithTimeout(ctx, callTimeout)
+	v, err := a.d.Net.Allowed(callCtx)
+	cancel()
+	if err != nil {
+		if ctx.Err() == nil {
+			a.log.Warn("reading the network state from NetworkManager failed; keeping the last verdict",
+				"monitor", monitorNetwork, "error", err)
+		}
+		return
+	}
+	if v.NMAbsent {
+		a.noteNMAbsent()
+	}
+	a.armNetwork(a.network.update(a.d.Clock.Now(), v))
+	if _, ev := a.network.pending(); ev != netDown {
+		// The down being retried is no longer wanted: the streak ends.
+		a.netSendFailing = false
+	}
+}
+
+// armNetwork arms netAt for wait, or disarms it when ok is false.
+func (a *App) armNetwork(wait time.Duration, ok bool) {
+	a.netAt = nil
+	if ok {
+		a.netAt = a.d.Clock.After(wait)
+	}
+}
+
+// netDue handles netAt: it sends the "network down" or "network back" the
+// watch decided. Only a successful, unpaused send counts as sent. A down
+// held by a pause is skipped, so its outage is never announced; a down whose
+// send failed is not, and is retried after netRetry while the outage lasts.
+// A back held by a pause or whose send failed is skipped, and the down it
+// would have replaced is closed.
+func (a *App) netDue(ctx context.Context) {
+	now := a.d.Clock.Now()
+	at, ev := a.network.pending()
+	a.netAt = nil
+	if a.network.due(now) == netNone {
+		// Early, or the spell moved on: wait for what is pending now.
+		a.armNetwork(max(at.Sub(now), 0), ev != netNone)
+		return
+	}
+	key := condKey{Monitor: monitorNetwork}
+	held := a.paused(now)
+	if !held {
+		m, _ := networkSysMessage(ev, a.netReplaces(ev), netUrgency(ev))
+		id, err := a.sendSysAt(ctx, key, m, a.netFailLevel())
+		if err == nil {
+			a.netSendFailing = false
+			a.network.markSent(ev, id)
+			a.logNetwork(ev, now, at, true)
+			a.render()
+			return
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if ev == netDown {
+			// NetworkManager reports no change during a steady outage, so
+			// nothing else would bring the down due again.
+			a.netSendFailing = true
+			a.armNetwork(a.netRetry(), true)
+			return
+		}
+	}
+	a.closeSys(ctx, key, a.network.skip(ev))
+	a.logNetwork(ev, now, at, false)
+	a.render()
+}
+
+// netRetry is the wait before a "network down" whose send failed is tried
+// again: never shorter than a sample, so a zero down_after does not spin.
+func (a *App) netRetry() time.Duration {
+	return max(a.network.downAfter, a.mon.SampleInterval, config.MinMonitorSampleInterval)
+}
+
+// netFailLevel is the level of a failed network send: DEBUG while a failed
+// down is being retried, WARN otherwise, so an absent notification server
+// is not a WARN on every retry.
+func (a *App) netFailLevel() slog.Level {
+	if a.netSendFailing {
+		return slog.LevelDebug
+	}
+	return slog.LevelWarn
+}
+
+// netReplaces is the notification a network event replaces: a back
+// replaces the sent down, a down replaces nothing.
+func (a *App) netReplaces(ev netEvent) uint32 {
+	if ev == netBack {
+		return a.network.notifID
+	}
+	return 0
+}
+
+// netUrgency is the urgency of a network notification: normal for a down,
+// low for a back.
+func netUrgency(ev netEvent) byte {
+	if ev == netBack {
+		return urgencyLow
+	}
+	return urgencyNormal
+}
+
+// logNetwork logs the INFO transition line of a network event decided at
+// now: the time the spell lasted and the window it had to last. notified
+// tells a sent notification from one a pause or a failed send held back.
+func (a *App) logNetwork(ev netEvent, now, at time.Time, notified bool) {
+	to, from := levelWarning, levelOK
+	if ev == netBack {
+		to, from = levelOK, levelWarning
+	}
+	a.log.Info("system condition changed", "monitor", monitorNetwork, "target", "",
+		"level", to.String(), "from", from.String(), "value", now.Sub(a.network.since),
+		"threshold", at.Sub(a.network.since), "notified", notified)
 }
 
 // ---------- quit during blocking work ----------
@@ -1032,6 +1223,11 @@ func nextMorning(now time.Time) time.Time {
 
 // onNotification handles an action on a notification.
 func (a *App) onNotification(ctx context.Context, ev notify.Event) {
+	if ev.System {
+		// A system notification names no notice and opens nothing.
+		a.log.Debug("ignoring an action on a system notification", "action", ev.Action)
+		return
+	}
 	switch ev.Action {
 	case actionDefault:
 		if ev.NoticeID == "" {
@@ -1205,9 +1401,15 @@ func (a *App) markAllRead() {
 
 // ---------- output ----------
 
-// render shows the state on the icon.
+// render shows the state on the icon, with the active system conditions as
+// alert lines beside the notices. The alerts live only in the view, never in
+// the state, so the state file stays free of them.
 func (a *App) render() {
 	a.view = viewFor(a.st)
+	a.view.Alerts, a.view.AlertCritical = a.alerts()
+	if n := len(a.view.Alerts); n > 0 {
+		a.view.AlertTitle = messages.Count(messages.SysAlertsOne, messages.SysAlertsMany, n)
+	}
 	if a.iconUp {
 		a.d.Icon.SetState(a.view)
 	}

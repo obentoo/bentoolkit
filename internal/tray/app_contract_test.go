@@ -91,8 +91,8 @@ func TestApp_HungNetworkCheckTimesOutAndFetches(t *testing.T) {
 	h.waitFor("the startup timer", func() bool { return h.clock.hasPending(3 * time.Minute) })
 	h.clock.Advance(3 * time.Minute)
 	h.waitFor("the fetch after the network check timed out", h.fetches(1))
-	if !warned(h, "NetworkManager", "deadline exceeded") {
-		t.Error("the hung network check was not logged at WARN")
+	if !warned(h, "checking the network failed; fetching anyway", "deadline exceeded") {
+		t.Error("the hung network check of the fetch was not logged at WARN")
 	}
 }
 

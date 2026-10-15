@@ -162,7 +162,8 @@ func (n *appNotifier) Send(_ context.Context, m notify.Message) (uint32, error) 
 	n.sent = append(n.sent, m)
 	return uint32(len(n.sent)), nil
 }
-func (n *appNotifier) Events() <-chan notify.Event { return n.events }
+func (n *appNotifier) Close(context.Context, uint32, string) error { return nil }
+func (n *appNotifier) Events() <-chan notify.Event                 { return n.events }
 func (n *appNotifier) messages() []notify.Message {
 	n.mu.Lock()
 	defer n.mu.Unlock()

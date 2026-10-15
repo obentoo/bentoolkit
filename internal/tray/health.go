@@ -162,6 +162,7 @@ type condition struct {
 	activeSince time.Time // when the spell that left ok began; zero while ok
 	notifiedAt  time.Time // when observe last returned Notify; zero if never
 	notifID     uint32    // the last notification sent for it, replaced by the next
+	text        string    // the tooltip line while active, empty while ok
 }
 
 // transition is what one observed sample changed. Key is left zero by
@@ -191,7 +192,7 @@ type transition struct {
 // notifiedAt zero and is not sent later. ok is false when the sample changed
 // nothing the caller must act on.
 func (c *condition) observe(now time.Time, got level, window, reminder, maxGap time.Duration, paused bool) (transition, bool) {
-	gap := !c.lastSample.IsZero() && now.Sub(c.lastSample) > maxGap
+	gap := !c.lastSample.IsZero() && wallClock(now).Sub(wallClock(c.lastSample)) > maxGap
 	c.lastSample = now
 
 	if got == c.level {
@@ -207,6 +208,13 @@ func (c *condition) observe(now time.Time, got level, window, reminder, maxGap t
 		return transition{}, false
 	}
 	return c.move(now, got, paused), true
+}
+
+// wallClock strips the monotonic reading of t. A suspend stops the
+// monotonic clock but not the wall clock, so only a wall-clock difference
+// shows the gap a suspend leaves between two samples.
+func wallClock(t time.Time) time.Time {
+	return t.Round(0)
 }
 
 // track adds a reading off the current level to the pending spell. A reading
@@ -320,7 +328,7 @@ func memorySysMessage(mem sysmon.Memory, c *condition, urgency byte) (notify.Mes
 // cpuSysMessage returns the notification and the tooltip line of a CPU
 // pressure condition: the "some avg60" pressure and the whole minutes it has
 // lasted.
-func cpuSysMessage(p sysmon.Pressure, lasted time.Duration, c *condition, urgency byte) (notify.Message, string) { //nolint:unparam // shaped like the disk and memory builders; the caller passes the transition urgency
+func cpuSysMessage(p sysmon.Pressure, lasted time.Duration, c *condition, urgency byte) (notify.Message, string) {
 	minutes := int(lasted / time.Minute)
 	m := sysMessage(keyCPU,
 		messages.Text(messages.SysCPUSummary),
