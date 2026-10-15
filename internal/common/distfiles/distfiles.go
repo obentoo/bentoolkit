@@ -156,7 +156,7 @@ func Resolve(ctx context.Context, explicit, configured string) (Dir, error) {
 		candidate = configured
 	}
 	if candidate == "" {
-		candidate = hostDistdir(ctx)
+		candidate = HostDistdir(ctx)
 		if err := ctx.Err(); err != nil {
 			return Dir{}, fmt.Errorf("resolving the distdir: %w", err)
 		}
@@ -206,7 +206,7 @@ func Locate(ctx context.Context, explicit, configured string) (string, bool) {
 	// the host is a precedence bug even when it happens to return the right
 	// path, which is why the tests count this call rather than only checking it.
 	if candidate == "" {
-		candidate = hostDistdir(ctx)
+		candidate = HostDistdir(ctx)
 	}
 	if candidate == "" {
 		return "", false
@@ -321,7 +321,7 @@ func Probe(dir string) error {
 	return nil
 }
 
-// hostDistdir asks the host's package manager where it downloads to, and
+// HostDistdir asks the host's package manager where it downloads to, and
 // returns "" for every way that question can go unanswered: portageq absent,
 // a non-zero exit, the timeout expiring, empty output, or output that is not an
 // absolute path.
@@ -334,7 +334,7 @@ func Probe(dir string) error {
 // working directory.
 //
 // This is a library: the absence is reported by returning "", never logged.
-func hostDistdir(ctx context.Context) string {
+func HostDistdir(ctx context.Context) string {
 	return portageqPath(ctx, "distdir")
 }
 

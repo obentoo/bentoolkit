@@ -609,7 +609,7 @@ func TestTempRootIsEmptyWhenTheQuestionCannotBeAnswered(t *testing.T) {
 // directory the sandbox exists to keep it out of.
 func TestTempRootAndHostDistdirAskDifferentQuestions(t *testing.T) {
 	distdirCall := stubPortageqOutput(t, "/var/cache/distfiles\n")
-	_ = hostDistdir(t.Context())
+	_ = HostDistdir(t.Context())
 	distdirArgv := distdirCall.argv()
 
 	tempCall := stubPortageqOutput(t, "/var/tmp\n")
@@ -617,9 +617,9 @@ func TestTempRootAndHostDistdirAskDifferentQuestions(t *testing.T) {
 	tempArgv := tempCall.argv()
 
 	if distdirArgv == tempArgv {
-		t.Fatalf("hostDistdir and TempRoot ask the SAME question (%q); the fixer sandbox would be created inside the host's DISTDIR", distdirArgv)
+		t.Fatalf("HostDistdir and TempRoot ask the SAME question (%q); the fixer sandbox would be created inside the host's DISTDIR", distdirArgv)
 	}
 	if distdirArgv != "portageq distdir" {
-		t.Errorf("hostDistdir asked %q, want %q", distdirArgv, "portageq distdir")
+		t.Errorf("HostDistdir asked %q, want %q", distdirArgv, "portageq distdir")
 	}
 }

@@ -165,6 +165,7 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 	}
 	ticks, stopTicks := minuteTicks()
 	defer stopTicks()
+	sys, monitors, watched := healthDeps(ctx, log, trayCfg)
 
 	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state", statePath)
 
@@ -186,6 +187,10 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 		Net:   netMon,
 		Store: state.Open(statePath),
 		Bus:   dbusx.NewOwner(session),
+
+		Sys:       sys,
+		DiskPaths: watched,
+		Monitors:  monitors,
 	})
 	return app.Run(ctx)
 }
@@ -226,7 +231,8 @@ func loadTrayConfig(log *slog.Logger) config.TrayConfig {
 	}
 	_, intervalWarnings := cfg.Tray.GetInterval()
 	_, muteWarnings := cfg.Tray.GetMute()
-	for _, w := range slices.Concat(intervalWarnings, muteWarnings) {
+	_, monitorWarnings := cfg.Tray.GetMonitors()
+	for _, w := range slices.Concat(intervalWarnings, muteWarnings, monitorWarnings) {
 		log.Warn("configuration", "warning", w)
 	}
 	return cfg.Tray
