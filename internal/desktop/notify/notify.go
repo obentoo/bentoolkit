@@ -73,6 +73,17 @@ const eventBuffer = 16
 // yet. They are almost always another application's, so the oldest go first.
 const maxParked = 64
 
+// maxExpired bounds the records kept for notifications the server reported
+// expired. Such a notification can still sit in the server's history, where
+// it stays replaceable; past the bound the oldest are forgotten.
+const maxExpired = 64
+
+// closedExpired is the NotificationClosed reason for a notification that
+// timed out. KDE Plasma reports it when a popup moves into its history, where
+// the ID stays live, so it ends nothing; dismissed (2), closed by a call (3)
+// and undefined (4) do.
+const closedExpired uint32 = 1
+
 // Action is one notification action: Key is what the server reports back in
 // ActionInvoked, Label is what the user sees. The key "default" is the action
 // taken when the notification itself is clicked.
@@ -139,6 +150,10 @@ type sentNotification struct {
 	owner string
 	// changes is the Notifier's ownerChanges when the Notify went out.
 	changes uint64
+	// expired is set when the server reported the notification expired: it
+	// may still be in the server's history, so it stays replaceable and
+	// closable, but it counts against maxExpired.
+	expired bool
 }
 
 // capabilities is what one owner of serverName advertised.
@@ -527,9 +542,10 @@ func (n *Notifier) Close(ctx context.Context, id uint32, key string) error {
 // ownedLocked returns the record of id when this Notifier may replace or
 // close it on behalf of the condition key: the key is not empty, and id was
 // recorded for that same key from a Notify sent to, and answered after the
-// last change of, the current server owner (one the server has not reported
-// closed since). With no owner there is nothing to replace or close. n.mu
-// must be held.
+// last change of, the current server owner, and not since reported dismissed
+// or closed (an expired one is still owned: it can sit in the server's
+// history). With no owner there is nothing to replace or close. n.mu must be
+// held.
 func (n *Notifier) ownedLocked(id uint32, key string) (sentNotification, bool) {
 	if id == 0 || key == "" || n.owner == "" {
 		return sentNotification{}, false
@@ -563,6 +579,16 @@ func (n *Notifier) recordLocked(id uint32, s sentNotification) {
 	// A restarted server hands out IDs again: a token buffered for an older
 	// notification must not reach this one.
 	delete(n.tokens, id)
+	if s.system && s.key != "" {
+		// One notification stands for a condition: an older record of the
+		// same key no longer names the one on screen.
+		for other, o := range n.sent {
+			if other != id && o.key == s.key {
+				delete(n.sent, other)
+				delete(n.tokens, other)
+			}
+		}
+	}
 	n.sent[id] = s
 
 	kept := n.parked[:0]
@@ -692,8 +718,36 @@ func (n *Notifier) applyLocked(p serverSignal) {
 			// can arrive after the replacement was recorded.
 			return
 		}
+		if reason, ok := p.sig.Body[1].(uint32); ok && reason == closedExpired {
+			s.expired = true
+			n.sent[p.id] = s
+			n.capExpiredLocked()
+			return
+		}
 		delete(n.sent, p.id)
 		delete(n.tokens, p.id)
+	}
+}
+
+// capExpiredLocked forgets the oldest expired records, by reply sequence,
+// until at most maxExpired remain.
+func (n *Notifier) capExpiredLocked() {
+	for {
+		count, oldest := 0, uint32(0)
+		var oldestSeq dbus.Sequence
+		for id, s := range n.sent {
+			if !s.expired {
+				continue
+			}
+			if count++; count == 1 || s.seq < oldestSeq {
+				oldest, oldestSeq = id, s.seq
+			}
+		}
+		if count <= maxExpired {
+			return
+		}
+		delete(n.sent, oldest)
+		delete(n.tokens, oldest)
 	}
 }
 
