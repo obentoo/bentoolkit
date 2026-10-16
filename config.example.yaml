@@ -246,6 +246,14 @@ autoupdate:
 # downgrade_critical  send critical notices with normal urgency (default false).
 # skip_metered        do not check the feed on a metered connection
 #                     (default true).
+# monitors            system health checks: disk space, memory, CPU pressure
+#                     and network. Each one is on unless its `enabled` is
+#                     false, and a condition must last its `sustain` window
+#                     before it notifies. Percentages are 0-100, sizes whole
+#                     KiB/MiB/GiB/TiB, durations like 30s, 2m or 1h (0 is
+#                     allowed, negative is not). A bad or out-of-range value
+#                     warns and takes its default; an unknown key warns and
+#                     the tray still starts. Each value below is the default.
 # ----------------------------------------------------------------------------
 # tray:
 #   interval: 6h
@@ -253,3 +261,32 @@ autoupdate:
 #   mute: [release]
 #   downgrade_critical: false
 #   skip_metered: true
+#   monitors:
+#     sample_interval: 30s     # time between samples (default 30s; min 10s)
+#     reminder: 1h             # critical alert repeat (default 1h; min 15m)
+#     disk:
+#       enabled: true          # default true
+#       paths: []              # default []: /, PORTAGE_TMPDIR and DISTDIR
+#       warn_percent: 10       # warn under 10% free AND warn_free (default 10)
+#       warn_free: 20GiB       # default 20GiB
+#       crit_percent: 2        # critical under 2% free OR crit_free (default 2)
+#       crit_free: 2GiB        # default 2GiB
+#       sustain: 1m            # default 1m
+#     memory:
+#       enabled: true          # default true
+#       warn_percent: 10       # warn under 10% of RAM available (default 10)
+#       crit_percent: 5        # critical under 5% available (default 5)...
+#       crit_swap_percent: 10  # ...with under 10% of swap free (default 10)
+#       psi_full_crit: 10.0    # critical at "full avg60" pressure (default 10)
+#       sustain: 2m            # default 2m
+#     cpu:
+#       enabled: true          # default true
+#       warn_psi: 80.0         # warn at "some avg60" pressure (default 80.0)
+#       clear_psi: 70.0        # clear under this, below warn_psi (default 70.0;
+#                              # with warn_psi <= 70 it is warn_psi * 70/80)
+#       sustain: 5m            # default 5m
+#     network:
+#       enabled: true          # default true
+#       down_after: 30s        # offline this long: "network down" (default 30s)
+#       down_after_startup: 60s  # the same when the tray starts offline (60s)
+#       back_after: 10s        # online this long: "network back" (default 10s)
