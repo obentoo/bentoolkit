@@ -9,6 +9,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`overlay compare` reads the `# BENTOO-DIVERGENCE:` tags the overlay
+  actually writes.** The tree separates axis and reason with ` - `
+  (`RDEPEND - adds sys-kernel/bentoo-kernel`), the shape
+  `scripts/gentoo-parity.sh` reads; only `<axis>: <reason>` was accepted, so
+  the tags were reported as malformed (87 warnings on the bentoo tree) or, when
+  the reason held a colon, read with a phrase as the axis. Both separators are
+  read now, the earlier one winning. A tag naming a dependency variable
+  (`DEPEND`, `RDEPEND`, `BDEPEND`, `PDEPEND`, `IDEPEND`) covers the `deps`
+  axis, and candidate declarations are printed as `<AXIS> - <reason>`, which
+  `gentoo-parity.sh` can read. On the bentoo tree the candidates printed by
+  `--realign --no-review` drop from 158 to 62.
+
 ### Changed
 
 - **`make release-deps` can sign without a password prompt.** When
