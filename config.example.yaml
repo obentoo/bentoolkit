@@ -290,3 +290,14 @@ autoupdate:
 #       down_after: 30s        # offline this long: "network down" (default 30s)
 #       down_after_startup: 60s  # the same when the tray starts offline (60s)
 #       back_after: 10s        # online this long: "network back" (default 10s)
+#     emerge:
+#       enabled: true          # announce failed emerge builds (default true)
+#       log: /var/log/emerge.log  # absolute path (default /var/log/emerge.log)
+#     units:
+#       enabled: true          # announce failed systemd units (default true)
+#       system: true           # the system manager (default true)
+#       user: true             # your session's manager (default true)
+#     readonly:
+#       enabled: true          # announce read-only remounts (default true)
+#     smart:
+#       enabled: true          # announce failing drives via udisks2 (default true)

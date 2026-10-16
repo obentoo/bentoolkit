@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -128,6 +129,9 @@ const (
 	DefaultNetworkBackAfter        = 10 * time.Second
 )
 
+// DefaultEmergeLog is the emerge log the emerge monitor follows.
+const DefaultEmergeLog = "/var/log/emerge.log"
+
 // MonitorsConfig is the decoded `tray.monitors:` section. Every leaf and
 // every block is a yaml.Node, so an absent key stays distinct from a zero and
 // a value of the wrong YAML type ("10%", "maybe") or a block of the wrong
@@ -140,6 +144,10 @@ type MonitorsConfig struct {
 	Memory         yaml.Node `yaml:"memory,omitempty"`
 	CPU            yaml.Node `yaml:"cpu,omitempty"`
 	Network        yaml.Node `yaml:"network,omitempty"`
+	Emerge         yaml.Node `yaml:"emerge,omitempty"`
+	Units          yaml.Node `yaml:"units,omitempty"`
+	Readonly       yaml.Node `yaml:"readonly,omitempty"`
+	Smart          yaml.Node `yaml:"smart,omitempty"`
 }
 
 // DiskMonitorConfig is the raw `tray.monitors.disk:` block.
@@ -179,6 +187,29 @@ type NetworkMonitorConfig struct {
 	BackAfter        yaml.Node `yaml:"back_after,omitempty"`
 }
 
+// EmergeMonitorConfig is the raw `tray.monitors.emerge:` block.
+type EmergeMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+	Log     yaml.Node `yaml:"log,omitempty"`
+}
+
+// UnitsMonitorConfig is the raw `tray.monitors.units:` block.
+type UnitsMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+	System  yaml.Node `yaml:"system,omitempty"`
+	User    yaml.Node `yaml:"user,omitempty"`
+}
+
+// ReadonlyMonitorConfig is the raw `tray.monitors.readonly:` block.
+type ReadonlyMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+}
+
+// SmartMonitorConfig is the raw `tray.monitors.smart:` block.
+type SmartMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+}
+
 // Monitors is the resolved tray.monitors block: every value parsed, checked
 // against its limits and defaulted.
 type Monitors struct {
@@ -188,6 +219,10 @@ type Monitors struct {
 	Memory         MemoryMonitor
 	CPU            CPUMonitor
 	Network        NetworkMonitor
+	Emerge         EmergeMonitor
+	Units          UnitsMonitor
+	Readonly       ReadonlyMonitor
+	Smart          SmartMonitor
 }
 
 // DiskMonitor holds the disk thresholds. Paths is empty unless configured;
@@ -223,6 +258,30 @@ type CPUMonitor struct {
 	Sustain  time.Duration
 }
 
+// EmergeMonitor names the emerge log whose failed builds are announced.
+type EmergeMonitor struct {
+	Enabled bool
+	Log     string
+}
+
+// UnitsMonitor selects the systemd managers whose failed units are
+// announced.
+type UnitsMonitor struct {
+	Enabled bool
+	System  bool
+	User    bool
+}
+
+// ReadonlyMonitor switches the read-only remount monitor.
+type ReadonlyMonitor struct {
+	Enabled bool
+}
+
+// SmartMonitor switches the udisks2 disk health monitor.
+type SmartMonitor struct {
+	Enabled bool
+}
+
 // NetworkMonitor holds the network debounce windows.
 type NetworkMonitor struct {
 	Enabled          bool
@@ -243,6 +302,10 @@ func (t TrayConfig) GetMonitors() (Monitors, []string) {
 	memory := decodeBlock[MemoryMonitorConfig](&r, "memory", &c.Memory)
 	cpu := decodeBlock[CPUMonitorConfig](&r, "cpu", &c.CPU)
 	network := decodeBlock[NetworkMonitorConfig](&r, "network", &c.Network)
+	emerge := decodeBlock[EmergeMonitorConfig](&r, "emerge", &c.Emerge)
+	units := decodeBlock[UnitsMonitorConfig](&r, "units", &c.Units)
+	readonly := decodeBlock[ReadonlyMonitorConfig](&r, "readonly", &c.Readonly)
+	smart := decodeBlock[SmartMonitorConfig](&r, "smart", &c.Smart)
 	m := Monitors{
 		SampleInterval: r.duration("sample_interval", &c.SampleInterval, DefaultMonitorSampleInterval, MinMonitorSampleInterval),
 		Reminder:       r.duration("reminder", &c.Reminder, DefaultMonitorReminder, MinMonitorReminder),
@@ -250,6 +313,10 @@ func (t TrayConfig) GetMonitors() (Monitors, []string) {
 		Memory:         r.memory(&memory),
 		CPU:            r.cpu(&cpu),
 		Network:        r.network(&network),
+		Emerge:         r.emerge(&emerge),
+		Units:          r.units(&units),
+		Readonly:       ReadonlyMonitor{Enabled: r.enabled("readonly.enabled", &readonly.Enabled)},
+		Smart:          SmartMonitor{Enabled: r.enabled("smart.enabled", &smart.Enabled)},
 	}
 	return m, r.warnings
 }
@@ -382,6 +449,21 @@ func (r *monitorResolver) network(c *NetworkMonitorConfig) NetworkMonitor {
 	}
 }
 
+func (r *monitorResolver) emerge(c *EmergeMonitorConfig) EmergeMonitor {
+	return EmergeMonitor{
+		Enabled: r.enabled("emerge.enabled", &c.Enabled),
+		Log:     resolveKey(r, "emerge.log", &c.Log, DefaultEmergeLog, parseAbsPath, strconv.Quote),
+	}
+}
+
+func (r *monitorResolver) units(c *UnitsMonitorConfig) UnitsMonitor {
+	return UnitsMonitor{
+		Enabled: r.enabled("units.enabled", &c.Enabled),
+		System:  r.enabled("units.system", &c.System),
+		User:    r.enabled("units.user", &c.User),
+	}
+}
+
 // defaultClearPSI is DefaultCPUClearPSI while that stays below warn; under a
 // lower warn level it keeps the default pair's proportion (70/80 of warn).
 func defaultClearPSI(warn float64) float64 {
@@ -403,10 +485,14 @@ func (t TrayConfig) unknownMonitorKeys() []string {
 		return nil
 	}
 	blocks := map[string]reflect.Type{
-		"disk":    reflect.TypeFor[DiskMonitorConfig](),
-		"memory":  reflect.TypeFor[MemoryMonitorConfig](),
-		"cpu":     reflect.TypeFor[CPUMonitorConfig](),
-		"network": reflect.TypeFor[NetworkMonitorConfig](),
+		"disk":     reflect.TypeFor[DiskMonitorConfig](),
+		"memory":   reflect.TypeFor[MemoryMonitorConfig](),
+		"cpu":      reflect.TypeFor[CPUMonitorConfig](),
+		"network":  reflect.TypeFor[NetworkMonitorConfig](),
+		"emerge":   reflect.TypeFor[EmergeMonitorConfig](),
+		"units":    reflect.TypeFor[UnitsMonitorConfig](),
+		"readonly": reflect.TypeFor[ReadonlyMonitorConfig](),
+		"smart":    reflect.TypeFor[SmartMonitorConfig](),
 	}
 	unknown := unknownKeys("", sec, reflect.TypeFor[MonitorsConfig]())
 	for i := 0; i+1 < len(sec.Content); i += 2 {
@@ -566,6 +652,14 @@ func parsePaths(n *yaml.Node) ([]string, error) {
 }
 
 func showDefaultPaths([]string) string { return "the default paths" }
+
+// parseAbsPath reads a single absolute path.
+func parseAbsPath(n *yaml.Node) (string, error) {
+	if n.Kind != yaml.ScalarNode || !filepath.IsAbs(n.Value) {
+		return "", errors.New("is not an absolute path")
+	}
+	return n.Value, nil
+}
 
 func parsePercent(n *yaml.Node) (float64, error) {
 	if n.Kind != yaml.ScalarNode {
