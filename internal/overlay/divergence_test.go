@@ -739,3 +739,97 @@ func TestCandidateDeclarationsWriteNothing(t *testing.T) {
 		t.Errorf("the fixture overlay changed (hash %s -> %s) while emitting candidates; the overlay auto-commits, so a written declaration is a published one (R3.6)", before, after)
 	}
 }
+
+// TestParseDivergencesReadsTheOverlaySeparator is the separator the bentoo tree
+// actually writes. Every one of its 464 tags reads `<AXIS> - <reason>`, the shape
+// scripts/gentoo-parity.sh reads by taking the first token after the tag. A
+// parser that only knew `<AXIS>: <reason>` reported all of them as undeclared —
+// virtual/linux-sources was offered a "proposed declaration" for an axis its
+// ebuild already declared — and on a reason that happened to hold a colon it
+// read the axis as a phrase. Both separators are accepted; the earlier one wins,
+// so a reason may hold the other.
+func TestParseDivergencesReadsTheOverlaySeparator(t *testing.T) {
+	cases := []struct {
+		name, line, axis, reason string
+	}{
+		{
+			name:   "dash separator, as the overlay writes it",
+			line:   "# BENTOO-DIVERGENCE: RDEPEND - adds sys-kernel/bentoo-kernel, which installs",
+			axis:   "RDEPEND",
+			reason: "adds sys-kernel/bentoo-kernel, which installs",
+		},
+		{
+			name:   "dash separator with a colon later in the reason",
+			line:   "# BENTOO-DIVERGENCE: PATCHES - backport of upstream PR #43948: tpm2 setup",
+			axis:   "PATCHES",
+			reason: "backport of upstream PR #43948: tpm2 setup",
+		},
+		{
+			name:   "colon separator with a dash later in the reason",
+			line:   "# BENTOO-DIVERGENCE: INHERIT: gstreamer-meson - not meson",
+			axis:   "INHERIT",
+			reason: "gstreamer-meson - not meson",
+		},
+		{
+			name:   "an axis holding a dot or a slash",
+			line:   "# BENTOO-DIVERGENCE: files/content - upstream 6.8 beta",
+			axis:   "files/content",
+			reason: "upstream 6.8 beta",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ParseDivergences(parseDivEbuild(t, "EAPI=8\n\n"+tc.line+"\n"))
+			if err != nil {
+				t.Fatalf("ParseDivergences returned %v, want nil", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("parsed %d declarations, want 1: %+v", len(got), got)
+			}
+			if got[0].Axis != tc.axis || got[0].Reason != tc.reason {
+				t.Errorf("parsed axis %q reason %q, want axis %q reason %q", got[0].Axis, got[0].Reason, tc.axis, tc.reason)
+			}
+		})
+	}
+}
+
+// TestCandidateDeclarationsUseTheOverlaySeparator keeps a pasted candidate
+// readable by scripts/gentoo-parity.sh, which takes the first token after the
+// tag as the axis: `INHERIT:` would name no axis there, so the candidate would
+// silence this tool and leave the parity sweep reporting the row as ALIGN.
+func TestCandidateDeclarationsUseTheOverlaySeparator(t *testing.T) {
+	for _, block := range CandidateDeclarations(candidateAxes(), nil) {
+		tag, _, _ := strings.Cut(block, "\n")
+		_, tail, _ := strings.Cut(tag, "BENTOO-DIVERGENCE:")
+		fields := strings.Fields(tail)
+		if len(fields) < 3 || fields[1] != "-" || strings.ContainsAny(fields[0], ":") {
+			t.Errorf("candidate tag %q is not `<AXIS> - <reason>`; gentoo-parity.sh reads the first token as the axis", tag)
+		}
+		got, err := ParseDivergences(parseDivEbuild(t, "EAPI=8\n\n"+block+"\n"))
+		if err != nil || len(got) != 1 || !strings.EqualFold(got[0].Axis, fields[0]) {
+			t.Errorf("candidate does not parse back as one declaration of axis %q: %+v, %v", fields[0], got, err)
+		}
+	}
+}
+
+// TestCandidateDeclarationsReadDependencyVariablesAsDeps is the vocabulary the
+// tree writes: a dependency divergence is tagged by the variable it touched,
+// never by this package's single `deps` axis. Without the mapping,
+// virtual/linux-sources — whose RDEPEND tag says exactly why it adds
+// sys-kernel/bentoo-kernel — was offered a fresh `DEPS - ...` block every run.
+func TestCandidateDeclarationsReadDependencyVariablesAsDeps(t *testing.T) {
+	deps := []AxisFinding{{Axis: axisDeps, Detail: "sys-kernel/bentoo-kernel: only we depend on it"}}
+
+	for _, name := range []string{"RDEPEND", "depend", "BDEPEND", "PDEPEND", "IDEPEND", "deps"} {
+		declared := []DeclaredDivergence{{Axis: name, Reason: "adds sys-kernel/bentoo-kernel"}}
+		if got := CandidateDeclarations(deps, declared); len(got) != 0 {
+			t.Errorf("a %s declaration does not cover the deps axis; got %d candidate(s):\n%s", name, len(got), strings.Join(got, "\n"))
+		}
+	}
+
+	// Only dependency variables: an IUSE tag says nothing about the atoms.
+	unrelated := []DeclaredDivergence{{Axis: "IUSE", Reason: "drops a flag"}}
+	if got := CandidateDeclarations(deps, unrelated); len(got) != 1 {
+		t.Errorf("an IUSE declaration covered the deps axis; got %d candidate(s), want 1", len(got))
+	}
+}
