@@ -64,11 +64,11 @@ type DeclaredDivergence struct {
 // ParseDivergences reads one ebuild and returns the divergences it declares, in
 // this shape:
 //
-//	# BENTOO-DIVERGENCE: INHERIT: gstreamer-meson does not handle the qt6 option list
+//	# BENTOO-DIVERGENCE: INHERIT - gstreamer-meson does not handle the qt6 option list
 //	#   drop-when: gentoo-version >= 1.29
 //
-// The optional second line must immediately follow the first. A parsed
-// declaration is questioned no further; an axis with none is undeclared.
+// (`INHERIT: <reason>` is read too.) The optional second line must immediately
+// follow the first. A parsed declaration is questioned no further.
 //
 // The tag is recognised only on a line that is WHOLLY a comment, outside any
 // quoted string or heredoc body: an ebuild that echoes its own documentation
@@ -134,7 +134,7 @@ func divergencesInText(path, text string) ([]DeclaredDivergence, error) {
 		axis, reason, wellFormed := divergenceAxisReason(tail)
 		if !wellFormed {
 			malformed = append(malformed, fmt.Errorf(
-				"%s:%d: %q declares no axis and no reason; want `# %s <axis>: <reason>`",
+				"%s:%d: %q declares no axis and no reason; want `# %s <axis> - <reason>`",
 				path, i+1, strings.TrimSpace(line), divergenceTag))
 			continue
 		}
@@ -186,15 +186,28 @@ func divergenceComment(line string) (string, bool) {
 	return strings.TrimSpace(rest), true
 }
 
-// divergenceAxisReason splits a tag's tail into `<axis>: <reason>`.
+// divergenceSeparator is the separator the bentoo tree writes between axis and
+// reason, `# BENTOO-DIVERGENCE: RDEPEND - <reason>`. scripts/gentoo-parity.sh
+// takes the first token after the tag as the axis, so this is also the only
+// shape both readers agree on; candidateBlock emits it.
+const divergenceSeparator = " - "
+
+// divergenceAxisReason splits a tag's tail into `<axis> - <reason>` or
+// `<axis>: <reason>`.
 //
-// The split is on the FIRST colon, so a reason may contain as many more as the
-// maintainer needs — "see bug 942071: the eclass lost the option" survives
-// whole. Both halves must carry something: an axis with no reason is the
-// undocumented divergence declarations exist to abolish, and a reason with no axis names
+// The split is on whichever separator comes FIRST, so a reason may contain as
+// many of either as the maintainer needs — "see bug 942071: the eclass lost the
+// option" survives whole after a dash, and "a - b" survives after a colon.
+// Both halves must carry something: an axis with no reason is the undocumented
+// divergence declarations exist to abolish, and a reason with no axis names
 // nothing the report can attach it to.
 func divergenceAxisReason(tail string) (axis, reason string, ok bool) {
-	axis, reason, found := strings.Cut(tail, ":")
+	sep := ":"
+	colon, dash := strings.Index(tail, ":"), strings.Index(tail, divergenceSeparator)
+	if dash >= 0 && (colon < 0 || dash < colon) {
+		sep = divergenceSeparator
+	}
+	axis, reason, found := strings.Cut(tail, sep)
 	axis, reason = strings.TrimSpace(axis), strings.TrimSpace(reason)
 	if !found || axis == "" || reason == "" {
 		return "", "", false
@@ -759,7 +772,31 @@ func candidateCovered(axis string, declared []DeclaredDivergence) bool {
 			// the queue, so it earns a fresh candidate.
 			continue
 		}
-		if strings.EqualFold(declaration.Axis, axis) {
+		if declarationNamesAxis(declaration.Axis, axis) {
+			return true
+		}
+	}
+	return false
+}
+
+// depsDeclarationAxes are the ebuild variables a tag names for what this
+// package calls the one deps axis. The tree spells a dependency divergence by
+// the variable it touched (`RDEPEND - ...`), as scripts/gentoo-parity.sh does;
+// matched only by name, an RDEPEND tag never covered `deps` and the same
+// declaration was proposed again on every run.
+var depsDeclarationAxes = []string{"DEPEND", "RDEPEND", "BDEPEND", "PDEPEND", "IDEPEND"}
+
+// declarationNamesAxis reports whether a tag's axis, as the maintainer spelled
+// it, is the structural axis a finding is about.
+func declarationNamesAxis(declared, axis string) bool {
+	if strings.EqualFold(declared, axis) {
+		return true
+	}
+	if !strings.EqualFold(axis, axisDeps) {
+		return false
+	}
+	for _, name := range depsDeclarationAxes {
+		if strings.EqualFold(declared, name) {
 			return true
 		}
 	}
@@ -768,9 +805,11 @@ func candidateCovered(axis string, declared []DeclaredDivergence) bool {
 
 // candidateBlock renders one finding as the two-line declaration:
 //
-//	# BENTOO-DIVERGENCE: INHERIT: ::gentoo inherits gstreamer-meson; ours inherits meson
+//	# BENTOO-DIVERGENCE: INHERIT - ::gentoo inherits gstreamer-meson; ours inherits meson
 //	#   drop-when: TODO: state when this divergence stops applying, or delete this line
 //
+// The separator is divergenceSeparator, not a colon: scripts/gentoo-parity.sh
+// reads the first token after the tag as the axis, and `INHERIT:` names none.
 // The axis is upper-cased to match the documented spelling of the tag. Nothing else is
 // rewritten, and what comes out parses back through ParseDivergences as exactly
 // one well-formed declaration — a candidate that would not survive being pasted is
@@ -783,8 +822,9 @@ func candidateBlock(finding AxisFinding) string {
 	// Named as the two lines the parser itself reads — a tag line and its
 	// continuation — rather than as one format string, so what is emitted here
 	// and what divergencesInText looks for stay legibly the same two things.
-	tag := fmt.Sprintf("# %s %s: %s",
-		divergenceTag, strings.ToUpper(finding.Axis), strings.Join(strings.Fields(finding.Detail), " "))
+	tag := fmt.Sprintf("# %s %s%s%s",
+		divergenceTag, strings.ToUpper(finding.Axis), divergenceSeparator,
+		strings.Join(strings.Fields(finding.Detail), " "))
 	exit := fmt.Sprintf("%s%s %s",
 		candidateContinuation, divergenceDropWhenKey, candidateExitPlaceholder)
 	return tag + "\n" + exit
