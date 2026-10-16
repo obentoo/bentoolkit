@@ -226,7 +226,9 @@ func managerAbsent(err error) bool {
 
 // Changed fires after the manager reports a unit ActiveState change or an
 // unloaded unit. Changes that arrive before the receiver reads coalesce into
-// one. The channel is never closed.
+// one. The channel is closed when the bus connection is lost (or closed by
+// the caller); it is never closed by Absent or after a failed setup, where
+// it simply never fires.
 func (m *Monitor) Changed() <-chan struct{} {
 	return m.changed
 }
@@ -263,10 +265,14 @@ func (m *Monitor) Failed(ctx context.Context) ([]Unit, error) {
 	return units, nil
 }
 
-// read is the single reader of the connection's signal channel. It exits when
-// godbus closes the channel or the connection's context ends (on a connection
-// already closed, conn.Signal registers nothing and the channel never closes).
+// read is the single reader of the connection's signal channel and the only
+// sender on, and closer of, m.changed. It exits when godbus closes the
+// channel or the connection's context ends (on a connection already closed,
+// conn.Signal registers nothing and the channel never closes), and closes
+// m.changed as it does, so the caller sees the bus loss. New starts it at
+// most once per Monitor, so the close happens at most once.
 func (m *Monitor) read(signals <-chan *dbus.Signal) {
+	defer close(m.changed)
 	done := m.conn.Context().Done()
 	for {
 		select {
