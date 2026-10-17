@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.37.0] - 2026-10-17
+
 ### Added
 
 - **`bentoo-tray` warns when the machine runs short of disk, memory, CPU or
@@ -1570,7 +1572,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/obentoo/bentoolkit/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/obentoo/bentoolkit/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/obentoo/bentoolkit/compare/v0.34.0...v0.35.0
 [0.34.0]: https://github.com/obentoo/bentoolkit/compare/v0.33.3...v0.34.0
