@@ -2,7 +2,10 @@ package tray
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
@@ -281,14 +284,46 @@ func (c *condition) notify(now time.Time, tr transition, urgency byte) transitio
 	return tr
 }
 
-// Notification keys of the system monitors; a disk key is "disk:" and the
-// watched path.
+// Notification keys of the system monitors. A disk key is "disk:" and the
+// watched path, a read-only key "readonly:" and the mount point, a SMART key
+// "smart:" and the drive's udisks2 object path; every failed unit shares the
+// one units key.
 const (
-	keyDiskPrefix = "disk:"
-	keyMemory     = "memory"
-	keyCPU        = "cpu"
-	keyNetwork    = "network"
+	keyDiskPrefix     = "disk:"
+	keyMemory         = "memory"
+	keyCPU            = "cpu"
+	keyNetwork        = "network"
+	keyEmerge         = "emerge"
+	keyUnits          = "units"
+	keyReadonlyPrefix = "readonly:"
+	keySmartPrefix    = "smart:"
 )
+
+// maxField is the most bytes of one host-supplied field (an atom, a unit
+// name, a mount point, a drive model) a notification or tooltip line shows.
+const maxField = 128
+
+// clip makes s safe for one line of a notification and cuts it to at most
+// maxField bytes. Host names arrive raw (a mount point may hold Latin-1 bytes
+// or, unescaped, a newline): invalid UTF-8 becomes U+FFFD, which the bus can
+// encode, and every control character becomes a space. The cut falls on a
+// rune boundary so the text stays valid UTF-8.
+func clip(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s) // Map turns every invalid byte into U+FFFD
+	if len(s) <= maxField {
+		return s
+	}
+	cut := maxField
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
 
 // sysMessage is the system notification of the condition keyed key, replacing
 // its last notification.
@@ -350,6 +385,63 @@ func networkSysMessage(ev netEvent, replacesID uint32, urgency byte) (notify.Mes
 		messages.Text(messages.SysNetDownBody),
 		replacesID, urgency)
 	return m, messages.Text(messages.SysAlertNetwork)
+}
+
+// emergeSysMessage returns the notification and the tooltip line of a failed
+// build: the first failed atom, how many others failed when more is above
+// zero, and the first atom's build log when logPath is not empty. logPath is
+// shown whole, never cut: the caller states only a path it checked, and a
+// cut one would name a file that does not exist.
+func emergeSysMessage(atom string, more int, logPath string, replacesID uint32, urgency byte) (notify.Message, string) {
+	failed := clip(atom)
+	if more > 0 {
+		failed = messages.Format(messages.SysEmergeMore, failed, more)
+	}
+	body := messages.Format(messages.SysEmergeBody, failed)
+	if logPath != "" {
+		body = messages.Format(messages.SysEmergeBodyLog, failed, logPath)
+	}
+	m := sysMessage(keyEmerge, messages.Text(messages.SysEmergeSummary), body, replacesID, urgency)
+	return m, messages.Format(messages.SysAlertEmerge, failed)
+}
+
+// unitsSysMessage returns the shared units notification for one failed unit
+// of manager ("system" or "user"), with failed units currently failed, and
+// that unit's tooltip line.
+func unitsSysMessage(manager, unit string, failed int, replacesID uint32, urgency byte) (notify.Message, string) {
+	unit, manager = clip(unit), clip(manager)
+	m := sysMessage(keyUnits,
+		messages.Text(messages.SysUnitsSummary),
+		messages.Format(messages.SysUnitsBody, unit, manager, failed),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertUnit, unit, manager)
+}
+
+// readonlySysMessage returns the notification and the tooltip line of a
+// filesystem gone read-only: its mount point, device and filesystem type.
+func readonlySysMessage(point, device, fsType string, replacesID uint32, urgency byte) (notify.Message, string) {
+	p, dev, fs := clip(point), clip(device), clip(fsType)
+	m := sysMessage(keyReadonlyPrefix+point,
+		messages.Format(messages.SysReadonlySummary, p),
+		messages.Format(messages.SysReadonlyBody, p, dev, fs),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertReadonly, p, dev, fs)
+}
+
+// smartSysMessage returns the notification and the tooltip line of the
+// failing drive at the udisks2 object path: its model, its serial and the
+// reason, the NVMe warning names when there are any, else the SMART verdict.
+func smartSysMessage(path, model, serial string, warnings []string, replacesID uint32, urgency byte) (notify.Message, string) {
+	reason := messages.Text(messages.SysSmartFailing)
+	if len(warnings) > 0 {
+		reason = clip(strings.Join(warnings, ", "))
+	}
+	mdl := clip(model)
+	m := sysMessage(keySmartPrefix+path,
+		messages.Text(messages.SysSmartSummary),
+		messages.Format(messages.SysSmartBody, mdl, clip(serial), reason),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertSmart, mdl, reason)
 }
 
 // humanBytes renders n in the largest of GiB, MiB and KiB it fills at least

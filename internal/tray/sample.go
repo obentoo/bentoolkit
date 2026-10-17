@@ -1,9 +1,12 @@
 package tray
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
@@ -13,23 +16,35 @@ import (
 
 // Monitor names, as the condition keys and the log lines spell them.
 const (
-	monitorDisk    = "disk"
-	monitorMemory  = "memory"
-	monitorCPU     = "cpu"
-	monitorNetwork = "network"
+	monitorDisk     = "disk"
+	monitorMemory   = "memory"
+	monitorCPU      = "cpu"
+	monitorNetwork  = "network"
+	monitorEmerge   = "emerge"
+	monitorUnits    = "units"
+	monitorReadonly = "readonly"
+	monitorSmart    = "smart"
 )
 
 // Logical paths of the host files a sample reads, named by the WARN of a
 // failed reading: the reader's root is not the App's to know.
 const (
-	pathMeminfo  = "/proc/meminfo"
-	pathPressure = "/proc/pressure/"
-	pathProc     = "/proc"
+	pathMeminfo   = "/proc/meminfo"
+	pathPressure  = "/proc/pressure/"
+	pathProc      = "/proc"
+	pathMountinfo = "/proc/self/mountinfo"
 )
 
 // reading is what an INFO transition line reports: the measured value and
-// the threshold of the level the condition reached.
-type reading struct{ value, threshold float64 }
+// the threshold of the level the condition reached. An event monitor has
+// neither, and its line carries no value or threshold.
+type reading struct {
+	value, threshold float64
+	event            bool
+}
+
+// eventReading is the reading of a condition raised by an event.
+var eventReading = reading{event: true}
 
 // builder returns the notification and the tooltip line of an active
 // condition at urgency.
@@ -47,19 +62,51 @@ func (l level) String() string {
 	}
 }
 
-// sampling reports whether the App samples the host: a reader is set and at
-// least one resource monitor is enabled.
+// sampling reports whether the App samples the host: a system reader is set
+// and at least one resource monitor is enabled, the emerge or read-only
+// monitor is enabled and has its reader, or drive health is watched, whose
+// critical reminder the sample timer drives.
 func (a *App) sampling() bool {
+	return a.sysSampling() || a.emergeSampling() || a.mountSampling() || a.smartWatched()
+}
+
+// sysSampling reports whether the resource monitors sample.
+func (a *App) sysSampling() bool {
 	return a.d.Sys != nil && (a.mon.Disk.Enabled || a.mon.Memory.Enabled || a.mon.CPU.Enabled)
 }
 
-// sample reads every enabled resource monitor once and applies what changed,
-// then waits for the next sample. A reading that fails skips only its own
+// emergeSampling reports whether the emerge log is read on the sample timer.
+func (a *App) emergeSampling() bool { return a.mon.Emerge.Enabled && a.d.Emerge != nil }
+
+// mountSampling reports whether the mount table is read on the sample timer.
+func (a *App) mountSampling() bool { return a.mon.Readonly.Enabled && a.d.Mounts != nil }
+
+// sample reads every enabled monitor once and applies what changed, then
+// waits for the next sample. A reading that fails skips only its own
 // monitor. ctx is checked after every reading, so a Quit during a slow read
-// returns before the next one and drops what that read returned.
+// returns before the next one and drops what that read returned. The active
+// SMART conditions are observed again from their last reading, with no bus
+// call, so a failing drive is reminded about while udisks2 stays silent.
 func (a *App) sample(ctx context.Context) {
 	a.sampleAt = a.d.Clock.After(a.mon.SampleInterval)
 	now := a.d.Clock.Now()
+	if a.d.Sys != nil {
+		a.sampleResources(ctx, now)
+	}
+	if a.emergeSampling() && ctx.Err() == nil {
+		a.sampleEmerge(ctx, now)
+	}
+	if a.mountSampling() && ctx.Err() == nil {
+		a.sampleMounts(ctx, now)
+	}
+	if a.smartWatched() && ctx.Err() == nil {
+		a.remindSmart(ctx, now)
+	}
+	a.render()
+}
+
+// sampleResources reads the enabled disk, memory and CPU monitors.
+func (a *App) sampleResources(ctx context.Context, now time.Time) {
 	if a.mon.Disk.Enabled {
 		a.sampleDisks(ctx, now)
 	}
@@ -69,7 +116,6 @@ func (a *App) sample(ctx context.Context) {
 	if a.mon.CPU.Enabled && ctx.Err() == nil {
 		a.sampleCPU(ctx, now)
 	}
-	a.render()
 }
 
 // sampleDisks evaluates each filesystem once, under the first watched path
@@ -274,30 +320,40 @@ func (a *App) maxGap() time.Duration {
 	return 2 * a.mon.SampleInterval
 }
 
-// apply acts on one observed sample of key. An active condition gets its
-// tooltip line rebuilt on every sample, sent or not; an ok one has none. A
-// level change logs one INFO line, then the transition sends or withdraws
-// the condition's notification.
+// apply acts on one observed sample of key: noteSample, then the transition
+// sends or withdraws the condition's own notification.
 func (a *App) apply(ctx context.Context, key condKey, c *condition, tr transition, changed bool, build builder, r reading) {
+	msg := a.noteSample(key, c, tr, changed, build, r)
+	if !changed {
+		return
+	}
+	switch {
+	case tr.Notify:
+		a.sendSystem(ctx, key, c, msg)
+	case tr.Withdraw:
+		a.withdraw(ctx, key, c)
+	}
+}
+
+// noteSample records one observed sample of key and returns the condition's
+// notification while it is active. An active condition gets its tooltip line
+// rebuilt on every sample, sent or not; an ok one has none. A level change
+// logs one INFO line.
+func (a *App) noteSample(key condKey, c *condition, tr transition, changed bool, build builder, r reading) notify.Message {
 	var msg notify.Message
 	c.text = ""
 	if c.level != levelOK {
 		msg, c.text = build(levelUrgency(c.level))
 	}
-	if !changed {
-		return
+	if changed && tr.From != tr.To {
+		attrs := []any{"monitor", key.Monitor, "target", key.Target,
+			"state", tr.To.String(), "from", tr.From.String()}
+		if !r.event {
+			attrs = append(attrs, "value", r.value, "threshold", r.threshold)
+		}
+		a.log.Info("system condition changed", attrs...)
 	}
-	tr.Key = key
-	if tr.From != tr.To {
-		a.log.Info("system condition changed", "monitor", key.Monitor, "target", key.Target,
-			"state", tr.To.String(), "from", tr.From.String(), "value", r.value, "threshold", r.threshold)
-	}
-	switch {
-	case tr.Notify:
-		a.sendSystem(ctx, tr.Key, c, msg)
-	case tr.Withdraw:
-		a.withdraw(ctx, tr.Key, c)
-	}
+	return msg
 }
 
 // levelUrgency is the notification urgency of an active level.
@@ -309,17 +365,30 @@ func levelUrgency(l level) byte {
 }
 
 // notificationKey is the notification key of a condition: "disk:" and the
-// watched path, "memory", "network" or "cpu".
+// watched path, "memory", "cpu", "network", "emerge", the one "units" key
+// every failed unit shares, "readonly:" and the mount point, or "smart:" and
+// the drive's object path. A monitor with no case of its own keys by its
+// name, so it can never close another monitor's notification.
 func notificationKey(key condKey) string {
 	switch key.Monitor {
 	case monitorDisk:
 		return keyDiskPrefix + key.Target
 	case monitorMemory:
 		return keyMemory
+	case monitorCPU:
+		return keyCPU
 	case monitorNetwork:
 		return keyNetwork
+	case monitorEmerge:
+		return keyEmerge
+	case monitorUnits:
+		return keyUnits
+	case monitorReadonly:
+		return keyReadonlyPrefix + key.Target
+	case monitorSmart:
+		return keySmartPrefix + key.Target
 	default:
-		return keyCPU
+		return key.Monitor
 	}
 }
 
@@ -376,25 +445,54 @@ func (a *App) closeSys(ctx context.Context, key condKey, id uint32) {
 	}
 }
 
-// alerts returns the tooltip lines of the active system conditions, disks in
-// watched-path order, then memory, CPU and network, and whether any of them
-// is critical. The network line shows while a sent "network down" stands.
+// alerts returns the tooltip lines of the active system conditions and
+// whether any of them is critical: failing drives, read-only filesystems,
+// disks in watched-path order, memory, CPU, network, the failed build, then
+// failed units by manager and name. The network line shows while a sent
+// "network down" stands.
 func (a *App) alerts() (lines []string, critical bool) {
+	add := func(keys []condKey) {
+		for _, key := range keys {
+			c, ok := a.health[key]
+			if !ok || c.level == levelOK || c.text == "" {
+				continue
+			}
+			lines = append(lines, c.text)
+			critical = critical || c.level == levelCritical
+		}
+	}
+	add(a.healthKeys(monitorSmart))
+	add(a.healthKeys(monitorReadonly))
 	keys := make([]condKey, 0, len(a.d.DiskPaths)+2)
 	for _, path := range a.d.DiskPaths {
 		keys = append(keys, condKey{Monitor: monitorDisk, Target: path})
 	}
-	keys = append(keys, condKey{Monitor: monitorMemory}, condKey{Monitor: monitorCPU})
-	for _, key := range keys {
-		c, ok := a.health[key]
-		if !ok || c.level == levelOK || c.text == "" {
-			continue
-		}
-		lines = append(lines, c.text)
-		critical = critical || c.level == levelCritical
-	}
+	add(append(keys, condKey{Monitor: monitorMemory}, condKey{Monitor: monitorCPU}))
 	if a.network != nil && a.network.notifiedDown {
 		lines = append(lines, messages.Text(messages.SysAlertNetwork))
 	}
+	add([]condKey{{Monitor: monitorEmerge}})
+	add(a.healthKeys(monitorUnits))
 	return lines, critical
+}
+
+// healthKeys returns the keys of monitor's conditions sorted by target, a
+// unit's target ("<manager>:<unit>") by manager, then unit name, so the map
+// order never shows in the tooltip.
+func (a *App) healthKeys(monitor string) []condKey {
+	var keys []condKey
+	for key := range a.health {
+		if key.Monitor == monitor {
+			keys = append(keys, key)
+		}
+	}
+	slices.SortFunc(keys, func(x, y condKey) int {
+		xm, xn, _ := strings.Cut(x.Target, ":")
+		ym, yn, _ := strings.Cut(y.Target, ":")
+		if monitor != monitorUnits {
+			xm, xn, ym, yn = x.Target, "", y.Target, ""
+		}
+		return cmp.Or(strings.Compare(xm, ym), strings.Compare(xn, yn))
+	})
+	return keys
 }

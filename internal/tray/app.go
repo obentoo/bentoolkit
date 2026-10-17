@@ -16,7 +16,9 @@ import (
 	"github.com/obentoo/bentoolkit/internal/desktop/netmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
 	"github.com/obentoo/bentoolkit/internal/desktop/portal"
+	"github.com/obentoo/bentoolkit/internal/desktop/smartmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/sni"
+	"github.com/obentoo/bentoolkit/internal/desktop/unitmon"
 	"github.com/obentoo/bentoolkit/internal/gentoo/pkgdb"
 	"github.com/obentoo/bentoolkit/internal/notices"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
@@ -119,6 +121,35 @@ type SystemReader interface {
 	EmergeRunning() (bool, error)
 }
 
+// EmergeReader returns the emerge log events appended since its last read;
+// *sysmon.EmergeFollower implements it.
+type EmergeReader interface {
+	Read() ([]sysmon.EmergeEvent, error)
+}
+
+// MountReader reads the mount table; sysmon.Reader implements it.
+type MountReader interface {
+	Mounts() ([]sysmon.Mount, error)
+}
+
+// UnitMonitor lists the failed units of one systemd manager;
+// *unitmon.Monitor implements it. Changed fires when a unit's state may have
+// changed, and is closed when the manager's bus connection is lost.
+type UnitMonitor interface {
+	Failed(ctx context.Context) ([]unitmon.Unit, error)
+	Changed() <-chan struct{}
+}
+
+// SmartMonitor lists udisks2's drives with their SMART verdict;
+// *smartmon.Monitor implements it. Drives returns the well-formed drives
+// together with an error for the malformed ones. Changed fires when a verdict
+// may have changed or a drive came or went, and is closed when the system bus
+// connection is lost.
+type SmartMonitor interface {
+	Drives(ctx context.Context) ([]smartmon.Drive, error)
+	Changed() <-chan struct{}
+}
+
 // TrayIcon is the StatusNotifierItem; *sni.Item implements it. The context
 // given to Start bounds the item's lifetime, not only the call.
 type TrayIcon interface {
@@ -157,7 +188,12 @@ type BusOwner interface {
 // discards, a nil Clock is the SystemClock, a nil Rand is math/rand/v2's
 // Float64 and a nil Net behaves as netmon.Absent(). A nil Sys turns the
 // disk, memory and CPU monitors off; DiskPaths are the watched paths, and a
-// nil Monitors is resolved from Config. Every other field is required.
+// nil Monitors is resolved from Config. A nil Emerge or Mounts turns the
+// emerge or the read-only monitor off; PortageTmp is PORTAGE_TMPDIR, empty
+// when unknown, and EmergeStartFailed reports that the emerge log could not
+// be opened at start-up, a failure the caller has logged already. A nil
+// SystemUnits or UserUnits leaves that systemd manager unwatched, and a nil
+// Smart turns the SMART monitor off. Every other field is required.
 type Deps struct {
 	Log    *slog.Logger
 	Clock  Clock
@@ -176,6 +212,15 @@ type Deps struct {
 	Sys       SystemReader
 	DiskPaths []string
 	Monitors  *config.Monitors
+
+	Emerge            EmergeReader
+	EmergeStartFailed bool
+	Mounts            MountReader
+	PortageTmp        string
+
+	SystemUnits UnitMonitor
+	UserUnits   UnitMonitor
+	Smart       SmartMonitor
 }
 
 // checkKind is what started a check.
@@ -239,12 +284,19 @@ type App struct {
 	// condition per monitor and target, failing the monitors and targets
 	// whose last reading failed, diskDev the device each watched path last
 	// resolved to, and emergeFailing whether the last emerge scan failed;
-	// none of them is ever written to st.
+	// none of them is ever written to st. emerge follows the emerge log's
+	// runs, seenRW holds the mounts seen read-write, by mountKey, and units
+	// is the notification every failed unit shares; drives holds the last
+	// reading of each failing drive, by object path.
 	mon           config.Monitors
 	health        map[condKey]*condition
 	failing       map[condKey]bool
 	diskDev       map[string]uint64
 	emergeFailing bool
+	emerge        emergeTracker
+	seenRW        map[string]bool
+	units         unitsNote
+	drives        map[string]smartmon.Drive
 
 	fetchAt  <-chan time.Time
 	pauseAt  <-chan time.Time
@@ -281,7 +333,7 @@ func New(d Deps) *App {
 	} else {
 		mon, _ = d.Config.GetMonitors() // its warnings are main's to log
 	}
-	return &App{
+	a := &App{
 		d:        d,
 		log:      d.Log,
 		interval: interval,
@@ -290,10 +342,19 @@ func New(d Deps) *App {
 		health:   map[condKey]*condition{},
 		failing:  map[condKey]bool{},
 		diskDev:  map[string]uint64{},
+		emerge:   emergeTracker{started: map[string]bool{}},
+		seenRW:   map[string]bool{},
+		drives:   map[string]smartmon.Drive{},
 		openings: map[uint64]context.CancelFunc{},
 		opened:   make(chan openResult),
 		done:     make(chan struct{}),
 	}
+	if d.EmergeStartFailed {
+		// The caller logged the start-up failure: the streak is under way,
+		// so the next failed read logs nothing until one succeeds.
+		a.failing[condKey{Monitor: monitorEmerge}] = true
+	}
+	return a
 }
 
 // noticesIndex is https://<feed host>/notices/, or empty when the feed URL
@@ -403,6 +464,14 @@ func (a *App) Run(ctx context.Context) error {
 		a.sampleAt = a.d.Clock.After(a.mon.SampleInterval)
 	}
 	a.observeNetwork(ctx)
+	for _, s := range unitScopes {
+		if a.unitsWatched(s) {
+			a.reconcileUnits(ctx, s)
+		}
+	}
+	if a.smartWatched() {
+		a.reconcileSmart(ctx)
+	}
 	a.log.Info("bentoo-tray started", "first_check_in", delay, "interval", a.interval,
 		"feed", a.d.Feed != nil, "first_run", !a.st.Established)
 	return a.loop(ctx)
@@ -445,6 +514,9 @@ func (a *App) loop(ctx context.Context) error {
 	a.iconEvents = a.d.Icon.Events()
 	newsChanged := a.d.News.Changed()
 	netChanged := a.d.Net.Changed()
+	sysUnits := a.unitsChanged(scopeSystem)
+	userUnits := a.unitsChanged(scopeUser)
+	smartChanged := a.smartChanged()
 	lost := a.d.Bus.Lost()
 	for {
 		if ctx.Err() != nil {
@@ -482,6 +554,12 @@ func (a *App) loop(ctx context.Context) error {
 				a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkLocal) })
 		case _, ok := <-netChanged:
 			stop = received(&netChanged, ok) && a.guard(ctx, a.onNetworkChanged)
+		case _, ok := <-sysUnits:
+			stop = a.onUnitsChanged(ctx, &sysUnits, ok, scopeSystem)
+		case _, ok := <-userUnits:
+			stop = a.onUnitsChanged(ctx, &userUnits, ok, scopeUser)
+		case _, ok := <-smartChanged:
+			stop = a.onSmartChanged(ctx, &smartChanged, ok)
 		case r := <-a.opened:
 			a.onOpened(r)
 		}
