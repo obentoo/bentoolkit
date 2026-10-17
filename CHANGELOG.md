@@ -32,6 +32,35 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   new `tray.monitors` config section; a bad value warns and takes its
   default. See "bentoo-tray health monitors" in the README. The tray's
   version is 0.2.0.
+- **`bentoo-tray` announces errors as they happen: a failed build, a failed
+  systemd unit, a filesystem gone read-only and a failing drive.** It follows
+  `/var/log/emerge.log` from where it stood at startup and names the package
+  and its `build.log` when a build started and did not complete before an
+  unsuccessful exit; Ctrl+C and dependency failures stay silent, and the
+  notice clears when a later emerge succeeds or the package completes. Failed
+  units of the system manager and of your `systemd --user` session share one
+  notification, replaced by each new failure and withdrawn when the last one
+  recovers. A block-device filesystem seen read-write that turns read-only (the
+  kernel's reaction to an I/O error) and a drive whose SMART verdict reads
+  failing (udisks2) are critical alerts. These notify at once, with no sustain
+  window, and each can be switched off under `tray.monitors.emerge`, `units`,
+  `readonly` and `smart`. ATA SMART needs `sys-fs/udisks[smart]`; a missing
+  manager or service turns its monitor off with one log line.
+- **`bentoo-tray` tells you when updates are pending, when a GLSA applies and
+  when a repository has not been synced for a week.** An update check runs
+  `emerge --pretend -uDN @world` and `glsa-check --list affected` after every
+  sync, once 5 minutes after start and after each successful emerge, never
+  during one, at niceness 19 with the idle I/O class, and it is killed with its
+  whole process group on quit or after 10 (`@world`) or 2 (GLSA) minutes. Pending
+  updates are a low-urgency notification and a tooltip line, without the
+  attention icon, replaced only when the package set changes; "@world does not
+  resolve" replaces the count when emerge cannot compute the update. Applicable
+  GLSAs share one warning notification naming the advisory, its title and
+  atoms. Every repository in `repos.conf` with a `sync-uri` is a warning once
+  its last sync (`metadata/timestamp.chk` or `.git/FETCH_HEAD`) is older than
+  `tray.monitors.sync.max_age` (7 days). The three monitors are on by default
+  and configured under `tray.monitors.updates`, `glsa` and `sync`; without
+  `glsa-check` (app-portage/gentoolkit) the GLSA monitor turns itself off.
 
 ### Fixed
 
