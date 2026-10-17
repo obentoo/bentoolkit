@@ -193,7 +193,10 @@ type BusOwner interface {
 // when unknown, and EmergeStartFailed reports that the emerge log could not
 // be opened at start-up, a failure the caller has logged already. A nil
 // SystemUnits or UserUnits leaves that systemd manager unwatched, and a nil
-// Smart turns the SMART monitor off. Every other field is required.
+// Smart turns the SMART monitor off; SystemUnitsProbeFailed,
+// UserUnitsProbeFailed and SmartProbeFailed report that the caller's
+// start-up question to that monitor failed and was logged already. Every
+// other field is required.
 type Deps struct {
 	Log    *slog.Logger
 	Clock  Clock
@@ -218,9 +221,12 @@ type Deps struct {
 	Mounts            MountReader
 	PortageTmp        string
 
-	SystemUnits UnitMonitor
-	UserUnits   UnitMonitor
-	Smart       SmartMonitor
+	SystemUnits            UnitMonitor
+	SystemUnitsProbeFailed bool
+	UserUnits              UnitMonitor
+	UserUnitsProbeFailed   bool
+	Smart                  SmartMonitor
+	SmartProbeFailed       bool
 }
 
 // checkKind is what started a check.
@@ -353,6 +359,17 @@ func New(d Deps) *App {
 		// The caller logged the start-up failure: the streak is under way,
 		// so the next failed read logs nothing until one succeeds.
 		a.failing[condKey{Monitor: monitorEmerge}] = true
+	}
+	// A failed start-up probe of a bus monitor was logged by the caller in
+	// the same way: the first failed listing after it logs nothing.
+	if d.SystemUnitsProbeFailed {
+		a.failing[condKey{Monitor: monitorUnits, Target: scopeSystem.manager}] = true
+	}
+	if d.UserUnitsProbeFailed {
+		a.failing[condKey{Monitor: monitorUnits, Target: scopeUser.manager}] = true
+	}
+	if d.SmartProbeFailed {
+		a.failing[condKey{Monitor: monitorSmart}] = true
 	}
 	return a
 }
