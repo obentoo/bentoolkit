@@ -73,6 +73,13 @@ notifies, so a short spike stays silent. Every monitor is on by default.
 | memory | `MemAvailable` in `/proc/meminfo`, and `/proc/pressure/memory` | under 10% of RAM available | under 5% available with no swap or under 10% of swap free, or `full avg60` memory pressure at 10 or more | 2 min |
 | cpu | `some avg60` in `/proc/pressure/cpu` | 80 or more | never | 5 min |
 | network | NetworkManager's connectivity on the system bus | "Network down" after 30 s offline (60 s when the tray starts offline); "Network back" after 10 s online | never | - |
+| emerge | `/var/log/emerge.log`, read from where it was when the tray started | a build that started and did not complete before an unsuccessful exit, naming the package and its `build.log` when it still exists | never | - |
+| units | failed systemd units of the system manager and of your session's manager, through D-Bus | a unit entering `failed`, and every unit already failed when the tray starts | never | - |
+| readonly | `/proc/self/mountinfo`, every block-device filesystem (`/dev/...`; not tmpfs, squashfs, overlay, network, FUSE or ISO) | never | a filesystem seen read-write that is now read-only (the kernel's reaction to an I/O error) | - |
+| smart | udisks2's SMART verdict for every drive, on the system bus | never | an ATA drive reporting itself failing, or an NVMe drive with a critical warning (spare, temperature, degraded, read-only...) | - |
+| updates | `emerge --pretend --update --deep --newuse --quiet @world`, run by the update check | never (a low-urgency notice naming the count and the first packages; "@world does not resolve" when emerge exits non-zero) | never | - |
+| glsa | `glsa-check --list affected --nocolor` (app-portage/gentoolkit), run by the update check before `@world` | a GLSA that applies to an installed package, naming its id, title and atoms | never | - |
+| sync | every repository in `repos.conf` with a `sync-uri`: the newest of `metadata/timestamp.chk` and `.git/FETCH_HEAD` | not synced for more than `sync.max_age` (7 days), naming the repository and the whole days | never | - |
 
 How an alert behaves:
 
@@ -90,8 +97,9 @@ How an alert behaves:
   reading stays 20% past its threshold for the sustain window (CPU: below
   `clear_psi`, 70); its notification is then withdrawn. "Network back" is sent
   only after a "Network down" was shown, and replaces it.
-- **Pause** (tray menu) silences warnings and network notifications, never
-  critical alerts. A warning raised during a pause is not sent when it ends.
+- **Pause** (tray menu) silences warnings, the updates notice and network
+  notifications, never critical alerts. A warning or notice raised during a
+  pause is not sent when it ends; its tooltip line stays.
 - **The icon** asks for attention, and turns to its critical variant for a
   critical alert, while any alert is active; the tooltip lists one line per
   alert (GNOME's AppIndicator extension shows no tooltip). Alerts never enter
@@ -99,6 +107,24 @@ How an alert behaves:
   leaves them alone. Clicking an alert's notification opens nothing.
 - **Nothing is kept across restarts**: after a restart a problem still present
   is announced again once its sustain window has passed.
+- **Errors notify at once** (emerge, units, readonly, smart have no sustain
+  window). A failed emerge clears when a later emerge ends successfully or the
+  failed package completes; Ctrl+C and dependency failures, which you already
+  saw in the terminal, never notify. Failed units share one notification,
+  replaced by each new failure and withdrawn when the last unit recovers. A
+  read-only filesystem clears when it is read-write again or unmounted; a
+  failing drive when its SMART verdict is healthy again or it is removed.
+- **Pending updates are a notice, not an alert**: a low-urgency
+  notification and a tooltip line, no attention icon, never repeated. It is
+  replaced only when the set of packages changes and withdrawn when nothing is
+  left. A GLSA or a stale repository is a warning; all GLSAs share one
+  notification, withdrawn when the last one clears.
+- **The update check runs** after every sync (`/var/lib/portage/repo_revisions`
+  changed), 5 minutes after start, and after each successful `emerge` (needs
+  the emerge monitor). Never during an `emerge`: it waits until none runs.
+- **It costs** about 50 s of CPU for `@world`, at niceness 19 with the idle
+  I/O class, in its own process group. `@world` is killed after 10 min and
+  `glsa-check` after 2 min (one WARN, state kept); Quit kills a running check.
 
 Configure them under `tray.monitors` in `~/.config/bentoo/config.yaml`;
 [config.example.yaml](config.example.yaml) lists the same keys with their
@@ -129,6 +155,17 @@ defaults. Keys under `tray.monitors`:
 | `network.down_after` | `30s` | offline this long sends "Network down" |
 | `network.down_after_startup` | `60s` | the same, when the tray starts offline |
 | `network.back_after` | `10s` | online this long, after a "Network down", sends "Network back" |
+| `emerge.enabled` | `true` | announce failed emerge builds (block `tray.monitors.emerge`) |
+| `emerge.log` | `/var/log/emerge.log` | the emerge log to follow; an absolute path |
+| `units.enabled` | `true` | announce failed systemd units (block `tray.monitors.units`) |
+| `units.system` | `true` | watch the system manager |
+| `units.user` | `true` | watch your session's manager (`systemd --user`) |
+| `readonly.enabled` | `true` | announce read-only remounts (block `tray.monitors.readonly`) |
+| `smart.enabled` | `true` | announce failing drives through udisks2 (block `tray.monitors.smart`) |
+| `updates.enabled` | `true` | announce pending `@world` updates (block `tray.monitors.updates`) |
+| `glsa.enabled` | `true` | announce applicable GLSAs (block `tray.monitors.glsa`) |
+| `sync.enabled` | `true` | announce repositories not synced recently (block `tray.monitors.sync`) |
+| `sync.max_age` | `168h` | a repository not synced for longer than this is stale; minimum `24h` |
 
 Percentages are 0-100, sizes whole `KiB`, `MiB`, `GiB` or `TiB`, durations
 like `30s`, `2m` or `1h` (0 is accepted, a negative value is not). A bad or
@@ -159,8 +196,26 @@ Limits worth knowing:
 - **No pressure stall information** (a kernel without PSI, so no
   `/proc/pressure/cpu`): the CPU monitor turns itself off with one INFO line;
   the memory monitor uses `/proc/meminfo` alone.
-- Not covered: inode exhaustion, read-only remounts, disk health (SMART),
-  which process uses the memory, temperature, battery, network quality.
+- **The emerge log is read through the `portage` group** (it is
+  `portage:portage 0660`): outside that group the tray logs one WARN and keeps
+  retrying. emerge.log carries no process id, so with two emerge runs at once,
+  or after an emerge killed without its closing line, a failure may name the
+  other run's package until that package completes.
+- **ATA SMART needs `sys-fs/udisks[smart]` and `sys-libs/libblockdev[smart]`**:
+  without them udisks2 reports SMART as unsupported and no ATA failure is
+  announced. NVMe health needs udisks2 2.10 or later. Without udisks2 the
+  monitor turns itself off with one INFO line.
+- **No systemd** (or no `systemd --user`): that manager is not watched, with
+  one INFO line at startup.
+- **No `glsa-check`** (app-portage/gentoolkit): the GLSA monitor turns off
+  with one INFO line; no `emerge`, the updates monitor with one WARN.
+- **A repository with neither `metadata/timestamp.chk` nor `.git/FETCH_HEAD`**
+  is skipped with one INFO line. `repos.conf` is read once, at startup.
+- **The shared GLSA notification names the last GLSA raised**, even after
+  that one clears while another still applies.
+- Not covered: inode exhaustion, the write state of network, FUSE or image
+  filesystems, drive attribute details and self-tests, OpenRC services, which
+  process uses the memory, temperature, battery, network quality.
 
 ## Documentation
 

@@ -85,6 +85,95 @@ const (
 	// SysAlertsMany is the tooltip title suffix for any other count of active
 	// system alerts; %d is the count.
 	SysAlertsMany
+
+	// SysEmergeSummary is the failed-build notification summary.
+	SysEmergeSummary
+	// SysEmergeBody is the failed-build notification body; %s names the
+	// failed packages (an atom, or SysEmergeMore).
+	SysEmergeBody
+	// SysEmergeBodyLog is SysEmergeBody with the first failed package's build
+	// log; the first %s names the failed packages, the second is the log path.
+	SysEmergeBodyLog
+	// SysEmergeMore names several failed packages; %s is the first failed
+	// atom, %d how many others failed.
+	SysEmergeMore
+	// SysAlertEmerge is the tooltip line of the failed-build condition; %s
+	// names the failed packages (an atom, or SysEmergeMore).
+	SysAlertEmerge
+	// SysUnitsSummary is the failed-unit notification summary.
+	SysUnitsSummary
+	// SysUnitsBody is the failed-unit notification body; the first %s is the
+	// unit, the second its manager ("system" or "user"), %d how many units
+	// are failed.
+	SysUnitsBody
+	// SysAlertUnit is the tooltip line of a failed unit; the first %s is the
+	// unit, the second its manager.
+	SysAlertUnit
+	// SysReadonlySummary is the read-only filesystem notification summary;
+	// %s is the mount point.
+	SysReadonlySummary
+	// SysReadonlyBody is the read-only filesystem notification body; the
+	// three %s are the mount point, the device and the filesystem type.
+	SysReadonlyBody
+	// SysAlertReadonly is the tooltip line of a read-only filesystem; the
+	// three %s are the mount point, the device and the filesystem type.
+	SysAlertReadonly
+	// SysSmartSummary is the failing-drive notification summary.
+	SysSmartSummary
+	// SysSmartBody is the failing-drive notification body; the three %s are
+	// the drive model, its serial number and the reason.
+	SysSmartBody
+	// SysSmartFailing is the reason of a drive whose SMART self-assessment
+	// reports failing.
+	SysSmartFailing
+	// SysAlertSmart is the tooltip line of a failing drive; the two %s are
+	// the drive model and the reason.
+	SysAlertSmart
+
+	// SysUpdatesSummary is the pending-updates notification summary.
+	SysUpdatesSummary
+	// SysUpdatesBody is the pending-updates notification body; %d is the
+	// number of packages to update, %s names them (the first two, or
+	// SysUpdatesMore).
+	SysUpdatesBody
+	// SysUpdatesMore names more than two packages; %s is the first two, %d
+	// how many others there are.
+	SysUpdatesMore
+	// SysInfoUpdates is the informational tooltip line of pending updates;
+	// %d and %s are as in SysUpdatesBody.
+	SysInfoUpdates
+	// SysWorldBrokenSummary is the summary of the notification sent when
+	// the @world update cannot be computed.
+	SysWorldBrokenSummary
+	// SysWorldBrokenBody is that notification's body, telling the user what
+	// to run to see why.
+	SysWorldBrokenBody
+	// SysInfoWorldBroken is the informational tooltip line shown while the
+	// @world update cannot be computed.
+	SysInfoWorldBroken
+	// SysGLSASummary is the security-advisory notification summary.
+	SysGLSASummary
+	// SysGLSABody is the security-advisory notification body; the three %s
+	// are the GLSA id, its title and the affected package atoms, %d the
+	// number of advisories that apply.
+	SysGLSABody
+	// SysAlertGLSA is the tooltip line of one applicable advisory; the two
+	// %s are its id and title.
+	SysAlertGLSA
+	// SysSyncSummary is the stale-repository notification summary; %s is
+	// the repository.
+	SysSyncSummary
+	// SysSyncBody is the stale-repository notification body; the first %s
+	// is the repository, the second how long ago it was synced (SysDaysOne
+	// or SysDaysMany).
+	SysSyncBody
+	// SysAlertSync is the tooltip line of a stale repository; the two %s
+	// are as in SysSyncBody.
+	SysAlertSync
+	// SysDaysOne is a span of exactly one day; %d is the count.
+	SysDaysOne
+	// SysDaysMany is a span of any other number of days; %d is the count.
+	SysDaysMany
 )
 
 // catalog is the English text of every Key. The ellipsis is written as an
@@ -118,6 +207,38 @@ var catalog = map[Key]string{
 	SysAlertNetwork:   "Network: down",
 	SysAlertsOne:      "%d system alert",
 	SysAlertsMany:     "%d system alerts",
+
+	SysEmergeSummary:   "Package build failed",
+	SysEmergeBody:      "%s failed to build.",
+	SysEmergeBodyLog:   "%s failed to build. Log: %s",
+	SysEmergeMore:      "%s and %d more",
+	SysAlertEmerge:     "Build failed: %s",
+	SysUnitsSummary:    "systemd unit failed",
+	SysUnitsBody:       "%s failed in the %s manager. Failed units: %d",
+	SysAlertUnit:       "Unit %s failed (%s)",
+	SysReadonlySummary: "Filesystem read-only: %s",
+	SysReadonlyBody:    "%s (%s, %s) is now read-only.",
+	SysAlertReadonly:   "Read-only: %s (%s, %s)",
+	SysSmartSummary:    "Drive failing",
+	SysSmartBody:       "%s (serial %s): %s",
+	SysSmartFailing:    "SMART reports failing",
+	SysAlertSmart:      "Drive %s: %s",
+
+	SysUpdatesSummary:     "Updates available",
+	SysUpdatesBody:        "Packages to update in @world: %d (%s)",
+	SysUpdatesMore:        "%s and %d more",
+	SysInfoUpdates:        "Updates: %d pending (%s)",
+	SysWorldBrokenSummary: "@world does not resolve",
+	SysWorldBrokenBody:    "Portage cannot compute the @world update. Run emerge -puDN @world to see why.",
+	SysInfoWorldBroken:    "Updates: @world does not resolve",
+	SysGLSASummary:        "Security advisory applies",
+	SysGLSABody:           "GLSA %s: %s - affects %s. Applicable advisories: %d",
+	SysAlertGLSA:          "GLSA %s: %s",
+	SysSyncSummary:        "Repository not synced: %s",
+	SysSyncBody:           "%s was last synced %s ago.",
+	SysAlertSync:          "Repository %s: synced %s ago",
+	SysDaysOne:            "%d day",
+	SysDaysMany:           "%d days",
 }
 
 // Text returns k's catalog text. A key with no entry, which the catalog test

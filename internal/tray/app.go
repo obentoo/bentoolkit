@@ -16,7 +16,11 @@ import (
 	"github.com/obentoo/bentoolkit/internal/desktop/netmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
 	"github.com/obentoo/bentoolkit/internal/desktop/portal"
+	"github.com/obentoo/bentoolkit/internal/desktop/smartmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/sni"
+	"github.com/obentoo/bentoolkit/internal/desktop/unitmon"
+	"github.com/obentoo/bentoolkit/internal/gentoo/news"
+	"github.com/obentoo/bentoolkit/internal/gentoo/pending"
 	"github.com/obentoo/bentoolkit/internal/gentoo/pkgdb"
 	"github.com/obentoo/bentoolkit/internal/notices"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
@@ -119,6 +123,35 @@ type SystemReader interface {
 	EmergeRunning() (bool, error)
 }
 
+// EmergeReader returns the emerge log events appended since its last read;
+// *sysmon.EmergeFollower implements it.
+type EmergeReader interface {
+	Read() ([]sysmon.EmergeEvent, error)
+}
+
+// MountReader reads the mount table; sysmon.Reader implements it.
+type MountReader interface {
+	Mounts() ([]sysmon.Mount, error)
+}
+
+// UnitMonitor lists the failed units of one systemd manager;
+// *unitmon.Monitor implements it. Changed fires when a unit's state may have
+// changed, and is closed when the manager's bus connection is lost.
+type UnitMonitor interface {
+	Failed(ctx context.Context) ([]unitmon.Unit, error)
+	Changed() <-chan struct{}
+}
+
+// SmartMonitor lists udisks2's drives with their SMART verdict;
+// *smartmon.Monitor implements it. Drives returns the well-formed drives
+// together with an error for the malformed ones. Changed fires when a verdict
+// may have changed or a drive came or went, and is closed when the system bus
+// connection is lost.
+type SmartMonitor interface {
+	Drives(ctx context.Context) ([]smartmon.Drive, error)
+	Changed() <-chan struct{}
+}
+
 // TrayIcon is the StatusNotifierItem; *sni.Item implements it. The context
 // given to Start bounds the item's lifetime, not only the call.
 type TrayIcon interface {
@@ -157,7 +190,20 @@ type BusOwner interface {
 // discards, a nil Clock is the SystemClock, a nil Rand is math/rand/v2's
 // Float64 and a nil Net behaves as netmon.Absent(). A nil Sys turns the
 // disk, memory and CPU monitors off; DiskPaths are the watched paths, and a
-// nil Monitors is resolved from Config. Every other field is required.
+// nil Monitors is resolved from Config. A nil Emerge or Mounts turns the
+// emerge or the read-only monitor off; PortageTmp is PORTAGE_TMPDIR, empty
+// when unknown, and EmergeStartFailed reports that the emerge log could not
+// be opened at start-up, a failure the caller has logged already. A nil
+// SystemUnits or UserUnits leaves that systemd manager unwatched, and a nil
+// Smart turns the SMART monitor off; SystemUnitsProbeFailed,
+// UserUnitsProbeFailed and SmartProbeFailed report that the caller's
+// start-up question to that monitor failed and was logged already. A nil
+// Updates or GLSA leaves that update check unrun (the caller found no such
+// command); Repos are the repositories whose sync age is watched,
+// RepoRevisions the stamp every sync rewrites ("" watches none), and
+// EmergeRunning the emerge scan the update check uses when Sys is nil. Run
+// and SyncTime are pending.Run and news.SyncTime when nil. Every other field
+// is required.
 type Deps struct {
 	Log    *slog.Logger
 	Clock  Clock
@@ -176,6 +222,26 @@ type Deps struct {
 	Sys       SystemReader
 	DiskPaths []string
 	Monitors  *config.Monitors
+
+	Emerge            EmergeReader
+	EmergeStartFailed bool
+	Mounts            MountReader
+	PortageTmp        string
+
+	SystemUnits            UnitMonitor
+	SystemUnitsProbeFailed bool
+	UserUnits              UnitMonitor
+	UserUnitsProbeFailed   bool
+	Smart                  SmartMonitor
+	SmartProbeFailed       bool
+
+	Updates       *pending.Command
+	GLSA          *pending.Command
+	Repos         []news.Repo
+	RepoRevisions string
+	EmergeRunning func() (bool, error)
+	Run           func(context.Context, pending.Command) (pending.Result, error)
+	SyncTime      func(location string) (time.Time, bool, error)
 }
 
 // checkKind is what started a check.
@@ -203,9 +269,9 @@ type openResult struct {
 }
 
 // App is bentoo-tray's event loop. All of its fields belong to the goroutine
-// running Run. The only other goroutines it starts are the URL openings,
-// which report back over a channel, and the bounded release of the bus name
-// at a stop; neither touches a field.
+// running Run. The only other goroutines it starts are the URL openings and
+// the update checks, which report back over a channel, and the bounded
+// release of the bus name at a stop; none touches a field.
 type App struct {
 	d        Deps
 	log      *slog.Logger
@@ -239,12 +305,40 @@ type App struct {
 	// condition per monitor and target, failing the monitors and targets
 	// whose last reading failed, diskDev the device each watched path last
 	// resolved to, and emergeFailing whether the last emerge scan failed;
-	// none of them is ever written to st.
+	// none of them is ever written to st. emerge follows the emerge log's
+	// runs, seenRW holds the mounts seen read-write, by mountKey, and units
+	// is the notification every failed unit shares; drives holds the last
+	// reading of each failing drive, by object path.
 	mon           config.Monitors
 	health        map[condKey]*condition
 	failing       map[condKey]bool
 	diskDev       map[string]uint64
 	emergeFailing bool
+	emerge        emergeTracker
+	seenRW        map[string]bool
+	units         unitsNote
+	drives        map[string]smartmon.Drive
+
+	// sched decides when an update check runs; checked carries a finished
+	// check back to the loop, checkCancel cancels the check in flight, and
+	// checkEnded is closed once it left its command runs; both are nil while
+	// none runs. updSet is the sorted package set the
+	// updates notice shows, updBroken whether it says @world does not
+	// resolve instead. revFailing, busyFailing, worldFailing and
+	// glsaFailing are the failure streaks of the repo_revisions stat, the
+	// emerge scan made for the check, the @world command and the GLSA
+	// command; glsa is the notification every applicable advisory shares.
+	sched        checkScheduler
+	checked      chan checkResult
+	checkCancel  context.CancelFunc
+	checkEnded   <-chan struct{}
+	updSet       []string
+	updBroken    bool
+	revFailing   bool
+	busyFailing  bool
+	worldFailing bool
+	glsaFailing  bool
+	glsa         glsaNote
 
 	fetchAt  <-chan time.Time
 	pauseAt  <-chan time.Time
@@ -281,7 +375,7 @@ func New(d Deps) *App {
 	} else {
 		mon, _ = d.Config.GetMonitors() // its warnings are main's to log
 	}
-	return &App{
+	a := &App{
 		d:        d,
 		log:      d.Log,
 		interval: interval,
@@ -290,10 +384,40 @@ func New(d Deps) *App {
 		health:   map[condKey]*condition{},
 		failing:  map[condKey]bool{},
 		diskDev:  map[string]uint64{},
+		emerge:   emergeTracker{started: map[string]bool{}},
+		seenRW:   map[string]bool{},
+		drives:   map[string]smartmon.Drive{},
 		openings: map[uint64]context.CancelFunc{},
 		opened:   make(chan openResult),
+		checked:  make(chan checkResult),
 		done:     make(chan struct{}),
 	}
+	if a.d.Run == nil {
+		a.d.Run = pending.Run
+	}
+	if a.d.SyncTime == nil {
+		a.d.SyncTime = news.SyncTime
+	}
+	if a.checksOn() {
+		a.sched.startAt = a.d.Clock.Now().Add(checkStartDelay)
+	}
+	if d.EmergeStartFailed {
+		// The caller logged the start-up failure: the streak is under way,
+		// so the next failed read logs nothing until one succeeds.
+		a.failing[condKey{Monitor: monitorEmerge}] = true
+	}
+	// A failed start-up probe of a bus monitor was logged by the caller in
+	// the same way: the first failed listing after it logs nothing.
+	if d.SystemUnitsProbeFailed {
+		a.failing[condKey{Monitor: monitorUnits, Target: scopeSystem.manager}] = true
+	}
+	if d.UserUnitsProbeFailed {
+		a.failing[condKey{Monitor: monitorUnits, Target: scopeUser.manager}] = true
+	}
+	if d.SmartProbeFailed {
+		a.failing[condKey{Monitor: monitorSmart}] = true
+	}
+	return a
 }
 
 // noticesIndex is https://<feed host>/notices/, or empty when the feed URL
@@ -337,6 +461,7 @@ func (a *App) Run(ctx context.Context) error {
 	// included, ends when Run returns, also on Quit.
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	defer a.cancelChecks()
 
 	// The name request runs to its answer even when a stop signal arrives:
 	// the bus may already have granted the name, and abandoning the reply
@@ -403,6 +528,14 @@ func (a *App) Run(ctx context.Context) error {
 		a.sampleAt = a.d.Clock.After(a.mon.SampleInterval)
 	}
 	a.observeNetwork(ctx)
+	for _, s := range unitScopes {
+		if a.unitsWatched(s) {
+			a.reconcileUnits(ctx, s)
+		}
+	}
+	if a.smartWatched() {
+		a.reconcileSmart(ctx)
+	}
 	a.log.Info("bentoo-tray started", "first_check_in", delay, "interval", a.interval,
 		"feed", a.d.Feed != nil, "first_run", !a.st.Established)
 	return a.loop(ctx)
@@ -445,6 +578,9 @@ func (a *App) loop(ctx context.Context) error {
 	a.iconEvents = a.d.Icon.Events()
 	newsChanged := a.d.News.Changed()
 	netChanged := a.d.Net.Changed()
+	sysUnits := a.unitsChanged(scopeSystem)
+	userUnits := a.unitsChanged(scopeUser)
+	smartChanged := a.smartChanged()
 	lost := a.d.Bus.Lost()
 	for {
 		if ctx.Err() != nil {
@@ -482,8 +618,16 @@ func (a *App) loop(ctx context.Context) error {
 				a.guard(ctx, func(ctx context.Context) { a.check(ctx, checkLocal) })
 		case _, ok := <-netChanged:
 			stop = received(&netChanged, ok) && a.guard(ctx, a.onNetworkChanged)
+		case _, ok := <-sysUnits:
+			stop = a.onUnitsChanged(ctx, &sysUnits, ok, scopeSystem)
+		case _, ok := <-userUnits:
+			stop = a.onUnitsChanged(ctx, &userUnits, ok, scopeUser)
+		case _, ok := <-smartChanged:
+			stop = a.onSmartChanged(ctx, &smartChanged, ok)
 		case r := <-a.opened:
 			a.onOpened(r)
+		case r := <-a.checked:
+			stop = a.guard(ctx, func(ctx context.Context) { a.onChecked(ctx, r) })
 		}
 		if stop {
 			return a.stop()
@@ -504,6 +648,7 @@ func received[T any](ch *<-chan T, ok bool) bool {
 // stop ends a normal run: openings in flight get their grace, then the
 // state is saved and the name released.
 func (a *App) stop() error {
+	a.cancelChecks()
 	a.drainOpenings()
 	a.save()
 	a.release()
@@ -514,6 +659,7 @@ func (a *App) stop() error {
 // busLost ends a run whose connection is gone: the state is saved, and the
 // name, gone with the connection, is not released.
 func (a *App) busLost() error {
+	a.cancelChecks()
 	a.drainOpenings()
 	a.save()
 	return ErrBusLost
@@ -1405,11 +1551,12 @@ func (a *App) markAllRead() {
 // ---------- output ----------
 
 // render shows the state on the icon, with the active system conditions as
-// alert lines beside the notices. The alerts live only in the view, never in
+// alert lines beside the notices and notice-level conditions as informational
+// lines that never ask for attention. Both live only in the view, never in
 // the state, so the state file stays free of them.
 func (a *App) render() {
 	a.view = viewFor(a.st)
-	a.view.Alerts, a.view.AlertCritical = a.alerts()
+	a.view.Alerts, a.view.AlertCritical, a.view.Info = a.alerts()
 	if n := len(a.view.Alerts); n > 0 {
 		a.view.AlertTitle = messages.Count(messages.SysAlertsOne, messages.SysAlertsMany, n)
 	}

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -252,24 +253,85 @@ func (r *Reader) stamp() fileStamp {
 // warn and go on with the fallback.
 func RepoLocation(reposConf string, name string) (string, error) {
 	fallback := filepath.Join(DefaultReposDir, name)
-	files, err := confFiles(reposConf)
+	sections, err := readSections(reposConf)
 	if err != nil {
 		return fallback, err
 	}
-	location := ""
+	if location := sections[name]["location"]; location != "" {
+		return location, nil
+	}
+	return fallback, nil
+}
+
+// Repo is a repository repos.conf defines: its section name and location.
+type Repo struct {
+	Name, Location string
+}
+
+// SyncedRepos returns every repository repos.conf at reposConf defines with a
+// non-empty sync-uri and a non-empty location, sorted by name. It reads
+// repos.conf as RepoLocation does, so both agree on every location; a section
+// without a location is skipped rather than given RepoLocation's fallback.
+//
+// A missing repos.conf yields no repository and a nil error. When repos.conf
+// or one of its files cannot be read, the error names the path.
+func SyncedRepos(reposConf string) ([]Repo, error) {
+	sections, err := readSections(reposConf)
+	if err != nil {
+		return nil, err
+	}
+	var repos []Repo
+	for name, keys := range sections {
+		if keys["sync-uri"] == "" || keys["location"] == "" {
+			continue
+		}
+		repos = append(repos, Repo{Name: name, Location: keys["location"]})
+	}
+	slices.SortFunc(repos, func(a, b Repo) int { return strings.Compare(a.Name, b.Name) })
+	return repos, nil
+}
+
+// SyncTime returns when the repository at location was last synced: the newest
+// modification time of metadata/timestamp.chk (rsync trees) and
+// .git/FETCH_HEAD (git repositories, which have no timestamp.chk). ok is
+// false when neither file exists. Any other stat failure is an error naming
+// the file, even when the other file could be read.
+func SyncTime(location string) (newest time.Time, ok bool, err error) {
+	for _, path := range []string{
+		filepath.Join(location, "metadata", "timestamp.chk"),
+		filepath.Join(location, ".git", "FETCH_HEAD"),
+	} {
+		fi, err := os.Stat(path)
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return time.Time{}, false, fmt.Errorf("read sync time of %s: %w", path, err)
+		}
+		if mtime := fi.ModTime(); !ok || mtime.After(newest) {
+			newest, ok = mtime, true
+		}
+	}
+	return newest, ok, nil
+}
+
+// readSections reads every repos.conf file confFiles lists, in order, and
+// merges their sections with parseSections. A missing repos.conf yields no
+// section; a file that cannot be read is an error naming its path.
+func readSections(reposConf string) (map[string]map[string]string, error) {
+	files, err := confFiles(reposConf)
+	if err != nil {
+		return nil, err
+	}
+	sections := map[string]map[string]string{}
 	for _, path := range files {
 		data, err := readFile(path)
 		if err != nil {
-			return fallback, fmt.Errorf("read repository configuration %s: %w", path, err)
+			return nil, fmt.Errorf("read repository configuration %s: %w", path, err)
 		}
-		if loc, ok := sectionLocation(data, name); ok {
-			location = loc
-		}
+		parseSections(data, sections)
 	}
-	if location == "" {
-		return fallback, nil
-	}
-	return location, nil
+	return sections, nil
 }
 
 // confFiles lists the repos.conf files to read: the path itself when it is a
@@ -302,32 +364,37 @@ func confFiles(path string) ([]string, error) {
 	return files, nil
 }
 
-// sectionLocation returns the last non-empty "location" value inside the INI
-// section [name] of data. Keys compare case-insensitively and take "=" or ":"
-// as the delimiter, as portage's configparser does; "#" and ";" start a
-// comment line.
-func sectionLocation(data []byte, name string) (location string, ok bool) {
-	inSection := false
+// parseSections merges the INI sections of data into sections, keyed by the
+// exact section name and then by the lower-cased key. Keys compare
+// case-insensitively and take "=" or ":" as the delimiter, as portage's
+// configparser does; "#" and ";" start a comment line; a key outside any
+// section is ignored. A later value of a key overrides an earlier one, except
+// that an empty value never overrides a non-empty one.
+func parseSections(data []byte, sections map[string]map[string]string) {
+	var keys map[string]string
 	for line := range strings.Lines(string(data)) {
 		line = strings.TrimSpace(line)
 		switch {
 		case line == "" || line[0] == '#' || line[0] == ';':
 			continue
 		case line[0] == '[' && line[len(line)-1] == ']':
-			inSection = line[1:len(line)-1] == name
+			name := line[1 : len(line)-1]
+			if keys = sections[name]; keys == nil {
+				keys = map[string]string{}
+				sections[name] = keys
+			}
 			continue
-		case !inSection:
+		case keys == nil:
 			continue
 		}
 		i := strings.IndexAny(line, "=:")
-		if i < 0 || !strings.EqualFold(strings.TrimSpace(line[:i]), "location") {
+		if i < 0 {
 			continue
 		}
 		if v := strings.TrimSpace(line[i+1:]); v != "" {
-			location, ok = v, true
+			keys[strings.ToLower(strings.TrimSpace(line[:i]))] = v
 		}
 	}
-	return location, ok
 }
 
 // readFile returns the content of the file at path, opened read-only,

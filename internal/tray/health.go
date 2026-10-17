@@ -2,10 +2,14 @@ package tray
 
 import (
 	"fmt"
+	"strings"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
+	"github.com/obentoo/bentoolkit/internal/gentoo/pending"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
 	"github.com/obentoo/bentoolkit/internal/tray/messages"
 )
@@ -13,9 +17,12 @@ import (
 // level is how bad a system health condition is. The zero value is levelOK.
 type level int
 
-// Condition levels, in increasing severity.
+// Condition levels, in increasing severity. A notice is active but only
+// informs: it notifies at low urgency and is never reminded. Compare levels
+// by name, never by number.
 const (
 	levelOK level = iota
+	levelNotice
 	levelWarning
 	levelCritical
 )
@@ -180,11 +187,12 @@ type transition struct {
 // between samples still counted as continuous, paused the menu pause.
 //
 // Readings on one side of the level must last window without a break before
-// the condition moves; see track for what restarts the wait. Raising to
-// warning notifies at normal urgency unless paused; reaching critical
-// notifies at critical urgency even when paused; an active critical notifies
-// again once reminder has passed since the last notification, an active
-// warning never. Critical to warning is silent; clearing to ok withdraws.
+// the condition moves; see track for what restarts the wait. Raising a
+// notice or a warning from ok notifies at its level's urgency unless paused;
+// reaching critical notifies at critical urgency even when paused; an active
+// critical notifies again once reminder has passed since the last
+// notification, an active notice or warning never. Critical to warning is
+// silent; clearing to ok withdraws.
 //
 // observe stamps notifiedAt with now whenever it returns Notify, so the
 // caller only sends: a rejected critical is retried once per reminder, not
@@ -259,7 +267,7 @@ func (c *condition) move(now time.Time, got level, paused bool) transition {
 	case tr.To == levelCritical:
 		tr = c.notify(now, tr, urgencyCritical)
 	case tr.From == levelOK && !paused:
-		tr = c.notify(now, tr, urgencyNormal)
+		tr = c.notify(now, tr, levelUrgency(tr.To))
 	}
 	return tr
 }
@@ -281,14 +289,50 @@ func (c *condition) notify(now time.Time, tr transition, urgency byte) transitio
 	return tr
 }
 
-// Notification keys of the system monitors; a disk key is "disk:" and the
-// watched path.
+// Notification keys of the system monitors. A disk key is "disk:" and the
+// watched path, a read-only key "readonly:" and the mount point, a SMART key
+// "smart:" and the drive's udisks2 object path, a stale repository's "sync:"
+// and its name; every failed unit shares the one units key, every applicable
+// advisory the one glsa key.
 const (
-	keyDiskPrefix = "disk:"
-	keyMemory     = "memory"
-	keyCPU        = "cpu"
-	keyNetwork    = "network"
+	keyDiskPrefix     = "disk:"
+	keyMemory         = "memory"
+	keyCPU            = "cpu"
+	keyNetwork        = "network"
+	keyEmerge         = "emerge"
+	keyUnits          = "units"
+	keyReadonlyPrefix = "readonly:"
+	keySmartPrefix    = "smart:"
+	keyUpdates        = "updates"
+	keyGLSA           = "glsa"
+	keySyncPrefix     = "sync:"
 )
+
+// maxField is the most bytes of one host-supplied field (an atom, a unit
+// name, a mount point, a drive model) a notification or tooltip line shows.
+const maxField = 128
+
+// clip makes s safe for one line of a notification and cuts it to at most
+// maxField bytes. Host names arrive raw (a mount point may hold Latin-1 bytes
+// or, unescaped, a newline): invalid UTF-8 becomes U+FFFD, which the bus can
+// encode, and every control character becomes a space. The cut falls on a
+// rune boundary so the text stays valid UTF-8.
+func clip(s string) string {
+	s = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s) // Map turns every invalid byte into U+FFFD
+	if len(s) <= maxField {
+		return s
+	}
+	cut := maxField
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
 
 // sysMessage is the system notification of the condition keyed key, replacing
 // its last notification.
@@ -350,6 +394,118 @@ func networkSysMessage(ev netEvent, replacesID uint32, urgency byte) (notify.Mes
 		messages.Text(messages.SysNetDownBody),
 		replacesID, urgency)
 	return m, messages.Text(messages.SysAlertNetwork)
+}
+
+// emergeSysMessage returns the notification and the tooltip line of a failed
+// build: the first failed atom, how many others failed when more is above
+// zero, and the first atom's build log when logPath is not empty. logPath is
+// shown whole, never cut: the caller states only a path it checked, and a
+// cut one would name a file that does not exist.
+func emergeSysMessage(atom string, more int, logPath string, replacesID uint32, urgency byte) (notify.Message, string) {
+	failed := clip(atom)
+	if more > 0 {
+		failed = messages.Format(messages.SysEmergeMore, failed, more)
+	}
+	body := messages.Format(messages.SysEmergeBody, failed)
+	if logPath != "" {
+		body = messages.Format(messages.SysEmergeBodyLog, failed, logPath)
+	}
+	m := sysMessage(keyEmerge, messages.Text(messages.SysEmergeSummary), body, replacesID, urgency)
+	return m, messages.Format(messages.SysAlertEmerge, failed)
+}
+
+// unitsSysMessage returns the shared units notification for one failed unit
+// of manager ("system" or "user"), with failed units currently failed, and
+// that unit's tooltip line.
+func unitsSysMessage(manager, unit string, failed int, replacesID uint32, urgency byte) (notify.Message, string) {
+	unit, manager = clip(unit), clip(manager)
+	m := sysMessage(keyUnits,
+		messages.Text(messages.SysUnitsSummary),
+		messages.Format(messages.SysUnitsBody, unit, manager, failed),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertUnit, unit, manager)
+}
+
+// readonlySysMessage returns the notification and the tooltip line of a
+// filesystem gone read-only: its mount point, device and filesystem type.
+func readonlySysMessage(point, device, fsType string, replacesID uint32, urgency byte) (notify.Message, string) {
+	p, dev, fs := clip(point), clip(device), clip(fsType)
+	m := sysMessage(keyReadonlyPrefix+point,
+		messages.Format(messages.SysReadonlySummary, p),
+		messages.Format(messages.SysReadonlyBody, p, dev, fs),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertReadonly, p, dev, fs)
+}
+
+// smartSysMessage returns the notification and the tooltip line of the
+// failing drive at the udisks2 object path: its model, its serial and the
+// reason, the NVMe warning names when there are any, else the SMART verdict.
+func smartSysMessage(path, model, serial string, warnings []string, replacesID uint32, urgency byte) (notify.Message, string) {
+	reason := messages.Text(messages.SysSmartFailing)
+	if len(warnings) > 0 {
+		reason = clip(strings.Join(warnings, ", "))
+	}
+	mdl := clip(model)
+	m := sysMessage(keySmartPrefix+path,
+		messages.Text(messages.SysSmartSummary),
+		messages.Format(messages.SysSmartBody, mdl, clip(serial), reason),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertSmart, mdl, reason)
+}
+
+// updatesSysMessage returns the notification and the informational tooltip
+// line of pending @world updates: how many packages, the first two by name
+// and how many others. names holds at least one "category/name".
+func updatesSysMessage(names []string, replacesID uint32, urgency byte) (notify.Message, string) {
+	shown := make([]string, 0, 2)
+	for _, n := range names[:min(len(names), 2)] {
+		shown = append(shown, clip(n))
+	}
+	list := strings.Join(shown, ", ")
+	if more := len(names) - len(shown); more > 0 {
+		list = messages.Format(messages.SysUpdatesMore, list, more)
+	}
+	m := sysMessage(keyUpdates,
+		messages.Text(messages.SysUpdatesSummary),
+		messages.Format(messages.SysUpdatesBody, len(names), list),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysInfoUpdates, len(names), list)
+}
+
+// worldBrokenSysMessage returns the notification and the informational
+// tooltip line of an @world update that cannot be computed. It shares the
+// updates key, so it replaces a pending-updates notification and the other
+// way round.
+func worldBrokenSysMessage(replacesID uint32, urgency byte) (notify.Message, string) {
+	m := sysMessage(keyUpdates,
+		messages.Text(messages.SysWorldBrokenSummary),
+		messages.Text(messages.SysWorldBrokenBody),
+		replacesID, urgency)
+	return m, messages.Text(messages.SysInfoWorldBroken)
+}
+
+// glsaSysMessage returns the shared advisory notification naming g, with
+// applicable advisories applying now, and g's tooltip line.
+func glsaSysMessage(g pending.GLSA, applicable int, replacesID uint32, urgency byte) (notify.Message, string) {
+	id, title := clip(g.ID), clip(g.Title)
+	atoms := clip(strings.Join(g.Atoms, ", "))
+	m := sysMessage(keyGLSA,
+		messages.Text(messages.SysGLSASummary),
+		messages.Format(messages.SysGLSABody, id, title, atoms, applicable),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertGLSA, id, title)
+}
+
+// syncSysMessage returns the notification and the tooltip line of repo,
+// last synced age ago, in whole days.
+func syncSysMessage(repo string, age time.Duration, replacesID uint32, urgency byte) (notify.Message, string) {
+	name := clip(repo)
+	days := messages.Count(messages.SysDaysOne, messages.SysDaysMany, max(int(age/(24*time.Hour)), 0))
+	m := sysMessage(keySyncPrefix+repo,
+		messages.Format(messages.SysSyncSummary, name),
+		messages.Format(messages.SysSyncBody, name, days),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertSync, name, days)
 }
 
 // humanBytes renders n in the largest of GiB, MiB and KiB it fills at least

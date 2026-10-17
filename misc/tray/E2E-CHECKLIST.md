@@ -108,3 +108,56 @@ OOM killer: save your work, or run it in the VM.
 | Network cut 40 s while paused | neither "Network down" nor "Network back", also after Resume | | | n/a |
 | System notification click | opens nothing; no WARN in the journal | | | |
 | Mark all as read with an alert active | unread notices clear; the alert stays in the icon and tooltip | | | n/a |
+
+## Error monitors
+
+The emerge, units, read-only and SMART monitors. Run the read-only case in the
+VM (E2/E3) or on the virtual Plasma harness: it needs root for `mount`.
+
+| Case | Expected | E1 | E2 | E3 |
+|---|---|---|---|---|
+| Failed build: `sudo emerge -1 <a package whose src_compile fails>` (a local ebuild with `die` in `src_compile`) | within 2 sample intervals of emerge exiting, one normal "Package build failed" naming the atom and `Log: /var/tmp/portage/…/temp/build.log`; icon asks for attention | | | |
+| Ctrl+C during a build | no notification | | | |
+| Failed build then a successful `emerge -1 app-misc/jq` | the notification is withdrawn; icon back to plain | | | |
+| Failed unit: `systemd-run --user --unit=s098-fail false` | one normal "systemd unit failed" naming `s098-fail.service` and `user`; a second failing unit replaces it with the count 2 | | | |
+| Unit recovery: `systemctl --user reset-failed` | nothing is sent; the shared notification is withdrawn once no unit is failed | | | |
+| Read-only remount: as root, `truncate -s 64M /var/tmp/ro.img; mkfs.ext4 -q /var/tmp/ro.img; mount -o loop /var/tmp/ro.img /mnt/ro; mount -o remount,ro /mnt/ro` | within 2 sample intervals one critical "Filesystem read-only: /mnt/ro" with device and type, shown over Do Not Disturb; `mount -o remount,rw /mnt/ro` withdraws it | | | |
+| Read-only at first sight: mount the image `-o ro` before starting the tray | no notification | | | |
+| SMART (fake): on the virtual harness, export a fake `org.freedesktop.UDisks2` drive whose `SmartFailing` turns true | one critical notification at once naming model, serial and "SMART reports failing"; one more per reminder while it lasts | | | |
+| Pause with a failed unit | no unit notification while paused; a read-only or SMART alert still notifies | | | n/a |
+
+## Update monitors
+
+The updates, GLSA and sync monitors. The update check runs `emerge
+--pretend` and `glsa-check` at niceness 19; in the VM use a small tree or
+expect each check to take about a minute. `BENTOO_TRAY_LOG_LEVEL=debug` shows
+`update check started` and one INFO per command with `duration_s` and `found`.
+
+### Setup (each environment)
+
+- [ ] `app-portage/gentoolkit` installed (`command -v glsa-check`), the user in
+      the `portage` group (`emerge.log` and the sync trigger)
+- [ ] For the fake GLSA case: a script `/usr/local/bin/glsa-check` (first on
+      `PATH` before the tray starts) printing one line
+      `202610-01 [N] Test advisory ( app-misc/jq )` and exiting 0
+- [ ] Afterwards: remove the fake `glsa-check`, `touch` any `FETCH_HEAD` you
+      aged, and restore the config
+
+### Cases
+
+| Case | Expected | E1 | E2 | E3 |
+|---|---|---|---|---|
+| Sync with updates pending: `sudo emaint sync -a` on a tree that has updates | within 2 sample intervals of the sync ending plus the check's duration, one low-urgency notification with the count and the first two packages; the tooltip gains an `Updates:` line; the icon stays plain | | n/a | |
+| Start-up check: restart the tray with updates pending | no update check before 5 min; one check about 5 min after the start | | | |
+| Same set again: sync again without new updates | no new notification | | | |
+| Update applied: `sudo emerge -uDN @world` | no check starts while emerge runs; after it ends successfully the updates notification is withdrawn within the next check and the tooltip line goes away | | n/a | |
+| Check held by emerge: start `emerge -e @world` (or leave `sudo emerge --ask -1 app-misc/jq` at its prompt), then sync | no update check starts while emerge runs (journal); one starts within 2 sample intervals of emerge ending | | | |
+| @world does not resolve: mask a package @world needs (`echo app-misc/jq >> /etc/portage/package.mask/s099` with jq in @world), then sync | one low-urgency "@world does not resolve" telling to run `emerge -puDN @world`; removing the mask and syncing brings the count back | | | |
+| Fake GLSA: the fake `glsa-check` above, restart the tray, wait 5 min | one normal-urgency warning naming `202610-01`, its title and `app-misc/jq`; the icon asks for attention; tooltip line | | | |
+| GLSA cleared: remove the fake script, sync | the GLSA notification is withdrawn; icon back to plain | | | |
+| Shared GLSA note: fake script with two `[N]` lines, then drop the first | one notification on screen (the second replaced the first, count 2); after the first clears nothing is sent and the note keeps its text until the last clears | | | |
+| Stale repository: `touch -d '8 days ago' <overlay>/.git/FETCH_HEAD` (or `metadata/timestamp.chk` of a rsync tree) | within 2 sample intervals one warning naming the repository and "8 days"; a near-identical repository name is not affected | | | |
+| Repository synced again: `touch` the same file | the sync notification is withdrawn | | | |
+| Pause with updates pending and a stale repository | no notification while paused; tooltip lines stay; Resume sends nothing for them | | | n/a |
+| Quit during a check: Quit right after `update check started` | the tray exits within 2 s; `pgrep -f 'emerge --pretend'` finds nothing | | | n/a |
+| Monitors off: `tray.monitors.updates.enabled: false` and `glsa.enabled: false` | no update check ever starts (journal); the sync monitor still works | | | |

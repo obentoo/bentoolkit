@@ -13,12 +13,15 @@ import (
 	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- startup delay and interval jitter (Deps.Rand), not a secret
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/godbus/dbus/v5"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -28,7 +31,9 @@ import (
 	"github.com/obentoo/bentoolkit/internal/desktop/netmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
 	"github.com/obentoo/bentoolkit/internal/desktop/portal"
+	"github.com/obentoo/bentoolkit/internal/desktop/smartmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/sni"
+	"github.com/obentoo/bentoolkit/internal/desktop/unitmon"
 	"github.com/obentoo/bentoolkit/internal/gentoo/news"
 	"github.com/obentoo/bentoolkit/internal/gentoo/pkgdb"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
@@ -144,8 +149,9 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 	defer func() { _ = session.Close() }()
 
 	var netMon tray.NetworkMonitor
-	if system, err := dbusx.SystemBus(ctx); err != nil {
-		log.Warn("the system bus is unreachable; network checks are off", "error", err)
+	system, systemErr := dbusx.SystemBus(ctx)
+	if systemErr != nil {
+		log.Warn("the system bus is unreachable; network checks are off", "error", systemErr)
 		netMon = netmon.Absent()
 	} else {
 		defer func() { _ = system.Close() }()
@@ -167,11 +173,21 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 	}
 	ticks, stopTicks := minuteTicks()
 	defer stopTicks()
-	sys, monitors, watched := healthDeps(ctx, log, trayCfg, hostHealth{
+	health := resolveHealth(ctx, log, trayCfg, hostHealth{
 		Reader:  sysmon.Reader{Root: "/"},
 		TmpDir:  func() string { return distfiles.TempRoot(ctx) },
 		DistDir: func() string { return distfiles.HostDistdir(ctx) },
 		Stat:    os.Stat,
+
+		Emerge:      func(path string) emergeFollower { return &sysmon.EmergeFollower{Path: path} },
+		Mounts:      sysmon.Reader{Root: "/"},
+		SystemUnits: openUnits(log, "system", system, systemErr), //nolint:contextcheck // unitmon.New takes no ctx by design; it bounds its setup calls with its own timeout
+		UserUnits:   openUnits(log, "user", session, nil),        //nolint:contextcheck // unitmon.New takes no ctx by design; it bounds its setup calls with its own timeout
+		Smart:       openSmart(log, system, systemErr),           //nolint:contextcheck // smartmon.New takes no ctx by design; it bounds its setup calls with its own timeout
+
+		LookPath:    exec.LookPath,
+		SyncedRepos: news.SyncedRepos,
+		SyncTime:    news.SyncTime,
 	})
 
 	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state_file", statePath)
@@ -195,11 +211,54 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 		Store: state.Open(statePath),
 		Bus:   dbusx.NewOwner(session),
 
-		Sys:       sys,
-		DiskPaths: watched,
-		Monitors:  monitors,
+		Sys:       health.Sys,
+		DiskPaths: health.DiskPaths,
+		Monitors:  health.Monitors,
+
+		Emerge:            health.Emerge,
+		EmergeStartFailed: health.EmergeStartFailed,
+		Mounts:            health.Mounts,
+		PortageTmp:        health.PortageTmp,
+
+		SystemUnits:            health.SystemUnits,
+		SystemUnitsProbeFailed: health.SystemUnitsProbeFailed,
+		UserUnits:              health.UserUnits,
+		UserUnitsProbeFailed:   health.UserUnitsProbeFailed,
+		Smart:                  health.Smart,
+		SmartProbeFailed:       health.SmartProbeFailed,
+
+		Updates:       health.Updates,
+		GLSA:          health.GLSA,
+		Repos:         health.Repos,
+		RepoRevisions: health.RepoRevisions,
+		EmergeRunning: health.EmergeRunning,
 	})
 	return app.Run(ctx)
+}
+
+// openUnits returns the opener of manager's unitmon monitor on conn, the
+// connection start keeps open until the App has returned. A non-nil busErr
+// means the bus is unreachable: the opener returns it and opens nothing.
+func openUnits(log *slog.Logger, manager string, conn *dbus.Conn, busErr error) func() (unitsProbe, error) {
+	return func() (unitsProbe, error) {
+		if busErr != nil {
+			return nil, busErr
+		}
+		return unitmon.New(conn, log.With("monitor", "units", "manager", manager)), nil
+	}
+}
+
+// openSmart returns the opener of the smartmon monitor on the system bus
+// connection, which start keeps open until the App has returned. A non-nil
+// busErr means the system bus is unreachable: the opener returns it and opens
+// nothing.
+func openSmart(log *slog.Logger, system *dbus.Conn, busErr error) func() (smartProbe, error) {
+	return func() (smartProbe, error) {
+		if busErr != nil {
+			return nil, busErr
+		}
+		return smartmon.New(system, log.With("monitor", "smart")), nil
+	}
 }
 
 // newFeed builds the feed fetcher for feedURL and the hosts derived from it:
