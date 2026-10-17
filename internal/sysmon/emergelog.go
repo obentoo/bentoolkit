@@ -210,8 +210,9 @@ func (f *EmergeFollower) hold(part []byte) {
 // started a package, that terminating is reported as an interrupted exit, so
 // the packages it left started are forgotten instead of blamed on a later
 // failure. --sync, --config, --deselect and --depclean runs also end with a
-// bare terminating, but start no package, so a build running beside them is
-// never forgotten.
+// bare terminating and start no package; emerge.log carries no process id, so
+// when such a run's terminating lands after another run started a package,
+// that build is forgotten too and a later failure of it raises nothing.
 func (f *EmergeFollower) track(line []byte, events []EmergeEvent) []EmergeEvent {
 	if ev, ok := ParseEmergeLine(line); ok {
 		switch ev.Kind {

@@ -116,7 +116,7 @@ VM (E2/E3) or on the virtual Plasma harness: it needs root for `mount`.
 
 | Case | Expected | E1 | E2 | E3 |
 |---|---|---|---|---|
-| Failed build: `sudo emerge -1 <a package whose src_compile fails>` (a local ebuild with `die` in `src_compile`) | within 2 sample intervals of emerge exiting, one normal "emerge build failed" naming the atom and `Log: /var/tmp/portage/…/temp/build.log`; icon asks for attention | | | |
+| Failed build: `sudo emerge -1 <a package whose src_compile fails>` (a local ebuild with `die` in `src_compile`) | within 2 sample intervals of emerge exiting, one normal "Package build failed" naming the atom and `Log: /var/tmp/portage/…/temp/build.log`; icon asks for attention | | | |
 | Ctrl+C during a build | no notification | | | |
 | Failed build then a successful `emerge -1 app-misc/jq` | the notification is withdrawn; icon back to plain | | | |
 | Failed unit: `systemd-run --user --unit=s098-fail false` | one normal "systemd unit failed" naming `s098-fail.service` and `user`; a second failing unit replaces it with the count 2 | | | |
