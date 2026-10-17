@@ -301,3 +301,12 @@ autoupdate:
 #       enabled: true          # announce read-only remounts (default true)
 #     smart:
 #       enabled: true          # announce failing drives via udisks2 (default true)
+#     updates:
+#       enabled: true          # announce pending world updates (default true)
+#     glsa:
+#       enabled: true          # announce security advisories (GLSA) that
+#                              # affect this system (default true)
+#     sync:
+#       enabled: true          # announce repositories not synced lately
+#                              # (default true)
+#       max_age: 168h          # last sync older than this (default 168h; min 24h)

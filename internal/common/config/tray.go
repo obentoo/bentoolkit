@@ -132,6 +132,14 @@ const (
 // DefaultEmergeLog is the emerge log the emerge monitor follows.
 const DefaultEmergeLog = "/var/log/emerge.log"
 
+const (
+	// DefaultSyncMaxAge is how old a repository's last sync may grow before
+	// the sync monitor reports it.
+	DefaultSyncMaxAge = 7 * 24 * time.Hour
+	// MinSyncMaxAge is the shortest tray.monitors.sync.max_age accepted.
+	MinSyncMaxAge = 24 * time.Hour
+)
+
 // MonitorsConfig is the decoded `tray.monitors:` section. Every leaf and
 // every block is a yaml.Node, so an absent key stays distinct from a zero and
 // a value of the wrong YAML type ("10%", "maybe") or a block of the wrong
@@ -148,6 +156,9 @@ type MonitorsConfig struct {
 	Units          yaml.Node `yaml:"units,omitempty"`
 	Readonly       yaml.Node `yaml:"readonly,omitempty"`
 	Smart          yaml.Node `yaml:"smart,omitempty"`
+	Updates        yaml.Node `yaml:"updates,omitempty"`
+	GLSA           yaml.Node `yaml:"glsa,omitempty"`
+	Sync           yaml.Node `yaml:"sync,omitempty"`
 }
 
 // DiskMonitorConfig is the raw `tray.monitors.disk:` block.
@@ -210,6 +221,22 @@ type SmartMonitorConfig struct {
 	Enabled yaml.Node `yaml:"enabled,omitempty"`
 }
 
+// UpdatesMonitorConfig is the raw `tray.monitors.updates:` block.
+type UpdatesMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+}
+
+// GLSAMonitorConfig is the raw `tray.monitors.glsa:` block.
+type GLSAMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+}
+
+// SyncMonitorConfig is the raw `tray.monitors.sync:` block.
+type SyncMonitorConfig struct {
+	Enabled yaml.Node `yaml:"enabled,omitempty"`
+	MaxAge  yaml.Node `yaml:"max_age,omitempty"`
+}
+
 // Monitors is the resolved tray.monitors block: every value parsed, checked
 // against its limits and defaulted.
 type Monitors struct {
@@ -223,6 +250,9 @@ type Monitors struct {
 	Units          UnitsMonitor
 	Readonly       ReadonlyMonitor
 	Smart          SmartMonitor
+	Updates        UpdatesMonitor
+	GLSA           GLSAMonitor
+	Sync           SyncMonitor
 }
 
 // DiskMonitor holds the disk thresholds. Paths is empty unless configured;
@@ -282,6 +312,23 @@ type SmartMonitor struct {
 	Enabled bool
 }
 
+// UpdatesMonitor switches the pending world updates monitor.
+type UpdatesMonitor struct {
+	Enabled bool
+}
+
+// GLSAMonitor switches the security advisory monitor.
+type GLSAMonitor struct {
+	Enabled bool
+}
+
+// SyncMonitor holds how old a repository's last sync may grow before it is
+// reported; MaxAge is never below MinSyncMaxAge.
+type SyncMonitor struct {
+	Enabled bool
+	MaxAge  time.Duration
+}
+
 // NetworkMonitor holds the network debounce windows.
 type NetworkMonitor struct {
 	Enabled          bool
@@ -306,6 +353,9 @@ func (t TrayConfig) GetMonitors() (Monitors, []string) {
 	units := decodeBlock[UnitsMonitorConfig](&r, "units", &c.Units)
 	readonly := decodeBlock[ReadonlyMonitorConfig](&r, "readonly", &c.Readonly)
 	smart := decodeBlock[SmartMonitorConfig](&r, "smart", &c.Smart)
+	updates := decodeBlock[UpdatesMonitorConfig](&r, "updates", &c.Updates)
+	glsa := decodeBlock[GLSAMonitorConfig](&r, "glsa", &c.GLSA)
+	sync := decodeBlock[SyncMonitorConfig](&r, "sync", &c.Sync)
 	m := Monitors{
 		SampleInterval: r.duration("sample_interval", &c.SampleInterval, DefaultMonitorSampleInterval, MinMonitorSampleInterval),
 		Reminder:       r.duration("reminder", &c.Reminder, DefaultMonitorReminder, MinMonitorReminder),
@@ -317,6 +367,9 @@ func (t TrayConfig) GetMonitors() (Monitors, []string) {
 		Units:          r.units(&units),
 		Readonly:       ReadonlyMonitor{Enabled: r.enabled("readonly.enabled", &readonly.Enabled)},
 		Smart:          SmartMonitor{Enabled: r.enabled("smart.enabled", &smart.Enabled)},
+		Updates:        UpdatesMonitor{Enabled: r.enabled("updates.enabled", &updates.Enabled)},
+		GLSA:           GLSAMonitor{Enabled: r.enabled("glsa.enabled", &glsa.Enabled)},
+		Sync:           r.sync(&sync),
 	}
 	return m, r.warnings
 }
@@ -464,6 +517,13 @@ func (r *monitorResolver) units(c *UnitsMonitorConfig) UnitsMonitor {
 	}
 }
 
+func (r *monitorResolver) sync(c *SyncMonitorConfig) SyncMonitor {
+	return SyncMonitor{
+		Enabled: r.enabled("sync.enabled", &c.Enabled),
+		MaxAge:  r.duration("sync.max_age", &c.MaxAge, DefaultSyncMaxAge, MinSyncMaxAge),
+	}
+}
+
 // defaultClearPSI is DefaultCPUClearPSI while that stays below warn; under a
 // lower warn level it keeps the default pair's proportion (70/80 of warn).
 func defaultClearPSI(warn float64) float64 {
@@ -493,6 +553,9 @@ func (t TrayConfig) unknownMonitorKeys() []string {
 		"units":    reflect.TypeFor[UnitsMonitorConfig](),
 		"readonly": reflect.TypeFor[ReadonlyMonitorConfig](),
 		"smart":    reflect.TypeFor[SmartMonitorConfig](),
+		"updates":  reflect.TypeFor[UpdatesMonitorConfig](),
+		"glsa":     reflect.TypeFor[GLSAMonitorConfig](),
+		"sync":     reflect.TypeFor[SyncMonitorConfig](),
 	}
 	unknown := unknownKeys("", sec, reflect.TypeFor[MonitorsConfig]())
 	for i := 0; i+1 < len(sec.Content); i += 2 {
