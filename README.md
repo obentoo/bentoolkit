@@ -77,6 +77,9 @@ notifies, so a short spike stays silent. Every monitor is on by default.
 | units | failed systemd units of the system manager and of your session's manager, through D-Bus | a unit entering `failed`, and every unit already failed when the tray starts | never | - |
 | readonly | `/proc/self/mountinfo`, every block-device filesystem (`/dev/...`; not tmpfs, squashfs, overlay, network, FUSE or ISO) | never | a filesystem seen read-write that is now read-only (the kernel's reaction to an I/O error) | - |
 | smart | udisks2's SMART verdict for every drive, on the system bus | never | an ATA drive reporting itself failing, or an NVMe drive with a critical warning (spare, temperature, degraded, read-only...) | - |
+| updates | `emerge --pretend --update --deep --newuse --quiet @world`, run by the update check | never (a low-urgency notice naming the count and the first packages; "@world does not resolve" when emerge exits non-zero) | never | - |
+| glsa | `glsa-check --list affected --nocolor` (app-portage/gentoolkit), run by the update check before `@world` | a GLSA that applies to an installed package, naming its id, title and atoms | never | - |
+| sync | every repository in `repos.conf` with a `sync-uri`: the newest of `metadata/timestamp.chk` and `.git/FETCH_HEAD` | not synced for more than `sync.max_age` (7 days), naming the repository and the whole days | never | - |
 
 How an alert behaves:
 
@@ -94,8 +97,9 @@ How an alert behaves:
   reading stays 20% past its threshold for the sustain window (CPU: below
   `clear_psi`, 70); its notification is then withdrawn. "Network back" is sent
   only after a "Network down" was shown, and replaces it.
-- **Pause** (tray menu) silences warnings and network notifications, never
-  critical alerts. A warning raised during a pause is not sent when it ends.
+- **Pause** (tray menu) silences warnings, the updates notice and network
+  notifications, never critical alerts. A warning or notice raised during a
+  pause is not sent when it ends; its tooltip line stays.
 - **The icon** asks for attention, and turns to its critical variant for a
   critical alert, while any alert is active; the tooltip lists one line per
   alert (GNOME's AppIndicator extension shows no tooltip). Alerts never enter
@@ -110,6 +114,17 @@ How an alert behaves:
   replaced by each new failure and withdrawn when the last unit recovers. A
   read-only filesystem clears when it is read-write again or unmounted; a
   failing drive when its SMART verdict is healthy again or it is removed.
+- **Pending updates are a notice, not an alert**: a low-urgency
+  notification and a tooltip line, no attention icon, never repeated. It is
+  replaced only when the set of packages changes and withdrawn when nothing is
+  left. A GLSA or a stale repository is a warning; all GLSAs share one
+  notification, withdrawn when the last one clears.
+- **The update check runs** after every sync (`/var/lib/portage/repo_revisions`
+  changed), 5 minutes after start, and after each successful `emerge` (needs
+  the emerge monitor). Never during an `emerge`: it waits until none runs.
+- **It costs** about 50 s of CPU for `@world`, at niceness 19 with the idle
+  I/O class, in its own process group. `@world` is killed after 10 min and
+  `glsa-check` after 2 min (one WARN, state kept); Quit kills a running check.
 
 Configure them under `tray.monitors` in `~/.config/bentoo/config.yaml`;
 [config.example.yaml](config.example.yaml) lists the same keys with their
@@ -147,6 +162,10 @@ defaults. Keys under `tray.monitors`:
 | `units.user` | `true` | watch your session's manager (`systemd --user`) |
 | `readonly.enabled` | `true` | announce read-only remounts (block `tray.monitors.readonly`) |
 | `smart.enabled` | `true` | announce failing drives through udisks2 (block `tray.monitors.smart`) |
+| `updates.enabled` | `true` | announce pending `@world` updates (block `tray.monitors.updates`) |
+| `glsa.enabled` | `true` | announce applicable GLSAs (block `tray.monitors.glsa`) |
+| `sync.enabled` | `true` | announce repositories not synced recently (block `tray.monitors.sync`) |
+| `sync.max_age` | `168h` | a repository not synced for longer than this is stale; minimum `24h` |
 
 Percentages are 0-100, sizes whole `KiB`, `MiB`, `GiB` or `TiB`, durations
 like `30s`, `2m` or `1h` (0 is accepted, a negative value is not). A bad or
@@ -188,6 +207,12 @@ Limits worth knowing:
   monitor turns itself off with one INFO line.
 - **No systemd** (or no `systemd --user`): that manager is not watched, with
   one INFO line at startup.
+- **No `glsa-check`** (app-portage/gentoolkit): the GLSA monitor turns off
+  with one INFO line; no `emerge`, the updates monitor with one WARN.
+- **A repository with neither `metadata/timestamp.chk` nor `.git/FETCH_HEAD`**
+  is skipped with one INFO line. `repos.conf` is read once, at startup.
+- **The shared GLSA notification names the last GLSA raised**, even after
+  that one clears while another still applies.
 - Not covered: inode exhaustion, the write state of network, FUSE or image
   filesystems, drive attribute details and self-tests, OpenRC services, which
   process uses the memory, temperature, battery, network quality.
