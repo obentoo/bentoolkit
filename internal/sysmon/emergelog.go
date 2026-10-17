@@ -46,7 +46,12 @@ var (
 	emergeAtomRE = regexp.MustCompile(`^[A-Za-z0-9+_][A-Za-z0-9+_.-]*/[A-Za-z0-9+_][A-Za-z0-9+_.-]*$`)
 )
 
-const emergeExitOKText = "*** exiting successfully."
+const (
+	emergeExitOKText       = "*** exiting successfully."
+	emergeTerminatingText  = "*** terminating."
+	emergeRunStartText     = "Started emerge on:"
+	emergeInterruptedState = 130
+)
 
 // ParseEmergeLine reads one emerge.log line, without its newline. ok is false
 // for every line that is not one of the four events, including an event line
@@ -97,6 +102,8 @@ type EmergeFollower struct {
 	offset   int64
 	carry    []byte // the bytes after the last newline read
 	skipping bool   // inside an over-long line, discarding up to its newline
+	exited   bool   // an exit line was read since the last "terminating"
+	building bool   // a package started since the last "Started emerge on:"
 }
 
 // Start positions the follower at the current end of the log, so only lines
@@ -114,6 +121,7 @@ func (f *EmergeFollower) Start() error {
 	f.inode = inodeOf(fi)
 	f.offset = fi.Size()
 	f.carry, f.skipping = nil, false
+	f.exited, f.building = false, false
 	f.started = true
 	return nil
 }
@@ -140,6 +148,7 @@ func (f *EmergeFollower) Read() ([]EmergeEvent, error) {
 	if ino := inodeOf(fi); ino != f.inode || fi.Size() < f.offset {
 		f.inode, f.offset = ino, 0
 		f.carry, f.skipping = nil, false
+		f.exited, f.building = false, false
 	}
 	n := min(fi.Size()-f.offset, int64(f.maxRead()))
 	if n <= 0 {
@@ -178,9 +187,7 @@ func (f *EmergeFollower) consume(chunk []byte) []EmergeEvent {
 			line = append(f.carry, line...)
 			f.carry = nil
 		}
-		if ev, ok := ParseEmergeLine(line); ok {
-			events = append(events, ev)
-		}
+		events = f.track(line, events)
 	}
 	return events
 }
@@ -196,6 +203,51 @@ func (f *EmergeFollower) hold(part []byte) {
 		return
 	}
 	f.carry = append(f.carry, part...)
+}
+
+// track appends the event of one complete line to events. A run stopped by a
+// signal skips its exit line and only writes "terminating"; when it had
+// started a package, that terminating is reported as an interrupted exit, so
+// the packages it left started are forgotten instead of blamed on a later
+// failure. --sync, --config, --deselect and --depclean runs also end with a
+// bare terminating, but start no package, so a build running beside them is
+// never forgotten.
+func (f *EmergeFollower) track(line []byte, events []EmergeEvent) []EmergeEvent {
+	if ev, ok := ParseEmergeLine(line); ok {
+		switch ev.Kind {
+		case EmergeStarted:
+			f.building = true
+		case EmergeExitOK, EmergeExitFailed:
+			f.exited = true
+		case EmergeCompleted:
+		}
+		return append(events, ev)
+	}
+	switch emergeMessage(line) {
+	case emergeRunStartText:
+		f.building = false
+	case emergeTerminatingText:
+		if !f.exited && f.building {
+			events = append(events, EmergeEvent{Kind: EmergeExitFailed, Status: emergeInterruptedState})
+		}
+		f.exited, f.building = false, false
+	}
+	return events
+}
+
+// emergeMessage is the message of an emerge.log line without its timestamp,
+// cut to the run-start prefix when it is a "Started emerge on:" line; "" for a
+// line with no timestamp.
+func emergeMessage(line []byte) string {
+	loc := emergePrefixRE.FindIndex(line)
+	if loc == nil {
+		return ""
+	}
+	msg := string(bytes.TrimRight(line[loc[1]:], " \t\r"))
+	if len(msg) >= len(emergeRunStartText) && msg[:len(emergeRunStartText)] == emergeRunStartText {
+		return emergeRunStartText
+	}
+	return msg
 }
 
 func (f *EmergeFollower) maxRead() int {
