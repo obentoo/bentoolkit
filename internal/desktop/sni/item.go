@@ -90,14 +90,17 @@ type MenuEntry struct {
 // View is what the tray shows. Critical means at least one unread notice is
 // critical; it has no effect when Unread is zero. Alerts are the active
 // system conditions, one tooltip line each, and AlertCritical means at least
-// one of them is critical. AlertTitle is appended to the tooltip title while
-// it is non-empty; the caller words it, so the item adds no text of its own.
-// Paused, Entries and More feed the menu.
+// one of them is critical. Info lines follow the alerts in the tooltip, one
+// line each, and never change the status or the icon variant. AlertTitle is
+// appended to the tooltip title while it is non-empty; the caller words it,
+// so the item adds no text of its own. Paused, Entries and More feed the
+// menu.
 type View struct {
 	Unread        int
 	Critical      bool
 	Alerts        []string
 	AlertCritical bool
+	Info          []string
 	AlertTitle    string
 	Paused        bool
 	Entries       []MenuEntry
@@ -147,9 +150,9 @@ func (s shown) toolTip() toolTip {
 const titleSeparator = ", "
 
 // render maps a View to what the item shows. Unread notices and alerts both
-// ask for attention; the critical variant needs a critical unread notice or a
-// critical alert, so a critical notice already read never makes a warning
-// alert look critical.
+// ask for attention, info lines never; the critical variant needs a critical
+// unread notice or a critical alert, so a critical notice already read never
+// makes a warning alert look critical.
 func render(v View) shown {
 	unread := max(v.Unread, 0)
 	s := shown{variant: variantPlain, status: statusActive}
@@ -163,12 +166,12 @@ func render(v View) shown {
 	if v.AlertTitle != "" {
 		s.tooltip += titleSeparator + v.AlertTitle
 	}
-	s.description = alertLines(v.Alerts)
+	s.description = tooltipLines(v.Alerts, v.Info)
 	return s
 }
 
-// lineBreaks turns every line break inside one alert into a space, so one
-// alert always renders as one tooltip line.
+// lineBreaks turns every line break inside one alert or info line into a
+// space, so each always renders as one tooltip line.
 var lineBreaks = strings.NewReplacer(
 	"\r\n", " ", "\n", " ", "\r", " ", "\v", " ", "\f", " ",
 	"\u0085", " ", "\u2028", " ", "\u2029", " ",
@@ -178,12 +181,14 @@ var lineBreaks = strings.NewReplacer(
 // tooltip description, so an alert (a path, say) never becomes markup.
 var tooltipMarkup = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
-// alertLines is the tooltip description: one escaped line per alert, in
-// order.
-func alertLines(alerts []string) string {
-	lines := make([]string, len(alerts))
-	for n, a := range alerts {
-		lines[n] = tooltipMarkup.Replace(lineBreaks.Replace(a))
+// tooltipLines is the tooltip description: one escaped line per alert, then
+// one per info line, each group in order.
+func tooltipLines(alerts, info []string) string {
+	lines := make([]string, 0, len(alerts)+len(info))
+	for _, group := range [][]string{alerts, info} {
+		for _, l := range group {
+			lines = append(lines, tooltipMarkup.Replace(lineBreaks.Replace(l)))
+		}
 	}
 	return strings.Join(lines, "\n")
 }

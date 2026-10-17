@@ -53,6 +53,8 @@ type builder func(urgency byte) (notify.Message, string)
 // String is the level as the log lines spell it.
 func (l level) String() string {
 	switch l {
+	case levelNotice:
+		return "notice"
 	case levelWarning:
 		return "warning"
 	case levelCritical:
@@ -358,10 +360,14 @@ func (a *App) noteSample(key condKey, c *condition, tr transition, changed bool,
 
 // levelUrgency is the notification urgency of an active level.
 func levelUrgency(l level) byte {
-	if l == levelCritical {
+	switch l {
+	case levelCritical:
 		return urgencyCritical
+	case levelNotice:
+		return urgencyLow
+	default:
+		return urgencyNormal
 	}
-	return urgencyNormal
 }
 
 // notificationKey is the notification key of a condition: "disk:" and the

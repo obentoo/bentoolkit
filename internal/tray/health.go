@@ -16,9 +16,12 @@ import (
 // level is how bad a system health condition is. The zero value is levelOK.
 type level int
 
-// Condition levels, in increasing severity.
+// Condition levels, in increasing severity. A notice is active but only
+// informs: it notifies at low urgency and is never reminded. Compare levels
+// by name, never by number.
 const (
 	levelOK level = iota
+	levelNotice
 	levelWarning
 	levelCritical
 )
@@ -183,11 +186,12 @@ type transition struct {
 // between samples still counted as continuous, paused the menu pause.
 //
 // Readings on one side of the level must last window without a break before
-// the condition moves; see track for what restarts the wait. Raising to
-// warning notifies at normal urgency unless paused; reaching critical
-// notifies at critical urgency even when paused; an active critical notifies
-// again once reminder has passed since the last notification, an active
-// warning never. Critical to warning is silent; clearing to ok withdraws.
+// the condition moves; see track for what restarts the wait. Raising a
+// notice or a warning from ok notifies at its level's urgency unless paused;
+// reaching critical notifies at critical urgency even when paused; an active
+// critical notifies again once reminder has passed since the last
+// notification, an active notice or warning never. Critical to warning is
+// silent; clearing to ok withdraws.
 //
 // observe stamps notifiedAt with now whenever it returns Notify, so the
 // caller only sends: a rejected critical is retried once per reminder, not
@@ -262,7 +266,7 @@ func (c *condition) move(now time.Time, got level, paused bool) transition {
 	case tr.To == levelCritical:
 		tr = c.notify(now, tr, urgencyCritical)
 	case tr.From == levelOK && !paused:
-		tr = c.notify(now, tr, urgencyNormal)
+		tr = c.notify(now, tr, levelUrgency(tr.To))
 	}
 	return tr
 }
