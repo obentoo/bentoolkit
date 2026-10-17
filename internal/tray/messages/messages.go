@@ -129,6 +129,51 @@ const (
 	// SysAlertSmart is the tooltip line of a failing drive; the two %s are
 	// the drive model and the reason.
 	SysAlertSmart
+
+	// SysUpdatesSummary is the pending-updates notification summary.
+	SysUpdatesSummary
+	// SysUpdatesBody is the pending-updates notification body; %d is the
+	// number of packages to update, %s names them (the first two, or
+	// SysUpdatesMore).
+	SysUpdatesBody
+	// SysUpdatesMore names more than two packages; %s is the first two, %d
+	// how many others there are.
+	SysUpdatesMore
+	// SysInfoUpdates is the informational tooltip line of pending updates;
+	// %d and %s are as in SysUpdatesBody.
+	SysInfoUpdates
+	// SysWorldBrokenSummary is the summary of the notification sent when
+	// the @world update cannot be computed.
+	SysWorldBrokenSummary
+	// SysWorldBrokenBody is that notification's body, telling the user what
+	// to run to see why.
+	SysWorldBrokenBody
+	// SysInfoWorldBroken is the informational tooltip line shown while the
+	// @world update cannot be computed.
+	SysInfoWorldBroken
+	// SysGLSASummary is the security-advisory notification summary.
+	SysGLSASummary
+	// SysGLSABody is the security-advisory notification body; the three %s
+	// are the GLSA id, its title and the affected package atoms, %d the
+	// number of advisories that apply.
+	SysGLSABody
+	// SysAlertGLSA is the tooltip line of one applicable advisory; the two
+	// %s are its id and title.
+	SysAlertGLSA
+	// SysSyncSummary is the stale-repository notification summary; %s is
+	// the repository.
+	SysSyncSummary
+	// SysSyncBody is the stale-repository notification body; the first %s
+	// is the repository, the second how long ago it was synced (SysDaysOne
+	// or SysDaysMany).
+	SysSyncBody
+	// SysAlertSync is the tooltip line of a stale repository; the two %s
+	// are as in SysSyncBody.
+	SysAlertSync
+	// SysDaysOne is a span of exactly one day; %d is the count.
+	SysDaysOne
+	// SysDaysMany is a span of any other number of days; %d is the count.
+	SysDaysMany
 )
 
 // catalog is the English text of every Key. The ellipsis is written as an
@@ -178,6 +223,22 @@ var catalog = map[Key]string{
 	SysSmartBody:       "%s (serial %s): %s",
 	SysSmartFailing:    "SMART reports failing",
 	SysAlertSmart:      "Drive %s: %s",
+
+	SysUpdatesSummary:     "Updates available",
+	SysUpdatesBody:        "Packages to update in @world: %d (%s)",
+	SysUpdatesMore:        "%s and %d more",
+	SysInfoUpdates:        "Updates: %d pending (%s)",
+	SysWorldBrokenSummary: "@world does not resolve",
+	SysWorldBrokenBody:    "Portage cannot compute the @world update. Run emerge -puDN @world to see why.",
+	SysInfoWorldBroken:    "Updates: @world does not resolve",
+	SysGLSASummary:        "Security advisory applies",
+	SysGLSABody:           "GLSA %s: %s - affects %s. Applicable advisories: %d",
+	SysAlertGLSA:          "GLSA %s: %s",
+	SysSyncSummary:        "Repository not synced: %s",
+	SysSyncBody:           "%s was last synced %s ago.",
+	SysAlertSync:          "Repository %s: synced %s ago",
+	SysDaysOne:            "%d day",
+	SysDaysMany:           "%d days",
 }
 
 // Text returns k's catalog text. A key with no entry, which the catalog test

@@ -9,6 +9,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/desktop/notify"
+	"github.com/obentoo/bentoolkit/internal/gentoo/pending"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
 	"github.com/obentoo/bentoolkit/internal/tray/messages"
 )
@@ -290,8 +291,9 @@ func (c *condition) notify(now time.Time, tr transition, urgency byte) transitio
 
 // Notification keys of the system monitors. A disk key is "disk:" and the
 // watched path, a read-only key "readonly:" and the mount point, a SMART key
-// "smart:" and the drive's udisks2 object path; every failed unit shares the
-// one units key.
+// "smart:" and the drive's udisks2 object path, a stale repository's "sync:"
+// and its name; every failed unit shares the one units key, every applicable
+// advisory the one glsa key.
 const (
 	keyDiskPrefix     = "disk:"
 	keyMemory         = "memory"
@@ -301,6 +303,9 @@ const (
 	keyUnits          = "units"
 	keyReadonlyPrefix = "readonly:"
 	keySmartPrefix    = "smart:"
+	keyUpdates        = "updates"
+	keyGLSA           = "glsa"
+	keySyncPrefix     = "sync:"
 )
 
 // maxField is the most bytes of one host-supplied field (an atom, a unit
@@ -446,6 +451,61 @@ func smartSysMessage(path, model, serial string, warnings []string, replacesID u
 		messages.Format(messages.SysSmartBody, mdl, clip(serial), reason),
 		replacesID, urgency)
 	return m, messages.Format(messages.SysAlertSmart, mdl, reason)
+}
+
+// updatesSysMessage returns the notification and the informational tooltip
+// line of pending @world updates: how many packages, the first two by name
+// and how many others. names holds at least one "category/name".
+func updatesSysMessage(names []string, replacesID uint32, urgency byte) (notify.Message, string) {
+	shown := make([]string, 0, 2)
+	for _, n := range names[:min(len(names), 2)] {
+		shown = append(shown, clip(n))
+	}
+	list := strings.Join(shown, ", ")
+	if more := len(names) - len(shown); more > 0 {
+		list = messages.Format(messages.SysUpdatesMore, list, more)
+	}
+	m := sysMessage(keyUpdates,
+		messages.Text(messages.SysUpdatesSummary),
+		messages.Format(messages.SysUpdatesBody, len(names), list),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysInfoUpdates, len(names), list)
+}
+
+// worldBrokenSysMessage returns the notification and the informational
+// tooltip line of an @world update that cannot be computed. It shares the
+// updates key, so it replaces a pending-updates notification and the other
+// way round.
+func worldBrokenSysMessage(replacesID uint32, urgency byte) (notify.Message, string) {
+	m := sysMessage(keyUpdates,
+		messages.Text(messages.SysWorldBrokenSummary),
+		messages.Text(messages.SysWorldBrokenBody),
+		replacesID, urgency)
+	return m, messages.Text(messages.SysInfoWorldBroken)
+}
+
+// glsaSysMessage returns the shared advisory notification naming g, with
+// applicable advisories applying now, and g's tooltip line.
+func glsaSysMessage(g pending.GLSA, applicable int, replacesID uint32, urgency byte) (notify.Message, string) {
+	id, title := clip(g.ID), clip(g.Title)
+	atoms := clip(strings.Join(g.Atoms, ", "))
+	m := sysMessage(keyGLSA,
+		messages.Text(messages.SysGLSASummary),
+		messages.Format(messages.SysGLSABody, id, title, atoms, applicable),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertGLSA, id, title)
+}
+
+// syncSysMessage returns the notification and the tooltip line of repo,
+// last synced age ago, in whole days.
+func syncSysMessage(repo string, age time.Duration, replacesID uint32, urgency byte) (notify.Message, string) {
+	name := clip(repo)
+	days := messages.Count(messages.SysDaysOne, messages.SysDaysMany, max(int(age/(24*time.Hour)), 0))
+	m := sysMessage(keySyncPrefix+repo,
+		messages.Format(messages.SysSyncSummary, name),
+		messages.Format(messages.SysSyncBody, name, days),
+		replacesID, urgency)
+	return m, messages.Format(messages.SysAlertSync, name, days)
 }
 
 // humanBytes renders n in the largest of GiB, MiB and KiB it fills at least

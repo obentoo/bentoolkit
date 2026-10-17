@@ -24,6 +24,9 @@ const (
 	monitorUnits    = "units"
 	monitorReadonly = "readonly"
 	monitorSmart    = "smart"
+	monitorUpdates  = "updates"
+	monitorGLSA     = "glsa"
+	monitorSync     = "sync"
 )
 
 // Logical paths of the host files a sample reads, named by the WARN of a
@@ -66,10 +69,11 @@ func (l level) String() string {
 
 // sampling reports whether the App samples the host: a system reader is set
 // and at least one resource monitor is enabled, the emerge or read-only
-// monitor is enabled and has its reader, or drive health is watched, whose
-// critical reminder the sample timer drives.
+// monitor is enabled and has its reader, drive health is watched, whose
+// critical reminder the sample timer drives, or the updates, GLSA or sync
+// monitor is enabled and has its command or repositories.
 func (a *App) sampling() bool {
-	return a.sysSampling() || a.emergeSampling() || a.mountSampling() || a.smartWatched()
+	return a.sysSampling() || a.emergeSampling() || a.mountSampling() || a.smartWatched() || a.updSampling()
 }
 
 // sysSampling reports whether the resource monitors sample.
@@ -103,6 +107,9 @@ func (a *App) sample(ctx context.Context) {
 	}
 	if a.smartWatched() && ctx.Err() == nil {
 		a.remindSmart(ctx, now)
+	}
+	if a.updSampling() && ctx.Err() == nil {
+		a.sampleUpdates(ctx, now)
 	}
 	a.render()
 }
@@ -270,18 +277,25 @@ func (a *App) sampleCPU(ctx context.Context, now time.Time) {
 		reading{value: p.SomeAvg60, threshold: threshold})
 }
 
-// emergeRunning scans for a running emerge. A failed scan counts as none
-// running, with one WARN per failure streak.
+// emergeRunning scans for a running emerge for the CPU monitor. A failed scan
+// counts as none running, with one WARN per failure streak.
 func (a *App) emergeRunning() bool {
-	running, err := a.d.Sys.EmergeRunning()
+	return a.scanEmerge(a.d.Sys.EmergeRunning, &a.emergeFailing, condKey{Monitor: monitorCPU})
+}
+
+// scanEmerge runs one scan for a running emerge on behalf of key's monitor.
+// A failed scan counts as none running; the first failure while *failing is
+// false logs one WARN, and the streak lasts until a scan succeeds.
+func (a *App) scanEmerge(scan func() (bool, error), failing *bool, key condKey) bool {
+	running, err := scan()
 	if err == nil {
-		a.emergeFailing = false
+		*failing = false
 		return running
 	}
-	if !a.emergeFailing {
-		a.emergeFailing = true
+	if !*failing {
+		*failing = true
 		a.log.Warn("looking for a running emerge failed; treating it as not running",
-			"monitor", monitorCPU, "target", "", "path", pathProc, "error", err)
+			"monitor", key.Monitor, "target", key.Target, "state", a.levelOf(key), "path", pathProc, "error", err)
 	}
 	return false
 }
@@ -372,8 +386,10 @@ func levelUrgency(l level) byte {
 
 // notificationKey is the notification key of a condition: "disk:" and the
 // watched path, "memory", "cpu", "network", "emerge", the one "units" key
-// every failed unit shares, "readonly:" and the mount point, or "smart:" and
-// the drive's object path. A monitor with no case of its own keys by its
+// every failed unit shares, "readonly:" and the mount point, "smart:" and the
+// drive's object path, the one "updates" key of pending updates and of an
+// unresolvable @world, the one "glsa" key every advisory shares, or "sync:"
+// and the repository name. A monitor with no case of its own keys by its
 // name, so it can never close another monitor's notification.
 func notificationKey(key condKey) string {
 	switch key.Monitor {
@@ -393,6 +409,12 @@ func notificationKey(key condKey) string {
 		return keyReadonlyPrefix + key.Target
 	case monitorSmart:
 		return keySmartPrefix + key.Target
+	case monitorUpdates:
+		return keyUpdates
+	case monitorGLSA:
+		return keyGLSA
+	case monitorSync:
+		return keySyncPrefix + key.Target
 	default:
 		return key.Monitor
 	}
@@ -420,12 +442,25 @@ func (a *App) sendSysAt(ctx context.Context, key condKey, m notify.Message, fail
 	cancel()
 	if err != nil {
 		a.log.Log(ctx, failLevel, "sending a system notification failed", "monitor", key.Monitor,
-			"target", key.Target, "urgency", m.Urgency, "error", err)
+			"target", key.Target, "state", a.stateOf(key), "urgency", m.Urgency, "error", err)
 		return 0, err
 	}
 	a.log.Debug("system notification sent", "monitor", key.Monitor, "target", key.Target,
 		"urgency", m.Urgency, "id", id, "replaces", m.ReplacesID)
 	return id, nil
+}
+
+// stateOf is the level a failed send of key's notification reports: the
+// network's from the spell it is in, which no condition holds, and any
+// other monitor's from key's condition.
+func (a *App) stateOf(key condKey) string {
+	if key.Monitor == monitorNetwork && a.network != nil {
+		if a.network.online {
+			return levelOK.String()
+		}
+		return levelWarning.String()
+	}
+	return a.levelOf(key)
 }
 
 // withdraw closes a cleared condition's notification.
@@ -451,16 +486,23 @@ func (a *App) closeSys(ctx context.Context, key condKey, id uint32) {
 	}
 }
 
-// alerts returns the tooltip lines of the active system conditions and
-// whether any of them is critical: failing drives, read-only filesystems,
-// disks in watched-path order, memory, CPU, network, the failed build, then
-// failed units by manager and name. The network line shows while a sent
-// "network down" stands.
-func (a *App) alerts() (lines []string, critical bool) {
+// alerts returns the tooltip lines of the active system conditions, whether
+// any of them is critical, and the informational lines: failing drives,
+// read-only filesystems, disks in watched-path order, memory, CPU, network,
+// the failed build, failed units by manager and name, applicable advisories
+// by id, stale repositories by name, then pending updates. The network line
+// shows while a sent "network down" stands. A condition at the notice level
+// goes to info, never to lines, so it never asks for attention; a condition
+// with no text shows nothing.
+func (a *App) alerts() (lines []string, critical bool, info []string) {
 	add := func(keys []condKey) {
 		for _, key := range keys {
 			c, ok := a.health[key]
 			if !ok || c.level == levelOK || c.text == "" {
+				continue
+			}
+			if c.level == levelNotice {
+				info = append(info, c.text)
 				continue
 			}
 			lines = append(lines, c.text)
@@ -479,7 +521,10 @@ func (a *App) alerts() (lines []string, critical bool) {
 	}
 	add([]condKey{{Monitor: monitorEmerge}})
 	add(a.healthKeys(monitorUnits))
-	return lines, critical
+	add(a.healthKeys(monitorGLSA))
+	add(a.healthKeys(monitorSync))
+	add([]condKey{{Monitor: monitorUpdates}})
+	return lines, critical, info
 }
 
 // healthKeys returns the keys of monitor's conditions sorted by target, a

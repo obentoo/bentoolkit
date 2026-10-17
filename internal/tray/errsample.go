@@ -29,6 +29,9 @@ func (a *App) sampleEmerge(ctx context.Context, now time.Time) {
 	a.readSucceeded(key)
 	c := a.cond(key)
 	for _, ev := range events {
+		if ev.Kind == sysmon.EmergeExitOK && a.checksOn() {
+			a.sched.trigger() // a successful run may have changed what @world would merge
+		}
 		if fail, changed := a.emerge.feed(ev); changed {
 			a.emergeChanged(ctx, now, key, c, fail)
 		}
@@ -105,8 +108,8 @@ func (a *App) buildLog(atom string) string {
 
 // resend sends m again for the active condition c, replacing its last
 // notification, when an event changed what the condition reports without
-// moving its level. A warning is not sent while the menu is paused. The
-// reminder clock (notifiedAt) is left alone.
+// moving its level. While the menu is paused nothing below critical is sent,
+// a notice or a warning alike. The reminder clock (notifiedAt) is left alone.
 func (a *App) resend(ctx context.Context, key condKey, c *condition, m notify.Message) {
 	if c.level < levelCritical && a.paused(a.d.Clock.Now()) {
 		return
@@ -363,15 +366,7 @@ func (a *App) deliverUnits(ctx context.Context, s unitScope, raised []unitRaise,
 }
 
 // activeUnits is the number of active unit conditions, across both managers.
-func (a *App) activeUnits() int {
-	n := 0
-	for key, c := range a.health {
-		if key.Monitor == monitorUnits && c.level != levelOK {
-			n++
-		}
-	}
-	return n
-}
+func (a *App) activeUnits() int { return a.activeOf(monitorUnits) }
 
 // smartWatched reports whether drive health is watched: the SMART monitor is
 // enabled and present.

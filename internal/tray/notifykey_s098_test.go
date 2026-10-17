@@ -129,7 +129,7 @@ func TestS098Alerts_R5_5_TooltipOrder(t *testing.T) {
 	netLine := messages.Text(messages.SysAlertNetwork)
 
 	for range 20 { // map order must not leak into the tooltip
-		lines, critical := a.alerts()
+		lines, critical, _ := a.alerts()
 		if !critical {
 			t.Fatalf("alerts() critical = false with SMART and read-only criticals active")
 		}
@@ -153,7 +153,7 @@ func TestS098Alerts_R5_5_OkAndTextlessConditionsAreNotListed(t *testing.T) {
 	keysActive(a, condKey{Monitor: "readonly", Target: "/home"}, levelCritical, "")
 	keysActive(a, condKey{Monitor: "units", Target: "system:a.service"}, levelOK, "")
 	keysActive(a, condKey{Monitor: "emerge"}, levelWarning, "EMERGE")
-	lines, critical := a.alerts()
+	lines, critical, _ := a.alerts()
 	if !slices.Equal(lines, []string{"EMERGE"}) {
 		t.Errorf("alerts() = %q, want only the emerge line", lines)
 	}
