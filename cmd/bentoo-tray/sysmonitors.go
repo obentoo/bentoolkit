@@ -11,6 +11,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/desktop/smartmon"
 	"github.com/obentoo/bentoolkit/internal/desktop/unitmon"
+	"github.com/obentoo/bentoolkit/internal/gentoo/news"
+	"github.com/obentoo/bentoolkit/internal/gentoo/pending"
 	"github.com/obentoo/bentoolkit/internal/sysmon"
 	"github.com/obentoo/bentoolkit/internal/tray"
 )
@@ -71,11 +73,13 @@ type smartProbe interface {
 
 // hostHealth is the host access the health monitors need: the resource
 // reader, the two portageq questions, the existence check, the emerge
-// follower factory, the mount reader and the bus monitors. start builds the
+// follower factory, the mount reader, the bus monitors, the command lookup
+// and the repos.conf and sync-time readers. start builds the
 // real one; tests pass fakes, so nothing here touches the host on its own.
 //
-// A nil Emerge, Mounts, SystemUnits, UserUnits or Smart is a capability the
-// host lacks: nothing is opened, asked or logged for it. Calling one of the
+// A nil Emerge, Mounts, SystemUnits, UserUnits, Smart, LookPath,
+// SyncedRepos or SyncTime is a capability the host lacks: nothing is opened,
+// asked or logged for it. Calling one of the
 // func fields opens that monitor, so it is called only for an enabled one.
 // SystemUnits, UserUnits and Smart return an error when their bus is
 // unreachable.
@@ -90,11 +94,15 @@ type hostHealth struct {
 	SystemUnits func() (unitsProbe, error)
 	UserUnits   func() (unitsProbe, error)
 	Smart       func() (smartProbe, error)
+
+	LookPath    func(string) (string, error)
+	SyncedRepos func(string) ([]news.Repo, error)
+	SyncTime    func(string) (time.Time, bool, error)
 }
 
 // healthWiring is what resolveHealth hands the App: each field is the
 // tray.Deps field of the same name. An absent or disabled monitor is a nil
-// interface.
+// interface, a nil command or no repository.
 type healthWiring struct {
 	Sys       tray.SystemReader
 	Monitors  *config.Monitors
@@ -111,6 +119,12 @@ type healthWiring struct {
 	UserUnitsProbeFailed   bool
 	Smart                  tray.SmartMonitor
 	SmartProbeFailed       bool
+
+	Updates       *pending.Command
+	GLSA          *pending.Command
+	Repos         []news.Repo
+	RepoRevisions string
+	EmergeRunning func() (bool, error)
 }
 
 // healthDeps resolves the host reader, the monitor configuration and the
@@ -127,8 +141,10 @@ func healthDeps(ctx context.Context, log *slog.Logger, cfg config.TrayConfig, h 
 // here. The systemd and udisks2 monitors are opened and probed concurrently
 // with each other and with portageq; their lines are logged once all have
 // answered, system manager first, then user manager, then SMART. A disabled
-// monitor opens nothing and asks nothing. Every line logged for the emerge,
-// units and SMART monitors carries monitor=<name>.
+// monitor opens nothing and asks nothing. The update-check commands and the
+// synced repositories are resolved by resolveUpdates. Every line logged for
+// the emerge, units, SMART, updates, GLSA and sync monitors carries
+// monitor=<name>.
 func resolveHealth(ctx context.Context, log *slog.Logger, cfg config.TrayConfig, h hostHealth) healthWiring {
 	m, _ := cfg.GetMonitors() // its warnings were logged by loadTrayConfig
 	sys, m := systemMonitors(log, m, h.Reader)
@@ -170,6 +186,7 @@ func resolveHealth(ctx context.Context, log *slog.Logger, cfg config.TrayConfig,
 	if m.Readonly.Enabled && h.Mounts != nil {
 		w.Mounts = h.Mounts
 	}
+	resolveUpdates(ctx, log, m, h, &w)
 
 	probes.Wait()
 	system.note.log(ctx, log)

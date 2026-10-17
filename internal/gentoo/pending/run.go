@@ -52,7 +52,7 @@ type Command struct {
 	// own, leaving only the caller's ctx.
 	Timeout time.Duration
 	// Wrap is the priority prefix the command runs behind, for instance
-	// ["nice", "-n", "19", "ionice", "-c", "3"]. Empty runs Path directly.
+	// ["nice", "-n", "19", "ionice", "-t", "-c", "3"]. Empty runs Path directly.
 	Wrap []string
 }
 

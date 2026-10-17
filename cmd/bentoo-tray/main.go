@@ -13,6 +13,7 @@ import (
 	"math/rand/v2" // nosemgrep: go.lang.security.audit.crypto.math_random.math-random-used -- startup delay and interval jitter (Deps.Rand), not a secret
 	"net/url"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"slices"
@@ -183,6 +184,10 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 		SystemUnits: openUnits(log, "system", system, systemErr), //nolint:contextcheck // unitmon.New takes no ctx by design; it bounds its setup calls with its own timeout
 		UserUnits:   openUnits(log, "user", session, nil),        //nolint:contextcheck // unitmon.New takes no ctx by design; it bounds its setup calls with its own timeout
 		Smart:       openSmart(log, system, systemErr),           //nolint:contextcheck // smartmon.New takes no ctx by design; it bounds its setup calls with its own timeout
+
+		LookPath:    exec.LookPath,
+		SyncedRepos: news.SyncedRepos,
+		SyncTime:    news.SyncTime,
 	})
 
 	log.Info("bentoo-tray starting", "version", trayversion.Version(), "bentoolkit", version.Short(), "feed_url", feedURL, "state_file", statePath)
@@ -221,6 +226,12 @@ func start(ctx context.Context, log *slog.Logger, getenv func(string) string) er
 		UserUnitsProbeFailed:   health.UserUnitsProbeFailed,
 		Smart:                  health.Smart,
 		SmartProbeFailed:       health.SmartProbeFailed,
+
+		Updates:       health.Updates,
+		GLSA:          health.GLSA,
+		Repos:         health.Repos,
+		RepoRevisions: health.RepoRevisions,
+		EmergeRunning: health.EmergeRunning,
 	})
 	return app.Run(ctx)
 }
