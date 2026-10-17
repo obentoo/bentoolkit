@@ -73,6 +73,10 @@ notifies, so a short spike stays silent. Every monitor is on by default.
 | memory | `MemAvailable` in `/proc/meminfo`, and `/proc/pressure/memory` | under 10% of RAM available | under 5% available with no swap or under 10% of swap free, or `full avg60` memory pressure at 10 or more | 2 min |
 | cpu | `some avg60` in `/proc/pressure/cpu` | 80 or more | never | 5 min |
 | network | NetworkManager's connectivity on the system bus | "Network down" after 30 s offline (60 s when the tray starts offline); "Network back" after 10 s online | never | - |
+| emerge | `/var/log/emerge.log`, read from where it was when the tray started | a build that started and did not complete before an unsuccessful exit, naming the package and its `build.log` when it still exists | never | - |
+| units | failed systemd units of the system manager and of your session's manager, through D-Bus | a unit entering `failed`, and every unit already failed when the tray starts | never | - |
+| readonly | `/proc/self/mountinfo`, every block-device filesystem (`/dev/...`; not tmpfs, squashfs, overlay, network, FUSE or ISO) | never | a filesystem seen read-write that is now read-only (the kernel's reaction to an I/O error) | - |
+| smart | udisks2's SMART verdict for every drive, on the system bus | never | an ATA drive reporting itself failing, or an NVMe drive with a critical warning (spare, temperature, degraded, read-only...) | - |
 
 How an alert behaves:
 
@@ -99,6 +103,13 @@ How an alert behaves:
   leaves them alone. Clicking an alert's notification opens nothing.
 - **Nothing is kept across restarts**: after a restart a problem still present
   is announced again once its sustain window has passed.
+- **Errors notify at once** (emerge, units, readonly, smart have no sustain
+  window). A failed emerge clears when a later emerge ends successfully or the
+  failed package completes; Ctrl+C and dependency failures, which you already
+  saw in the terminal, never notify. Failed units share one notification,
+  replaced by each new failure and withdrawn when the last unit recovers. A
+  read-only filesystem clears when it is read-write again or unmounted; a
+  failing drive when its SMART verdict is healthy again or it is removed.
 
 Configure them under `tray.monitors` in `~/.config/bentoo/config.yaml`;
 [config.example.yaml](config.example.yaml) lists the same keys with their
@@ -129,6 +140,13 @@ defaults. Keys under `tray.monitors`:
 | `network.down_after` | `30s` | offline this long sends "Network down" |
 | `network.down_after_startup` | `60s` | the same, when the tray starts offline |
 | `network.back_after` | `10s` | online this long, after a "Network down", sends "Network back" |
+| `emerge.enabled` | `true` | announce failed emerge builds (block `tray.monitors.emerge`) |
+| `emerge.log` | `/var/log/emerge.log` | the emerge log to follow; an absolute path |
+| `units.enabled` | `true` | announce failed systemd units (block `tray.monitors.units`) |
+| `units.system` | `true` | watch the system manager |
+| `units.user` | `true` | watch your session's manager (`systemd --user`) |
+| `readonly.enabled` | `true` | announce read-only remounts (block `tray.monitors.readonly`) |
+| `smart.enabled` | `true` | announce failing drives through udisks2 (block `tray.monitors.smart`) |
 
 Percentages are 0-100, sizes whole `KiB`, `MiB`, `GiB` or `TiB`, durations
 like `30s`, `2m` or `1h` (0 is accepted, a negative value is not). A bad or
@@ -159,8 +177,20 @@ Limits worth knowing:
 - **No pressure stall information** (a kernel without PSI, so no
   `/proc/pressure/cpu`): the CPU monitor turns itself off with one INFO line;
   the memory monitor uses `/proc/meminfo` alone.
-- Not covered: inode exhaustion, read-only remounts, disk health (SMART),
-  which process uses the memory, temperature, battery, network quality.
+- **The emerge log is read through the `portage` group** (it is
+  `portage:portage 0660`): outside that group the tray logs one WARN and keeps
+  retrying. emerge.log carries no process id, so with two emerge runs at once,
+  or after an emerge killed without its closing line, a failure may name the
+  other run's package until that package completes.
+- **ATA SMART needs `sys-fs/udisks[smart]` and `sys-libs/libblockdev[smart]`**:
+  without them udisks2 reports SMART as unsupported and no ATA failure is
+  announced. NVMe health needs udisks2 2.10 or later. Without udisks2 the
+  monitor turns itself off with one INFO line.
+- **No systemd** (or no `systemd --user`): that manager is not watched, with
+  one INFO line at startup.
+- Not covered: inode exhaustion, the write state of network, FUSE or image
+  filesystems, drive attribute details and self-tests, OpenRC services, which
+  process uses the memory, temperature, battery, network quality.
 
 ## Documentation
 

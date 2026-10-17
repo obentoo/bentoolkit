@@ -108,3 +108,20 @@ OOM killer: save your work, or run it in the VM.
 | Network cut 40 s while paused | neither "Network down" nor "Network back", also after Resume | | | n/a |
 | System notification click | opens nothing; no WARN in the journal | | | |
 | Mark all as read with an alert active | unread notices clear; the alert stays in the icon and tooltip | | | n/a |
+
+## Error monitors
+
+The emerge, units, read-only and SMART monitors. Run the read-only case in the
+VM (E2/E3) or on the virtual Plasma harness: it needs root for `mount`.
+
+| Case | Expected | E1 | E2 | E3 |
+|---|---|---|---|---|
+| Failed build: `sudo emerge -1 <a package whose src_compile fails>` (a local ebuild with `die` in `src_compile`) | within 2 sample intervals of emerge exiting, one normal "emerge build failed" naming the atom and `Log: /var/tmp/portage/…/temp/build.log`; icon asks for attention | | | |
+| Ctrl+C during a build | no notification | | | |
+| Failed build then a successful `emerge -1 app-misc/jq` | the notification is withdrawn; icon back to plain | | | |
+| Failed unit: `systemd-run --user --unit=s098-fail false` | one normal "systemd unit failed" naming `s098-fail.service` and `user`; a second failing unit replaces it with the count 2 | | | |
+| Unit recovery: `systemctl --user reset-failed` | nothing is sent; the shared notification is withdrawn once no unit is failed | | | |
+| Read-only remount: as root, `truncate -s 64M /var/tmp/ro.img; mkfs.ext4 -q /var/tmp/ro.img; mount -o loop /var/tmp/ro.img /mnt/ro; mount -o remount,ro /mnt/ro` | within 2 sample intervals one critical "Filesystem read-only: /mnt/ro" with device and type, shown over Do Not Disturb; `mount -o remount,rw /mnt/ro` withdraws it | | | |
+| Read-only at first sight: mount the image `-o ro` before starting the tray | no notification | | | |
+| SMART (fake): on the virtual harness, export a fake `org.freedesktop.UDisks2` drive whose `SmartFailing` turns true | one critical notification at once naming model, serial and "SMART reports failing"; one more per reminder while it lasts | | | |
+| Pause with a failed unit | no unit notification while paused; a read-only or SMART alert still notifies | | | n/a |
