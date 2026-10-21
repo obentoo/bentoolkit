@@ -8,7 +8,7 @@ go 1.27.0
 // reads a patch-qualified `go` directive as an exact version, which would have
 // frozen CI eight patch releases behind. It prefers `toolchain` when present,
 // so this line is what the runner installs. Bump it on each Go patch release.
-toolchain go1.27.2
+toolchain go1.27.3
 
 require (
 	github.com/BurntSushi/toml v1.6.0
