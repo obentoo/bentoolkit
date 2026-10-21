@@ -9,6 +9,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`bentoo-tray` counts the time the machine slept.** After a suspend, a
+  critical alert (disk, memory, SMART, read-only mount) could be reminded up
+  to one reminder interval late, and the tooltip's "for X" left out the time
+  asleep: both were measured on Go's monotonic clock, which stops during a
+  suspend. Every alert time is now taken on the wall clock, as the gap between
+  samples already was. A wall clock set backwards delays a reminder by as
+  much.
+
 ## [0.37.1] - 2026-10-21
 
 ### Security

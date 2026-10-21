@@ -199,8 +199,11 @@ type transition struct {
 // on every sample. A warning raised while paused never notifies, keeps
 // notifiedAt zero and is not sent later. ok is false when the sample changed
 // nothing the caller must act on.
+//
+// Every time observe keeps is taken on the wall clock; see wallClock.
 func (c *condition) observe(now time.Time, got level, window, reminder, maxGap time.Duration, paused bool) (transition, bool) {
-	gap := !c.lastSample.IsZero() && wallClock(now).Sub(wallClock(c.lastSample)) > maxGap
+	now = wallClock(now)
+	gap := !c.lastSample.IsZero() && now.Sub(c.lastSample) > maxGap
 	c.lastSample = now
 
 	if got == c.level {
@@ -219,8 +222,12 @@ func (c *condition) observe(now time.Time, got level, window, reminder, maxGap t
 }
 
 // wallClock strips the monotonic reading of t. A suspend stops the
-// monotonic clock but not the wall clock, so only a wall-clock difference
-// shows the gap a suspend leaves between two samples.
+// monotonic clock but not the wall clock, and Sub uses the monotonic
+// readings whenever both times carry one. observe strips now on entry, so
+// every time a condition keeps is wall-clock only: the gap between samples,
+// the sustain window, the critical reminder and lasted all count the time the
+// machine slept. The price is that a wall clock set backwards delays a
+// reminder by as much.
 func wallClock(t time.Time) time.Time {
 	return t.Round(0)
 }
