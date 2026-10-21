@@ -9,6 +9,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Security
+
+- **Built with Go 1.27.3** (GO-2026-6809, CVE-2026-111943: `crypto/x509`
+  now distrusts compromised intermediate certificates). bentoolkit and
+  `bentoo-tray` verify TLS certificates on every HTTPS download and feed
+  fetch, and the toolchain in `go.mod` decides what a release links against.
+  The fix was taken the day after it was published, ahead of the usual
+  seven-day wait for new dependencies, because it is the Go team's own
+  security release.
+
 ## [0.37.0] - 2026-10-17
 
 ### Added
