@@ -25,7 +25,7 @@ require (
 	github.com/chromedp/cdproto v0.157.10
 	github.com/chromedp/chromedp v0.21.0
 	github.com/fatih/color v1.19.0
-	github.com/godbus/dbus/v5 v5.2.3
+	github.com/godbus/dbus/v5 v5.2.4
 	github.com/leanovate/gopter v0.2.11
 	github.com/muesli/termenv v0.16.0
 	github.com/sony/gobreaker v1.0.0
