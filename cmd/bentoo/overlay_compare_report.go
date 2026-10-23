@@ -220,6 +220,8 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 //     was killed, a version pair the content check refused. Counted once per
 //     ROW, not from ErrorCount: noteContentRefusal also marks an errored
 //     package ReadingNotComparable, so summing the two would count it twice.
+//     A refused pair on a newer or overlay-only package is not counted: its
+//     keep follows from the versions alone (compareVerdictIgnoresContent).
 //
 // ReadingNotRequested is excluded: `--no-review` leaves every row there, and a
 // choice is not a shortfall. That is why this set differs from
@@ -243,6 +245,10 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 			// The lookup itself did not come back, so nothing downstream of it
 			// was established either.
 			unestablished++
+		case result.Reading == overlay.ReadingNotComparable && compareVerdictIgnoresContent(result.Status):
+			// A pair the content check refused, on a package whose verdict the
+			// versions alone decide. No comparison could change it, so nothing
+			// the run set out to establish is missing.
 		case result.Reading == overlay.ReadingFailed,
 			result.Reading == overlay.ReadingNotComparable:
 			// A review that was attempted and did not return, and a pair of
@@ -253,6 +259,15 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 	}
 
 	return unreached + unestablished
+}
+
+// compareVerdictIgnoresContent reports whether a package's verdict is settled by
+// its version relationship whatever its ebuilds contain: a package ahead of
+// upstream, or carried only here, is kept either way (overlay.deriveVerdict).
+// Every such package with an upstream copy differs in version, so the content
+// check refuses it by construction — on the live overlay, most of the rows.
+func compareVerdictIgnoresContent(status overlay.CompareStatus) bool {
+	return status == overlay.StatusNewer || status == overlay.StatusNotInRemote
 }
 
 // comparePkgFacts is one compared package as the model spells it.
