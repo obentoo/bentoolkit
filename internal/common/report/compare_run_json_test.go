@@ -136,7 +136,7 @@ var (
 		"reading_failures", "redundant", "repository", "scanned", "unknown", "unread", "verdicts",
 	}
 	comparePkgKeys = []string{
-		"cause", "diff", "error", "further_findings", "local_version", "package", "reading",
+		"cause", "diff", "error", "further_findings", "local_version", "package", "proved_ours", "reading",
 		"reason", "remote_version", "status",
 	}
 	keepGroupKeys     = []string{"by_category", "label", "local_version", "members", "remote_version"}

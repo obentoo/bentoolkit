@@ -250,8 +250,8 @@ func manifestState(target ManifestTarget) string {
 // survives and only the line structure is folded, because a Row.Detail is one
 // line (a raw newline corrupts both the plain and the Markdown layout). The
 // verbatim bytes stay on ManifestTarget.Output for the JSON export, so nothing
-// is lost. This matches the check's failureDetail; cutting a long sentence to a
-// line budget is a renderer's decision, marked where it cuts.
+// is lost. This matches the check's failureDetail; fitting a long sentence to a
+// line budget is a renderer's decision, and the terminal renderers wrap it.
 func manifestDetail(target ManifestTarget) string {
 	if target.Success {
 		return ""

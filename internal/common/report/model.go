@@ -267,7 +267,7 @@ type PlanEntry struct {
 	Depth string `json:"depth"`
 	// Reason names the input that decided the depth, in full, and quotes an
 	// override's stated justification where one exists. It is never shortened
-	// here; a renderer that lacks the room shortens its own copy.
+	// here; a renderer that lacks the room wraps it under the row.
 	Reason string `json:"reason"`
 	// Skipped marks an entry no gate will run for, because policy said so — a
 	// depth of none, or a package type the run excludes. It travels with the

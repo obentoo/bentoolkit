@@ -234,7 +234,7 @@ func checkReport(log *slog.Logger, scanned []autoupdate.CheckResult, validated r
 // The two ends of the bump are renamed on the way across — From/Version here
 // become CurrentVersion/CandidateVersion there — because the model names a
 // version by what it IS rather than by where the producer's struct kept it.
-// Reason crosses untouched: shortening it is a rendering decision, and doing it
+// Reason crosses untouched: fitting it to a line is a rendering decision, and doing it
 // at this boundary would make it a loss of data instead.
 func planEntryFacts(entry validationPlanEntry) report.PlanEntry {
 	return report.PlanEntry{

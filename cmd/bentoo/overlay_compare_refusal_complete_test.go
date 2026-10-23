@@ -116,3 +116,41 @@ func TestCompareNoReviewOverACleanRunStaysComplete(t *testing.T) {
 			"is the commentary the operator declined (S047-R5.3)")
 	}
 }
+
+// TestCompareNewerRefusedPairStaysComplete is the live run's false interrupt:
+// a package the overlay carries AHEAD of upstream is kept on its versions
+// alone, so the content check refusing to diff two different versions leaves
+// no recommendation standing on missing evidence. Counting it painted a
+// finished run as cut short.
+func TestCompareNewerRefusedPairStaysComplete(t *testing.T) {
+	report, prov, opts := refusalFixture(t,
+		map[string]string{"dev-libs/glib": "2.0"},
+		map[string]string{"dev-libs/glib": "1.0"})
+
+	overlay.AnnotateReviews(t.Context(), report, nil, prov, opts)
+
+	if got := report.Results[0].Status; got != overlay.StatusNewer {
+		t.Fatalf("fixture status = %v, want StatusNewer: the case under test is a package ahead of upstream", got)
+	}
+
+	run := buildCompareReport(report, "gentoo", nil)
+	if run.NotEvaluated != 0 {
+		t.Errorf("NotEvaluated = %d, want 0: dev-libs/glib-2.0 is kept because it is newer than 1.0, and no content "+
+			"comparison could change that verdict", run.NotEvaluated)
+	}
+	if !run.Complete {
+		t.Errorf("Complete = false on a run that finished and whose only refused pair backs a version-derived keep")
+	}
+}
+
+// TestCompareNewerFailedReviewStillCounts keeps the exemption narrow: a review
+// that was attempted and died is a shortfall whatever the version relationship.
+func TestCompareNewerFailedReviewStillCounts(t *testing.T) {
+	result := compareFixtureResultStatus("dev-libs", "glib", overlay.StatusNewer)
+	result.Reading = overlay.ReadingFailed
+	rep := &overlay.CompareReport{TotalPackages: 1, ComparedPackages: 1, Results: []overlay.CompareResult{result}}
+
+	if run := buildCompareReport(rep, "gentoo", nil); run.NotEvaluated != 1 {
+		t.Errorf("NotEvaluated = %d, want 1: a failed review is a shortfall on a newer package too", run.NotEvaluated)
+	}
+}

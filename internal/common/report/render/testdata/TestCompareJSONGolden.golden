@@ -22,7 +22,8 @@
           "KEYWORDS differs from ::gentoo — ours drops ~arm64"
         ],
         "cause": "timed out",
-        "error": "the divergence review failed: LLM API request failed: claude CLI ran out of time: its 2m0s budget elapsed before it answered"
+        "error": "the divergence review failed: LLM API request failed: claude CLI ran out of time: its 2m0s budget elapsed before it answered",
+        "proved_ours": false
       },
       {
         "package": "kde-plasma/breeze-gtk",
@@ -34,7 +35,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "net-libs/nodejs",
@@ -46,7 +48,8 @@
         "reason": "identical to the ::gentoo copy, line for line",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "sys-apps/fwupd",
@@ -58,7 +61,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       }
     ],
     "needs_rebase": [
@@ -72,7 +76,8 @@
         "reason": "ours: adds files/kwin-wayland-crash.patch on top of a version ::gentoo has moved past",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "x11-base/xwayland",
@@ -84,7 +89,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "could not start",
-        "error": "the divergence review failed: LLM API request failed: claude CLI could not start: exec: \"claude\": executable file not found in $PATH"
+        "error": "the divergence review failed: LLM API request failed: claude CLI could not start: exec: \"claude\": executable file not found in $PATH",
+        "proved_ours": false
       }
     ],
     "keep": [
@@ -98,7 +104,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "media-plugins/gst-plugins-good",
@@ -110,7 +117,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "media-libs/gst-libav",
@@ -122,7 +130,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "media-plugins/gst-plugins-ugly",
@@ -136,7 +145,8 @@
           "inherit differs from ::gentoo — ours adds gstreamer-meson"
         ],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "dev-lang/rust",
@@ -148,7 +158,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "dev-lang/rust-bin",
@@ -160,7 +171,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "app-admin/ansible",
@@ -172,7 +184,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       }
     ],
     "keep_groups": [
@@ -223,7 +236,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       },
       {
         "package": "virtual/dist-kernel",
@@ -235,7 +249,8 @@
         "reason": "",
         "further_findings": [],
         "cause": "",
-        "error": ""
+        "error": "",
+        "proved_ours": false
       }
     ],
     "verdicts": {

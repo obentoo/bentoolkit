@@ -285,9 +285,9 @@ type ComparePkg struct {
 	//
 	// It is ONE LINE by construction, folded by the adapter, because a raw
 	// newline in a row's detail corrupts both the plain writer and the Markdown
-	// pipe table. Anything that will not survive being shortened belongs in a
-	// section's lead or notes, which wrap, rather than in a row detail, which
-	// is cut. What travels here is the whole folded string at no width budget:
+	// pipe table. Anything longer than a finding about this one row belongs in
+	// a section's lead or notes rather than in a row detail, which a terminal
+	// wraps under its row. What travels here is the whole folded string:
 	// the export carries every explanation in full, whatever the terminal it
 	// was rendered at was able to show.
 	Reason string `json:"reason"`
@@ -296,8 +296,8 @@ type ComparePkg struct {
 	// words and at full length.
 	//
 	// Reason holds the FIRST and this holds the rest, because a row detail is
-	// one line that a narrow device cuts; what does not fit a cell is said
-	// beside it, in prose that wraps, under the block holding this package's
+	// one finding about one row; the others are said beside it, in prose, under
+	// the block holding this package's
 	// row. The package is NOT named in the text — the block names it — so no
 	// second spelling of Package can disagree with the row beside it.
 	//
@@ -315,6 +315,11 @@ type ComparePkg struct {
 	// failure. It follows ManifestResult.Error (model.go): kept whole here,
 	// never shortened; only a table cell may cut it.
 	Error string `json:"error"`
+	// ProvedOurs is true on a row whose ebuild differs from upstream's with no
+	// entry declaring why, and whose own files prove the difference is ours: it
+	// references a file upstream does not ship. `bentoo overlay prune` refuses
+	// such a package, so no removal advice may cover it.
+	ProvedOurs bool `json:"proved_ours"`
 }
 
 // CauseCount is one entry of CompareRun.ReadingFailures: how many failed
@@ -529,8 +534,8 @@ func compareFirstMember(g KeepGroup) string {
 //
 // # Count descending, ties broken by the category name
 //
-// Largest first is what makes the breakdown useful when it is cut: a shortened
-// line still says what the group mostly is. The name breaks ties because it is
+// Largest first is what makes the breakdown useful at a glance: its opening
+// words say what the group mostly is. The name breaks ties because it is
 // the only other fact in the entry and it cannot itself tie — a category
 // appears once in the list — so the order is total, which byte-identical
 // output needs from this list as much as from the groups above it.
@@ -817,8 +822,8 @@ func compareFailureCounts(failures []CauseCount) string {
 // and a missing heading is indistinguishable from a report cut short. Guards
 // read the COUNTS the run established, never the length of a list. Counts go
 // in the Lead; omissions, causes and anything that must be read whole go in
-// the Notes, which wrap — a Row.Detail is cut at the device width, so it holds
-// only a line that still means something shortened.
+// the Notes, which read as prose — a Row.Detail sits under one row and should
+// stay a short finding about that row, even though it wraps.
 //
 // Only the keep section reads ShowAll, and it changes what is LISTED, never a
 // count. SectionOptions.SkipPlan is not read: none of the six blocks is a plan.
@@ -940,9 +945,9 @@ func compareRedundantSection(r CompareRun) Section {
 // and the removal advice that FOLLOWS FROM those two — in that order, above the
 // table they describe.
 //
-// The advice is derived from what was read, never unconditional: nothing read
-// gives no removal advice (the measured overlay's case), some read limits the
-// recommendation to those by count, and everything read covers the whole list.
+// The advice is derived from what was read: nothing read gives none, some read
+// limits it to those by count, everything read covers the whole list — never a
+// row proved ours, which prune refuses.
 // A Reading this file does not know, the empty string included, counts as NOT
 // read — the fail-safe direction, which can cost a recommendation but never
 // earn one over evidence nobody has.
@@ -956,11 +961,14 @@ func compareRedundantSection(r CompareRun) Section {
 // conditional on its count, since a false "never compared" invites an operator
 // to distrust a list with nothing wrong with it.
 func compareRedundantLead(pkgs []ComparePkg) string {
-	var read, versionsDiffer, refusedUnstated, failed, notRequested int
+	var read, provedOurs, versionsDiffer, refusedUnstated, failed, notRequested int
 	for _, p := range pkgs {
 		switch p.Reading {
 		case readingRead:
 			read++
+			if p.ProvedOurs {
+				provedOurs++
+			}
 		case readingNotComparable:
 			// The producer collapsed the cause, but ONE of the four is provable
 			// from the row itself. `func resolvePackagePaths` in
@@ -1018,6 +1026,15 @@ func compareRedundantLead(pkgs []ComparePkg) string {
 	if len(clauses) > 0 {
 		sentences = append(sentences, strings.Join(clauses, "; ")+".")
 	}
+	if provedOurs > 0 {
+		// Read, and read as ours: prune refuses these, so the advice below is
+		// taken over the rest and this sentence says what to do instead.
+		sentences = append(sentences, fmt.Sprintf(
+			"%d %s changes proved ours, so removing %s would discard work of our own — declare %s instead.",
+			provedOurs, compareAgrees(provedOurs, "carries", "carry"),
+			compareAgrees(provedOurs, "it", "them"), compareAgrees(provedOurs, "it", "them")))
+		return strings.Join(append(sentences, compareProvedOursAdvice(read-provedOurs)), " ")
+	}
 	return strings.Join(append(sentences, compareRemovalAdvice(len(pkgs), read, len(clauses))), " ")
 }
 
@@ -1052,6 +1069,15 @@ func compareRemovalAdvice(listed, read, causes int) string {
 	default:
 		return fmt.Sprintf("The recommendation to remove covers the %d somebody read, and none of the rest.", read)
 	}
+}
+
+// compareProvedOursAdvice is the removal advice once some read rows are proved
+// ours: it covers only the read rows that are not, and never the whole list.
+func compareProvedOursAdvice(removable int) string {
+	if removable == 0 {
+		return "No removal advice follows."
+	}
+	return fmt.Sprintf("The recommendation to remove covers the %d that were read and are not proved ours, and none of the rest.", removable)
 }
 
 // compareNeedsRebaseSection is the block that asks for work rather than for a
@@ -1205,9 +1231,9 @@ func compareKeepGroupRow(g KeepGroup, status map[string]string) Row {
 // compareCategoryBreakdown is a group's ByCategory as one line: what was
 // compressed, beside the count of how much.
 //
-// It is a Row.Detail rather than prose because it is one line per row and it
-// stays meaningful when it is cut — the first categories are the largest, so a
-// shortened breakdown still says what the group mostly is. It is
+// It is a Row.Detail rather than prose because it describes one row, and the
+// largest categories come first, so the breakdown's opening words already say
+// what the group mostly is. It is
 // folded for the reason every detail in this package is: a raw newline
 // corrupts both the plain writer and the Markdown pipe table, and the category
 // names arrive from the producer.
@@ -1427,14 +1453,13 @@ func comparePkgRow(p ComparePkg, withDiff bool) Row {
 // compareDetail is the row's own finding, in one line, with the failed-review
 // marker after it.
 //
-// # The marker goes LAST, and that is a decision about what survives a cut
+// # The marker goes LAST, so the finding is what is read first
 //
-// A detail is shortened to the width the device allows and marked where it was
-// cut, so whatever sits at the end is the first thing to go. The
-// finding is what the operator needs; the marker repeats a fact the first
-// section already states for the whole run and that ComparePkg.Reading carries
-// in full in the exported document. Putting the marker first would spend the
-// visible width on the redundant half.
+// A terminal renderer wraps the detail under its row, and the eye takes its
+// first line. The finding is what the operator needs; the marker repeats a fact
+// the first section already states for the whole run and that
+// ComparePkg.Reading carries in full in the exported document. Putting the
+// marker first would spend that first line on the redundant half.
 //
 // The reason is FOLDED, never shortened: a raw newline corrupts both the plain
 // writer and the Markdown pipe table. The adapter folds it too, and folding an

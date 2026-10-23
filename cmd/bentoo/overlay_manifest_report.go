@@ -114,8 +114,8 @@ func buildManifestReport(result *overlay.ManifestResult, dryRun bool) report.Run
 // value) does not cross: nothing downstream can unwrap it, and what the report
 // needs — which target, and why — is already in the fields beside it.
 //
-// Output is copied whole. A renderer with a line budget cuts its own copy and
-// marks the cut; the JSON export carries the exact bytes, because whoever reads
+// Output is copied whole. A renderer with a line budget wraps its own copy;
+// the JSON export carries the exact bytes, because whoever reads
 // that file does so because the terminal that streamed them is gone.
 func manifestTargetFacts(update overlay.ManifestUpdate) report.ManifestTarget {
 	return report.ManifestTarget{

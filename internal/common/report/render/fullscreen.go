@@ -268,7 +268,7 @@ func (m fullscreenModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 //
 // The body is laid out by the SAME writer plain and inline use, at the width
 // left over once the box has taken its two cells, so a heading, a column width
-// or a shortened reason is never decided twice. What this function adds
+// or a wrapped reason is never decided twice. What this function adds
 // is the frame and the height budget — the two things a full screen has and a
 // scrollback does not.
 func (m fullscreenModel) View() string {

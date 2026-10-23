@@ -134,9 +134,9 @@ func s057SortedKeys(m map[string]json.RawMessage) []string {
 // TestComparePayloadPublishesCauseErrorAndReadingFailures is S057-R4.4 and
 // S057-R4.5 at the zero value, where a stray omitempty would show.
 func TestComparePayloadPublishesCauseErrorAndReadingFailures(t *testing.T) {
-	t.Run("ComparePkg has exactly the eight old keys plus cause and error, both empty strings", func(t *testing.T) {
+	t.Run("ComparePkg has exactly its published keys, cause and error both empty strings", func(t *testing.T) {
 		m := s057Keys(t, ComparePkg{})
-		want := []string{"cause", "diff", "error", "further_findings", "local_version", "package", "reading", "reason", "remote_version", "status"}
+		want := []string{"cause", "diff", "error", "further_findings", "local_version", "package", "proved_ours", "reading", "reason", "remote_version", "status"}
 		if got := s057SortedKeys(m); !reflect.DeepEqual(got, want) {
 			t.Errorf("ComparePkg keys\n got: %v\nwant: %v", got, want)
 		}

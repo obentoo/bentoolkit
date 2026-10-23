@@ -221,9 +221,9 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 //     ROW, not from ErrorCount: noteContentRefusal also marks an errored
 //     package ReadingNotComparable, so summing the two would count it twice.
 //
-// ReadingNotRequested is excluded: `--no-review` leaves every row there, and a
-// choice is not a shortfall. That is why this set differs from
-// CompareRun.Unread, which answers "did anybody read this difference".
+// Not counted: ReadingNotRequested (`--no-review` is a choice, not a
+// shortfall), and a refused pair whose verdict no content could change
+// (compareVerdictIgnoresContent).
 //
 // The rows are an ARGUMENT because the call site narrows CompareReport.Results
 // first; the caller passes the whole run's rows, so what the operator chose to
@@ -243,6 +243,10 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 			// The lookup itself did not come back, so nothing downstream of it
 			// was established either.
 			unestablished++
+		case result.Reading == overlay.ReadingNotComparable && compareVerdictIgnoresContent(result.Status):
+			// A pair the content check refused, on a package whose verdict the
+			// versions alone decide. No comparison could change it, so nothing
+			// the run set out to establish is missing.
 		case result.Reading == overlay.ReadingFailed,
 			result.Reading == overlay.ReadingNotComparable:
 			// A review that was attempted and did not return, and a pair of
@@ -253,6 +257,16 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 	}
 
 	return unreached + unestablished
+}
+
+// compareVerdictIgnoresContent reports whether a package's verdict is settled by
+// its version relationship whatever its ebuilds contain: a package ahead of
+// upstream, or carried only here, is kept — or unknown when nothing is recorded
+// about it — and neither depends on content (overlay.deriveVerdict).
+// Every such package with an upstream copy differs in version, so the content
+// check refuses it by construction — on the live overlay, most of the rows.
+func compareVerdictIgnoresContent(status overlay.CompareStatus) bool {
+	return status == overlay.StatusNewer || status == overlay.StatusNotInRemote
 }
 
 // comparePkgFacts is one compared package as the model spells it.
@@ -291,6 +305,8 @@ func comparePkgFacts(result overlay.CompareResult, reasons map[string]string, ex
 
 		Cause: compareCauseWord(result),
 		Error: compareOneLine(result.FailureText),
+
+		ProvedOurs: result.ProvedOurs(),
 	}
 }
 

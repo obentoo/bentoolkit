@@ -122,10 +122,10 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 // validationPlanSection is the cost of the run, on screen before any of it is
 // spent: which packages, how far each will be taken, and the case for it.
 //
-// Every entry states its reason, shortened by the writer to whatever the line
-// budget allows. This is the ONE place the reason of a package whose result
-// merely repeats it is stated at all — validationResultsSection prints no second
-// copy — so a reason dropped here would not be shortened, it would be gone.
+// Every entry states its reason, wrapped by the writer to the line budget. This
+// is the ONE place the reason of a package whose result merely repeats it is
+// stated at all — validationResultsSection prints no second copy — so a reason
+// dropped here would be gone.
 func validationPlanSection(r AutoupdateCheck) Section {
 	s := Section{Title: "Validation Plan"}
 

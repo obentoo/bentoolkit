@@ -70,8 +70,8 @@ type Row struct {
 	// established — and it may hold more; Columns is what keeps the surplus
 	// from being dropped.
 	Cells []string
-	// Detail is the row's reason, IN FULL. A writer with a width budget cuts
-	// its own copy; a writer without one prints all of it.
+	// Detail is the row's reason, IN FULL. A writer with a width budget wraps
+	// it under the row; a writer without one prints it on one line.
 	//
 	// Empty means this row has nothing of its own to add, which is a decision
 	// about content and not a sign that the report held no reason: a result
