@@ -306,6 +306,8 @@ func comparePkgFacts(result overlay.CompareResult, reasons map[string]string, ex
 
 		Cause: compareCauseWord(result),
 		Error: compareOneLine(result.FailureText),
+
+		ProvedOurs: result.ProvedOurs(),
 	}
 }
 

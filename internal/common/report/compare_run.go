@@ -315,6 +315,11 @@ type ComparePkg struct {
 	// failure. It follows ManifestResult.Error (model.go): kept whole here,
 	// never shortened; only a table cell may cut it.
 	Error string `json:"error"`
+	// ProvedOurs is true on a row whose ebuild differs from upstream's with no
+	// entry declaring why, and whose own files prove the difference is ours: it
+	// references a file upstream does not ship. `bentoo overlay prune` refuses
+	// such a package, so no removal advice may cover it.
+	ProvedOurs bool `json:"proved_ours"`
 }
 
 // CauseCount is one entry of CompareRun.ReadingFailures: how many failed
@@ -956,11 +961,14 @@ func compareRedundantSection(r CompareRun) Section {
 // conditional on its count, since a false "never compared" invites an operator
 // to distrust a list with nothing wrong with it.
 func compareRedundantLead(pkgs []ComparePkg) string {
-	var read, versionsDiffer, refusedUnstated, failed, notRequested int
+	var read, provedOurs, versionsDiffer, refusedUnstated, failed, notRequested int
 	for _, p := range pkgs {
 		switch p.Reading {
 		case readingRead:
 			read++
+			if p.ProvedOurs {
+				provedOurs++
+			}
 		case readingNotComparable:
 			// The producer collapsed the cause, but ONE of the four is provable
 			// from the row itself. `func resolvePackagePaths` in
@@ -1018,6 +1026,15 @@ func compareRedundantLead(pkgs []ComparePkg) string {
 	if len(clauses) > 0 {
 		sentences = append(sentences, strings.Join(clauses, "; ")+".")
 	}
+	if provedOurs > 0 {
+		// Read, and read as ours: prune refuses these, so the advice below is
+		// taken over the rest and this sentence says what to do instead.
+		sentences = append(sentences, fmt.Sprintf(
+			"%d %s changes proved ours, so removing %s would discard work of our own — declare %s instead.",
+			provedOurs, compareAgrees(provedOurs, "carries", "carry"),
+			compareAgrees(provedOurs, "it", "them"), compareAgrees(provedOurs, "it", "them")))
+		return strings.Join(append(sentences, compareProvedOursAdvice(read-provedOurs)), " ")
+	}
 	return strings.Join(append(sentences, compareRemovalAdvice(len(pkgs), read, len(clauses))), " ")
 }
 
@@ -1052,6 +1069,15 @@ func compareRemovalAdvice(listed, read, causes int) string {
 	default:
 		return fmt.Sprintf("The recommendation to remove covers the %d somebody read, and none of the rest.", read)
 	}
+}
+
+// compareProvedOursAdvice is the removal advice once some read rows are proved
+// ours: it covers only the read rows that are not, and never the whole list.
+func compareProvedOursAdvice(removable int) string {
+	if removable == 0 {
+		return "No removal advice follows."
+	}
+	return fmt.Sprintf("The recommendation to remove covers the %d that were read and are not proved ours, and none of the rest.", removable)
 }
 
 // compareNeedsRebaseSection is the block that asks for work rather than for a

@@ -1220,6 +1220,14 @@ func isUndeclaredDivergence(r CompareResult) bool {
 	return r.Verified == VerifiedDiffers && !r.Patched
 }
 
+// ProvedOurs reports whether r is an undeclared divergence that the overlay's
+// own content settled as ours: our ebuild references a file upstream does not
+// ship for this package. prune refuses such a package (classifyPrune), so a
+// report must never advise removing it.
+func (r CompareResult) ProvedOurs() bool {
+	return isUndeclaredDivergence(r) && r.Authorship == AuthorshipOverlay
+}
+
 // compareFindings writes every finding this comparison establishes, once, as a
 // value — the ONE definition of what the report says about a package, so the
 // line an operator reads and the value a caller receives cannot disagree.
@@ -1270,7 +1278,7 @@ func compareFindings(results []CompareResult) []Finding {
 				// has to edit it when it can quote what the entry claims.
 				Effect: declared(r.PatchedReason),
 			})
-		case isUndeclaredDivergence(r) && r.Authorship == AuthorshipOverlay:
+		case r.ProvedOurs():
 			// The same finding as below, except that the overlay's own
 			// content settled the question the two ebuilds could not. Our ebuild
 			// references a file ::gentoo does not ship for this package, and a

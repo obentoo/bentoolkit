@@ -733,3 +733,53 @@ func TestCompareRunRedundantLeadRefusesToGuessTheCause(t *testing.T) {
 			"an operator cannot tell it from the case the sentence is true of.\n%s", lead)
 	}
 }
+
+// TestCompareRunRedundantLeadExcludesProvedOurs is the qemu row of the live run:
+// read, listed as redundant on its versions, and proved ours by its own files.
+// prune refuses it, so the advice above the table must not cover it.
+func TestCompareRunRedundantLeadExcludesProvedOurs(t *testing.T) {
+	const whole = "The recommendation to remove covers the whole list."
+
+	run := func(proved ...int) CompareRun {
+		r := compareFixture()
+		for i := range r.Redundant {
+			r.Redundant[i].Reading = readingRead
+		}
+		for _, i := range proved {
+			r.Redundant[i].ProvedOurs = true
+		}
+		return r
+	}
+
+	t.Run("a lone proved-ours row gets no removal advice", func(t *testing.T) {
+		r := run(0)
+		r.Redundant = r.Redundant[:1]
+		lead := strings.Join(r.Sections(SectionOptions{})[1].Lead, "\n")
+
+		if strings.Contains(lead, whole) {
+			t.Errorf("the only row is proved ours and the lead advises removing the whole list:\n%s", lead)
+		}
+		if !strings.Contains(lead, "1 carries changes proved ours") {
+			t.Errorf("the lead does not say the row carries changes proved ours:\n%s", lead)
+		}
+	})
+
+	t.Run("the advice covers the read rows that are not proved ours", func(t *testing.T) {
+		lead := strings.Join(run(1).Sections(SectionOptions{})[1].Lead, "\n")
+
+		if strings.Contains(lead, whole) {
+			t.Errorf("one of three rows is proved ours and the lead covers the whole list:\n%s", lead)
+		}
+		if !strings.Contains(lead, "covers the 2 ") {
+			t.Errorf("the advice does not cover exactly the two removable rows:\n%s", lead)
+		}
+	})
+
+	t.Run("no proved-ours row leaves the wording untouched", func(t *testing.T) {
+		lead := strings.Join(run().Sections(SectionOptions{})[1].Lead, "\n")
+
+		if !strings.Contains(lead, whole) || strings.Contains(lead, "proved ours") {
+			t.Errorf("a list with nothing proved ours lost its existing advice:\n%s", lead)
+		}
+	})
+}

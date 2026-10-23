@@ -872,3 +872,29 @@ func TestPresentCompareReport(t *testing.T) {
 		}
 	})
 }
+
+// TestCompareRedundantRowCarriesProvedOurs pins the adapter end: an undeclared
+// divergence whose files prove it ours reaches the payload flagged, and one the
+// files did not settle does not.
+func TestCompareRedundantRowCarriesProvedOurs(t *testing.T) {
+	proved := compareFixtureResult("app-emulation", "qemu", overlay.VerdictRedundant)
+	proved.Verified = overlay.VerifiedDiffers
+	proved.Authorship = overlay.AuthorshipOverlay
+
+	unsettled := compareFixtureResult("virtual", "linux-sources", overlay.VerdictRedundant)
+	unsettled.Verified = overlay.VerifiedDiffers
+
+	rep := &overlay.CompareReport{TotalPackages: 2, ComparedPackages: 2, Results: []overlay.CompareResult{proved, unsettled}}
+	payload := compareComparePayload(t, buildCompareReport(rep, "gentoo", nil))
+
+	got := map[string]bool{}
+	for _, p := range payload.Redundant {
+		got[p.Package] = p.ProvedOurs
+	}
+	if !got["app-emulation/qemu"] {
+		t.Error("app-emulation/qemu is proved ours and its row does not say so")
+	}
+	if got["virtual/linux-sources"] {
+		t.Error("virtual/linux-sources was never proved ours and its row claims it")
+	}
+}
