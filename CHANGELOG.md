@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.37.2] - 2026-10-23
+
 ### Fixed
 
 - **`bentoo overlay compare` no longer reports a finished run as interrupted,
@@ -25,11 +27,11 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 - **`bentoo-tray` counts the time the machine slept.** After a suspend, a
   critical alert (disk, memory, SMART, read-only mount) could be reminded up
-  to one reminder interval late, and the tooltip's "for X" left out the time
-  asleep: both were measured on Go's monotonic clock, which stops during a
-  suspend. Every alert time is now taken on the wall clock, as the gap between
-  samples already was. A wall clock set backwards delays a reminder by as
-  much.
+  to one reminder interval late, and the CPU-pressure line's "for X" in the
+  tooltip left out the time asleep: both were measured on Go's monotonic
+  clock, which stops during a suspend. Every alert time is now taken on the
+  wall clock, as the gap between samples already was. A wall clock set
+  backwards delays a reminder by as much. The tray's version is 0.2.1.
 
 ## [0.37.1] - 2026-10-21
 
@@ -1606,7 +1608,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.37.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.37.2...HEAD
+[0.37.2]: https://github.com/obentoo/bentoolkit/compare/v0.37.1...v0.37.2
 [0.37.1]: https://github.com/obentoo/bentoolkit/compare/v0.37.0...v0.37.1
 [0.37.0]: https://github.com/obentoo/bentoolkit/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/obentoo/bentoolkit/compare/v0.35.0...v0.36.0
