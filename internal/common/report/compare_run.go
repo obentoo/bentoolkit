@@ -534,8 +534,8 @@ func compareFirstMember(g KeepGroup) string {
 //
 // # Count descending, ties broken by the category name
 //
-// Largest first is what makes the breakdown useful when it is cut: a shortened
-// line still says what the group mostly is. The name breaks ties because it is
+// Largest first is what makes the breakdown useful at a glance: its opening
+// words say what the group mostly is. The name breaks ties because it is
 // the only other fact in the entry and it cannot itself tie — a category
 // appears once in the list — so the order is total, which byte-identical
 // output needs from this list as much as from the groups above it.
@@ -822,8 +822,8 @@ func compareFailureCounts(failures []CauseCount) string {
 // and a missing heading is indistinguishable from a report cut short. Guards
 // read the COUNTS the run established, never the length of a list. Counts go
 // in the Lead; omissions, causes and anything that must be read whole go in
-// the Notes, which wrap — a Row.Detail is cut at the device width, so it holds
-// only a line that still means something shortened.
+// the Notes, which read as prose — a Row.Detail sits under one row and should
+// stay a short finding about that row, even though it wraps.
 //
 // Only the keep section reads ShowAll, and it changes what is LISTED, never a
 // count. SectionOptions.SkipPlan is not read: none of the six blocks is a plan.
@@ -1231,9 +1231,9 @@ func compareKeepGroupRow(g KeepGroup, status map[string]string) Row {
 // compareCategoryBreakdown is a group's ByCategory as one line: what was
 // compressed, beside the count of how much.
 //
-// It is a Row.Detail rather than prose because it is one line per row and it
-// stays meaningful when it is cut — the first categories are the largest, so a
-// shortened breakdown still says what the group mostly is. It is
+// It is a Row.Detail rather than prose because it describes one row, and the
+// largest categories come first, so the breakdown's opening words already say
+// what the group mostly is. It is
 // folded for the reason every detail in this package is: a raw newline
 // corrupts both the plain writer and the Markdown pipe table, and the category
 // names arrive from the producer.

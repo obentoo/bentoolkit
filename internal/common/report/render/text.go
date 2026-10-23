@@ -507,7 +507,7 @@ func writeMarkdownProse(out *lineWriter, text string) {
 // Nothing is measured and nothing is padded: whatever renders a pipe table
 // aligns it, and a column width here would be the first place a line budget
 // could enter the export path. Every cell holds its value in full, including
-// the ~230-character reason the terminal shows sixty cells of.
+// a ~230-character reason the terminal wraps over several lines.
 //
 // The column count is report.Table.Columns, which reads the header AND every
 // row, so a row with an extra cell is printed rather than dropped and the two
