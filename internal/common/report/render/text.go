@@ -271,13 +271,11 @@ func writePlainHeading(out *lineWriter, title string, width int, p paint) {
 // writePlainTable prints a table whose every column was measured from the values
 // this run will actually print.
 //
-// A row's detail is CUT to one line while prose is WRAPPED, and the asymmetry is
-// deliberate. A sentence standing on its own loses nothing by occupying three
-// lines. A reason wrapped between two rows costs the table the property that
-// makes it scannable — one record, one line — and a reader looking for the next
-// package has to re-find the column instead of following it down. The cut is
-// marked and the model still holds the whole string, so a syntax with no width
-// budget prints all of it.
+// A row's detail is WRAPPED under its row, every line at the detail indent. A
+// cut kept the table one record per line, but a finding states its reason last
+// ("proved ours — … references <file>, which ::gentoo does not ship"), and the
+// cut took exactly that part away. The rows stay easy to follow down because a
+// detail line never starts in a column a cell starts in.
 func writePlainTable(out *lineWriter, t report.Table, width int, p paint) {
 	widths := plainColumnWidths(t, width)
 
@@ -285,13 +283,23 @@ func writePlainTable(out *lineWriter, t report.Table, width int, p paint) {
 	for _, r := range t.Rows {
 		out.line(plainRow(r.Cells, widths))
 
-		// The emptiness is tested AFTER shortening, not before: a budget too
-		// narrow to hold even the ellipsis leaves nothing to print, and printing
-		// the indent anyway would put a line of pure whitespace in a log and in
-		// every golden file.
-		if detail := shorten(r.Detail, width-detailIndent); detail != "" {
-			out.line(decorate(p.detail, strings.Repeat(" ", detailIndent)+detail))
+		writeRowDetail(out, r.Detail, width, p)
+	}
+}
+
+// writeRowDetail prints a row's detail wrapped to the budget at the detail
+// indent. A budget with no room for text prints nothing: the indent alone would
+// put a line of pure whitespace in a log and in every golden file.
+func writeRowDetail(out *lineWriter, detail string, width int, p paint) {
+	budget := width - detailIndent
+	if detail == "" || budget < 1 {
+		return
+	}
+	for _, line := range strings.Split(ansi.Wrap(detail, budget, ""), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
 		}
+		out.line(decorate(p.detail, strings.Repeat(" ", detailIndent)+line))
 	}
 }
 

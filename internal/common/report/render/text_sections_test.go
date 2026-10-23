@@ -174,3 +174,65 @@ func TestMarkdownTakesTheSameSections(t *testing.T) {
 		t.Errorf("the markdown export contains no table syntax:\n%s", out)
 	}
 }
+
+// TestPlainWrapsARowDetail is the live compare run's qemu row: a finding whose
+// reason sat at the end of the sentence was cut at "which ::…", so the line
+// said a package was ours without saying why. A detail is wrapped under its
+// row, every line at the detail indent, and none of it is dropped.
+func TestPlainWrapsARowDetail(t *testing.T) {
+	const detail = "undeclared divergence (+836/-820), proved ours — our 11.1.2 ebuild references " +
+		"files/qemu-11.0.0-optionrom-pass-Wl-no-error-rwx-segments.patch, which ::gentoo does not ship"
+
+	blocks := []report.Section{{
+		Title: "Redundant",
+		Rows: report.Table{
+			Headers: []string{"package", "state"},
+			Rows: []report.Row{
+				{Cells: []string{"app-emulation/qemu", "up-to-date"}, Detail: detail},
+				{Cells: []string{"app-misc/jq", "up-to-date"}, Detail: "short reason"},
+			},
+		},
+	}}
+
+	out := ansi.Strip(renderSectionsPlain(t, blocks, Options{Width: 60}))
+
+	if strings.Contains(out, "…") {
+		t.Errorf("the detail was cut instead of wrapped:\n%s", out)
+	}
+	var detailLines []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, strings.Repeat(" ", detailIndent)) && strings.TrimSpace(line) != "" {
+			detailLines = append(detailLines, strings.TrimSpace(line))
+		}
+	}
+	if joined := strings.Join(detailLines, " "); !strings.Contains(joined, "which ::gentoo does not ship") {
+		t.Errorf("the end of the detail, which carries the reason, never reached the output:\n%s", out)
+	}
+	if !strings.Contains(out, "\n"+strings.Repeat(" ", detailIndent)+"short reason\n") {
+		t.Errorf("a detail that fits is no longer printed on one line at the detail indent:\n%s", out)
+	}
+	for i, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if w := lipgloss.Width(line); w > 60 {
+			t.Errorf("line %d is %d cells wide at a budget of 60:\n%q", i+1, w, line)
+		}
+	}
+}
+
+// TestPlainDetailAtANarrowBudgetPrintsNoBlankLine keeps the guard the cut had:
+// a budget too narrow for any detail text prints nothing, not an indent alone.
+func TestPlainDetailAtANarrowBudgetPrintsNoBlankLine(t *testing.T) {
+	blocks := []report.Section{{
+		Title: "T",
+		Rows: report.Table{
+			Headers: []string{"p"},
+			Rows:    []report.Row{{Cells: []string{"x"}, Detail: "some reason"}},
+		},
+	}}
+
+	out := renderSectionsPlain(t, blocks, Options{Width: detailIndent})
+	for i, line := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if line != "" && strings.TrimSpace(line) == "" {
+			t.Errorf("line %d is whitespace only:\n%q", i+1, out)
+		}
+	}
+}

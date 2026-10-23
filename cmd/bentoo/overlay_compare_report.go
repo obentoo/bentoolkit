@@ -220,8 +220,6 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 //     was killed, a version pair the content check refused. Counted once per
 //     ROW, not from ErrorCount: noteContentRefusal also marks an errored
 //     package ReadingNotComparable, so summing the two would count it twice.
-//     A refused pair on a newer or overlay-only package is not counted: its
-//     keep follows from the versions alone (compareVerdictIgnoresContent).
 //
 // ReadingNotRequested is excluded: `--no-review` leaves every row there, and a
 // choice is not a shortfall. That is why this set differs from
