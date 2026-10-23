@@ -285,9 +285,9 @@ type ComparePkg struct {
 	//
 	// It is ONE LINE by construction, folded by the adapter, because a raw
 	// newline in a row's detail corrupts both the plain writer and the Markdown
-	// pipe table. Anything that will not survive being shortened belongs in a
-	// section's lead or notes, which wrap, rather than in a row detail, which
-	// is cut. What travels here is the whole folded string at no width budget:
+	// pipe table. Anything longer than a finding about this one row belongs in
+	// a section's lead or notes rather than in a row detail, which a terminal
+	// wraps under its row. What travels here is the whole folded string:
 	// the export carries every explanation in full, whatever the terminal it
 	// was rendered at was able to show.
 	Reason string `json:"reason"`
@@ -296,8 +296,8 @@ type ComparePkg struct {
 	// words and at full length.
 	//
 	// Reason holds the FIRST and this holds the rest, because a row detail is
-	// one line that a narrow device cuts; what does not fit a cell is said
-	// beside it, in prose that wraps, under the block holding this package's
+	// one finding about one row; the others are said beside it, in prose, under
+	// the block holding this package's
 	// row. The package is NOT named in the text — the block names it — so no
 	// second spelling of Package can disagree with the row beside it.
 	//
