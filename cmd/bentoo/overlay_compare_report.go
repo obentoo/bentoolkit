@@ -221,9 +221,9 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 //     ROW, not from ErrorCount: noteContentRefusal also marks an errored
 //     package ReadingNotComparable, so summing the two would count it twice.
 //
-// ReadingNotRequested is excluded: `--no-review` leaves every row there, and a
-// choice is not a shortfall. That is why this set differs from
-// CompareRun.Unread, which answers "did anybody read this difference".
+// Not counted: ReadingNotRequested (`--no-review` is a choice, not a
+// shortfall), and a refused pair whose verdict no content could change
+// (compareVerdictIgnoresContent).
 //
 // The rows are an ARGUMENT because the call site narrows CompareReport.Results
 // first; the caller passes the whole run's rows, so what the operator chose to
@@ -261,7 +261,8 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 
 // compareVerdictIgnoresContent reports whether a package's verdict is settled by
 // its version relationship whatever its ebuilds contain: a package ahead of
-// upstream, or carried only here, is kept either way (overlay.deriveVerdict).
+// upstream, or carried only here, is kept — or unknown when nothing is recorded
+// about it — and neither depends on content (overlay.deriveVerdict).
 // Every such package with an upstream copy differs in version, so the content
 // check refuses it by construction — on the live overlay, most of the rows.
 func compareVerdictIgnoresContent(status overlay.CompareStatus) bool {

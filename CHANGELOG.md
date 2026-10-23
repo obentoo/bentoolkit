@@ -11,6 +11,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **`bentoo overlay compare` no longer reports a finished run as interrupted,
+  nor advises removing work proved ours.** Every package the overlay carries
+  ahead of ::gentoo was counted as "not evaluated", because the content check
+  never diffs two different versions — yet its keep verdict follows from the
+  versions alone. A run that finished opened with "Run Interrupted … 235
+  planned unit(s) were not evaluated". Those packages no longer count. A
+  redundant package whose ebuild references a file ::gentoo does not ship (a
+  divergence proved ours, which `prune` already refuses) is now excluded from
+  the removal advice, which tells you to declare it instead; the JSON row
+  carries `proved_ours`. Row details in every terminal report are wrapped
+  instead of cut, so a finding no longer loses the reason it states last.
+
 - **`bentoo-tray` counts the time the machine slept.** After a suspend, a
   critical alert (disk, memory, SMART, read-only mount) could be reminded up
   to one reminder interval late, and the tooltip's "for X" left out the time

@@ -945,9 +945,9 @@ func compareRedundantSection(r CompareRun) Section {
 // and the removal advice that FOLLOWS FROM those two — in that order, above the
 // table they describe.
 //
-// The advice is derived from what was read, never unconditional: nothing read
-// gives no removal advice (the measured overlay's case), some read limits the
-// recommendation to those by count, and everything read covers the whole list.
+// The advice is derived from what was read: nothing read gives none, some read
+// limits it to those by count, everything read covers the whole list — never a
+// row proved ours, which prune refuses.
 // A Reading this file does not know, the empty string included, counts as NOT
 // read — the fail-safe direction, which can cost a recommendation but never
 // earn one over evidence nobody has.
@@ -1453,14 +1453,13 @@ func comparePkgRow(p ComparePkg, withDiff bool) Row {
 // compareDetail is the row's own finding, in one line, with the failed-review
 // marker after it.
 //
-// # The marker goes LAST, and that is a decision about what survives a cut
+// # The marker goes LAST, so the finding is what is read first
 //
-// A detail is shortened to the width the device allows and marked where it was
-// cut, so whatever sits at the end is the first thing to go. The
-// finding is what the operator needs; the marker repeats a fact the first
-// section already states for the whole run and that ComparePkg.Reading carries
-// in full in the exported document. Putting the marker first would spend the
-// visible width on the redundant half.
+// A terminal renderer wraps the detail under its row, and the eye takes its
+// first line. The finding is what the operator needs; the marker repeats a fact
+// the first section already states for the whole run and that
+// ComparePkg.Reading carries in full in the exported document. Putting the
+// marker first would spend that first line on the redundant half.
 //
 // The reason is FOLDED, never shortened: a raw newline corrupts both the plain
 // writer and the Markdown pipe table. The adapter folds it too, and folding an
