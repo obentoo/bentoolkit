@@ -74,12 +74,12 @@ github.com/charmbracelet/x/cellbuf v0.0.15 h1:ur3pZy0o6z/R7EylET877CBxaiE1Sp1GMx
 github.com/charmbracelet/x/cellbuf v0.0.15/go.mod h1:J1YVbR7MUuEGIFPCaaZ96KDl5NoS0DAWkskup+mOY+Q=
 github.com/charmbracelet/x/exp/golden v0.0.0-20260920004010-53e2afe73ae5 h1:G5hF7IixUMB8o2qHlZrZyKn8TaY6hLngHBlGcm6g+D8=
 github.com/charmbracelet/x/exp/golden v0.0.0-20260920004010-53e2afe73ae5/go.mod h1:6fMpcW6iwN/kX+xJ52eqVWsDiBTe0UJD24JLoHFe+P0=
-github.com/charmbracelet/x/exp/teatest v0.0.0-20261012121918-43427fdbad12 h1:5lIHVF28y5rAkktpBXN+bk/3aRblr4ho9MNy7xlqVvQ=
-github.com/charmbracelet/x/exp/teatest v0.0.0-20261012121918-43427fdbad12/go.mod h1:aPVjFrBwbJgj5Qz1F0IXsnbcOVJcMKgu1ySUfTAxh7k=
+github.com/charmbracelet/x/exp/teatest v0.0.0-20261018003744-cb897cb4ed72 h1:RCotuG+9o/Dr6twB5Mg5SXStyQSNhWv8t7MvJ5VswCo=
+github.com/charmbracelet/x/exp/teatest v0.0.0-20261018003744-cb897cb4ed72/go.mod h1:aPVjFrBwbJgj5Qz1F0IXsnbcOVJcMKgu1ySUfTAxh7k=
 github.com/charmbracelet/x/term v0.2.2 h1:xVRT/S2ZcKdhhOuSP4t5cLi5o+JxklsoEObBSgfgZRk=
 github.com/charmbracelet/x/term v0.2.2/go.mod h1:kF8CY5RddLWrsgVwpw4kAa6TESp6EB5y3uxGLeCqzAI=
-github.com/chromedp/cdproto v0.157.10 h1:/NP1Pw7IlOGI1kt2/KJWr8nXEdYkUFXJgblw1YblOI0=
-github.com/chromedp/cdproto v0.157.10/go.mod h1:h68JaIuFr9o3yiayxEYhBdvaxgYO3shDrPSYhNlyfu0=
+github.com/chromedp/cdproto v0.158.4 h1:5t2VGQGp2OuaGPnKIpBikPplESrGMjQMQ4d+7e+eilk=
+github.com/chromedp/cdproto v0.158.4/go.mod h1:h68JaIuFr9o3yiayxEYhBdvaxgYO3shDrPSYhNlyfu0=
 github.com/chromedp/chromedp v0.21.0 h1:nVHgS2LHyhZJ1l3BWRbG2eFIFYiJMnvkJbELbd8WBoQ=
 github.com/chromedp/chromedp v0.21.0/go.mod h1:6z1Y5FdKUxRzxx2qcC5h1xjaBJrSWrZp1mjgITfNZig=
 github.com/chzyer/logex v1.1.10/go.mod h1:+Ywpsq7O8HXn0nuIou7OrIPyXbp3wmkHB+jjWRnGsAI=

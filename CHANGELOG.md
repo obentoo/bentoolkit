@@ -9,6 +9,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.158.4 and the
+  test-only `charmbracelet/x/exp/teatest` to its 2026-10-18 snapshot; CI now
+  lints with golangci-lint v2.15.0 and zizmor 1.31.1. None of them carries a
+  security fix, and all four were taken ahead of the usual seven-day wait.
+
 ## [0.37.2] - 2026-10-23
 
 ### Fixed

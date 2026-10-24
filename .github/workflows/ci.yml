@@ -60,7 +60,7 @@ jobs:
       - name: Install golangci-lint from source
         run: |
           for attempt in 1 2 3; do
-            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.14.0; then
+            if go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0; then
               exit 0
             fi
             echo "::warning::go install failed (attempt ${attempt}/3), retrying"
@@ -382,6 +382,6 @@ jobs:
       # permissions, credential persistence, unpinned actions). pipx is
       # preinstalled on GitHub-hosted runners; zizmor is pinned by version.
       - name: Run zizmor
-        run: pipx run zizmor==1.30.1 --min-severity=medium .github/workflows/
+        run: pipx run zizmor==1.31.1 --min-severity=medium .github/workflows/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

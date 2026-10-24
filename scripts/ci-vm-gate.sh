@@ -43,7 +43,7 @@ CONN="qemu:///system"
 STATE_DIR="$HOME/.local/share/bentoolkit-ci"
 LOG_ROOT="${GATE_LOG_ROOT:-$STATE_DIR/logs}"
 BASE="${GATE_BASE:-origin/main}"
-ZIZMOR_VERSION=1.30.1 # ci.yml's pin
+ZIZMOR_VERSION=1.31.1 # ci.yml's pin
 
 POST_STATUS=false
 if [[ "${1:-}" == --status ]]; then
