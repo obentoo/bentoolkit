@@ -1961,35 +1961,7 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 	}
 
 	if result.Success {
-		output.Success.Println("    Status:  Success")
-		ar.displayCompileIsolation(result)
-		if result.Fixed {
-			output.Warning.Printf("    Fixed:   manifest repaired by LLM — %s\n", result.FixSummary)
-		}
-		if result.QASummary != "" {
-			output.Warning.Printf("    QA:      pkgcheck findings after the fix — review before committing:\n%s\n", result.QASummary)
-		}
-		displayCleanReport(result)
-		if result.CleanWarning != "" {
-			// The blocked-entry line arrives here and nowhere else: a plan
-			// blocked by a pinless entry is returned as an error naming that
-			// entry, which Apply stores in CleanWarning. ApplyResult carries no
-			// sweepPlan and therefore no Blocked field, so this IS the line —
-			// printing a second one would repeat the same entry name twice.
-			output.Warning.Printf("    Clean:   %s\n", result.CleanWarning)
-		}
-		if result.RegistryWarning != "" {
-			// Its own label, deliberately not "Clean:". The pin is written on
-			// every successful apply while the sweep runs only under --clean, so
-			// filing a registry failure under the clean step would blame a step
-			// that may not even have run.
-			output.Warning.Printf("    Registry: %s\n", result.RegistryWarning)
-		}
-		if result.MetadataCacheWarning != "" {
-			output.Warning.Printf("    Cache:   %s\n", result.MetadataCacheWarning)
-		}
-		output.Success.Println("\n✓ Update applied successfully")
-		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+		ar.displayApplySuccess(result)
 	} else if action, ok := autoupdate.VendorUploadAction(result.Error); ok {
 		// Not a failure of the bump: the tarball it needs exists and was
 		// digested, and only its publication is owed by the operator.
@@ -2000,30 +1972,69 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
 		}
 	} else {
-		output.Error.Println("    Status:  Failed")
-		if result.Error != nil {
-			output.Error.Printf("    Error:   %v\n", result.Error)
-			displayChildRuns(result.Error)
-		}
-		if result.LogPath != "" {
-			output.Info.Printf("    Log:     %s\n", result.LogPath)
-		}
-		if result.StagedPath != "" {
-			// The operator's end of staged-tree retention: the bump was
-			// validated in a tree of its own outside the overlay, that tree is kept
-			// when the bump is not promoted, and this line is what makes it findable.
-			// Without it the tree still survives, but the only way to see the ebuild
-			// the gates actually read is to run the whole bump again.
-			//
-			// Failure branch only, and that is not merely where it happens to sit: a
-			// promoted bump clears StagedPath precisely so no success ever points at
-			// a tree whose bytes are already in the overlay.
-			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
-			output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
-		}
-		if result.RepairBundle != "" {
-			output.Info.Printf("    Repair:  bentoo overlay autoupdate --repair %s\n", result.Package)
-		}
+		displayApplyFailure(result)
+	}
+}
+
+// displayApplySuccess prints the details of a bump that was applied.
+func (ar *autoupdateRun) displayApplySuccess(result *autoupdate.ApplyResult) {
+	output.Success.Println("    Status:  Success")
+	ar.displayCompileIsolation(result)
+	if result.Fixed {
+		output.Warning.Printf("    Fixed:   manifest repaired by LLM — %s\n", result.FixSummary)
+	}
+	if result.QASummary != "" {
+		output.Warning.Printf("    QA:      pkgcheck findings after the fix — review before committing:\n%s\n", result.QASummary)
+	}
+	displayCleanReport(result)
+	if result.CleanWarning != "" {
+		// The blocked-entry line arrives here and nowhere else: a plan
+		// blocked by a pinless entry is returned as an error naming that
+		// entry, which Apply stores in CleanWarning. ApplyResult carries no
+		// sweepPlan and therefore no Blocked field, so this IS the line —
+		// printing a second one would repeat the same entry name twice.
+		output.Warning.Printf("    Clean:   %s\n", result.CleanWarning)
+	}
+	if result.RegistryWarning != "" {
+		// Its own label, deliberately not "Clean:". The pin is written on
+		// every successful apply while the sweep runs only under --clean, so
+		// filing a registry failure under the clean step would blame a step
+		// that may not even have run.
+		output.Warning.Printf("    Registry: %s\n", result.RegistryWarning)
+	}
+	if result.MetadataCacheWarning != "" {
+		output.Warning.Printf("    Cache:   %s\n", result.MetadataCacheWarning)
+	}
+	output.Success.Println("\n✓ Update applied successfully")
+	output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+}
+
+// displayApplyFailure prints the error, log, staged tree and repair hint of a
+// bump that failed.
+func displayApplyFailure(result *autoupdate.ApplyResult) {
+	output.Error.Println("    Status:  Failed")
+	if result.Error != nil {
+		output.Error.Printf("    Error:   %v\n", result.Error)
+		displayChildRuns(result.Error)
+	}
+	if result.LogPath != "" {
+		output.Info.Printf("    Log:     %s\n", result.LogPath)
+	}
+	if result.StagedPath != "" {
+		// The operator's end of staged-tree retention: the bump was
+		// validated in a tree of its own outside the overlay, that tree is kept
+		// when the bump is not promoted, and this line is what makes it findable.
+		// Without it the tree still survives, but the only way to see the ebuild
+		// the gates actually read is to run the whole bump again.
+		//
+		// Failure branch only, and that is not merely where it happens to sit: a
+		// promoted bump clears StagedPath precisely so no success ever points at
+		// a tree whose bytes are already in the overlay.
+		output.Info.Printf("    Staged:  %s\n", result.StagedPath)
+		output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
+	}
+	if result.RepairBundle != "" {
+		output.Info.Printf("    Repair:  bentoo overlay autoupdate --repair %s\n", result.Package)
 	}
 }
 
