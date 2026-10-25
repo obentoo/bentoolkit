@@ -59,9 +59,12 @@ mkdir -p "$LOG_DIR"
 
 log() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "$LOG_DIR/gate.log"; }
 vm_state() { LC_ALL=C virsh --connect "$CONN" domstate "$VM" 2>/dev/null; }
+# awk reads to the end instead of exiting on the first match: an early exit
+# lets virsh hit SIGPIPE on its trailing newline, and under pipefail and set -e
+# that 141 killed the gate right after starting the VM (1 run in ~300).
 vm_ip() {
   virsh --connect "$CONN" domifaddr "$VM" 2>/dev/null |
-    awk '/ipv4/ { split($4, a, "/"); print a[1]; exit }'
+    awk '/ipv4/ && !ip { split($4, a, "/"); ip = a[1] } END { if (ip) print ip }'
 }
 
 if [[ "$REF" == HEAD ]] && { ! git diff --quiet || ! git diff --cached --quiet; }; then
