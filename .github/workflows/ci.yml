@@ -57,6 +57,8 @@ jobs:
       # cleared first. Whoever moves it next should expect that.
       # Pin moved v2.13.2 -> v2.14.0 with the move to Go 1.27: v2.13.2 cannot
       # read the Go 1.27 standard library's export data and fails at typecheck.
+      # Pin moved v2.14.0 -> v2.15.0: its gocognit v1.3.0 scores one function
+      # past the limit of 30, which had to be split first.
       - name: Install golangci-lint from source
         run: |
           for attempt in 1 2 3; do
