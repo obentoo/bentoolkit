@@ -22,7 +22,7 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20261018003744-cb897cb4ed72
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/chromedp/cdproto v0.158.4
+	github.com/chromedp/cdproto v0.158.5
 	github.com/chromedp/chromedp v0.21.0
 	github.com/fatih/color v1.19.0
 	github.com/godbus/dbus/v5 v5.2.4
