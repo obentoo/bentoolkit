@@ -11,10 +11,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Changed
 
-- **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.158.4 and the
-  test-only `charmbracelet/x/exp/teatest` to its 2026-10-18 snapshot; CI now
-  lints with golangci-lint v2.15.0 and zizmor 1.31.1. None of them carries a
-  security fix, and all four were taken ahead of the usual seven-day wait.
+- **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.158.5,
+  `go.yaml.in/yaml/v3` v3.0.5 → v3.0.6 and the test-only
+  `charmbracelet/x/exp/teatest` to its 2026-10-18 snapshot; CI now lints with
+  golangci-lint v2.15.0 and zizmor 1.31.1. None of them carries a security
+  fix; cdproto v0.158.4, teatest, golangci-lint and zizmor were taken ahead of
+  the usual seven-day wait.
+
+### Security
+
+- **`golang.org/x/net` v0.61.0 → v0.62.0 (GO-2026-6860, CVE-2026-78661).**
+  Its HTML parser took quadratic time to merge adjacent text nodes, and
+  autoupdate parses upstream pages with it (the XPath version-history
+  extractor), so a crafted page could stall an autoupdate run. Taken ahead of
+  the usual seven-day wait.
 
 ## [0.37.2] - 2026-10-23
 
