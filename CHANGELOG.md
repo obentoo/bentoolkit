@@ -11,11 +11,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Changed
 
-- **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.158.5,
-  `go.yaml.in/yaml/v3` v3.0.5 → v3.0.6 and the test-only
-  `charmbracelet/x/exp/teatest` to its 2026-10-18 snapshot; CI now lints with
-  golangci-lint v2.15.0 and zizmor 1.31.1. None of them carries a security
-  fix; cdproto v0.158.4, teatest, golangci-lint and zizmor were taken ahead of
+- **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.159.0,
+  `chromedp/chromedp` v0.21.0 → v0.21.1, `xo/terminfo` v1.2.0 → v1.3.0,
+  `go.yaml.in/yaml/v3` v3.0.5 → v3.0.6, the test-only
+  `charmbracelet/x/exp/teatest` to its 2026-11-01 snapshot and
+  `charmbracelet/x/exp/golden` to v0.1.0; CI now lints with golangci-lint
+  v2.15.0 and zizmor 1.32.0. None of them carries a security fix; cdproto,
+  chromedp, terminfo, teatest, golangci-lint and zizmor were taken ahead of
   the usual seven-day wait.
 
 ### Security
