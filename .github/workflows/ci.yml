@@ -384,6 +384,6 @@ jobs:
       # permissions, credential persistence, unpinned actions). pipx is
       # preinstalled on GitHub-hosted runners; zizmor is pinned by version.
       - name: Run zizmor
-        run: pipx run zizmor==1.31.1 --min-severity=medium .github/workflows/
+        run: pipx run zizmor==1.32.0 --min-severity=medium .github/workflows/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
