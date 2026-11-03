@@ -359,12 +359,14 @@ jobs:
 
           if echo "$changed" | grep -qx 'CHANGELOG.md'; then
             echo "Changelog updated alongside:"
+            # shellcheck disable=SC2001 # a per-line indent; ${var//} cannot anchor at each line
             echo "$relevant" | sed 's/^/  /'
             exit 0
           fi
 
           echo "::error::This PR changes what ships but does not touch CHANGELOG.md"
           echo "Files that require an entry:"
+          # shellcheck disable=SC2001 # same per-line indent as above
           echo "$relevant" | sed 's/^/  /'
           echo
           echo "Add a line under [Unreleased], or label the PR 'no-changelog'."
@@ -387,3 +389,9 @@ jobs:
         run: pipx run zizmor==1.32.0 --min-severity=medium .github/workflows/
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Syntax, expression and type checks zizmor does not make, plus
+      # shellcheck over every run: script. Go and shellcheck are preinstalled
+      # on GitHub-hosted runners; actionlint is pinned by version.
+      - name: Run actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

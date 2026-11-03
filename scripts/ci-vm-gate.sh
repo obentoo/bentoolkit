@@ -44,6 +44,7 @@ STATE_DIR="$HOME/.local/share/bentoolkit-ci"
 LOG_ROOT="${GATE_LOG_ROOT:-$STATE_DIR/logs}"
 BASE="${GATE_BASE:-origin/main}"
 ZIZMOR_VERSION=1.32.0 # ci.yml's pin
+ACTIONLINT_VERSION=v1.7.12 # ci.yml's pin
 
 POST_STATUS=false
 if [[ "${1:-}" == --status ]]; then
@@ -142,6 +143,11 @@ host_job() { # <name> <command...>
   echo "$rc $(($(date +%s) - start))" >"$LOG_DIR/host-$name.rc"
 }
 
+workflow_lint() { # ci.yml's Workflow Lint job: zizmor, then actionlint
+  uvx "zizmor==$ZIZMOR_VERSION" --min-severity=medium .github/workflows/ &&
+    go run "github.com/rhysd/actionlint/cmd/actionlint@$ACTIONLINT_VERSION"
+}
+
 changelog_gate() { # the logic of ci.yml's Changelog job, against $BASE
   local branch pr changed
   local -a relevant
@@ -176,7 +182,7 @@ git worktree add -q --detach "$SCAN_WT" "$SHA"
   # runner's full-depth checkout does; without it, it scans every local branch.
   host_job secrets gitleaks git --redact --log-opts="$SHA" . &
   host_job osv osv-scanner scan source --recursive ./ &
-  host_job workflow-lint uvx "zizmor==$ZIZMOR_VERSION" --min-severity=medium .github/workflows/ &
+  host_job workflow-lint workflow_lint &
   host_job changelog changelog_gate &
   wait
 )
