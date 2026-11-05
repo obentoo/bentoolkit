@@ -386,6 +386,16 @@ func deriveVerdict(status CompareStatus, div Divergence, known bool) Verdict {
 	//
 	// Neither can ever yield VerdictRedundant, which is the only verdict that
 	// recommends removing something.
+	//
+	// One cell is settled BEFORE them: a package ::gentoo does not carry at all
+	// is kept whatever is recorded about it, because there is nothing upstream
+	// that could replace it. Leaving it Unknown only for want of a registry
+	// entry put every acct-*, every bentoo-native package and every signing key
+	// in that column (23 on 2026-11-05) and said nothing an operator could act
+	// on. Keep recommends no removal, so the invariant above still holds.
+	if status == StatusNotInRemote {
+		return VerdictKeep
+	}
 	if !known || status == StatusError {
 		return VerdictUnknown
 	}

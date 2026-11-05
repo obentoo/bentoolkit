@@ -13,7 +13,7 @@ import "testing"
 //	| StatusNewer       | Unknown | Keep        | Keep         |
 //	| StatusUpToDate    | Unknown | Redundant   | Keep         |
 //	| StatusOutdated    | Unknown | Redundant   | NeedsRebase  |
-//	| StatusNotInRemote | Unknown | Keep        | Keep         |
+//	| StatusNotInRemote | Keep    | Keep        | Keep         |
 //	| StatusError       | Unknown | Unknown     | Unknown      |
 //
 // The cells that carry the story are the `unknown` column and the `StatusError`
@@ -64,7 +64,7 @@ func TestDeriveVerdict(t *testing.T) {
 		{"outdated / patched", StatusOutdated, patchedDiv, true, VerdictNeedsRebase},
 
 		// ours alone.
-		{"not-in-remote / unknown", StatusNotInRemote, unknownDiv, false, VerdictUnknown},
+		{"not-in-remote / unknown", StatusNotInRemote, unknownDiv, false, VerdictKeep},
 		{"not-in-remote / not patched", StatusNotInRemote, plainDiv, true, VerdictKeep},
 		{"not-in-remote / patched", StatusNotInRemote, patchedDiv, true, VerdictKeep},
 
