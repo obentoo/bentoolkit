@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.37.3] - 2026-11-05
+
 ### Fixed
 
 - **`overlay compare` no longer reports "needs rebase" for a version nobody
@@ -1658,7 +1660,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.37.2...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.37.3...HEAD
+[0.37.3]: https://github.com/obentoo/bentoolkit/compare/v0.37.2...v0.37.3
 [0.37.2]: https://github.com/obentoo/bentoolkit/compare/v0.37.1...v0.37.2
 [0.37.1]: https://github.com/obentoo/bentoolkit/compare/v0.37.0...v0.37.1
 [0.37.0]: https://github.com/obentoo/bentoolkit/compare/v0.36.0...v0.37.0
