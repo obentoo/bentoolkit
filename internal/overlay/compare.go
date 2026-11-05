@@ -34,7 +34,11 @@ type CompareResult struct {
 	Package       string
 	LocalVersion  string // Version in Bentoo overlay
 	RemoteVersion string // Version in Gentoo repository
-	Status        CompareStatus
+	// RemoteNewest is ::gentoo's newest version when comparableRemoteVersions
+	// set it aside (unkeyworded, another SLOT, masked) and RemoteVersion is an
+	// older one; empty when the two are the same. It keeps the narrowing visible.
+	RemoteNewest string
+	Status       CompareStatus
 
 	// The fields below carry the second axis: not what the two versions are —
 	// that is Status, and it is unchanged — but what is known about the package
@@ -904,7 +908,7 @@ func sortCompareResults(results []CompareResult) {
 // current four values and their current meanings by construction, not by
 // convention.
 func comparePackageWithProvider(ctx context.Context, pkg repo.PackageInfo, prov provider.Provider, opts CompareOptions) CompareResult {
-	result := comparePackageVersions(ctx, pkg, prov)
+	result := comparePackageVersions(ctx, pkg, prov, opts.OverlayPath)
 	// comparePackageVersions has no opts, so the text it recorded is scrubbed
 	// here, before anything else can read it.
 	result.FailureText = redactFailure(result.FailureText, opts.Redact)
@@ -946,9 +950,15 @@ func comparePackageWithProvider(ctx context.Context, pkg repo.PackageInfo, prov 
 }
 
 // comparePackageVersions resolves how the local package's latest version relates
-// to the provider's copy. It sets Status and the two version fields, and knows
-// nothing about divergence.
-func comparePackageVersions(ctx context.Context, pkg repo.PackageInfo, prov provider.Provider) CompareResult {
+// to the provider's copy. It sets Status and the version fields, and knows
+// nothing about divergence: overlayPath is the only option it receives, so the
+// registry still cannot reach Status.
+//
+// When the provider has the compared tree on disk and overlayPath is set, the
+// remote list is first narrowed by comparableRemoteVersions (keywords, main
+// SLOT, package.mask). The API providers carry no content and compare against
+// the newest version, as before.
+func comparePackageVersions(ctx context.Context, pkg repo.PackageInfo, prov provider.Provider, overlayPath string) CompareResult {
 	result := CompareResult{
 		Category:     pkg.Category,
 		Package:      pkg.Package,
@@ -974,8 +984,19 @@ func comparePackageVersions(ctx context.Context, pkg repo.PackageInfo, prov prov
 	}
 
 	// Find latest remote version (ignoring live/9999 ebuilds)
-	remoteLatest := repo.FindLatestVersionFiltered(remoteVersions, true)
+	newest := repo.FindLatestVersionFiltered(remoteVersions, true)
+	remoteLatest := newest
+	if dirProv, ok := prov.(provider.PackageDirProvider); ok && overlayPath != "" && pkg.LatestVersion != "" {
+		if remoteDir, err := dirProv.LocalPackagePath(pkg.Category, pkg.Package); err == nil {
+			narrowed := comparableRemoteVersions(remoteVersions,
+				filepath.Join(overlayPath, pkg.Category, pkg.Package), pkg.Package, pkg.LatestVersion, remoteDir)
+			remoteLatest = repo.FindLatestVersionFiltered(narrowed, true)
+		}
+	}
 	result.RemoteVersion = remoteLatest
+	if remoteLatest != newest {
+		result.RemoteNewest = newest
+	}
 
 	// If remote only has live versions, consider up-to-date
 	if remoteLatest == "" {
@@ -1413,7 +1434,19 @@ func undeclaredFinding(r CompareResult, atom string, added, removed int, detail 
 // the recommendation: what should be done about a package is the Verdict, which
 // is derived from this plus the registry, and a sentence that carried both would
 // be a second place for the recommendation to be decided.
+//
+// When ::gentoo's newest version was set aside (RemoteNewest), the sentence
+// says so, so the narrowing is never silent.
 func comparedDetail(r CompareResult) string {
+	detail := comparedRelation(r)
+	if r.RemoteNewest != "" && (r.Status == StatusOutdated || r.Status == StatusNewer || r.Status == StatusUpToDate) {
+		detail += fmt.Sprintf(" (::gentoo's newest, %s, is not comparable: no %s keyword, another SLOT, or masked)", r.RemoteNewest, compareArch)
+	}
+	return detail
+}
+
+// comparedRelation is comparedDetail's sentence without the set-aside note.
+func comparedRelation(r CompareResult) string {
 	switch r.Status {
 	case StatusOutdated:
 		return fmt.Sprintf("::gentoo ships %s and the overlay carries %s", r.RemoteVersion, r.LocalVersion)

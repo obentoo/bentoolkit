@@ -135,6 +135,15 @@ type Run struct {
 	//
 	// It carries no omitempty for the same reason Complete does not.
 	NotEvaluated int `json:"not_evaluated"`
+	// Interrupted reports that the run was cut short (a cancelled context, a
+	// signal), as opposed to one that reached every unit and could not
+	// establish some of them. Both leave Complete false; only this says which,
+	// and it decides whether the gap block reads "interrupted" or
+	// "incomplete". overlay compare is incomplete without any interruption
+	// whenever the content check refuses a version pair.
+	//
+	// It carries no omitempty for the same reason Complete does not.
+	Interrupted bool `json:"interrupted"`
 	// Payload is the domain half, and it marshals NESTED under its own key.
 	// The nesting is the whole point of the envelope: `.tally.proved` becomes
 	// `.payload.tally.proved`, and every kind added after this one adds a
@@ -167,7 +176,28 @@ func (r Run) Sections(opts SectionOptions) []Section {
 	if r.Complete {
 		return blocks
 	}
-	return append([]Section{interruptedSection(r.NotEvaluated)}, blocks...)
+	gap := incompleteSection(r.NotEvaluated)
+	if r.Interrupted {
+		gap = interruptedSection(r.NotEvaluated)
+	}
+	return append([]Section{gap}, blocks...)
+}
+
+// incompleteSection is the label for a run that reached the end of its plan
+// but left some of it without an answer. It must not say "interrupted": on
+// 2026-11-05 a compare nobody interrupted printed exactly that over 19 version
+// pairs the content check had refused.
+func incompleteSection(notEvaluated int) Section {
+	return Section{
+		Title: "Run Incomplete",
+		Lead: []string{
+			fmt.Sprintf("This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer.",
+				notEvaluated),
+		},
+		Notes: []string{
+			"The counts below cover only what the run established; the rest are counted in no column.",
+		},
+	}
 }
 
 // interruptedSection is the label for a run that stopped before the end of its

@@ -44,7 +44,7 @@ import (
 // whose last package happened to complete would come out complete. Completeness
 // is established by the run that did the work; the doc on
 // CompareReport.Interrupted states the same rule from the producer's side.
-func compareEnvelope(payload report.CompareRun, complete bool, notEvaluated int) report.Run {
+func compareEnvelope(payload report.CompareRun, complete bool, notEvaluated int, interrupted bool) report.Run {
 	return report.Run{
 		Schema: report.SchemaVersion,
 		Kind:   report.KindOverlayCompare,
@@ -55,6 +55,7 @@ func compareEnvelope(payload report.CompareRun, complete bool, notEvaluated int)
 		// discriminates with.
 		Title:        "Overlay comparison",
 		Complete:     complete,
+		Interrupted:  interrupted,
 		NotEvaluated: notEvaluated,
 		Payload:      payload,
 	}
@@ -97,7 +98,7 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 		// established nothing, rather than one that claims to have been cut
 		// short. Every slice is already non-nil above, so this document and a
 		// full one differ in their rows and not in the shape of their keys.
-		return compareEnvelope(payload, true, 0)
+		return compareEnvelope(payload, true, 0, false)
 	}
 
 	payload.Scanned = rep.TotalPackages
@@ -206,7 +207,7 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 	// after its last package has a gap of zero and was still cut short — so it
 	// is OR-ed in and never inferred.
 	notEvaluated := compareNotEvaluated(rep, whole)
-	return compareEnvelope(payload, !rep.Interrupted && notEvaluated == 0, notEvaluated)
+	return compareEnvelope(payload, !rep.Interrupted && notEvaluated == 0, notEvaluated, rep.Interrupted)
 }
 
 // compareNotEvaluated counts the facts this run set out to establish and did

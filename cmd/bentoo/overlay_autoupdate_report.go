@@ -37,6 +37,7 @@ func checkEnvelope(payload report.AutoupdateCheck, complete bool, notEvaluated i
 		// discriminates with.
 		Title:        "Autoupdate check",
 		Complete:     complete,
+		Interrupted:  !complete, // incomplete here only ever means cut short
 		NotEvaluated: notEvaluated,
 		Payload:      payload,
 	}

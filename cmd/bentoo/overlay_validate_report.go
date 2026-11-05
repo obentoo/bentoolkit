@@ -105,6 +105,7 @@ func validateEnvelope(rep validate.Report, complete bool) report.Run {
 		Kind:         report.KindOverlayValidate,
 		Title:        "Overlay validation",
 		Complete:     complete,
+		Interrupted:  !complete, // incomplete here only ever means cut short
 		NotEvaluated: 0,
 		Payload:      validatePayload{Report: rep.Normalized()},
 	}
