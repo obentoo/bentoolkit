@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -226,4 +228,120 @@ func keysOf(m map[string]overlay.Divergence) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// slotDivergenceRegistry reproduces the two shapes measured on the bentoo
+// overlay on 2026-11-05: parallel release lines told apart by `series` under
+// "@label" keys (llvm-core/clang@22, @23) and by SLOT under ":slot" keys
+// (net-libs/nodejs:24, :26). In both, the OLDER line sorts first.
+const slotDivergenceRegistry = `["llvm-core/clang@22"]
+url = "https://example.com/llvm"
+parser = "json"
+path = "tag_name"
+series = '^22\.'
+patched = "the 22 line's delta"
+comments = """
+clang 22.
+"""
+# END
+
+["llvm-core/clang@23"]
+url = "https://example.com/llvm"
+parser = "json"
+path = "tag_name"
+series = '^23\.'
+patched = "the 23 line's delta"
+comments = """
+clang 23.
+"""
+# END
+
+["net-libs/nodejs:24"]
+url = "https://example.com/node"
+parser = "json"
+path = "tag_name"
+patched = "slot 24's delta"
+comments = """
+nodejs 24.
+"""
+# END
+
+["net-libs/nodejs:26"]
+url = "https://example.com/node"
+parser = "json"
+path = "tag_name"
+patched = "slot 26's delta"
+comments = """
+nodejs 26.
+"""
+# END
+
+["dev-libs/orphan@old"]
+url = "https://example.com/orphan"
+parser = "json"
+path = "tag_name"
+series = '^9\.'
+patched = "tracks nothing in the tree"
+comments = """
+an entry whose series matches no ebuild.
+"""
+# END
+
+["dev-libs/orphan@new"]
+url = "https://example.com/orphan"
+parser = "json"
+path = "tag_name"
+series = '^1\.'
+patched = "tracks the only ebuild"
+comments = """
+the entry that resolves.
+"""
+# END
+`
+
+// TestBuildDivergenceMapNewestTrackedEntrySpeaks pins that, among several
+// declaring entries of one atom, the one naming the row is the entry tracking
+// the overlay's newest ebuild — the version CompareResult.LocalVersion shows —
+// not the first key in sorted order. Before, clang@22's text was printed on
+// the 23.1.5 row and nodejs:24's on the 26.13.0 one.
+func TestBuildDivergenceMapNewestTrackedEntrySpeaks(t *testing.T) {
+	dir := writeLintRegistry(t, slotDivergenceRegistry)
+	writeEbuild := func(rel, slot string) {
+		t.Helper()
+		p := filepath.Join(dir, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o750); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		body := "EAPI=8\nSLOT=\"" + slot + "\"\n"
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatalf("write %s: %v", rel, err)
+		}
+	}
+	writeEbuild("llvm-core/clang/clang-22.1.8.ebuild", "22/22.1")
+	writeEbuild("llvm-core/clang/clang-23.1.5-r1.ebuild", "23/23.1")
+	writeEbuild("net-libs/nodejs/nodejs-24.11.0.ebuild", "24")
+	writeEbuild("net-libs/nodejs/nodejs-26.13.0.ebuild", "26")
+	writeEbuild("dev-libs/orphan/orphan-1.0.ebuild", "0")
+
+	m, err := buildDivergenceMap(discardLog(), dir)
+	if err != nil {
+		t.Fatalf("buildDivergenceMap returned %v, want nil", err)
+	}
+
+	for _, tc := range []struct{ atom, entry, reason string }{
+		{"llvm-core/clang", "llvm-core/clang@23", "the 23 line's delta"},
+		{"net-libs/nodejs", "net-libs/nodejs:26", "slot 26's delta"},
+		// @new sorts before @old, but the point is that an unresolvable entry
+		// never outranks one that resolves, whichever way the keys sort.
+		{"dev-libs/orphan", "dev-libs/orphan@new", "tracks the only ebuild"},
+	} {
+		d := m[tc.atom]
+		if !d.Patched {
+			t.Errorf("%s: Patched = false, want true", tc.atom)
+		}
+		if d.Entry != tc.entry || d.Reason != tc.reason {
+			t.Errorf("%s: Entry = %q, Reason = %q; want %q, %q (the entry tracking the newest ebuild)",
+				tc.atom, d.Entry, d.Reason, tc.entry, tc.reason)
+		}
+	}
 }

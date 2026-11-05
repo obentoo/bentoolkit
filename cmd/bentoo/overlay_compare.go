@@ -16,6 +16,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/github"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
@@ -734,12 +735,11 @@ func filterCompareResults(results []overlay.CompareResult, onlyRedundant, onlyPa
 //
 // Keys are split with ebuilds.SplitPackageKey, never by hand, so ":slot" and
 // "@label" keys land on their bare atom; a key it rejects is skipped with a
-// warning, so one bad key cannot blank the map. Keys are visited sorted, so the
-// entry recorded for an atom is stable across runs (":slot" beats "@label"
-// because ':' sorts before '@'). Any patched entry marks the atom — failing
-// toward "patched" can only suppress a removal recommendation, never produce
-// one. The key is only a map key, never a filesystem path (verification uses
-// the scanned directory names), and nothing here sanitises it: keep it so.
+// warning, so one bad key cannot blank the map. Any patched entry marks the
+// atom — failing toward "patched" can only suppress a removal recommendation,
+// never produce one. The key is only a map key, never a filesystem path
+// (verification uses the scanned directory names), and nothing here sanitises
+// it: keep it so. Which declaring entry speaks is trackedVersion's rule.
 func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overlay.Divergence, error) {
 	cfg, err := registry.LoadPackagesConfig(overlayPath)
 	if err != nil {
@@ -753,6 +753,9 @@ func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overla
 	sort.Strings(keys)
 
 	divs := make(map[string]overlay.Divergence, len(keys))
+	// tracked holds, per atom, the version tracked by the entry currently
+	// speaking for it, so a later declaring entry can be ranked against it.
+	tracked := make(map[string]string)
 	for _, key := range keys {
 		category, name, ok := ebuilds.SplitPackageKey(key)
 		if !ok {
@@ -773,15 +776,46 @@ func buildDivergenceMap(log *slog.Logger, overlayPath string) (map[string]overla
 		// but LoadPackagesConfig never calls it, so this path is not protected
 		// by it. The report caps this text when it prints it; what is printed
 		// verbatim is the entry key, not the reason.
-		if reason := strings.TrimSpace(cfg.Packages[key].Patched); reason != "" && !div.Patched {
-			div.Patched = true
-			div.Reason = reason
-			div.Entry = key
+		if reason := strings.TrimSpace(cfg.Packages[key].Patched); reason != "" {
+			if !div.Patched {
+				div.Patched = true
+				div.Reason = reason
+				div.Entry = key
+				tracked[atom] = trackedVersion(overlayPath, key, cfg.Packages[key].Series)
+			} else if v := trackedVersion(overlayPath, key, cfg.Packages[key].Series); v != "" &&
+				(tracked[atom] == "" || ebuild.CompareVersions(v, tracked[atom]) > 0) {
+				div.Reason = reason
+				div.Entry = key
+				tracked[atom] = v
+			}
 		}
 		divs[atom] = div
 	}
 
 	return divs, nil
+}
+
+// trackedVersion is the overlay version a registry entry tracks — the one its
+// autoupdate bumps, resolved through ":slot" and `series` by
+// SelectCurrentEbuild — or "" when no ebuild matches.
+//
+// It ranks the declaring entries of one atom: the entry tracking the newest
+// ebuild speaks, because that is the version the row shows (LocalVersion).
+// Sorted key order alone made the oldest line speak for the newest, putting
+// llvm-core/clang@22's text on the 23.1.5 row and net-libs/nodejs:24's on the
+// 26.13.0 one. An entry that resolves nothing ranks last and ties keep key
+// order, so the choice is stable across runs. Only Entry and Reason depend on
+// it, never Patched or the verdict.
+//
+// A failure is therefore not an error, and the series-regex warning is
+// discarded: the checker already reports a bad series, and repeating it on
+// every compare run would be noise.
+func trackedVersion(overlayPath, key, series string) string {
+	cand, err := ebuilds.SelectCurrentEbuild(nil, overlayPath, key, series)
+	if err != nil {
+		return ""
+	}
+	return cand.Version
 }
 
 func truncatePkgName(name string, maxLen int) string {
