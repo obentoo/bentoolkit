@@ -4,6 +4,7 @@
   "title": "overlay comparison",
   "complete": true,
   "not_evaluated": 0,
+  "interrupted": false,
   "payload": {
     "repository": "gentoo",
     "scanned": 20,
