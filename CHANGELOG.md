@@ -9,6 +9,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`overlay compare` names the registry entry of the line a row shows.** When
+  several `packages.toml` entries of one package declared `patched`, the first
+  key in sorted order spoke for the row, so the oldest line's text sat on the
+  newest version: on the bentoo overlay `llvm-core/clang@22` (and five more
+  LLVM `@22` entries) declared the 23.1.5 rows and `net-libs/nodejs:24` the
+  26.13.0 one. The entry that speaks is now the one tracking the overlay's
+  newest ebuild, resolved through `:slot` and `series` exactly as autoupdate
+  resolves it; ties and entries that track nothing fall back to key order.
+  Verdicts are unchanged: any declaring entry still marks the package patched.
+
 ## [0.37.3] - 2026-11-05
 
 ### Fixed
