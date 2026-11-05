@@ -11,6 +11,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **`overlay compare` no longer reports "needs rebase" for a version nobody
+  can install.** With the compared tree on disk (`--clone`, `provider: local`)
+  a package is now measured against the newest upstream version that is
+  keyworded for amd64, sits in the same main SLOT as ours and is not in
+  `profiles/package.mask`. Before, ::gentoo's newest version won outright, so
+  unkeyworded snapshots (LLVM 24, GCC 17), a revision ::gentoo had not
+  keyworded (glibc 2.44-r5), a `9998` live ebuild, another SLOT (atkmm 2.36
+  beside our atkmm:0) and a masked sub-slot (eigen:3/5.0) all showed as
+  outdated: 18 of the 19 rows in the bentoo overlay were false. The finding
+  sentence names the version that was set aside, and the API providers are
+  unchanged.
+
 - **A report says "Run Incomplete", not "Run Interrupted", when nothing was
   interrupted.** `overlay compare` marks a run incomplete when it reaches every
   package but leaves some without an answer, for instance a version pair the
