@@ -197,6 +197,15 @@ This command will:
 - Query the specified upstream repository (via API or git clone)
 - Compare versions using Gentoo's version comparison rules
 - **Automatically ignore live ebuilds** (versions with `9999`)
+- With the tree on disk (`--clone` or `provider: local`), measure each package
+  only against the upstream versions it can honestly be compared with: a
+  version with no `amd64`/`~amd64` keyword (a snapshot, an unkeyworded
+  revision, a `9998` live ebuild), a version in another main `SLOT`, or one
+  `profiles/package.mask` masks is set aside. Our `atkmm:0` 2.28 is therefore
+  no longer "behind" ::gentoo's `atkmm:2.36`. The finding sentence names the
+  version that was set aside, and when nothing survives the newest version is
+  used, as before. The API providers carry no ebuild content and always compare
+  against the newest version
 - Display a table of outdated packages
 
 **Built-in Repositories:**
