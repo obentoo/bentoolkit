@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A report says "Run Incomplete", not "Run Interrupted", when nothing was
+  interrupted.** `overlay compare` marks a run incomplete when it reaches every
+  package but leaves some without an answer, for instance a version pair the
+  content check refuses. The gap block still said "the run was interrupted",
+  so a run nobody had stopped read as cut short. Exported documents gain
+  `"interrupted"` beside `"complete"` and `"not_evaluated"`, and the block
+  reads "Run Interrupted" only when it is true. The schema stays 2: the key is
+  additive.
+
 ### Changed
 
 - **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.159.0,

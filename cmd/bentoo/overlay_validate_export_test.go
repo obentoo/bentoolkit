@@ -313,6 +313,7 @@ const validateExportJSONBeforeTheDeclaration = `{
   "title": "Overlay validation",
   "complete": true,
   "not_evaluated": 0,
+  "interrupted": false,
   "payload": {
     "overlay": "/var/db/repos/bentoo",
     "results": [

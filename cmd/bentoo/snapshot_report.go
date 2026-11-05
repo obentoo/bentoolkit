@@ -40,7 +40,7 @@ import (
 // Complete and NotEvaluated are ARGUMENTS, never read off the payload: the run
 // establishes them (whether its context was cancelled, which subvolumes it
 // reached), and rows cannot say what the run intended.
-func snapshotEnvelope(payload report.SnapshotRun, complete bool, notEvaluated int) report.Run {
+func snapshotEnvelope(payload report.SnapshotRun, complete bool, notEvaluated int, interrupted bool) report.Run {
 	return report.Run{
 		Schema: report.SchemaVersion,
 		Kind:   report.KindSnapshotRun,
@@ -51,6 +51,7 @@ func snapshotEnvelope(payload report.SnapshotRun, complete bool, notEvaluated in
 		// consumer discriminates with.
 		Title:        "Snapshot run",
 		Complete:     complete,
+		Interrupted:  interrupted,
 		NotEvaluated: notEvaluated,
 		Payload:      payload,
 	}
@@ -148,7 +149,7 @@ func buildSnapshotReport(result *snapshot.RunResult, planned []string, interrupt
 	// every subvolume in it. Counting those skipped stages as "not evaluated"
 	// would have put "the run was interrupted" above the report of a run that
 	// nobody interrupted.
-	return snapshotEnvelope(payload, !interrupted && notEvaluated == 0, notEvaluated)
+	return snapshotEnvelope(payload, !interrupted && notEvaluated == 0, notEvaluated, interrupted)
 }
 
 // snapshotStepFacts is one pipeline stage as the model spells it.

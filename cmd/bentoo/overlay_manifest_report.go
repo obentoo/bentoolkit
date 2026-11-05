@@ -53,6 +53,7 @@ func manifestEnvelope(payload report.ManifestRun, complete bool, notEvaluated in
 		// consumer discriminates with.
 		Title:        "Manifest regeneration",
 		Complete:     complete,
+		Interrupted:  !complete, // incomplete here only ever means cut short
 		NotEvaluated: notEvaluated,
 		Payload:      payload,
 	}
