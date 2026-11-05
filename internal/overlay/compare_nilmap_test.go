@@ -77,8 +77,14 @@ func TestNilDivergenceMapIsAdditive(t *testing.T) {
 				t.Errorf("%s: Status = %v, want %v", atom, r.Status, want)
 			}
 			// UB6 in the other direction: nothing known means nothing recommended.
-			if r.Verdict != VerdictUnknown {
-				t.Errorf("%s: Verdict = %v, want VerdictUnknown with a nil map", atom, r.Verdict)
+			// The one exception: a package ::gentoo does not carry is kept
+			// whatever is recorded, since nothing upstream could replace it.
+			wantVerdict := VerdictUnknown
+			if want == StatusNotInRemote {
+				wantVerdict = VerdictKeep
+			}
+			if r.Verdict != wantVerdict {
+				t.Errorf("%s: Verdict = %v, want %v with a nil map", atom, r.Verdict, wantVerdict)
 			}
 			if r.Patched || r.PatchedBy != "" || r.PatchedReason != "" {
 				t.Errorf("%s: reports a divergence (%v, %q, %q) the caller never supplied", atom, r.Patched, r.PatchedBy, r.PatchedReason)

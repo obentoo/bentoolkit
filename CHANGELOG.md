@@ -32,6 +32,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   reads "Run Interrupted" only when it is true. The schema stays 2: the key is
   additive.
 
+- **`overlay compare` keeps a package ::gentoo does not carry, with or without
+  a `packages.toml` record.** Such a package was "unknown" for want of a record.
+  On the bentoo overlay that meant 23 of them (`acct-*` users and groups,
+  overlay-native packages, a signing key), counted in the summary but never
+  listed. Nothing upstream could replace them, so no record could make them
+  removable, and they now count as "keep". A package ::gentoo does carry and
+  nothing records still reads as unknown.
+
 ### Changed
 
 - **Dependencies updated.** `chromedp/cdproto` v0.157.10 → v0.159.0,
