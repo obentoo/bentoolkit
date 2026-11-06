@@ -270,3 +270,27 @@ func TestValidatePublishedPathNeedsJSON(t *testing.T) {
 		t.Fatalf("published_path on a regex record: got %v, want an error naming published_path", err)
 	}
 }
+
+// TestValidatePublishedPathSyntax pins that a malformed published_path is
+// refused when the registry loads rather than holding every candidate at fetch
+// time, and that the "{version}" placeholder is valid member text.
+func TestValidatePublishedPathSyntax(t *testing.T) {
+	base := PackageConfig{URL: "https://example.com/api", Parser: "json", Path: "dist-tags.latest", MinAgeDays: 7}
+	for path, ok := range map[string]bool{
+		"time.{version}":   true,
+		"published_at":     true,
+		"[0].published_at": true,
+		"time..{version}":  false,
+		"time.":            false,
+	} {
+		cfg := base
+		cfg.PublishedPath = path
+		err := ValidatePackageConfig(nil, "dev-util/x", &cfg)
+		if ok && err != nil {
+			t.Errorf("published_path %q refused: %v", path, err)
+		}
+		if !ok && (err == nil || !strings.Contains(err.Error(), "published_path")) {
+			t.Errorf("published_path %q: got %v, want an error naming published_path", path, err)
+		}
+	}
+}

@@ -1894,5 +1894,12 @@ func validateMinAge(pkg string, cfg *PackageConfig) error {
 		// json parser leaves a document to navigate.
 		return fmt.Errorf("package %s: published_path needs parser = \"json\", got %q", pkg, cfg.Parser)
 	}
+	if cfg.PublishedPath != "" {
+		// "{version}" is ordinary member text to the grammar, so the path is
+		// checked as written and the version substituted only when it is read.
+		if _, err := jsonpath.Parse(cfg.PublishedPath); err != nil {
+			return fmt.Errorf("package %s: published_path: %w", pkg, err)
+		}
+	}
 	return nil
 }

@@ -101,6 +101,8 @@ selector = "a.release-tag"          # REQUIRED for parser=html (or xpath)
 script = "@vendor.js"               # REQUIRED for parser=script (scripts/vendor.js)
 transform = [['^v', ""]]            # ordered regex substitutions on the result
 select = "max"                      # first (default) | max | last
+min_age_days = 7                    # hold a candidate younger than this…
+published_path = "time.{version}"   # …reading its publication time here (parser=json)
 suffix = "_pre"                     # pre-release channel marker
 suffix_when = '^26\.8\.'            # …applied only to a matching version
 commit_sha_path = "[0].sha"         # REQUIRED with track="commit"
@@ -297,6 +299,12 @@ package, not just for the maintainer's sweep.
   never auto-bump") that reconciliation never touches. A package needing manual
   work each release (patchset, pinned SHA, bootstrap compiler) takes `hold` —
   `enabled = false` would be silently reverted. Both skip the fetch entirely.
+- **`min_age_days` is a minimum release age, not a hold.** The record is still
+  fetched and compared; a candidate younger than `min_age_days` is reported
+  `held` with its publication and eligibility times, and nothing is queued. It
+  becomes a bump on the first run after it ages in, with no edit. Use it for a
+  dependency that must not be adopted in the first days after it ships, when a
+  broken or compromised release is usually caught and pulled.
 - **User-Agent** is required by `api.github.com` and `crates.io` — always the
   literal `"bentoo-autoupdate"`. A browser UA is a last resort for a
   Cloudflare-fronted host, and the reason belongs in `comments`.
@@ -449,6 +457,8 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `series` | Regex restricting the entry to one release line — which ebuild counts as current, and which upstream candidates are eligible. For a package whose parallel ebuilds share a SLOT; see [Several release lines](#several-release-lines-of-one-package-series). |
 | `suffix` | Gentoo pre-release suffix (`_alpha`, `_beta`, `_pre`, `_rc`, `_p`, each optionally numbered) appended to the detected version — see [Pre-release channels](#pre-release-channels-suffix). |
 | `suffix_when` | Regex gating `suffix`: the suffix is appended only to a version matching it. Omit when the probed URL *is* the pre-release channel. |
+| `min_age_days` | Minimum age, in days, of the upstream release before it is offered as a bump. A younger candidate is kept back: the current version stays, `--check` reports the package as `held` with the line `held by min_age_days: <version> published <time>, eligible <time>`, and nothing is queued. Only the newest version is considered — the gate never steps down to an older release that would pass. Requires `published_path`; absent/`0` means no gate. |
+| `published_path` | JSON path, in the same response the version came from, to the candidate's publication time as an RFC 3339 string. `{version}` is replaced by the candidate and stays one member name even when the version holds dots, so npm's registry document reads `"time.{version}"`. A missing, non-string or unparseable time **holds** the candidate and the report says why. Requires `min_age_days` and `parser = "json"`. |
 | `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |
 | `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
 

@@ -182,6 +182,7 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 			NotComparable:    result.NotComparable,
 			Orphaned:         result.Orphaned,
 			FromCache:        result.FromCache,
+			Held:             result.HeldBy,
 		}
 		if result.Error != nil {
 			fact.Error = result.Error.Error()

@@ -99,6 +99,7 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 		{conditionOrphaned, "%d package(s) have no ebuild in the overlay."},
 		{conditionFailed, "%d package(s) could not be checked."},
 		{conditionNotComparable, "%d package(s) reported a version that could not be ordered against the current one."},
+		{conditionHeld, "%d package(s) have an update held by min_age_days."},
 	} {
 		if found[stated.when] > 0 {
 			s.Notes = append(s.Notes, fmt.Sprintf(stated.text, found[stated.when]))
@@ -264,6 +265,11 @@ const (
 	// reason the model carries it separately — a broken parser must never be
 	// read as "up to date".
 	conditionNotComparable
+	// conditionHeld: upstream is newer, and the record's min_age_days gate
+	// kept it back because it is too young. Read before conditionUpdate because
+	// HasUpdate is true for it, and nothing was queued, so counting it as a
+	// pending update would promise a bump the run did not record.
+	conditionHeld
 	// conditionUpdate: upstream is newer.
 	conditionUpdate
 	// conditionUpToDate: the package was read and there was nothing to report.
@@ -272,7 +278,7 @@ const (
 	conditionUpToDate
 )
 
-// conditionOf reads the four flags in the model's own order. It is the only
+// conditionOf reads the model's flags, and the hold line, in the model's own order. It is the only
 // place in this package that reads them.
 func conditionOf(result PackageResult) condition {
 	switch {
@@ -282,6 +288,8 @@ func conditionOf(result PackageResult) condition {
 		return conditionFailed
 	case result.NotComparable:
 		return conditionNotComparable
+	case result.Held != "":
+		return conditionHeld
 	case result.HasUpdate:
 		return conditionUpdate
 	default:
@@ -390,6 +398,8 @@ func scanState(result PackageResult) (state, detail string) {
 		return "not comparable" + cacheTag(result),
 			fmt.Sprintf("%q could not be ordered against the current %s; check the parser configuration",
 				result.CandidateVersion, result.CurrentVersion)
+	case conditionHeld:
+		return "held" + cacheTag(result), result.Held
 	case conditionUpdate:
 		return "update" + cacheTag(result), ""
 	default:
