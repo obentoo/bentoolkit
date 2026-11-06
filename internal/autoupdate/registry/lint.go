@@ -37,16 +37,14 @@ const RecordEndMarker = "# END"
 // it names WHO wrote the `enabled = false` beside it. Both were placed while no
 // record carried them, so their positions cost nothing now and churn later.
 //
-// `min_age_days` and `published_path` sit right after `select`: select is the
-// last field deciding WHICH upstream version is the candidate, and the age gate
-// decides whether that candidate may be taken. Placed while one record used them.
-//
 // It covers every `toml:` tag of PackageConfig exactly once, as
 // TestCanonicalFieldOrderCoversPackageConfig pins; `binary` (no struct field, the
 // classifier is `type`) is absent. Read-only: canonicalFieldRank is built from it.
 var CanonicalFieldOrder = []string{
 	"enabled", "disabled_by", "hold", "track",
 	"url", "mirrors", "parser", "path", "pattern", "selector", "xpath", "script",
+	// The age gate follows select: select picks the candidate, the gate decides
+	// whether it may be taken.
 	"transform", "select", "min_age_days", "published_path", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
