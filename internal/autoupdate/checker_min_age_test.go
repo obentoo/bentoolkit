@@ -15,12 +15,12 @@ import (
 	"time"
 )
 
-// Story 069: a packages.toml record that sets min_age_days and published_path
+// A packages.toml record that sets min_age_days and published_path
 // holds a candidate younger than the age, reading its publication time from
-// the same upstream response the version came from (R1.1–R1.4, R2.1, R2.2).
+// the same upstream response the version came from.
 //
 // The records are written as TOML and loaded by NewChecker, so the contract
-// these tests pin is the two keys the story names, not the Go field names
+// these tests pin is the two TOML keys, not the Go field names
 // behind them. The clock is injected, so the seven-day arithmetic is exact.
 //
 // The fixtures are npm-shaped on purpose: npm's `time` map is keyed by the
@@ -181,7 +181,7 @@ func minAgeSetup(t *testing.T, body string, records func(url string) []string) (
 
 func minAgeGated(url string) []string { return []string{minAgeRecord(minAgePkg, url, true)} }
 
-// expectHeld asserts R1.2: the current version is kept and nothing is queued.
+// expectHeld asserts a hold: the current version is kept and nothing is queued.
 func (o minAgeOutcome) expectHeld(t *testing.T) {
 	t.Helper()
 	if o.result.CurrentVersion != minAgeCurrent {
@@ -192,7 +192,7 @@ func (o minAgeOutcome) expectHeld(t *testing.T) {
 	}
 }
 
-// expectHeldReport asserts R1.2's report line, to the day of both times.
+// expectHeldReport asserts the hold's report line, to the day of both times.
 func (o minAgeOutcome) expectHeldReport(t *testing.T, published, eligible time.Time) {
 	t.Helper()
 	re := regexp.MustCompile(`held by min_age_days: ` + regexp.QuoteMeta(minAgeLatest) +
@@ -215,7 +215,7 @@ func (o minAgeOutcome) expectQueued(t *testing.T, version string) {
 	}
 }
 
-// TestCheckPackage_MinAgeHoldsYoungCandidate pins R1.1 and R1.2: a candidate
+// TestCheckPackage_MinAgeHoldsYoungCandidate pins the hold itself: a candidate
 // published one day ago is held, the report gives its publication time and
 // the time it becomes eligible, and the cache-hit path holds it too.
 func TestCheckPackage_MinAgeHoldsYoungCandidate(t *testing.T) {
@@ -254,7 +254,7 @@ func TestCheckPackage_MinAgeHoldsYoungCandidate(t *testing.T) {
 	})
 }
 
-// TestCheckPackage_MinAgeProceedsWhenOldEnough pins R1.3: a candidate at least
+// TestCheckPackage_MinAgeProceedsWhenOldEnough pins the pass: a candidate at least
 // min_age_days old is queued exactly as a record without the keys queues it.
 func TestCheckPackage_MinAgeProceedsWhenOldEnough(t *testing.T) {
 	// The neighbours are young: a lookup that resolves the wrong key would
@@ -284,7 +284,7 @@ func TestCheckPackage_MinAgeProceedsWhenOldEnough(t *testing.T) {
 	})
 }
 
-// TestCheckPackage_MinAgeHoldsWhenPublishedTimeUnreadable pins R1.4: no time,
+// TestCheckPackage_MinAgeHoldsWhenPublishedTimeUnreadable pins the doubt: no time,
 // or one that does not parse, is a too-young candidate, and the report says so.
 func TestCheckPackage_MinAgeHoldsWhenPublishedTimeUnreadable(t *testing.T) {
 	old := minAgeNow.Add(-90 * minAgeDay)
@@ -312,7 +312,7 @@ func TestCheckPackage_MinAgeHoldsWhenPublishedTimeUnreadable(t *testing.T) {
 	}
 }
 
-// TestCheckPackage_MinAgeNeverStepsDown pins R2.1: when the latest version is
+// TestCheckPackage_MinAgeNeverStepsDown pins that the gate never steps down: when the latest version is
 // too young, an older release newer than the current one is not bumped to,
 // however old it is; the run keeps the current version and names the latest.
 func TestCheckPackage_MinAgeNeverStepsDown(t *testing.T) {
@@ -331,7 +331,7 @@ func TestCheckPackage_MinAgeNeverStepsDown(t *testing.T) {
 	out.expectHeldReport(t, published, published.Add(7*minAgeDay))
 }
 
-// TestCheckPackage_MinAgeBumpsHeldVersionOnLaterRun pins R2.2: the publication
+// TestCheckPackage_MinAgeBumpsHeldVersionOnLaterRun pins the release: the publication
 // time does not move, the clock does, and the run that finds the held version
 // old enough queues it.
 func TestCheckPackage_MinAgeBumpsHeldVersionOnLaterRun(t *testing.T) {
@@ -348,7 +348,7 @@ func TestCheckPackage_MinAgeBumpsHeldVersionOnLaterRun(t *testing.T) {
 	run.check(t, minAgePkg, true).expectQueued(t, minAgeLatest)
 }
 
-// TestCheckPackage_MinAgeIsPerRecord pins R1.5 beside the gate: in one
+// TestCheckPackage_MinAgeIsPerRecord pins that a record without the keys is unchanged: in one
 // registry, the record without the keys bumps the same young candidate the
 // gated record holds — the gate neither leaks to it nor is lost to it.
 func TestCheckPackage_MinAgeIsPerRecord(t *testing.T) {
