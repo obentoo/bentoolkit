@@ -32,6 +32,10 @@ const RecordEndMarker = "# END"
 // not "tidy" it: every edit is a churn bill payable in records, so change it only
 // with a fresh measurement in hand.
 //
+// `cooldown_with` and `cooldown_exempt` follow `published_path`: like the age
+// gate, they decide what happens to a version once it is found. They were placed
+// while no record carried them, so their position costs no reordering now.
+//
 // `patched` sits right after `type` because both classify the PACKAGE rather
 // than describe how to probe it, and `disabled_by` right after `enabled` because
 // it names WHO wrote the `enabled = false` beside it. Both were placed while no
@@ -45,7 +49,8 @@ var CanonicalFieldOrder = []string{
 	"url", "mirrors", "parser", "path", "pattern", "selector", "xpath", "script",
 	// The age gate follows select: select picks the candidate, the gate decides
 	// whether it may be taken.
-	"transform", "select", "min_age_days", "published_path", "suffix", "suffix_when",
+	"transform", "select", "min_age_days", "published_path",
+	"cooldown_with", "cooldown_exempt", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
 	"headers", "timeout", "meta", "type", "patched", "series",
@@ -217,6 +222,12 @@ func LintPackagesConfig(log *slog.Logger, overlayPath string) ([]LintIssue, erro
 		issues = append(issues, LintIssue{
 			Rule:    LintAmbiguousEntries,
 			Message: derr.Error(),
+		})
+	}
+	if gerr := validateCooldownGroups(cfg.Packages); gerr != nil {
+		issues = append(issues, LintIssue{
+			Rule:    LintInvalidConfig,
+			Message: gerr.Error(),
 		})
 	}
 
