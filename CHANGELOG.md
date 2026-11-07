@@ -9,6 +9,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **A minimum release age for an autoupdate record.** `min_age_days` and
+  `published_path` hold a candidate younger than the age: `--check` keeps the
+  current version, reports the package as `held` with the release's
+  publication time and when it becomes eligible, and queues nothing. The time
+  is read from the response the version came from (`"time.{version}"` on npm),
+  and a missing or unparseable one holds rather than passes. The gate never
+  steps down to an older release, and the first run after the candidate ages
+  in bumps it with no edit. The two fields only work as a pair, and `--lint`
+  names the missing half.
+
 ### Changed
 
 - **`--help` shows boolean flags as `--name[=true|false]`.** pflag v1.1.0
