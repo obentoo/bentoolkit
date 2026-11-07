@@ -22,15 +22,15 @@ require (
 	github.com/charmbracelet/x/ansi v0.11.9
 	github.com/charmbracelet/x/exp/teatest v0.0.0-20261101151554-27ecf3e4d454
 	github.com/charmbracelet/x/term v0.2.2
-	github.com/chromedp/cdproto v0.159.0
-	github.com/chromedp/chromedp v0.21.1
+	github.com/chromedp/cdproto v0.159.2
+	github.com/chromedp/chromedp v0.23.0
 	github.com/fatih/color v1.19.0
 	github.com/godbus/dbus/v5 v5.2.4
 	github.com/leanovate/gopter v0.2.11
 	github.com/muesli/termenv v0.16.0
 	github.com/sony/gobreaker v1.0.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	go.uber.org/goleak v1.3.0
 	go.yaml.in/yaml/v3 v3.0.6
 	golang.org/x/time v0.16.0
@@ -56,7 +56,7 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
-	github.com/xo/terminfo v1.3.0 // indirect
+	github.com/xo/terminfo v1.3.1 // indirect
 	golang.org/x/mod v0.42.0 // indirect
 	golang.org/x/net v0.62.0 // indirect
 	golang.org/x/sync v0.24.0 // indirect
