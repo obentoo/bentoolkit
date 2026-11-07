@@ -43,7 +43,9 @@ const RecordEndMarker = "# END"
 var CanonicalFieldOrder = []string{
 	"enabled", "disabled_by", "hold", "track",
 	"url", "mirrors", "parser", "path", "pattern", "selector", "xpath", "script",
-	"transform", "select", "suffix", "suffix_when",
+	// The age gate follows select: select picks the candidate, the gate decides
+	// whether it may be taken.
+	"transform", "select", "min_age_days", "published_path", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
 	"headers", "timeout", "meta", "type", "patched", "series",

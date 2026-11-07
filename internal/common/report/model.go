@@ -232,6 +232,10 @@ type PackageResult struct {
 	// Always a key, like every field here: an absent key could not be told from
 	// an unanswered one.
 	Requirements []Requirement `json:"requirements"`
+	// Held is the report line of a candidate the record's min_age_days gate
+	// kept back: newer than the current version, too young to take, and not
+	// queued. Empty when no gate held it.
+	Held string `json:"held"`
 }
 
 // Requirement is one package a bump requires and whether its version is

@@ -149,3 +149,148 @@ func TestCanonicalFieldOrderCoversPackageConfig(t *testing.T) {
 		t.Error("CanonicalFieldOrder lists the retired key binary; type is the classifier")
 	}
 }
+
+// TestLintMinAgeFieldPair pins that min_age_days and published_path only work
+// as a pair. Either alone is a gate that cannot decide: an age with no place to
+// read the publication time from, or a place to read it with no age to compare
+// against. The lint must name the half that is missing, because the half that
+// is present is the one the maintainer already typed.
+func TestLintMinAgeFieldPair(t *testing.T) {
+	const pkg = "dev-util/x"
+	record := func(body string) string {
+		return `["` + pkg + `"]
+url = "https://example.com/api"
+parser = "json"
+path = "dist-tags.latest"
+` + body + `comments = """
+x — a test record.
+"""
+# END
+`
+	}
+	tests := []struct {
+		name    string
+		body    string
+		missing string // "" means the record must lint clean
+	}{
+		{"min_age_days alone", "min_age_days = 7\n", "published_path"},
+		{"published_path alone", "published_path = \"time.{version}\"\n", "min_age_days"},
+		{"both", "min_age_days = 7\npublished_path = \"time.{version}\"\n", ""},
+		{"neither", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			issues, err := LintPackagesConfig(nil, writeRegistry(t, record(tc.body)))
+			if err != nil {
+				t.Fatalf("LintPackagesConfig: %v", err)
+			}
+			if tc.missing == "" {
+				if len(issues) != 0 {
+					t.Fatalf("record reported: %v", issues)
+				}
+				return
+			}
+			var found bool
+			for _, iss := range issues {
+				if iss.Package == pkg && iss.Rule == LintInvalidConfig && strings.Contains(iss.Message, tc.missing) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("no %s issue naming %q; got %v", LintInvalidConfig, tc.missing, issues)
+			}
+		})
+	}
+}
+
+// TestLintMinAgeFieldOrder pins where the pair sits: right after select, the
+// last field that decides WHICH upstream version is the candidate, because the
+// age gate decides whether that candidate may be taken.
+func TestLintMinAgeFieldOrder(t *testing.T) {
+	selectRank, ok := canonicalFieldRank["select"]
+	if !ok {
+		t.Fatal("select is not ranked")
+	}
+	if got := canonicalFieldRank["min_age_days"]; got != selectRank+1 {
+		t.Errorf("min_age_days rank = %d, want %d (right after select)", got, selectRank+1)
+	}
+	if got := canonicalFieldRank["published_path"]; got != selectRank+2 {
+		t.Errorf("published_path rank = %d, want %d (right after min_age_days)", got, selectRank+2)
+	}
+
+	outOfOrder := `["dev-util/x"]
+url = "https://example.com/api"
+parser = "json"
+path = "dist-tags.latest"
+published_path = "time.{version}"
+min_age_days = 7
+comments = """
+x — a test record.
+"""
+# END
+`
+	var flagged bool
+	for _, iss := range LintRecordModel(outOfOrder) {
+		if iss.Rule == LintFieldOrder && iss.Package == "dev-util/x" {
+			flagged = true
+		}
+	}
+	if !flagged {
+		t.Error("published_path before min_age_days was not flagged as out of order")
+	}
+}
+
+// TestValidateMinAgeDaysNegative pins that a negative age is refused, naming
+// the record: it can only be a typo, and read literally it would make every
+// candidate old enough — the gate silently off.
+func TestValidateMinAgeDaysNegative(t *testing.T) {
+	cfg := PackageConfig{
+		URL: "https://example.com/api", Parser: "json", Path: "dist-tags.latest",
+		MinAgeDays: -1, PublishedPath: "time.{version}",
+	}
+	err := ValidatePackageConfig(nil, "dev-util/x", &cfg)
+	if err == nil {
+		t.Fatal("min_age_days = -1 was accepted")
+	}
+	if !strings.Contains(err.Error(), "dev-util/x") || !strings.Contains(err.Error(), "min_age_days") {
+		t.Errorf("error does not name the record and the field: %v", err)
+	}
+}
+
+// TestValidatePublishedPathNeedsJSON pins that the gate is refused on a record
+// whose response is not a JSON document: published_path could never be
+// navigated there, so every candidate would be held forever with no error.
+func TestValidatePublishedPathNeedsJSON(t *testing.T) {
+	cfg := PackageConfig{
+		URL: "https://example.com/", Parser: "regex", Pattern: `v(\d+)`,
+		MinAgeDays: 7, PublishedPath: "time.{version}",
+	}
+	err := ValidatePackageConfig(nil, "dev-util/x", &cfg)
+	if err == nil || !strings.Contains(err.Error(), "published_path") {
+		t.Fatalf("published_path on a regex record: got %v, want an error naming published_path", err)
+	}
+}
+
+// TestValidatePublishedPathSyntax pins that a malformed published_path is
+// refused when the registry loads rather than holding every candidate at fetch
+// time, and that the "{version}" placeholder is valid member text.
+func TestValidatePublishedPathSyntax(t *testing.T) {
+	base := PackageConfig{URL: "https://example.com/api", Parser: "json", Path: "dist-tags.latest", MinAgeDays: 7}
+	for path, ok := range map[string]bool{
+		"time.{version}":   true,
+		"published_at":     true,
+		"[0].published_at": true,
+		"time..{version}":  false,
+		"time.":            false,
+	} {
+		cfg := base
+		cfg.PublishedPath = path
+		err := ValidatePackageConfig(nil, "dev-util/x", &cfg)
+		if ok && err != nil {
+			t.Errorf("published_path %q refused: %v", path, err)
+		}
+		if !ok && (err == nil || !strings.Contains(err.Error(), "published_path")) {
+			t.Errorf("published_path %q: got %v, want an error naming published_path", path, err)
+		}
+	}
+}

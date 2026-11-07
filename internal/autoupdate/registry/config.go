@@ -219,6 +219,21 @@ type PackageConfig struct {
 	// "last" = last match. Requires a parser that can extract a list
 	// (json/regex/html); ignored by the "script" parser.
 	Select string `toml:"select,omitempty"`
+	// MinAgeDays is the minimum age, in days, an upstream release must reach
+	// before the checker offers it as a bump. A younger candidate is held: the
+	// current version is kept, the hold is reported, and nothing is queued. It
+	// exists so a dependency is not adopted in the first days after it ships,
+	// which is when a compromised or broken release is usually caught and
+	// pulled. Zero/absent means no gate. It works only beside PublishedPath.
+	MinAgeDays int `toml:"min_age_days,omitempty"`
+	// PublishedPath is the JSON path, in the SAME response the version came
+	// from, to the candidate's publication time (RFC 3339). "{version}" is
+	// replaced by the candidate, and that segment is read as one literal key
+	// even when the version holds dots: npm's registry document answers
+	// "time.{version}" with time["2.1.310"]. A missing or unparseable time
+	// holds the candidate, because an age that cannot be read cannot be shown
+	// to be old enough. It works only beside MinAgeDays.
+	PublishedPath string `toml:"published_path,omitempty"`
 
 	// Suffix is the Gentoo version suffix (_alpha, _beta, _pre, _rc, _p, each
 	// optionally numbered) appended to the detected version, declaring that what
@@ -1312,6 +1327,9 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if err := validateFallback(pkg, cfg); err != nil {
 		return err
 	}
+	if err := validateMinAge(pkg, cfg); err != nil {
+		return err
+	}
 
 	// The [meta] map is free-form except for the fetch_* namespace, which the
 	// applier reads as a typed sub-schema. Every key inside a map[string]string
@@ -1854,4 +1872,34 @@ func (cfg PackageConfig) UpstreamURLs() []string {
 		}
 	}
 	return urls
+}
+
+// validateMinAge checks the age gate's two fields, which only work as a pair:
+// an age with nowhere to read the publication time, or a place to read it with
+// no age to compare against, is a gate that cannot decide. The error names the
+// half that is missing, since the half present is the one already typed.
+func validateMinAge(pkg string, cfg *PackageConfig) error {
+	// A negative age can only be a typo, and read literally it would make every
+	// candidate old enough — the gate silently off.
+	if cfg.MinAgeDays < 0 {
+		return fmt.Errorf("package %s: min_age_days must be >= 0, got %d", pkg, cfg.MinAgeDays)
+	}
+	switch {
+	case cfg.MinAgeDays > 0 && cfg.PublishedPath == "":
+		return fmt.Errorf("package %s: min_age_days is set but published_path is missing: the gate has nowhere to read the publication time", pkg)
+	case cfg.MinAgeDays == 0 && cfg.PublishedPath != "":
+		return fmt.Errorf("package %s: published_path is set but min_age_days is missing: the gate has no age to compare against", pkg)
+	case cfg.PublishedPath != "" && cfg.Parser != "json":
+		// The time is read from the response the version came from, and only a
+		// json parser leaves a document to navigate.
+		return fmt.Errorf("package %s: published_path needs parser = \"json\", got %q", pkg, cfg.Parser)
+	}
+	if cfg.PublishedPath != "" {
+		// "{version}" is ordinary member text to the grammar, so the path is
+		// checked as written and the version substituted only when it is read.
+		if _, err := jsonpath.Parse(cfg.PublishedPath); err != nil {
+			return fmt.Errorf("package %s: published_path: %w", pkg, err)
+		}
+	}
+	return nil
 }

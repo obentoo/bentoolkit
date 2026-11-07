@@ -109,6 +109,10 @@ type CheckResult struct {
 	// update, in atom order; nil for a record without requires or a bump that
 	// was held.
 	Requirements []RequirementState
+	// HeldBy is the report line of a candidate the record's min_age_days gate
+	// held: newer than the current version, too young to take. HasUpdate stays
+	// true — upstream IS newer — and nothing was queued. Empty when no gate held.
+	HeldBy string
 }
 
 // RequirementState is whether the version a bump requires is available yet.
@@ -329,6 +333,9 @@ type Checker struct {
 	// tokenErrSink, when non-nil, receives the GitHub token resolution error in
 	// place of the checker's own warning. Set via WithGitHubTokenErrorSink.
 	tokenErrSink func(error)
+
+	// nowFunc is the clock the min_age_days gate reads; nil means time.Now.
+	nowFunc func() time.Time
 }
 
 // logger returns the checker's logger, or a discarding one for a checker that
@@ -999,6 +1006,13 @@ func (c *Checker) checkUpstream(ctx context.Context, pkg string, pkgConfig *regi
 // nothing is recorded; the returned error is addToPending's alone, so each
 // caller keeps its own rule for whether it may replace result.Error.
 func (c *Checker) queueUpdate(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion, newVersion string, result *CheckResult) error {
+	// The age gate runs first: a held candidate needs none of the auxiliary
+	// reads below, and must not leave a pending entry behind.
+	if held := c.minAgeHold(ctx, pkgConfig, newVersion); held != "" {
+		result.HeldBy = held
+		c.logger().Info("update held by min_age_days", "package", pkg, "version", newVersion, "reason", held)
+		return nil
+	}
 	sha := c.resolveAuxSHA(ctx, pkgConfig, result)
 	aux := c.resolveAuxValue(ctx, pkgConfig, result)
 	reqs, reqErr := c.resolveRequirements(ctx, pkg, pkgConfig, result)
