@@ -101,7 +101,7 @@ Examples:
 	// NO BACK-QUOTE IN THE SENTENCE BELOW, and that is load-bearing rather than
 	// stylistic: pflag reads the first back-quoted substring of a usage string as
 	// the flag's VALUE PLACEHOLDER and prints it after the flag name
-	// (UnquoteUsage, flag.go:594; FlagUsagesWrapped, flag.go:725). Quoting
+	// (pflag.UnquoteUsage; pflag.FlagUsagesWrapped). Quoting
 	// jq '.kind' here made --help advertise "--json jq '.kind'" on a boolean that
 	// rejects every argument — and stripped the quotes out of the sentence anyway,
 	// so it bought nothing and cost the flag its own signature. The damage exists

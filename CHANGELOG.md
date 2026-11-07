@@ -9,6 +9,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **`--help` shows boolean flags as `--name[=true|false]`.** pflag v1.1.0
+  renders every plain boolean flag with its explicit-value syntax, so
+  `--quiet` now reads `--quiet[=true|false]`. The flags parse exactly as
+  before: `--quiet` alone still means true. The same bump moves chromedp to
+  v0.23.0, cdproto to v0.159.2 and terminfo to v1.3.1.
+
 ## [0.37.4] - 2026-11-05
 
 ### Fixed

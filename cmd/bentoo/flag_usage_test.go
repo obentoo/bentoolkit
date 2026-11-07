@@ -9,12 +9,18 @@ package main
 //
 // pflag reads the FIRST back-quoted substring of a flag's usage string as that
 // flag's VALUE PLACEHOLDER — the word printed after the flag name in `--help`
-// to tell the operator what argument to supply. UnquoteUsage (pflag@v1.0.10,
-// flag.go:594) scans for a back-quote, takes everything up to the closing one
-// as the placeholder, and strips both quotes out of the sentence; only when no
-// back-quote is present does it fall back to the flag's type, where "bool"
-// means "no placeholder at all". FlagUsagesWrapped (flag.go:725) then appends
-// that placeholder to the line: `      --name` + " " + placeholder.
+// to tell the operator what argument to supply. pflag.UnquoteUsage scans for a
+// back-quote, takes everything up to the closing one as the placeholder, and
+// strips both quotes out of the sentence; only when no back-quote is present
+// does it fall back to the flag's type, where "bool" means "no placeholder at
+// all". pflag.FlagUsagesWrapped then appends that placeholder to the line:
+// `      --name` + " " + placeholder.
+//
+// Since pflag v1.1.0 FlagUsagesWrapped prints `[=true|false]` instead of the
+// placeholder for a flag whose type is exactly "bool", so on a plain Bool the
+// rendered trap is closed upstream. The sweep below still matters: a
+// "boolfunc" flag keeps the old rendering, and the back-quotes are still
+// stripped from the sentence on every flag type.
 //
 // So a back-quote inside a BOOL flag's usage makes `--help` advertise a value
 // the flag does not take. Nothing in the source says so — the registration is
@@ -146,7 +152,7 @@ func TestFlagUsageBoolFlagsAdvertiseNoValuePlaceholder(t *testing.T) {
 	for _, o := range offenders {
 		t.Errorf("`%s --help` renders --%s as if it took a value: it prints `--%s %s`.\n"+
 			"    --%s is a BOOL. pflag's UnquoteUsage reads the first back-quoted substring of a\n"+
-			"    usage string as the flag's value placeholder (pflag flag.go:594) and prints it after\n"+
+			"    usage string as the flag's value placeholder (pflag.UnquoteUsage) and prints it after\n"+
 			"    the flag name, so the back-quotes below are not quoting — they are telling the\n"+
 			"    operator to supply an argument the flag will refuse. They are also stripped out of\n"+
 			"    the sentence itself.\n"+
@@ -156,10 +162,10 @@ func TestFlagUsageBoolFlagsAdvertiseNoValuePlaceholder(t *testing.T) {
 	}
 }
 
-// jsonFlagLine matches the --json entry of a rendered flag block: the flag name
-// and whatever pflag chose to print immediately after it, up to the end of the
-// line.
-var jsonFlagLine = regexp.MustCompile(`(?m)^\s*--json(.*)$`)
+// jsonFlagLine matches the --json entry of a rendered flag block: the flag name,
+// the `[=true|false]` suffix pflag v1.1.0+ prints after every plain Bool, and
+// whatever pflag chose to print after that, up to the end of the line.
+var jsonFlagLine = regexp.MustCompile(`(?m)^\s*--json(?:\[=true\|false\])?(.*)$`)
 
 // TestFlagUsageOverlayValidateJSONRendersAsABoolean is the user-visible half:
 // it reads the help text an operator would actually see, through the same
@@ -171,12 +177,13 @@ var jsonFlagLine = regexp.MustCompile(`(?m)^\s*--json(.*)$`)
 // one would still catch a rendering change in a future pflag that made the
 // placeholder appear by some other route.
 //
-// What it asserts: after `--json` the line must continue with the column gap,
-// not with a word. pflag writes `      --json` + " " + placeholder when there is
-// one, and pads with at least three spaces before the description when there is
-// not (flag.go:766 — one space, at least one padding space, one more space). So
-// "two or more spaces after --json" separates the two renderings with room to
-// spare, and does not depend on how wide the block happens to be.
+// What it asserts: after `--json`, and after the `[=true|false]` suffix when
+// pflag prints one, the line must continue with the column gap, not with a
+// word. pflag writes " " + placeholder when there is one, and pads with at
+// least three spaces before the description when there is not (one space, at
+// least one padding space, one more space, in FlagUsagesWrapped). So "two or
+// more spaces next" separates the two renderings with room to spare, and does
+// not depend on how wide the block happens to be.
 func TestFlagUsageOverlayValidateJSONRendersAsABoolean(t *testing.T) {
 	stdout, stderr, code := newTestCLI(t).Run("overlay", "validate", "--help")
 	if code != 0 {
@@ -193,7 +200,7 @@ func TestFlagUsageOverlayValidateJSONRendersAsABoolean(t *testing.T) {
 		t.Errorf("`overlay validate --help` renders --json as `--json%s`.\n"+
 			"    --json is a boolean and takes no argument, but the help advertises one: the token\n"+
 			"    after the flag name is pflag's VALUE PLACEHOLDER, taken from the first back-quoted\n"+
-			"    substring of the flag's usage string (pflag flag.go:594, printed at flag.go:725).\n"+
+			"    substring of the flag's usage string (pflag.UnquoteUsage, printed by FlagUsagesWrapped).\n"+
 			"    An operator reading this line will type a value the flag rejects.\n"+
 			"    Remedy: drop the back-quotes from the --json usage string in overlay_validate.go.\n"+
 			"    Rendered block:\n%s",
