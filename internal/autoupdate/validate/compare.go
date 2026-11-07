@@ -48,6 +48,10 @@ const (
 	GateCompile   = "compile"
 	GateInstall   = "install"
 	GateReview    = "review"
+	// GateRequiredUse is outside the ladder too, but it decides: a candidate
+	// that drops an implementation the overlay requires is uninstallable on a
+	// system configured for that implementation, whatever depth it builds to.
+	GateRequiredUse = "required-use"
 )
 
 // Finding is one thing the gate has to say about an ebuild.

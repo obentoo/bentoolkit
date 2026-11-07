@@ -10,7 +10,7 @@ can be wired into scripts and CI:
 | Situation | Code |
 |-----------|------|
 | Success, including "nothing to do" (`overlay commit` or `overlay staged clean` with nothing staged, `overlay compare` on an overlay with no packages, `overlay autoupdate --list` with nothing pending, `version`) | `0` |
-| Any failure a command reports (configuration, git, scan, lock held, write refused, `snapshot hook` without `--install`/`--uninstall`, `overlay manifest` with nothing to update, `overlay autoupdate --lint` with findings) | `1` |
+| Any failure a command reports (configuration, git, scan, lock held, write refused, `snapshot hook` without `--install`/`--uninstall`, `overlay manifest` with nothing to update, `overlay autoupdate --lint` with findings, `overlay targets` with a package lacking a required implementation) | `1` |
 | Usage error: unknown command, unknown flag, wrong argument count, unusable `--ui` | `1` |
 | `overlay validate`: an error finding from a deciding gate, or a `--depth` that does not parse | `1` |
 | `overlay validate`: the selector matches nothing, or the run fails for a reason other than an interruption | `2` |

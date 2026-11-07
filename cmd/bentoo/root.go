@@ -191,6 +191,7 @@ func newOverlayCmd(d *deps) *cobra.Command {
 		newRenameCmd(),
 		newStagedCmd(d),
 		newStatusCmd(),
+		newTargetsCmd(),
 		newValidateCmd(d),
 	)
 

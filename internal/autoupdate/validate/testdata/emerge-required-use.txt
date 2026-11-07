@@ -1,0 +1,13 @@
+
+
+!!! Problem resolving dependencies for =app-editors/vim-9.2.1302::gentoo
+
+!!! The ebuild selected to satisfy "=app-editors/vim-9.2.1302::gentoo" has unmet requirements.
+- app-editors/vim-9.2.1302::gentoo USE="X acl crypt nls python wayland -cscope -debug -gpm -images -lua -minimal -pango -perl -racket -ruby (-selinux) -sound -tcl -terminal -vim-pager" LUA_SINGLE_TARGET="lua5-4 luajit -lua5-1 -lua5-3" PERL_FEATURES="ithreads (-debug) -quadmath" PYTHON_SINGLE_TARGET="-python3_12 -python3_13 -python3_14"
+
+  The following REQUIRED_USE flag constraints are unsatisfied:
+    python? ( exactly-one-of ( python_single_target_python3_12 python_single_target_python3_13 python_single_target_python3_14 ) )
+
+  The above constraints are a subset of the following complete expression:
+    lua? ( exactly-one-of ( lua_single_target_luajit lua_single_target_lua5-1 lua_single_target_lua5-3 lua_single_target_lua5-4 ) ) python? ( exactly-one-of ( python_single_target_python3_12 python_single_target_python3_13 python_single_target_python3_14 ) ) images? ( !minimal ) pango? ( !minimal ) vim-pager? ( !minimal )
+
