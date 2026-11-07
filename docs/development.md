@@ -48,6 +48,13 @@ It prints one PASS/FAIL line per job and keeps every log under
 `~/.local/share/bentoolkit-ci/logs/`. `--status` also posts the verdict on the
 commit as a `local-gate` status.
 
+One gate runs at a time. Every run shares the same VM, so a second gate waits
+on `~/.local/share/bentoolkit-ci/gate.lock` until the first has finished and
+the VM is off, printing `another gate holds … waiting for it to finish`. A
+gate from a checkout older than this lock does not take it; a run that shows
+every `vm:*` job as `FAIL (did not finish)` while every `host:*` job passed
+collided with one, so rerun it.
+
 Create the guest once from an Ubuntu 24.04 cloud image (no root needed, only
 the `libvirt` group):
 

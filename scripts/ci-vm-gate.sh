@@ -30,7 +30,8 @@
 # request on this machine.
 #
 # The VM is shut down 30 s after the gate ends unless
-# ~/.local/share/bentoolkit-ci/hold exists.
+# ~/.local/share/bentoolkit-ci/hold exists. One gate runs at a time: a second
+# one waits on ~/.local/share/bentoolkit-ci/gate.lock.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -74,14 +75,42 @@ fi
 [[ -n "$TOOLCHAIN" ]] || { log "FAIL: go.mod at $SHORT has no toolchain line"; exit 1; }
 log "gating $REF ($SHORT) with $TOOLCHAIN"
 
+# One gate at a time. Every run drives the same VM and the same ~/gate checkout
+# inside it, and its EXIT trap powers that VM off. Two gates started together
+# used to collide: the second failed at `virsh start` (domain already active)
+# and its trap then shut the VM down under the first, so a sound commit went
+# RED with every vm:* job "did not finish". The lock lives on fd 9 until this
+# process exits, which is after shutdown_later has run.
+LOCK_FILE="${GATE_LOCK_FILE:-$STATE_DIR/gate.lock}"
+acquire_gate_lock() {
+  mkdir -p "$(dirname "$LOCK_FILE")"
+  exec 9>>"$LOCK_FILE"
+  if ! flock -n 9; then
+    log "another gate holds $LOCK_FILE; waiting for it to finish"
+    flock 9
+    log "lock acquired"
+  fi
+}
+acquire_gate_lock
+
+# Waits for "shut off" before returning, so the lock is not released to a gate
+# that would find the VM half way through powering down.
 shutdown_later() {
   sleep 30
   if [[ -f "$STATE_DIR/hold" ]]; then
     log "VM kept on ($STATE_DIR/hold exists)"
     return
   fi
-  virsh --connect "$CONN" shutdown "$VM" >/dev/null 2>&1 && log "VM shutdown requested"
+  virsh --connect "$CONN" shutdown "$VM" >/dev/null 2>&1 || return 0
+  log "VM shutdown requested"
+  for _ in $(seq 60); do
+    [[ "$(vm_state)" == "shut off" ]] && return 0
+    sleep 2
+  done
+  log "WARN $VM still not shut off after 120 s"
 }
+# Installed only once the lock is held: a gate still waiting for the lock must
+# never be the one that powers the VM off.
 trap shutdown_later EXIT
 
 # 1. VM up, and its address from the libvirt DHCP lease.
