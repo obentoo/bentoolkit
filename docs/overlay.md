@@ -454,7 +454,49 @@ that; a piped or scripted run without it prints the diff and writes nothing.
 
 The autoupdate system reads version schemas from `packages.toml` in your overlay root, fetches upstream sources, and updates ebuilds when a new version is found.
 
-#### Analyze Package
+#### Required Interpreter Targets
+
+An overlay that moves to a new interpreter — `PYTHON_SINGLE_TARGET="python3_15"`
+and nothing else — can no longer install a `python-single-r1` package whose
+`PYTHON_COMPAT` omits it: every `python_single_target_*` flag is off and emerge
+stops with "The following REQUIRED_USE flag constraints are unsatisfied".
+Declare the implementations the overlay requires in `.autoupdate/targets.toml`:
+
+```toml
+[required]
+python_targets = ["python3_15"]
+python_single_target = ["python3_15"]
+# also: lua_targets, lua_single_target, ruby_targets
+
+[[exempt]]
+atom = "dev-python/example"
+groups = ["python_targets"]
+reason = "upstream fails on 3.15: <link>; reopen when it is fixed"
+```
+
+A group a package does not use is never checked, and every exemption needs a
+reason. Two consumers read the file:
+
+```bash
+# Every package whose best visible version (overlay or ::gentoo) lacks one
+bentoo overlay targets
+bentoo overlay targets --all     # every ::gentoo package, not only those the overlay carries
+bentoo overlay targets --json
+```
+
+A row that says `overtaken` means ::gentoo published a higher version than the
+overlay's mirror and that version drops the implementation: Portage picks it,
+so the fix is to bump the mirror. Only versions keyworded `amd64`/`~amd64`
+count; masks are not read. The command exits `1` while any package has a gap.
+
+`overlay autoupdate --apply` runs a `required-use` gate on every staged
+candidate. It **fails** — the bump is not promoted — when the candidate drops
+an implementation a published version of the same package offers. A gap the
+published versions already have is a warning, not a refusal: refusing would
+keep an older version that is no more installable. The gate also reads the
+dependency pre-check: an `emerge -p` refused for a REQUIRED_USE constraint on a
+required group fails the gate instead of counting as "could not be determined".
+
 
 Use an LLM to analyze a package's upstream source and generate an autoupdate schema:
 

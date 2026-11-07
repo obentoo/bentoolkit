@@ -9,6 +9,19 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **Required interpreter targets: `overlay targets` and the `required-use` gate.**
+  Declare in `.autoupdate/targets.toml` the Python, Lua and Ruby implementations
+  the overlay requires (for example `python_single_target = ["python3_15"]`).
+  `bentoo overlay targets` lists every package whose best visible version, across
+  the overlay and ::gentoo, does not offer them — including a mirror ::gentoo
+  overtook with a version that drops one, the case that makes emerge stop with
+  "REQUIRED_USE flag constraints are unsatisfied". `overlay autoupdate --apply`
+  refuses a candidate that drops an implementation a published version offers,
+  and reads an `emerge -p` refused for such a constraint as that failure rather
+  than as "could not be determined".
+
 ## [0.38.0] - 2026-11-06
 
 ### Added

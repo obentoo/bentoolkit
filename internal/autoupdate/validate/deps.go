@@ -251,6 +251,9 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if constraints := requiredUseConstraints(stdout.String() + "\n" + stderr.String()); len(constraints) > 0 {
+			return nil, fmt.Errorf("the pretend resolve of %s failed: %w", spec, &RequiredUseError{Constraints: constraints, cause: err})
+		}
 		return nil, fmt.Errorf("the pretend resolve of %s failed%s: %w", spec, diagnostic(stderr.String()), err)
 	}
 	// The CLEAN atom, matching the spec above: emerge's merge list names the
@@ -580,4 +583,45 @@ func namesPackageUnderTest(spec, atom string) bool {
 	}
 	rest, prefixed := strings.CutPrefix(name, atom+"-")
 	return prefixed && rest != "" && rest[0] >= '0' && rest[0] <= '9'
+}
+
+// requiredUseHeader opens the block in which emerge lists the REQUIRED_USE
+// constraints the selected ebuild does not meet under this host's USE.
+const requiredUseHeader = "The following REQUIRED_USE flag constraints are unsatisfied:"
+
+// RequiredUseError is a pretend resolve that failed because the candidate's
+// REQUIRED_USE cannot be met with this host's USE. It still wraps
+// ErrDependenciesUndetermined through DependenciesSatisfied, so a caller that
+// does not look for it keeps the old answer; one that does can tell it apart
+// from a resolve that merely could not run.
+type RequiredUseError struct {
+	Constraints []string
+	cause       error
+}
+
+func (e *RequiredUseError) Error() string {
+	return "REQUIRED_USE unsatisfied: " + strings.Join(e.Constraints, "; ")
+}
+
+func (e *RequiredUseError) Unwrap() error { return e.cause }
+
+// requiredUseConstraints returns the indented lines under requiredUseHeader, up
+// to the first blank line.
+func requiredUseConstraints(output string) []string {
+	_, rest, found := strings.Cut(output, requiredUseHeader)
+	if !found {
+		return nil
+	}
+	var constraints []string
+	for _, line := range strings.Split(rest, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if len(constraints) > 0 {
+				break
+			}
+			continue
+		}
+		constraints = append(constraints, line)
+	}
+	return constraints
 }

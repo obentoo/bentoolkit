@@ -80,6 +80,7 @@ func cancellableCommands() []string {
 		"overlay push",
 		"overlay staged clean",
 		"overlay status",
+		"overlay targets",
 		"overlay validate",
 		"snapshot apply",
 		"snapshot list",

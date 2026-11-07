@@ -147,6 +147,15 @@ func (a *Applier) runStaticGates(ctx context.Context, cand candidatePaths, pkg, 
 	if !cand.staged {
 		return nil
 	}
+	gates := a.scanStaticGates(ctx, cand, pkg, version)
+	if res, ok := a.requiredUseGate(cand, pkg, version); ok {
+		gates = append(gates, res)
+	}
+	return gates
+}
+
+// scanStaticGates is the validate.Run half of runStaticGates.
+func (a *Applier) scanStaticGates(ctx context.Context, cand candidatePaths, pkg, version string) []validate.GateResult {
 
 	opts := validate.Options{
 		Overlay:  cand.repoRoot,
@@ -720,6 +729,11 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	satisfied, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, deps)
 	switch {
 	case err != nil:
+		if res, ok := a.requiredUseResolveFailure(pkg, version, err); ok {
+			return append(hostDeclinedGates(depth, fmt.Sprintf(
+				"no build phase was run for %s-%s: the pretend resolve refused its REQUIRED_USE (see the %s gate)",
+				pkg, version, validate.GateRequiredUse)), res), nil
+		}
 		// UNDETERMINED. The caller still skips, but must NOT name a missing
 		// dependency, because it does not know of one.
 		//
