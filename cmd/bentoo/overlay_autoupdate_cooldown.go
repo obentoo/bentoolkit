@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -37,12 +38,11 @@ func ebuildExistsFn(overlayPath string) func(pkg, ver string) bool {
 // entry dated in the future and per stale lift, one Info per lift, and one
 // Warn when the installed-package database cannot be read (R3.8). It does not
 // save. A nil block with a nil error is cooldown disabled.
-func (ar *autoupdateRun) sweepCooldown(ctx context.Context, overlayPath, pkgdbRoot string, confirms []cooldown.Confirm) (*cooldown.Block, []cooldown.Lift, error) {
+func sweepCooldown(ctx context.Context, log *slog.Logger, overlayPath, pkgdbRoot string, confirms []cooldown.Confirm) (*cooldown.Block, []cooldown.Lift, error) {
 	block, err := cooldown.Load(overlayPath)
 	if err != nil || block == nil {
 		return nil, nil, err
 	}
-	log := ar.log()
 	inst, err := cooldown.NewPkgdbInstalledContext(ctx, pkgdbRoot)
 	if err != nil {
 		log.Warn("cooldown: release by installation skipped this run", "root", pkgdbRoot, "err", err)
@@ -54,18 +54,18 @@ func (ar *autoupdateRun) sweepCooldown(ctx context.Context, overlayPath, pkgdbRo
 			"since", e.Since.Format(time.RFC3339))
 	}
 	lifts, rest := cooldown.Sweep(block, now, inst, confirms, ebuildExistsFn(overlayPath))
-	logCooldownLifts(ar, lifts)
+	logCooldownLifts(log, lifts)
 	return rest, lifts, nil
 }
 
 // logCooldownLifts logs one Info per lift, and a Warn for a stale one (R8.1).
-func logCooldownLifts(ar *autoupdateRun, lifts []cooldown.Lift) {
+func logCooldownLifts(log *slog.Logger, lifts []cooldown.Lift) {
 	for _, l := range lifts {
 		if l.Reason == cooldown.ReasonStale {
-			ar.log().Warn("cooldown: lifted an entry whose ebuild is gone", "package", l.Package, "version", l.Version, "reason", l.Reason)
+			log.Warn("cooldown: lifted an entry whose ebuild is gone", "package", l.Package, "version", l.Version, "reason", l.Reason)
 			continue
 		}
-		ar.log().Info("cooldown: lifted", "package", l.Package, "version", l.Version, "reason", l.Reason)
+		log.Info("cooldown: lifted", "package", l.Package, "version", l.Version, "reason", l.Reason)
 	}
 }
 
@@ -75,7 +75,7 @@ func logCooldownLifts(ar *autoupdateRun, lifts []cooldown.Lift) {
 // with every promotion that needs an entry refused (R7.3); a failed save
 // stops the run before anything is staged.
 func (ar *autoupdateRun) cooldownApplyStart(ctx context.Context, overlayPath string) (cooldownRun, error) {
-	block, lifts, err := ar.sweepCooldown(ctx, overlayPath, ar.deps.cooldownPkgdbRoot, nil)
+	block, lifts, err := sweepCooldown(ctx, ar.log(), overlayPath, ar.deps.cooldownPkgdbRoot, nil)
 	if err != nil {
 		ar.log().Error("cooldown: the block cannot be read; every promotion that needs an entry is refused this run", "err", err)
 		output.Error.Printf("cooldown: %v\n", err)

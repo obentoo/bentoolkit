@@ -181,6 +181,7 @@ func newOverlayCmd(d *deps) *cobra.Command {
 		newAutoupdateCmd(d),
 		newCommitCmd(),
 		newCompareCmd(d),
+		newCooldownCmd(d),
 		newDiffCmd(),
 		newInitCmd(),
 		newLogCmd(),

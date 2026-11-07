@@ -66,10 +66,10 @@ func (a *Applier) cooldownLocked() (*cooldown.Block, error) {
 	return s.block, s.err
 }
 
-// cooldownGroup is the sorted set {pkg} ∪ cooldown_with joined by ",", or
+// CooldownGroup is the sorted set {pkg} ∪ cooldown_with joined by ",", or
 // empty without cooldown_with. The registry enforces a clique, so every member
 // derives the same string.
-func cooldownGroup(pkg string, cfg registry.PackageConfig) string {
+func CooldownGroup(pkg string, cfg registry.PackageConfig) string {
 	if len(cfg.CooldownWith) == 0 {
 		return ""
 	}
@@ -114,7 +114,7 @@ func (a *Applier) cooldownMask(key, version string, result *ApplyResult) error {
 		Version: version,
 		Since:   a.now().UTC().Truncate(time.Second),
 		Origin:  cooldown.OriginAutoupdate,
-		Group:   cooldownGroup(pkg, cfg),
+		Group:   CooldownGroup(pkg, cfg),
 	}
 	added := block.Add(entry)
 	if err := block.Save(a.overlayPath); err != nil {
