@@ -1742,11 +1742,18 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	// buildApplyReporter wires the reporter into extra (WithApplierReporter), so
 	// the reporter value itself is not needed at this call site.
+	// The cooldown releases what is due before anything is checked (R3.1).
+	cd, err := ar.cooldownApplyStart(ctx, overlayPath)
+	if err != nil {
+		return err
+	}
+
 	extra, finish := ar.buildApplyReporter(applyCtx, cancel, 1)
 	// Every early return closes the batch and restores the terminal through
 	// this; finish is idempotent (func buildApplyReporter), so the explicit
 	// call before the summary below is the one that does the work there.
 	defer finish()
+	extra = append(extra, cd.option)
 
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
@@ -1763,12 +1770,11 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// history stays in scrollback and displayApplyResult prints to a clean line.
 	finish()
 
+	ar.displayApplyResult(result)
+	displayCooldownSummary(cd, []*autoupdate.ApplyResult{result})
 	if err != nil {
-		ar.displayApplyResult(result)
 		return exitWith(1)
 	}
-
-	ar.displayApplyResult(result)
 	return nil
 }
 
@@ -1822,8 +1828,16 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 		return failWith(1, fmt.Errorf("failed to load pending list: %w", err))
 	}
 	updates := pending.List()
+
+	// The cooldown releases what is due before anything is checked (R3.1),
+	// with or without pending updates.
+	cd, err := ar.cooldownApplyStart(ctx, overlayPath)
+	if err != nil {
+		return err
+	}
 	if len(updates) == 0 {
 		ar.log().Info("No pending updates to apply")
+		displayCooldownSummary(cd, nil)
 		return nil
 	}
 
@@ -1856,6 +1870,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	// no claude CLI, and pay the PATH lookup as many times.
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
+	opts = append(opts, cd.option)
 
 	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
@@ -1871,6 +1886,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	finish()
 
 	ar.displayApplyAllResults(results, failures)
+	displayCooldownSummary(cd, results)
 
 	if failures > 0 {
 		return exitWith(1)

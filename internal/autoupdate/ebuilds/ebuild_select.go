@@ -271,6 +271,32 @@ func SelectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebu
 	}
 
 	var best ebuildCandidate
+	for _, c := range lineCandidates(entries, pkgDir, category, pkgName, slot, matcher) {
+		if best.Version == "" || ebuild.CompareVersions(c.Version, best.Version) > 0 {
+			best = c
+		}
+	}
+
+	if best.Version == "" {
+		// The package directory exists (ReadDir succeeded above), so this is
+		// never an orphan. With a filter it is a config error; without one the
+		// directory holds no parsable, non-live ebuild at all.
+		if slot != "" {
+			return ebuildCandidate{}, fmt.Errorf("%w: %s (slot %q)", ErrSlotNotFound, pkg, slot)
+		}
+		if matcher.Active() {
+			return ebuildCandidate{}, fmt.Errorf("%w: %s (series %q)", ErrSeriesNotFound, pkg, series)
+		}
+		return ebuildCandidate{}, fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
+	}
+	return best, nil
+}
+
+// lineCandidates returns the non-live ebuilds of a package directory that
+// belong to one release line: the series matcher on the PV and, when slot is
+// set, the ebuild's SLOT. It is the filter SelectCurrentEbuild picks from.
+func lineCandidates(entries []os.DirEntry, pkgDir, category, pkgName, slot string, matcher seriesMatcher) []ebuildCandidate {
+	var out []ebuildCandidate
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
@@ -293,24 +319,33 @@ func SelectCurrentEbuild(log *slog.Logger, overlayPath, pkg, series string) (ebu
 		if slot != "" && readEbuildSlot(path) != slot {
 			continue
 		}
-		if best.Version == "" || ebuild.CompareVersions(eb.Version, best.Version) > 0 {
-			best = ebuildCandidate{Version: eb.Version, Path: path}
-		}
+		out = append(out, ebuildCandidate{Version: eb.Version, Path: path})
 	}
+	return out
+}
 
-	if best.Version == "" {
-		// The package directory exists (ReadDir succeeded above), so this is
-		// never an orphan. With a filter it is a config error; without one the
-		// directory holds no parsable, non-live ebuild at all.
-		if slot != "" {
-			return ebuildCandidate{}, fmt.Errorf("%w: %s (slot %q)", ErrSlotNotFound, pkg, slot)
-		}
-		if matcher.Active() {
-			return ebuildCandidate{}, fmt.Errorf("%w: %s (series %q)", ErrSeriesNotFound, pkg, series)
-		}
-		return ebuildCandidate{}, fmt.Errorf("%w: %s", ErrNoEbuildFound, pkg)
+// LineVersions lists the non-live versions of the release line a registry key
+// selects from — its ":slot" and its series — with the same filter
+// SelectCurrentEbuild uses. An absent directory lists nothing.
+func LineVersions(log *slog.Logger, overlayPath, key, series string) ([]string, error) {
+	category, pkgName, ok := SplitPkgAtom(key)
+	if !ok {
+		return nil, fmt.Errorf("invalid package name format: %s", key)
 	}
-	return best, nil
+	_, slot := SplitPkgSlot(key)
+	pkgDir := filepath.Join(overlayPath, category, pkgName)
+	entries, err := os.ReadDir(pkgDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("reading %s: %w", pkgDir, err)
+	}
+	var out []string
+	for _, c := range lineCandidates(entries, pkgDir, category, pkgName, slot, NewSeriesMatcher(log, series)) {
+		out = append(out, c.Version)
+	}
+	return out, nil
 }
 
 // RevisionSuffixRegex matches the trailing -rN of a PV.

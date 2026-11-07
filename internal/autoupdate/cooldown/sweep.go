@@ -65,11 +65,17 @@ func (p pkgdbInstalled) HighestFromRepo(pkg, repo string) (string, bool) {
 	return v, ok
 }
 
-// NewPkgdbInstalled reads <root>/var/db/pkg once and answers from that
-// snapshot. A package with no repository record answers for no repository.
+// NewPkgdbInstalled is NewPkgdbInstalledContext without a deadline.
 func NewPkgdbInstalled(root string) (Installed, error) {
+	return NewPkgdbInstalledContext(context.Background(), root)
+}
+
+// NewPkgdbInstalledContext reads <root>/var/db/pkg once and answers from that
+// snapshot; ctx bounds the read. A package with no repository record answers
+// for no repository.
+func NewPkgdbInstalledContext(ctx context.Context, root string) (Installed, error) {
 	dir := filepath.Join(root, strings.TrimPrefix(pkgdb.DefaultRoot, "/"))
-	pkgs, _, err := pkgdb.Read(context.Background(), dir)
+	pkgs, _, err := pkgdb.Read(ctx, dir)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrPkgdbUnreadable, err)
 	}

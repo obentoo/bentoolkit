@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/cooldown"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
@@ -194,6 +195,10 @@ type ApplyResult struct {
 	// CleanWarning records a non-fatal failure of the --clean step (the update
 	// itself still succeeded). Empty on success.
 	CleanWarning string
+	// CooldownAdded holds the cooldown entry this apply added before the
+	// promotion, exactly as written to the block; empty when the version was
+	// already masked, the record is exempt, or the overlay has no block.
+	CooldownAdded []cooldown.Entry
 	// RegistryWarning records a non-fatal failure to write the applied version
 	// back into packages.toml. It is deliberately NOT CleanWarning:
 	// the two report different steps — the pin is written on every successful
@@ -522,6 +527,12 @@ type Applier struct {
 	// operator edited: Apply validates and promotes that tree as it stands
 	// instead of staging a fresh one. Set via WithAdoptedStagedTree.
 	adoptedRoot string
+
+	// cooldown is the run's cooldown block (see applier_cooldown.go), shared
+	// by every promotion of this Applier. Never nil after NewApplier.
+	cooldown *cooldownState
+	// nowFn stamps cooldown entries; nil means time.Now. WithApplierNowFunc.
+	nowFn func() time.Time
 }
 
 // reenabledSet is the set of packages re-enabled after the Applier loaded
@@ -947,6 +958,9 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		opt(applier)
 	}
 	applier.slots = newApplySlots(applier.buildLimit, applier.llmLimit)
+	if applier.cooldown == nil {
+		applier.cooldown = &cooldownState{}
+	}
 
 	// Initialize pending list if not provided
 	if applier.pending == nil {
@@ -1506,6 +1520,9 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 	r.result.DepthReached = reuse.reached
 
 	r.stage("promote")
+	if err := r.a.cooldownMask(r.pkg, r.newVersion, r.result); err != nil {
+		return r.fail(err)
+	}
 	if err := r.a.publishVendorDistfile(ctx, reuse.cand, r.pkg, r.newVersion, r.result.Vendor, r.result); err != nil {
 		return r.result, err
 	}
@@ -1589,6 +1606,12 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 		return r.fail(err)
 	}
 	r.gatesPassed = true
+
+	// Masked before it is published (R1.1); a failure refuses the promotion.
+	// See cooldownMask for why this is not warn-only like completeApply.
+	if err := a.cooldownMask(pkg, r.newVersion, result); err != nil {
+		return r.fail(err)
+	}
 
 	// The published overlay's first and only write of this apply. On the
 	// pre-staging path there is nothing to promote: copyEbuild already put the
@@ -2150,7 +2173,12 @@ func (a *Applier) pruneObsolete(pkg string, result *ApplyResult, reason error) (
 func (a *Applier) cleanPackageDir(ctx context.Context, pkg, newVersion string) (sweepPlan, error) {
 	cfgs, claimed := a.sweepConfigs(pkg, newVersion)
 
-	plan, err := planSweep(a.logger(), a.overlayPath, cfgs, pkg)
+	category, name, _ := ebuilds.SplitPkgAtom(pkg)
+	held, err := a.cooldownHeldFor(category+"/"+name, cfgs)
+	if err != nil {
+		return sweepPlan{}, fmt.Errorf("nothing removed from %s: %w", pkg, err)
+	}
+	plan, err := planSweepHolding(a.logger(), a.overlayPath, cfgs, pkg, held)
 	if err != nil {
 		return sweepPlan{}, fmt.Errorf("cannot plan the sweep of %s: %w", pkg, err)
 	}

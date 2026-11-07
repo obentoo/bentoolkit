@@ -424,11 +424,18 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]regi
 
 	scoped := scopeConfigs(cfgs, atom, category)
 
+	// A block that cannot be read stops the whole sweep: any directory might
+	// hold a masked version or its predecessor.
+	held, err := loadHeldVersions(logging.OrDiscard(log), overlayPath, scoped)
+	if err != nil {
+		return SweepBatch{}, err
+	}
+
 	// One divergence is emitted per unclaimed FILE; several files can share a
 	// directory, so reduce to unique atoms before planning.
 	seen := make(map[string]bool)
 	var atoms, skippedHeld []string
-	for _, d := range Reconcile(log, overlayPath, scoped) {
+	for _, d := range reconcile(logging.OrDiscard(log), overlayPath, scoped, held, true) {
 		if d.Kind != UnclaimedEbuild || seen[d.Key] {
 			continue
 		}
@@ -465,7 +472,7 @@ func PlanOverlaySweep(log *slog.Logger, overlayPath string, cfgs map[string]regi
 
 	batch := SweepBatch{SkippedHeld: skippedHeld}
 	for _, a := range atoms {
-		plan, err := planSweep(log, overlayPath, scoped, a)
+		plan, err := planSweepHolding(log, overlayPath, scoped, a, held[a])
 		if err != nil {
 			// An unreadable directory is a fact about that directory. Report it
 			// and keep planning the rest: refusing the whole batch because one
