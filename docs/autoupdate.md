@@ -305,6 +305,13 @@ package, not just for the maintainer's sweep.
   becomes a bump on the first run after it ages in, with no edit. Use it for a
   dependency that must not be adopted in the first days after it ships, when a
   broken or compromised release is usually caught and pulled.
+- **The cooldown is not `min_age_days`.** `min_age_days` runs at `--check`,
+  against the *upstream* release date, and keeps a young version out of the
+  queue. The [cooldown](#the-autoupdate-cooldown) runs at `--apply`, against the
+  date the version reached *this overlay*, and lets it in masked. A record can
+  have both: the age gate holds first, and what passes it is still masked for
+  the cooldown's days. They report differently — `held by min_age_days: …` in
+  `--check`, the `Cooldown:` section in `--apply`.
 - **User-Agent** is required by `api.github.com` and `crates.io` — always the
   literal `"bentoo-autoupdate"`. A browser UA is a last resort for a
   Cloudflare-fronted host, and the reason belongs in `comments`.
@@ -459,8 +466,70 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `suffix_when` | Regex gating `suffix`: the suffix is appended only to a version matching it. Omit when the probed URL *is* the pre-release channel. |
 | `min_age_days` | Minimum age, in days, of the upstream release before it is offered as a bump. A younger candidate is kept back: the current version stays, `--check` reports the package as `held` with the line `held by min_age_days: <version> published <time>, eligible <time>`, and nothing is queued. Only the newest version is considered — the gate never steps down to an older release that would pass. Requires `published_path`; absent/`0` means no gate. |
 | `published_path` | JSON path, in the same response the version came from, to the candidate's publication time as an RFC 3339 string. `{version}` is replaced by the candidate and stays one member name even when the version holds dots, so npm's registry document reads `"time.{version}"`. A missing, non-string or unparseable time **holds** the candidate and the report says why. Requires `min_age_days` and `parser = "json"`. |
+| `cooldown_with` | Packages (bare `category/package`, sorted, never the record itself) masked and released **together** with this one by the [cooldown](#the-autoupdate-cooldown): a pair that cannot be installed apart, such as `sys-apps/ai-jail` and `sys-apps/ai-jail-bin`. Every target needs a record, and the relation is a clique — each member lists every other member — so the load and `--lint` fail naming both records of the first missing link. |
+| `cooldown_exempt` | Takes the package out of the [cooldown](#the-autoupdate-cooldown): its promotions land unmasked. The value is the reason and must say one — `cooldown_exempt = ""` fails the load. |
 | `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |
 | `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
+
+#### The autoupdate cooldown
+
+An overlay opts in by carrying a managed block in `profiles/package.mask`.
+From then on every version `--apply` promotes lands **masked** and stays so
+until it is released, so a broken bump never reaches a user's `emerge -u` before
+someone has built it:
+
+```text
+# BEGIN bentoo-cooldown format=1 days=7
+# Managed by `bentoo overlay autoupdate`. Edit with `bentoo overlay cooldown`, never by hand.
+# cooldown since=2026-11-07T07:10:00Z origin=autoupdate group=sys-apps/ai-jail,sys-apps/ai-jail-bin
+=sys-apps/ai-jail-3.2.0
+# cooldown since=2026-11-07T07:10:00Z origin=autoupdate group=sys-apps/ai-jail,sys-apps/ai-jail-bin
+=sys-apps/ai-jail-bin-3.2.0
+# END bentoo-cooldown
+```
+
+- **The block is the switch.** No BEGIN line, no cooldown: an overlay without
+  the block is never touched. `format=1` versions the block — a bentoolkit
+  that meets another format refuses it, naming it — and `days=` (1 to 3650) is
+  the policy. Every entry is two lines, sorted by package then version, and the
+  atom is bare (Portage stamps `::<repo>` on it). Bytes outside the block are
+  never rewritten.
+- **`.autoupdate/cooldown.unmask`** lists the same atoms in `package.unmask`
+  syntax. It is outside `profiles/` on purpose: a host that wants the fresh
+  versions now links it once,
+  `ln -s /var/db/repos/<overlay>/.autoupdate/cooldown.unmask /etc/portage/package.unmask/<overlay>-cooldown`.
+- **Promotion fails closed.** The entry is written *before* the ebuild reaches
+  the overlay. If the block cannot be read or the write fails, the promotion is
+  refused and the rest of the run continues — the one step of `--apply` that is
+  not warn-only, because an unmasked bump is exactly what the cooldown exists to
+  prevent. A record with `cooldown_exempt` needs no entry and is promoted even
+  under a malformed block.
+- **Release rules**, applied at the start of every `--apply` (with or without
+  pending bumps) and by `bentoo overlay cooldown sweep`, each entry once, in this
+  order: **stale** (its ebuild is gone), **manual** (`cooldown confirm`),
+  **installed** (a version at or above it is installed from the overlay's
+  repository in `/var/db/pkg`; an unreadable database skips only this rule, with
+  one warning), **elapsed** (the package's *oldest* entry is `days` old — a newer
+  bump never restarts the clock). A `cooldown_with` group shares one clock and
+  lifts whole; it lifts by installation only when every member is installed.
+- **`--clean` and `sweep` keep what is held**: every masked version, the highest
+  unmasked version below the oldest masked one, and — for each release line
+  (`:slot`, `series`) holding a masked version — that line's own predecessor, so
+  every line keeps something installable while its new version waits. `--check`
+  does not report held versions as unclaimed. A block that cannot be read stops
+  the sweep instead of guessing.
+- **Commands** (`bentoo overlay cooldown …`): `status [--json]` lists the entries
+  and takes no lock; its JSON is an array of objects with exactly `package`,
+  `version`, `since`, `eligible` (RFC 3339 UTC), `group` (array), `origin` and
+  `installed` (bool, or `null` when `/var/db/pkg` cannot be read). `confirm
+  =cat/pkg-N…` releases that version and every older one (a whole group for a
+  grouped package) and fails naming an atom not in the block. `add
+  =cat/pkg-PVR` masks an ebuild already in the overlay (`origin=manual`). `sweep
+  [--dry-run] [--pkgdb-root DIR]` runs the release rules outside an apply. The
+  writing subcommands take the apply's overlay lock and exit 1 naming its holder
+  while an apply runs.
+- Every add and lift is one structured log record (`package`, `version`,
+  `reason`), and `--apply` ends with `Cooldown: N added, M lifted`.
 
 #### Multi-slot packages
 

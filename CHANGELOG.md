@@ -9,6 +9,22 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **An autoupdate cooldown.** An overlay whose `profiles/package.mask` carries
+  a `# BEGIN bentoo-cooldown format=1 days=N` block gets every version
+  `--apply` promotes masked, written before the ebuild lands — a failed write
+  refuses the promotion — and mirrored in `.autoupdate/cooldown.unmask` for
+  hosts that opt in. Each apply first releases what is due: by time (the
+  package's oldest entry, so a newer bump never restarts the clock), by
+  installation from the overlay's repository, by hand, or because the ebuild
+  is gone. `--clean` and the standalone sweep keep every masked version and an
+  installable predecessor per release line. New record fields
+  `cooldown_with` (packages masked and released together) and
+  `cooldown_exempt` (a reason to skip the cooldown), and new commands
+  `bentoo overlay cooldown status [--json]`, `confirm`, `add` and `sweep`.
+  An overlay without the block behaves exactly as before.
+
 ### Fixed
 
 - **`--revivable` no longer reports a commit-tracked orphan ::gentoo already
