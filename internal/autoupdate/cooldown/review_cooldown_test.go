@@ -62,7 +62,11 @@ func TestCooldownReview_AnUngroupedMemberEntryDoesNotSplitTheGroup(t *testing.T)
 	if a, bb := b.Eligible("sys-apps/a"), b.Eligible("sys-apps/b"); !a.Equal(bb) {
 		t.Errorf("Eligible(a) = %s, Eligible(b) = %s; one group, one clock", a, bb)
 	}
-	lifts, _ := cooldown.Sweep(b, mustTime(t, "2026-11-09T00:00:00Z"), nil, nil, everyEbuildExists)
+	// The group waits for its newest member (a, masked 2026-11-04).
+	if lifts, _ := cooldown.Sweep(b, mustTime(t, "2026-11-10T00:00:00Z"), nil, nil, everyEbuildExists); len(lifts) != 0 {
+		t.Errorf("lifts = %v before the newest member aged, want none", lifts)
+	}
+	lifts, _ := cooldown.Sweep(b, mustTime(t, "2026-11-11T00:00:00Z"), nil, nil, everyEbuildExists)
 	if len(lifts) != 2 {
 		t.Errorf("lifts = %v, want both members", lifts)
 	}
@@ -90,7 +94,7 @@ func TestCooldownReview_GroupsWithDifferentStringsStayWhole(t *testing.T) {
 		grouped("c-x/b", "1", mustTime(t, "2026-11-04T00:00:00Z"), "c-x/a,c-x/b"),
 		grouped("c-x/c", "1", mustTime(t, "2026-11-01T00:00:00Z"), "c-x/a,c-x/b,c-x/c"),
 	)
-	if lifts, _ := cooldown.Sweep(b, mustTime(t, "2026-11-09T00:00:00Z"), nil, nil, everyEbuildExists); len(lifts) != 3 {
+	if lifts, _ := cooldown.Sweep(b, mustTime(t, "2026-11-11T00:00:00Z"), nil, nil, everyEbuildExists); len(lifts) != 3 {
 		t.Errorf("elapsed lifts = %v, want the whole group of 3", lifts)
 	}
 	b = blockOf(7,

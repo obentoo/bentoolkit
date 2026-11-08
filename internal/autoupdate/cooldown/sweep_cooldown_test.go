@@ -130,10 +130,10 @@ func blockOf(days int, entries ...cooldown.Entry) *cooldown.Block {
 // TestCooldownSweep_ElapsedLiftsTheWholeQueueAtTheOldestClock: R3.2. The
 // whole queue of a package goes when its OLDEST since is Days old, the
 // boundary is inclusive, and a package one second short stays.
-func TestCooldownSweep_ElapsedLiftsTheWholeQueueAtTheOldestClock(t *testing.T) {
+func TestCooldownSweep_ElapsedLiftsEachVersionOnItsOwnClock(t *testing.T) {
 	b := blockOf(7,
 		entry("sys-apps/foo", "1.0", sweepNow.Add(-day(8))),
-		entry("sys-apps/foo", "1.1", sweepNow.Add(-day(1))), // queued behind 1.0
+		entry("sys-apps/foo", "1.1", sweepNow.Add(-day(1))), // its own clock: 6 days to go
 		entry("sys-apps/bar", "1.0", sweepNow.Add(-day(7))), // exactly due
 		entry("sys-apps/baz", "1.0", sweepNow.Add(-day(7)+time.Second)),
 		entry("sys-apps/qux", "1.0", sweepNow.Add(time.Hour)), // clock skew: in the future
@@ -143,10 +143,9 @@ func TestCooldownSweep_ElapsedLiftsTheWholeQueueAtTheOldestClock(t *testing.T) {
 	expectSweep(t, lifts, rest,
 		map[liftKey]string{
 			{"sys-apps/foo", "1.0"}: "elapsed",
-			{"sys-apps/foo", "1.1"}: "elapsed",
 			{"sys-apps/bar", "1.0"}: "elapsed",
 		},
-		[]liftKey{{"sys-apps/baz", "1.0"}, {"sys-apps/qux", "1.0"}})
+		[]liftKey{{"sys-apps/foo", "1.1"}, {"sys-apps/baz", "1.0"}, {"sys-apps/qux", "1.0"}})
 	if rest != nil && rest.Days != 7 {
 		t.Errorf("remaining block Days = %d, want 7", rest.Days)
 	}
@@ -257,16 +256,25 @@ func TestCooldownSweep_AGroupOfThreeLiftsTogether(t *testing.T) {
 			[]liftKey{{"dev-lang/a-bin", "1.0"}})
 	})
 
-	t.Run("elapsed on the oldest member", func(t *testing.T) {
+	t.Run("not elapsed while a member is still young", func(t *testing.T) {
 		lifts, rest := cooldown.Sweep(groupOfThree(recent, recent, sweepNow.Add(-day(8))), sweepNow, newFakeInstalled(),
+			nil, everyEbuildExists)
+		expectSweep(t, lifts, rest, map[liftKey]string{},
+			[]liftKey{{"dev-lang/a", "1.0"}, {"dev-lang/a-bin", "1.0"}, {"dev-lang/b", "2.0"}, {"dev-lang/c", "3.0"}})
+	})
+
+	t.Run("elapsed on the newest member", func(t *testing.T) {
+		lifts, rest := cooldown.Sweep(groupOfThree(sweepNow.Add(-day(7)), sweepNow.Add(-day(9)), sweepNow.Add(-day(8))), sweepNow, newFakeInstalled(),
 			nil, everyEbuildExists)
 		expectSweep(t, lifts, rest,
 			map[liftKey]string{
 				{"dev-lang/a", "1.0"}: "elapsed",
 				{"dev-lang/b", "2.0"}: "elapsed",
 				{"dev-lang/c", "3.0"}: "elapsed",
+				// Not a member: lifted on its own clock (it shares sinceA).
+				{"dev-lang/a-bin", "1.0"}: "elapsed",
 			},
-			[]liftKey{{"dev-lang/a-bin", "1.0"}})
+			nil)
 	})
 }
 

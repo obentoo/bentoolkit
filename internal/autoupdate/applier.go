@@ -199,6 +199,14 @@ type ApplyResult struct {
 	// promotion, exactly as written to the block; empty when the version was
 	// already masked, the record is exempt, or the overlay has no block.
 	CooldownAdded []cooldown.Entry
+	// CooldownSuperseded lists the masked versions of the same release line
+	// this promotion replaces; completeApply retires them.
+	CooldownSuperseded []string
+	// CooldownRetired lists the superseded versions actually removed.
+	CooldownRetired []string
+	// CooldownSkipped says why the promoted version got no cooldown entry
+	// ("urgent", "same version in ::gentoo", "unkeyworded"), or is empty.
+	CooldownSkipped string
 	// RegistryWarning records a non-fatal failure to write the applied version
 	// back into packages.toml. It is deliberately NOT CleanWarning:
 	// the two report different steps — the pin is written on every successful
@@ -348,6 +356,9 @@ type Applier struct {
 	// warning at the moment of the rename puts it in front of the one person
 	// who does, while the bump is still in their hands.
 	gentooPath string
+	// urgent names the packages (cat/pkg or record key) whose promotion skips
+	// the cooldown this run: a security fix must not wait. WithApplierUrgent.
+	urgent map[string]bool
 
 	// reenabled holds packages re-enabled in packages.toml after this Applier
 	// loaded it (--revive enables an orphan's entry, then applies it). Their
@@ -583,6 +594,21 @@ func WithApplierLogger(l *slog.Logger) ApplierOption {
 func WithApplierPendingList(pending *PendingList) ApplierOption {
 	return func(a *Applier) {
 		a.pending = pending
+	}
+}
+
+// WithApplierUrgent names packages (cat/pkg, or a record key) promoted
+// unmasked by this run: --urgent, for a security fix that must not wait out
+// the cooldown. Each is logged.
+func WithApplierUrgent(pkgs []string) ApplierOption {
+	return func(a *Applier) {
+		if len(pkgs) == 0 {
+			return
+		}
+		a.urgent = make(map[string]bool, len(pkgs))
+		for _, p := range pkgs {
+			a.urgent[p] = true
+		}
 	}
 }
 
@@ -1520,7 +1546,7 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 	r.result.DepthReached = reuse.reached
 
 	r.stage("promote")
-	if err := r.a.cooldownMask(r.pkg, r.newVersion, r.result); err != nil {
+	if err := r.a.cooldownMask(r.pkg, r.newVersion, reuse.cand.ebuildPath, r.result); err != nil {
 		return r.fail(err)
 	}
 	if err := r.a.publishVendorDistfile(ctx, reuse.cand, r.pkg, r.newVersion, r.result.Vendor, r.result); err != nil {
@@ -1609,7 +1635,7 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 
 	// Masked before it is published (R1.1); a failure refuses the promotion.
 	// See cooldownMask for why this is not warn-only like completeApply.
-	if err := a.cooldownMask(pkg, r.newVersion, result); err != nil {
+	if err := a.cooldownMask(pkg, r.newVersion, r.cand.ebuildPath, result); err != nil {
 		return r.fail(err)
 	}
 
@@ -1767,6 +1793,9 @@ func (r *applyRun) promotionRefusal(ctx context.Context) error {
 // Success left true and Error left nil — setting Error would fire the deferred
 // rollback and delete the ebuild this apply just published.
 func (a *Applier) completeApply(ctx context.Context, pkg, newVersion string, result *ApplyResult) {
+	// The line's previous candidate goes only now, past a completed promotion.
+	a.retireSuperseded(ctx, pkg, newVersion, result)
+
 	// Remove the now-applied package from pending.json so `--list` no
 	// longer surfaces it. A Delete failure is a bookkeeping miss, not
 	// an apply failure — log a Warn (through the applier's logger, which tests

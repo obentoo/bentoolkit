@@ -47,8 +47,9 @@ import (
 
 // TestCooldownStatus_JSONIsTheTrayContract: R6.2. A JSON array, one object
 // per entry, with exactly the seven keys; since/eligible are RFC 3339; a
-// grouped entry's eligible time is anchored at its group's OLDEST member
-// (R4.1), not at its own since.
+// grouped entry's eligible time is anchored at its group's NEWEST member: every
+// version keeps its own clock and a group lifts whole, so it waits for the
+// last member to age.
 func TestCooldownStatus_JSONIsTheTrayContract(t *testing.T) {
 	c := newTestCLI(t)
 	t0 := time.Date(2026, 11, 1, 6, 0, 0, 0, time.UTC)
@@ -119,8 +120,8 @@ func TestCooldownStatus_JSONIsTheTrayContract(t *testing.T) {
 		}
 	}
 	week := 7 * 24 * time.Hour
-	check("dev-test/cdj-ai-jail-3.2.0", t1, t0.Add(week), "autoupdate", "dev-test/cdj-ai-jail", "dev-test/cdj-ai-jail-bin")
-	check("dev-test/cdj-ai-jail-bin-3.2.0", t0, t0.Add(week), "autoupdate", "dev-test/cdj-ai-jail", "dev-test/cdj-ai-jail-bin")
+	check("dev-test/cdj-ai-jail-3.2.0", t1, t1.Add(week), "autoupdate", "dev-test/cdj-ai-jail", "dev-test/cdj-ai-jail-bin")
+	check("dev-test/cdj-ai-jail-bin-3.2.0", t0, t1.Add(week), "autoupdate", "dev-test/cdj-ai-jail", "dev-test/cdj-ai-jail-bin")
 	check("dev-test/cdj-freerdp-3.33.0-r1", t2, t2.Add(week), "manual")
 }
 

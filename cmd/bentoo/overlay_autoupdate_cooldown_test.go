@@ -300,3 +300,13 @@ func TestCooldownLog_OnePerApplyStartLift(t *testing.T) {
 		t.Errorf("%d log records with package=dev-test/cdlog-old version=1.0 reason=elapsed, want exactly 1:\n%s", n, data)
 	}
 }
+
+// --urgent names promotions that skip the cooldown; outside --apply and
+// --revive it would silently mean nothing, so it is refused.
+func TestCooldownUrgent_RefusedOutsideApplyAndRevive(t *testing.T) {
+	c := newTestCLI(t)
+	_, stderr, code := c.Run("overlay", "autoupdate", "--check", "--urgent", "dev-libs/foo")
+	if code == 0 || !strings.Contains(stderr, "--urgent only applies to --apply or --revive") {
+		t.Errorf("--check --urgent exited %d, stderr %q; want a refusal naming --apply and --revive", code, stderr)
+	}
+}

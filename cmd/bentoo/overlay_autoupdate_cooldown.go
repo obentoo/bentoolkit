@@ -97,17 +97,40 @@ func displayCooldownSummary(run cooldownRun, results []*autoupdate.ApplyResult) 
 		return
 	}
 	var added []cooldown.Entry
+	var retired, skipped []string
 	for _, r := range results {
-		if r != nil {
-			added = append(added, r.CooldownAdded...)
+		if r == nil {
+			continue
+		}
+		added = append(added, r.CooldownAdded...)
+		for _, v := range r.CooldownRetired {
+			retired = append(retired, "="+cooldownAtomOf(r.Package)+"-"+v)
+		}
+		if r.CooldownSkipped != "" && r.Success {
+			skipped = append(skipped, fmt.Sprintf("=%s-%s (%s)", cooldownAtomOf(r.Package), r.NewVersion, r.CooldownSkipped))
 		}
 	}
 	fmt.Println()
-	output.Header.Printf("Cooldown: %d added, %d lifted\n", len(added), len(run.lifts))
+	output.Header.Printf("Cooldown: %d added, %d replaced, %d lifted, %d unmasked\n", len(added), len(retired), len(run.lifts), len(skipped))
 	for _, e := range added {
-		fmt.Printf("  masked  %s (since %s)\n", e.Atom(), e.Since.UTC().Format(time.RFC3339))
+		fmt.Printf("  masked    %s (since %s)\n", e.Atom(), e.Since.UTC().Format(time.RFC3339))
+	}
+	for _, a := range retired {
+		fmt.Printf("  replaced  %s\n", a)
+	}
+	for _, s := range skipped {
+		fmt.Printf("  unmasked  %s\n", s)
 	}
 	for _, l := range run.lifts {
-		fmt.Printf("  lifted  %s (%s)\n", l.Atom(), l.Reason)
+		fmt.Printf("  lifted    %s (%s)\n", l.Atom(), l.Reason)
 	}
+}
+
+// cooldownAtomOf strips a record key's ":slot" or "@label" to the bare
+// cat/pkg an atom is built from.
+func cooldownAtomOf(key string) string {
+	if c, n, ok := ebuilds.SplitPkgAtom(key); ok {
+		return c + "/" + n
+	}
+	return key
 }

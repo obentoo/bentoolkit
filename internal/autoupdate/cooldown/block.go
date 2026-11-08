@@ -10,6 +10,8 @@
 //	# Managed by `bentoo overlay autoupdate`. Edit with `bentoo overlay cooldown`, never by hand.
 //	# cooldown since=2026-11-07T07:10:00Z origin=autoupdate group=sys-apps/a,sys-apps/b
 //	=sys-apps/a-3.2.0
+//	# cooldown since=2026-11-08T09:00:00Z origin=autoupdate line=app-editors/zed@preview first=2026-11-06T09:00:00Z
+//	=app-editors/zed-1.28.0_pre
 //	# END bentoo-cooldown
 //
 // The presence of the BEGIN line is what enables cooldown for an overlay; an
@@ -50,6 +52,12 @@ const (
 	// FormatVersion is the only block format this package reads and writes.
 	FormatVersion = 1
 
+	// MaxWaitFactor bounds how long a release line can stay masked when every
+	// candidate is replaced before it ages: the line's first entry plus
+	// MaxWaitFactor times its days releases whatever candidate is current.
+	// With days=7 that is 21 days.
+	MaxWaitFactor = 3
+
 	// OriginAutoupdate marks an entry the applier added on promotion.
 	OriginAutoupdate = "autoupdate"
 	// OriginManual marks an entry added by `bentoo overlay cooldown add`.
@@ -67,11 +75,24 @@ type Entry struct {
 	// Version is the full PVR ("1.2.3-r1").
 	Version string
 	// Since is when the version was masked; the release clock starts here.
+	// A candidate that replaces another starts its own clock.
 	Since time.Time
+	// Line is the registry record key ("cat/pkg", "cat/pkg@label",
+	// "cat/pkg:slot") whose release line the entry is the candidate of, or
+	// empty for an entry that belongs to no line (a manual add). A line holds
+	// at most one candidate: Replace supersedes the previous one.
+	Line string
+	// First is when the line's current run of candidates started: the Since
+	// of the first candidate a chain of replacements descends from. It bounds
+	// the wait (MaxWaitFactor). Zero means Since.
+	First time.Time
+	// Days overrides the block's days=N for this entry (a record's
+	// cooldown_days); zero means the block's.
 	// Group is the sorted, comma-joined set {pkg} ∪ cooldown_with, or empty.
 	Group string
 	// Origin is OriginAutoupdate or OriginManual.
 	Origin string
+	Days   int
 }
 
 // Atom returns the entry's package.mask atom, "=cat/pkg-PVR".
@@ -322,7 +343,7 @@ func parseBegin(line string) (int, error) {
 	return n, nil
 }
 
-// parseEntryComment reads "since=<RFC3339> origin=<o> [group=a,b]".
+// parseEntryComment reads "since=<RFC3339> origin=<o> [group=a,b] [line=<record>] [first=<RFC3339>] [days=N]".
 func parseEntryComment(s string) (Entry, error) {
 	var e Entry
 	var hasSince bool
@@ -345,6 +366,20 @@ func parseEntryComment(s string) (Entry, error) {
 			e.Origin = v
 		case "group":
 			e.Group = v
+		case "line":
+			e.Line = v
+		case "first":
+			t, err := time.Parse(time.RFC3339, v)
+			if err != nil {
+				return e, fmt.Errorf("first=%q is not an RFC 3339 time: %w", v, err)
+			}
+			e.First = t.UTC()
+		case "days":
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 1 || n > MaxDays {
+				return e, fmt.Errorf("days=%q must be a whole number of days from 1 to %d", v, MaxDays)
+			}
+			e.Days = n
 		default:
 			return e, fmt.Errorf("unknown `# cooldown` field %q", f)
 		}
@@ -370,6 +405,16 @@ func validateEntry(e Entry) error {
 	}
 	if e.Since.IsZero() {
 		return fmt.Errorf("=%s-%s: no since time", e.Package, e.Version)
+	}
+	if !e.First.IsZero() && e.First.After(e.Since) {
+		return fmt.Errorf("=%s-%s: first %s is after since %s", e.Package, e.Version,
+			e.First.UTC().Format(time.RFC3339), e.Since.UTC().Format(time.RFC3339))
+	}
+	if e.Days < 0 || e.Days > MaxDays {
+		return fmt.Errorf("=%s-%s: days %d must be from 1 to %d", e.Package, e.Version, e.Days, MaxDays)
+	}
+	if e.Line != "" && strings.ContainsAny(e.Line, " \t\n") {
+		return fmt.Errorf("=%s-%s: line %q must not contain whitespace", e.Package, e.Version, e.Line)
 	}
 	if e.Group == "" {
 		return nil
@@ -399,6 +444,15 @@ func (b *Block) render() string {
 		fmt.Fprintf(&sb, "%ssince=%s origin=%s", entryPrefix, e.Since.UTC().Format(time.RFC3339), e.Origin)
 		if e.Group != "" {
 			sb.WriteString(" group=" + e.Group)
+		}
+		if e.Line != "" {
+			sb.WriteString(" line=" + e.Line)
+		}
+		if !e.First.IsZero() && !e.First.Equal(e.Since) {
+			sb.WriteString(" first=" + e.First.UTC().Format(time.RFC3339))
+		}
+		if e.Days != 0 {
+			fmt.Fprintf(&sb, " days=%d", e.Days)
 		}
 		sb.WriteString("\n" + e.Atom() + "\n")
 	}

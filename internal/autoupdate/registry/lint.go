@@ -32,7 +32,7 @@ const RecordEndMarker = "# END"
 // not "tidy" it: every edit is a churn bill payable in records, so change it only
 // with a fresh measurement in hand.
 //
-// `cooldown_with` and `cooldown_exempt` follow `published_path`: like the age
+// `cooldown_with`, `cooldown_exempt` and `cooldown_days` follow `published_path`: like the age
 // gate, they decide what happens to a version once it is found. They were placed
 // while no record carried them, so their position costs no reordering now.
 //
@@ -50,7 +50,7 @@ var CanonicalFieldOrder = []string{
 	// The age gate follows select: select picks the candidate, the gate decides
 	// whether it may be taken.
 	"transform", "select", "min_age_days", "published_path",
-	"cooldown_with", "cooldown_exempt", "suffix", "suffix_when",
+	"cooldown_with", "cooldown_exempt", "cooldown_days", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
 	"headers", "timeout", "meta", "type", "patched", "series",

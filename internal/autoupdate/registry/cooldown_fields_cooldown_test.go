@@ -212,7 +212,7 @@ func TestCooldownFields_FollowPublishedPathInTheCanonicalOrder(t *testing.T) {
 	if !ok {
 		t.Fatal("published_path is not in CanonicalFieldOrder")
 	}
-	for _, f := range []string{"cooldown_with", "cooldown_exempt"} {
+	for _, f := range []string{"cooldown_with", "cooldown_exempt", "cooldown_days"} {
 		r, ok := rank[f]
 		if !ok {
 			t.Errorf("%s is not in CanonicalFieldOrder", f)
@@ -298,5 +298,33 @@ cooldown_with = ["dev-lang/a"]
 	a := back.Packages["dev-lang/a"]
 	if a.CooldownExempt == nil || *a.CooldownExempt != "a reason" || strings.Join(a.CooldownWith, ",") != "dev-lang/b" {
 		t.Errorf("repair changed the values: %+v", a)
+	}
+}
+
+func TestCooldownDays_RangeAndContradiction(t *testing.T) {
+	reason := "security fixes only"
+	for name, tc := range map[string]struct {
+		cfg     PackageConfig
+		wantErr string
+	}{
+		"in range":         {cfg: PackageConfig{CooldownDays: 3}},
+		"unset":            {cfg: PackageConfig{}},
+		"negative":         {cfg: PackageConfig{CooldownDays: -1}, wantErr: "cooldown_days"},
+		"above the bound":  {cfg: PackageConfig{CooldownDays: 3651}, wantErr: "cooldown_days"},
+		"exempt and sized": {cfg: PackageConfig{CooldownDays: 3, CooldownExempt: &reason}, wantErr: "contradict"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := validateCooldownFields("dev-lang/a", &tc.cfg)
+			if tc.wantErr == "" && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+			if tc.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tc.wantErr)) {
+				t.Errorf("error = %v, want one mentioning %q", err, tc.wantErr)
+			}
+		})
+	}
+	cfg := &PackageConfig{URL: "https://example.org/a", Parser: "regex", Pattern: `v([0-9.]+)`, CooldownDays: 3}
+	if text := RenderRecord("dev-lang/a", cfg); !strings.Contains(text, "cooldown_days = 3") {
+		t.Errorf("cooldown_days not rendered:\n%s", text)
 	}
 }

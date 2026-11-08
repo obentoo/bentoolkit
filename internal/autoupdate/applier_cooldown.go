@@ -1,10 +1,14 @@
 package autoupdate
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -80,13 +84,21 @@ func CooldownGroup(pkg string, cfg registry.PackageConfig) string {
 
 // cooldownMask masks the version about to be promoted (R1.1): it runs after
 // the promotion decision and before the candidate reaches the published
-// overlay. An error refuses the promotion.
+// overlay. An error refuses the promotion. ebuildPath is the candidate's
+// ebuild (staged or in place), read for the unkeyworded exemption.
+//
+// The new version is the ONE candidate of its release line — the registry
+// record key, so app-editors/zed@stable and @preview are separate lines. Any
+// other masked version of the same line is SUPERSEDED: it is left masked here
+// and listed on the result, and completeApply retires it (ebuild removed, then
+// entry dropped) only once the promotion completed. Dropping it now would
+// leave the old ebuild visible and unmasked if the promotion failed.
 //
 // This is a DELIBERATE EXCEPTION to completeApply's warn-only rule: a bump
 // published unmasked because its cooldown entry could not be written is the
 // exact failure the cooldown exists to prevent, so here a write error or an
 // unreadable block fails closed (R1.3, R7.3).
-func (a *Applier) cooldownMask(key, version string, result *ApplyResult) error {
+func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyResult) error {
 	cfg := a.configs[key]
 	if cfg.CooldownExempt != nil {
 		return nil // R5.1, even under a malformed block: no entry is needed
@@ -96,6 +108,11 @@ func (a *Applier) cooldownMask(key, version string, result *ApplyResult) error {
 		return fmt.Errorf("cooldown: %q is not a category/package atom", key)
 	}
 	pkg := category + "/" + name
+	if reason := a.cooldownAutoExempt(pkg, key, name, version, ebuildPath); reason != "" {
+		result.CooldownSkipped = reason
+		a.logger().Info("cooldown: promoted unmasked", "package", pkg, "version", version, "reason", reason)
+		return nil
+	}
 
 	a.cooldown.mu.Lock()
 	defer a.cooldown.mu.Unlock()
@@ -109,12 +126,25 @@ func (a *Applier) cooldownMask(key, version string, result *ApplyResult) error {
 	if err := cooldown.ValidateAtom(pkg, version); err != nil {
 		return fmt.Errorf("cooldown: refusing to promote %s-%s: %w", pkg, version, err)
 	}
+	var superseded []string
+	line := block.LineEntries(pkg, key)
+	for _, e := range line {
+		if e.Version != version {
+			superseded = append(superseded, e.Version)
+		}
+	}
 	entry := cooldown.Entry{
 		Package: pkg,
 		Version: version,
 		Since:   a.now().UTC().Truncate(time.Second),
 		Origin:  cooldown.OriginAutoupdate,
 		Group:   CooldownGroup(pkg, cfg),
+		Line:    key,
+		First:   cooldown.LineStart(line),
+		Days:    cfg.CooldownDays,
+	}
+	if !entry.First.IsZero() && entry.First.After(entry.Since) {
+		entry.First = entry.Since
 	}
 	added := block.Add(entry)
 	if err := block.Save(a.overlayPath); err != nil {
@@ -123,12 +153,109 @@ func (a *Applier) cooldownMask(key, version string, result *ApplyResult) error {
 		a.cooldown.err = fmt.Errorf("an earlier cooldown save failed: %w", err)
 		return fmt.Errorf("cooldown: refusing to promote %s-%s unmasked: %w", pkg, version, err)
 	}
+	result.CooldownSuperseded = superseded
 	if added {
 		result.CooldownAdded = append(result.CooldownAdded, entry)
-		a.logger().Info("cooldown: entry added", "package", pkg, "version", version,
-			"eligible", block.Eligible(pkg).UTC().Format(time.RFC3339))
+		a.logger().Info("cooldown: entry added", "package", pkg, "version", version, "line", key,
+			"eligible", block.EntryEligible(entry).UTC().Format(time.RFC3339))
 	}
 	return nil
+}
+
+// cooldownAutoExempt returns why the version needs no cooldown entry, or "".
+//
+//   - --urgent named the package or its record: a security fix must not wait.
+//   - ::gentoo ships the very same version: the overlay copy (a PYTHON_COMPAT
+//     mirror, say) adds no release ::gentoo users do not already get, so
+//     holding it back protects nobody.
+//   - the ebuild carries no KEYWORDS: Portage already refuses it without an
+//     explicit ** acceptance, which is a stronger gate than the cooldown.
+func (a *Applier) cooldownAutoExempt(pkg, key, name, version, ebuildPath string) string {
+	if a.urgent[pkg] || a.urgent[key] {
+		return "urgent"
+	}
+	if a.gentooPath != "" {
+		category, _, _ := ebuilds.SplitPkgAtom(pkg)
+		if _, err := os.Stat(filepath.Join(a.gentooPath, category, name, name+"-"+version+".ebuild")); err == nil {
+			return "same version in ::gentoo"
+		}
+	}
+	if ebuildPath != "" && !ebuildHasKeywords(ebuildPath) {
+		return "unkeyworded"
+	}
+	return ""
+}
+
+// keywordsAssignRe matches an uncommented KEYWORDS assignment with a value.
+var keywordsAssignRe = regexp.MustCompile(`(?m)^[ \t]*KEYWORDS="[^"]*[^"\s][^"]*"`)
+
+// ebuildHasKeywords reports whether the ebuild assigns a non-empty KEYWORDS
+// anywhere outside a comment. A conditional assignment (the usual 9999 /
+// release split) counts. An unreadable ebuild counts as keyworded, so a read
+// failure never turns into a skipped cooldown.
+func ebuildHasKeywords(path string) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return true
+	}
+	return keywordsAssignRe.Match(data)
+}
+
+// retireSuperseded removes the line candidates this promotion superseded:
+// first their ebuilds (and the Manifest's distfiles with them), then their
+// block entries. It runs only after a completed promotion and is warn-only,
+// like the rest of completeApply: a version that could not be removed simply
+// stays masked, and the next apply or sweep retries — its entry is dropped
+// only once its ebuild is gone.
+func (a *Applier) retireSuperseded(ctx context.Context, pkg, newVersion string, result *ApplyResult) {
+	if len(result.CooldownSuperseded) == 0 {
+		return
+	}
+	category, name, ok := ebuilds.SplitPkgAtom(pkg)
+	if !ok {
+		return
+	}
+	atom := category + "/" + name
+	var remove []string
+	for _, v := range result.CooldownSuperseded {
+		if v != newVersion {
+			remove = append(remove, v)
+		}
+	}
+	slices.SortFunc(remove, ebuild.CompareVersions)
+	plan, err := a.sweeper().execute(ctx, atom, sweepPlan{Remove: remove}, newVersion)
+	if err != nil {
+		a.logger().Warn("cooldown: superseded candidate not fully removed; it stays masked",
+			"package", atom, "versions", strings.Join(remove, ","), "err", err)
+	}
+	gone := plan.Remove
+	for _, v := range remove {
+		if _, statErr := os.Stat(a.sweeper().ebuildPath(atom, v)); errors.Is(statErr, os.ErrNotExist) && !slices.Contains(gone, v) {
+			gone = append(gone, v) // already absent: its entry can go too
+		}
+	}
+	if len(gone) == 0 {
+		return
+	}
+	a.cooldown.mu.Lock()
+	defer a.cooldown.mu.Unlock()
+	block, err := a.cooldownLocked()
+	if err != nil || block == nil {
+		return
+	}
+	for _, v := range gone {
+		block.Remove(atom, v)
+	}
+	if err := block.Save(a.overlayPath); err != nil {
+		a.cooldown.err = fmt.Errorf("an earlier cooldown save failed: %w", err)
+		a.logger().Warn("cooldown: superseded entries removed from disk but the block could not be saved; the sweep drops them as stale",
+			"package", atom, "err", err)
+		return
+	}
+	result.CooldownRetired = append(result.CooldownRetired, gone...)
+	for _, v := range gone {
+		a.logger().Info("cooldown: superseded candidate retired", "package", atom, "version", v, "by", newVersion)
+	}
 }
 
 // cooldownHeldFor returns the versions of atom the run's block holds in the

@@ -103,7 +103,7 @@ func cooldownStatusRows(ctx context.Context, log *slog.Logger, block *cooldown.B
 			Package:  e.Package,
 			Version:  e.Version,
 			Since:    e.Since.UTC().Format(time.RFC3339),
-			Eligible: block.Eligible(e.Package).UTC().Format(time.RFC3339),
+			Eligible: block.EntryEligible(e).UTC().Format(time.RFC3339),
 			Group:    []string{},
 			Origin:   e.Origin,
 		}

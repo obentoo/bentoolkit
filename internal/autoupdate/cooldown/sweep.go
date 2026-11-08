@@ -192,7 +192,7 @@ func Sweep(b *Block, now time.Time, inst Installed, confirms []Confirm, exists f
 		b.installedRule(s, inst)
 	}
 	for i, e := range b.Entries {
-		if due := b.eligibleAt(e.Package, now); !now.Before(due) {
+		if due := b.dueAt(e, now); !now.Before(due) {
 			s.claim(i, ReasonElapsed)
 		}
 	}

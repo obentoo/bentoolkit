@@ -183,7 +183,7 @@ func TestCooldownEligible_APrefixNamedPackageKeepsItsOwnClock(t *testing.T) {
 // TestCooldownEligible_AGroupOfThreeSharesTheOldestMemberClock: R4.1 with
 // three members (a pair would not show a member-of-member gap), plus a
 // prefix-named fourth package outside the group with an even older Since.
-func TestCooldownEligible_AGroupOfThreeSharesTheOldestMemberClock(t *testing.T) {
+func TestCooldownEligible_AGroupOfThreeWaitsForItsNewestMember(t *testing.T) {
 	const g = "dev-lang/a,dev-lang/b,dev-lang/c"
 	b := &cooldown.Block{Days: 7}
 	b.Add(grouped("dev-lang/a", "1.0", queueT0.Add(day(2)), g))
@@ -192,10 +192,12 @@ func TestCooldownEligible_AGroupOfThreeSharesTheOldestMemberClock(t *testing.T) 
 	// Hostile third element: not a member, but its name starts with one.
 	b.Add(entry("dev-lang/a-bin", "1.0", queueT0.Add(-day(10))))
 
-	want := queueT0.Add(day(7))
+	// Every version keeps its own clock and a group lifts whole, so the group
+	// waits for its newest member: dev-lang/a, masked at T0+2d.
+	want := queueT0.Add(day(9))
 	for _, pkg := range []string{"dev-lang/a", "dev-lang/b", "dev-lang/c"} {
 		if got := b.Eligible(pkg); !got.Equal(want) {
-			t.Errorf("Eligible(%s) = %s, want %s (oldest since among the group's members)", pkg, got, want)
+			t.Errorf("Eligible(%s) = %s, want %s (newest since among the group's members)", pkg, got, want)
 		}
 	}
 	if got, want := b.Eligible("dev-lang/a-bin"), queueT0.Add(-day(3)); !got.Equal(want) {

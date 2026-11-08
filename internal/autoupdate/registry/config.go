@@ -245,6 +245,9 @@ type PackageConfig struct {
 	// promotions land unmasked. The value is the reason, and it must say one;
 	// the pointer tells an absent key from an empty one, which is an error.
 	CooldownExempt *string `toml:"cooldown_exempt,omitempty"`
+	// CooldownDays overrides, for this record's release line, the days=N of
+	// the overlay's cooldown block (1 to 3650). Zero means the block's.
+	CooldownDays int `toml:"cooldown_days,omitempty"`
 
 	// Suffix is the Gentoo version suffix (_alpha, _beta, _pre, _rc, _p, each
 	// optionally numbered) appended to the detected version, declaring that what

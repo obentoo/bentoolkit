@@ -19,8 +19,9 @@ func sortEntries(es []Entry) {
 }
 
 // Add masks e. It is a no-op returning false when the same Package+Version is
-// already present, so a re-apply keeps the original Since. Since is stored in
-// UTC, truncated to the second the block format records.
+// already present, so a re-apply keeps the original Since. Since and First are
+// stored in UTC, truncated to the second the block format records. Add never
+// supersedes anything; Replace is the line-aware form.
 func (b *Block) Add(e Entry) (added bool) {
 	for _, have := range b.Entries {
 		if have.Package == e.Package && have.Version == e.Version {
@@ -28,9 +29,124 @@ func (b *Block) Add(e Entry) (added bool) {
 		}
 	}
 	e.Since = e.Since.UTC().Truncate(time.Second)
+	if !e.First.IsZero() {
+		e.First = e.First.UTC().Truncate(time.Second)
+	}
 	b.Entries = append(b.Entries, e)
 	sortEntries(b.Entries)
 	return true
+}
+
+// Replace masks e as the one candidate of its release line (e.Line): every
+// other entry of the same package and line is removed and returned as
+// superseded, so a line never accumulates masked versions. The new candidate
+// starts its own clock (Since) but inherits the line's First — the earliest
+// of the superseded entries' — so MaxWaitFactor still bounds how long the
+// line stays masked when upstream releases faster than the cooldown.
+//
+// An entry with no Line is plain Add. Re-adding the version already masked is
+// a no-op (added false, nothing superseded) that keeps its Since.
+func (b *Block) Replace(e Entry) (added bool, superseded []Entry) {
+	if e.Line == "" {
+		return b.Add(e), nil
+	}
+	for _, have := range b.Entries {
+		if have.Package == e.Package && have.Version == e.Version {
+			return false, nil
+		}
+	}
+	first := e.First
+	kept := b.Entries[:0:0]
+	for _, have := range b.Entries {
+		if have.Package == e.Package && have.Line == e.Line {
+			superseded = append(superseded, have)
+			if hf := have.lineStart(); first.IsZero() || hf.Before(first) {
+				first = hf
+			}
+			continue
+		}
+		kept = append(kept, have)
+	}
+	b.Entries = kept
+	e.First = first
+	if !e.First.IsZero() && e.First.After(e.Since) {
+		e.First = e.Since
+	}
+	return b.Add(e), superseded
+}
+
+// LineEntries returns the entries of pkg's release line (Line == line), in
+// block order. An empty line matches nothing: an entry with no line belongs
+// to no line.
+func (b *Block) LineEntries(pkg, line string) []Entry {
+	if line == "" {
+		return nil
+	}
+	var out []Entry
+	for _, e := range b.Entries {
+		if e.Package == pkg && e.Line == line {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
+// LineStart returns the earliest lineStart over es, or the zero time for none:
+// the First a new candidate of the line inherits.
+func LineStart(es []Entry) time.Time {
+	var first time.Time
+	for _, e := range es {
+		if s := e.lineStart(); first.IsZero() || s.Before(first) {
+			first = s
+		}
+	}
+	return first
+}
+
+// Remove drops the entry for pkg-version and reports whether there was one.
+func (b *Block) Remove(pkg, version string) bool {
+	for i, e := range b.Entries {
+		if e.Package == pkg && e.Version == version {
+			b.Entries = append(b.Entries[:i:i], b.Entries[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
+// lineStart is when the entry's line started waiting: First, or Since.
+func (e Entry) lineStart() time.Time {
+	if e.First.IsZero() {
+		return e.Since
+	}
+	return e.First
+}
+
+// days is the entry's release delay: its own override, or the block's.
+func (b *Block) days(e Entry) int {
+	if e.Days > 0 {
+		return e.Days
+	}
+	return b.Days
+}
+
+// entryDue is when e alone is released by time: its own Since plus its days
+// (the clock restarts with every replacement), but never later than the
+// line's First plus MaxWaitFactor times its days. A Since or First after now
+// is read as now (clock skew); a zero now applies no clamp.
+func (b *Block) entryDue(e Entry, now time.Time) time.Time {
+	clamp := func(t time.Time) time.Time {
+		if !now.IsZero() && t.After(now) {
+			return now
+		}
+		return t
+	}
+	d := b.days(e)
+	due := clamp(e.Since).AddDate(0, 0, d)
+	if limit := clamp(e.lineStart()).AddDate(0, 0, MaxWaitFactor*d); limit.Before(due) {
+		due = limit
+	}
+	return due
 }
 
 // groupHas reports whether the comma-joined group lists pkg as a whole member.
@@ -41,8 +157,8 @@ func groupHas(group, pkg string) bool {
 	return slices.Contains(strings.Split(group, ","), pkg)
 }
 
-// clockEntries returns the entries that set pkg's release clock: those of
-// every package released together with it (members), its own included.
+// clockEntries returns the entries released together with e: those of every
+// package in its group (members), its own included.
 func (b *Block) clockEntries(pkg string) []Entry {
 	members := b.members(pkg)
 	var out []Entry
@@ -54,30 +170,41 @@ func (b *Block) clockEntries(pkg string) []Entry {
 	return out
 }
 
-// Eligible returns when pkg is released by time: the oldest Since over the
-// package's entries — and over every member of its group — plus Days. It is
-// the zero time for a package with no entry.
-func (b *Block) Eligible(pkg string) time.Time {
-	return b.eligibleAt(pkg, time.Time{})
+// EntryEligible returns when e is released by time. A grouped entry waits for
+// the whole group: the latest due of its members' entries, so a pair that
+// cannot be installed apart lifts together.
+func (b *Block) EntryEligible(e Entry) time.Time {
+	return b.dueAt(e, time.Time{})
 }
 
-// eligibleAt is Eligible with every Since after now read as now (clock skew);
-// a zero now applies no clamp.
-func (b *Block) eligibleAt(pkg string, now time.Time) time.Time {
-	var oldest time.Time
-	for _, e := range b.clockEntries(pkg) {
-		since := e.Since
-		if !now.IsZero() && since.After(now) {
-			since = now
-		}
-		if oldest.IsZero() || since.Before(oldest) {
-			oldest = since
+// dueAt is EntryEligible with the clock-skew clamp of entryDue.
+func (b *Block) dueAt(e Entry, now time.Time) time.Time {
+	if e.Group == "" && len(b.members(e.Package)) <= 1 {
+		return b.entryDue(e, now)
+	}
+	var due time.Time
+	for _, m := range b.clockEntries(e.Package) {
+		if d := b.entryDue(m, now); d.After(due) {
+			due = d
 		}
 	}
-	if oldest.IsZero() {
-		return oldest
+	return due
+}
+
+// Eligible returns the next time any entry of pkg is released by time: the
+// earliest EntryEligible over its entries. It is the zero time for a package
+// with no entry.
+func (b *Block) Eligible(pkg string) time.Time {
+	var next time.Time
+	for _, e := range b.Entries {
+		if e.Package != pkg {
+			continue
+		}
+		if d := b.EntryEligible(e); next.IsZero() || d.Before(next) {
+			next = d
+		}
 	}
-	return oldest.AddDate(0, 0, b.Days)
+	return next
 }
 
 // Future returns the entries whose Since lies after now. Sweep reads such a

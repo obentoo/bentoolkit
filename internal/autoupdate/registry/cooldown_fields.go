@@ -8,6 +8,10 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 )
 
+// maxCooldownDays mirrors cooldown.MaxDays; registry cannot import the
+// cooldown package (it is the lower layer), so the bound is restated here.
+const maxCooldownDays = 3650
+
 // keyAtom is recordAtom without the well-formedness flag: a malformed key
 // is refused by validatePackageKey, and here it simply matches nothing.
 func keyAtom(key string) string {
@@ -21,6 +25,12 @@ func keyAtom(key string) string {
 func validateCooldownFields(pkg string, cfg *PackageConfig) error {
 	if cfg.CooldownExempt != nil && strings.TrimSpace(*cfg.CooldownExempt) == "" {
 		return fmt.Errorf("package %s: cooldown_exempt must say why the package skips the cooldown", pkg)
+	}
+	if cfg.CooldownDays < 0 || cfg.CooldownDays > maxCooldownDays {
+		return fmt.Errorf("package %s: cooldown_days = %d must be a whole number of days from 1 to %d", pkg, cfg.CooldownDays, maxCooldownDays)
+	}
+	if cfg.CooldownDays != 0 && cfg.CooldownExempt != nil {
+		return fmt.Errorf("package %s: cooldown_days and cooldown_exempt contradict each other: an exempt package has no cooldown to size", pkg)
 	}
 	self := keyAtom(pkg)
 	for i, t := range cfg.CooldownWith {
