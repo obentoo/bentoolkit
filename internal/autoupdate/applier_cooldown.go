@@ -205,7 +205,7 @@ var keywordsAssignRe = regexp.MustCompile(`(?m)^[ \t]*KEYWORDS="[^"]*[^"\s][^"]*
 // release split) counts. An unreadable ebuild counts as keyworded, so a read
 // failure never turns into a skipped cooldown.
 func ebuildHasKeywords(path string) bool {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return true
 	}

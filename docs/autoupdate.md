@@ -468,6 +468,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `published_path` | JSON path, in the same response the version came from, to the candidate's publication time as an RFC 3339 string. `{version}` is replaced by the candidate and stays one member name even when the version holds dots, so npm's registry document reads `"time.{version}"`. A missing, non-string or unparseable time **holds** the candidate and the report says why. Requires `min_age_days` and `parser = "json"`. |
 | `cooldown_with` | Packages (bare `category/package`, sorted, never the record itself) masked and released **together** with this one by the [cooldown](#the-autoupdate-cooldown): a pair that cannot be installed apart, such as `sys-apps/ai-jail` and `sys-apps/ai-jail-bin`. Every target needs a record, and the relation is a clique — each member lists every other member — so the load and `--lint` fail naming both records of the first missing link. |
 | `cooldown_exempt` | Takes the package out of the [cooldown](#the-autoupdate-cooldown): its promotions land unmasked. The value is the reason and must say one — `cooldown_exempt = ""` fails the load. |
+| `cooldown_days` | The [cooldown](#the-autoupdate-cooldown)'s delay for this record's release line, overriding the block's `days=` (1 to 3650). Written on each entry as `days=N`. Contradicts `cooldown_exempt`, and the load says so. |
 | `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |
 | `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
 
@@ -485,6 +486,8 @@ someone has built it:
 =sys-apps/ai-jail-3.2.0
 # cooldown since=2026-11-07T07:10:00Z origin=autoupdate group=sys-apps/ai-jail,sys-apps/ai-jail-bin
 =sys-apps/ai-jail-bin-3.2.0
+# cooldown since=2026-11-08T09:00:00Z origin=autoupdate line=app-editors/zed@preview first=2026-11-06T09:00:00Z
+=app-editors/zed-1.28.1_pre
 # END bentoo-cooldown
 ```
 
@@ -504,14 +507,43 @@ someone has built it:
   not warn-only, because an unmasked bump is exactly what the cooldown exists to
   prevent. A record with `cooldown_exempt` needs no entry and is promoted even
   under a malformed block.
+- **One candidate per release line.** A line is the registry record (`line=`
+  is its key, so `app-editors/zed@stable` and `@preview` are two lines). A new
+  version of a line whose candidate is still masked **replaces** it instead of
+  queueing behind it: the new version is masked, and once its promotion
+  completed the old candidate's ebuild is removed (Manifest regenerated) and
+  its entry dropped. Until then the old candidate stays masked, so a failed
+  promotion never leaves it visible. A line therefore holds at most two
+  versions: the installable one and the masked candidate. The summary lists
+  the replaced atoms.
 - **Release rules**, applied at the start of every `--apply` (with or without
   pending bumps) and by `bentoo overlay cooldown sweep`, each entry once, in this
   order: **stale** (its ebuild is gone), **manual** (`cooldown confirm`),
   **installed** (a version at or above it is installed from the overlay's
   repository in `/var/db/pkg`; an unreadable database skips only this rule, with
-  one warning), **elapsed** (the package's *oldest* entry is `days` old — a newer
-  bump never restarts the clock). A `cooldown_with` group shares one clock and
-  lifts whole; it lifts by installation only when every member is installed.
+  one warning), **elapsed** (the entry's own `since` is `days` old — a
+  replacement starts its own clock — or the line has waited three times
+  `days` since its `first=` candidate, so an upstream that releases faster than
+  the cooldown cannot keep a line masked for ever: 21 days with `days=7`). A
+  `cooldown_with` group lifts whole, when its newest member has aged; it lifts
+  by installation only when every member is installed.
+- **Snapshots graduate.** A `track = "commit"` line whose URL is a commit list
+  (GitHub `/repos/…/commits`, GitLab `…/repository/commits`) is not bounded by
+  the line wait — that bound would unmask a commit a day old. Instead `--check`
+  also asks the list for the newest commit at least `days` old (`until=`) and
+  queues it beside the candidate, and `--apply` first bumps the line's newest
+  unmasked version to it, **unmasked**, through the full apply (staging, gates,
+  promotion), then masks the new candidate. The installable snapshot moves
+  every day and is always at least `days` old; the candidate is the latest
+  commit. A failed graduation never fails the candidate, and the summary lists
+  `graduated` atoms. A single-commit endpoint (`/commits/<ref>`) cannot be asked
+  for an older commit and keeps the release rule above.
+- **Automatic exemptions.** A version is promoted unmasked, with the reason in
+  the log and the summary, when `--urgent <pkg>` names it (a security fix that
+  must not wait; `cat/pkg` or a record key, repeatable, only with `--apply` or
+  `--revive`), when ::gentoo ships the very same version (a mirror that only
+  widens `PYTHON_COMPAT` adds no release its users do not already get), or when
+  its ebuild assigns no `KEYWORDS` (Portage already refuses it without `**`).
 - **`--clean` and `sweep` keep what is held**: every masked version, the highest
   unmasked version below the oldest masked one, and — for each release line
   (`:slot`, `series`) holding a masked version — that line's own predecessor, so
@@ -529,7 +561,8 @@ someone has built it:
   writing subcommands take the apply's overlay lock and exit 1 naming its holder
   while an apply runs.
 - Every add and lift is one structured log record (`package`, `version`,
-  `reason`), and `--apply` ends with `Cooldown: N added, M lifted`.
+  `reason`), and `--apply` ends with `Cooldown: N added, N replaced, N
+  graduated, N lifted, N unmasked`.
 
 #### Multi-slot packages
 

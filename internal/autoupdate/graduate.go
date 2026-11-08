@@ -154,7 +154,11 @@ func (a *Applier) applyGraduation(ctx context.Context, key string, upd PendingUp
 		a.logger().Warn("cooldown: graduation skipped", "package", key, "err", fmt.Errorf("creating its pending list: %w", err))
 		return nil
 	}
-	defer func() { _ = os.RemoveAll(dir) }() //nolint:errcheck // a leftover temp dir is harmless and logged nowhere useful
+	defer func() {
+		if err := os.RemoveAll(dir); err != nil {
+			a.logger().Warn("cooldown: graduation left its temporary pending list behind", "dir", dir, "err", err)
+		}
+	}()
 	pl, err := NewPendingList(dir)
 	if err == nil {
 		err = pl.Add(PendingUpdate{
@@ -176,7 +180,9 @@ func (a *Applier) applyGraduation(ctx context.Context, key string, upd PendingUp
 	view.setVersionsFn = func(string, map[string]string) error { return nil }
 	view.graduating = true
 	view.reporter = tui.Noop()
-	res, _ := view.Apply(ctx, key, compile) //nolint:errcheck // the error is on res; a failed graduation never fails the candidate
+	// The error is also on res.Error, logged below; a failed graduation never
+	// fails the candidate, so it is not returned.
+	res, _ := view.Apply(ctx, key, compile)
 	if res != nil {
 		res.Graduation = true
 		if res.Success {
