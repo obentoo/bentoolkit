@@ -207,6 +207,11 @@ type ApplyResult struct {
 	// CooldownSkipped says why the promoted version got no cooldown entry
 	// ("urgent", "same version in ::gentoo", "unkeyworded"), or is empty.
 	CooldownSkipped string
+	// Graduation marks the result of a graduation apply (see applyGraduation).
+	Graduation bool
+	// Graduated is the graduation this apply ran first for its commit-tracked
+	// line, or nil when it ran none.
+	Graduated *ApplyResult
 	// RegistryWarning records a non-fatal failure to write the applied version
 	// back into packages.toml. It is deliberately NOT CleanWarning:
 	// the two report different steps — the pin is written on every successful
@@ -359,6 +364,10 @@ type Applier struct {
 	// urgent names the packages (cat/pkg or record key) whose promotion skips
 	// the cooldown this run: a security fix must not wait. WithApplierUrgent.
 	urgent map[string]bool
+	// graduating marks the Applier view applyGraduation runs on: the current
+	// version is the line's newest UNMASKED one, and the promotion gets no
+	// cooldown entry.
+	graduating bool
 
 	// reenabled holds packages re-enabled in packages.toml after this Applier
 	// loaded it (--revive enables an orphan's entry, then applies it). Their
@@ -1078,6 +1087,12 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	if done, err := run.preflight(); done != nil {
 		return done, err
 	}
+	// A commit-tracked line under the cooldown first moves its installable
+	// snapshot to the one the check found old enough, then masks the new
+	// candidate below. A failed graduation never fails the candidate.
+	if run.update.GraduateVersion != "" && !a.graduating {
+		result.Graduated = a.applyGraduation(ctx, pkg, *run.update, compile)
+	}
 
 	// From here to promotion nothing writes into the published overlay, and
 	// promotion is the last thing this function does. Everything in between is
@@ -1295,6 +1310,14 @@ func (r *applyRun) resolveCurrent() (*ApplyResult, error) {
 	// self-heals a stale current_version and lets a genuinely obsolete entry be
 	// pruned with a clear outcome instead of a hard failure.
 	currentVersion, err := r.a.resolveCurrentVersion(r.pkg)
+	if r.a.graduating {
+		// The line's newest version is the masked candidate; a graduation
+		// starts from what users install today.
+		currentVersion, err = r.a.liberatedVersion(r.pkg)
+		if err == nil && currentVersion == "" {
+			err = fmt.Errorf("%s: every version of the line is masked", r.pkg)
+		}
+	}
 	if err != nil {
 		// A slot that matches nothing is a config error, not an obsolete entry:
 		// the package is present, its key is wrong. Pruning would delete the

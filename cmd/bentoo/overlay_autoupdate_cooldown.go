@@ -97,7 +97,7 @@ func displayCooldownSummary(run cooldownRun, results []*autoupdate.ApplyResult) 
 		return
 	}
 	var added []cooldown.Entry
-	var retired, skipped []string
+	var retired, skipped, graduated []string
 	for _, r := range results {
 		if r == nil {
 			continue
@@ -106,17 +106,24 @@ func displayCooldownSummary(run cooldownRun, results []*autoupdate.ApplyResult) 
 		for _, v := range r.CooldownRetired {
 			retired = append(retired, "="+cooldownAtomOf(r.Package)+"-"+v)
 		}
+		if g := r.Graduated; g != nil && g.Success {
+			graduated = append(graduated, fmt.Sprintf("=%s-%s (from %s)", cooldownAtomOf(g.Package), g.NewVersion, g.OldVersion))
+		}
 		if r.CooldownSkipped != "" && r.Success {
 			skipped = append(skipped, fmt.Sprintf("=%s-%s (%s)", cooldownAtomOf(r.Package), r.NewVersion, r.CooldownSkipped))
 		}
 	}
 	fmt.Println()
-	output.Header.Printf("Cooldown: %d added, %d replaced, %d lifted, %d unmasked\n", len(added), len(retired), len(run.lifts), len(skipped))
+	output.Header.Printf("Cooldown: %d added, %d replaced, %d graduated, %d lifted, %d unmasked\n",
+		len(added), len(retired), len(graduated), len(run.lifts), len(skipped))
 	for _, e := range added {
 		fmt.Printf("  masked    %s (since %s)\n", e.Atom(), e.Since.UTC().Format(time.RFC3339))
 	}
 	for _, a := range retired {
 		fmt.Printf("  replaced  %s\n", a)
+	}
+	for _, g := range graduated {
+		fmt.Printf("  graduated %s\n", g)
 	}
 	for _, s := range skipped {
 		fmt.Printf("  unmasked  %s\n", s)

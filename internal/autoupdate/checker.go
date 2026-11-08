@@ -336,6 +336,9 @@ type Checker struct {
 
 	// nowFunc is the clock the min_age_days gate reads; nil means time.Now.
 	nowFunc func() time.Time
+	// cooldownState is the overlay's cooldown block, loaded once, which the
+	// commit-tracked check reads to queue a graduation target (graduate.go).
+	cooldownState checkerCooldown
 }
 
 // logger returns the checker's logger, or a discarding one for a checker that
@@ -898,7 +901,16 @@ func (c *Checker) checkCommitTracked(ctx context.Context, pkg string, pkgConfig 
 	}
 
 	if result.HasUpdate {
-		if err := c.addToPending(pkg, currentVersion, newVersion, info.SHA, "", nil); err != nil {
+		update := PendingUpdate{
+			Package:        pkg,
+			CurrentVersion: currentVersion,
+			NewVersion:     newVersion,
+			CommitHash:     info.SHA,
+			Status:         StatusPending,
+			DetectedAt:     time.Now(),
+		}
+		update.GraduateVersion, update.GraduateCommit = c.graduationTarget(ctx, pkg, pkgConfig, currentVersion)
+		if err := c.pending.Add(update); err != nil {
 			if result.Error == nil {
 				result.Error = fmt.Errorf("failed to add to pending: %w", err)
 			}

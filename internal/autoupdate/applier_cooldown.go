@@ -108,6 +108,10 @@ func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyRes
 		return fmt.Errorf("cooldown: %q is not a category/package atom", key)
 	}
 	pkg := category + "/" + name
+	if a.graduating {
+		result.CooldownSkipped = "graduation"
+		return nil // already the cooldown's days old upstream
+	}
 	if reason := a.cooldownAutoExempt(pkg, key, name, version, ebuildPath); reason != "" {
 		result.CooldownSkipped = reason
 		a.logger().Info("cooldown: promoted unmasked", "package", pkg, "version", version, "reason", reason)
@@ -145,6 +149,13 @@ func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyRes
 	}
 	if !entry.First.IsZero() && entry.First.After(entry.Since) {
 		entry.First = entry.Since
+	}
+	// A snapshot line whose installable version graduates on its own (see
+	// graduate.go) is not bounded by the line's wait: the bound would unmask
+	// a commit that is a day old, the very thing graduation avoids. Its
+	// candidate starts a fresh line every time.
+	if _, ok := graduationURL(cfg.URL, entry.Since); ok && cfg.Track == "commit" {
+		entry.First = time.Time{}
 	}
 	added := block.Add(entry)
 	if err := block.Save(a.overlayPath); err != nil {
