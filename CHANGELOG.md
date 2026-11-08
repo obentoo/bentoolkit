@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.40.0] - 2026-11-08
+
 ### Added
 
 - **An autoupdate cooldown.** An overlay whose `profiles/package.mask` carries
@@ -1743,7 +1745,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/obentoo/bentoolkit/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/obentoo/bentoolkit/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/obentoo/bentoolkit/compare/v0.37.4...v0.38.0
 [0.37.4]: https://github.com/obentoo/bentoolkit/compare/v0.37.3...v0.37.4
