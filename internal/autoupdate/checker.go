@@ -908,6 +908,34 @@ func (c *Checker) checkCommitTracked(ctx context.Context, pkg string, pkgConfig 
 	return result, nil
 }
 
+// reviveUpstreamVersion returns the upstream version FindRevivableOrphans
+// compares against ::gentoo's highest version.
+//
+// A commit-tracked record yields only a commit date (YYYYMMDD) from
+// fetchUpstreamVersion, which is not a version at all: compared raw, the bare
+// 20261030 outranks ::gentoo's 0_pre20261030 for the very same commit, and
+// media-libs/tg_owt was reported revivable while ::gentoo already pinned the
+// upstream HEAD. So a commit-tracked record builds its candidate exactly as
+// --check does (commitTrackedVersion), with ::gentoo's version standing in for
+// the overlay ebuild that a revive candidate, by definition, no longer has: the
+// base and the snapshot suffix are ::gentoo's, the date is upstream's.
+func (c *Checker) reviveUpstreamVersion(ctx context.Context, cfg *registry.PackageConfig, gentooVersion string) (string, error) {
+	if cfg.Track != "commit" {
+		return c.fetchUpstreamVersion(ctx, cfg)
+	}
+	info, err := c.fetchCommitInfo(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	// The revision is ::gentoo's packaging, not part of the upstream snapshot:
+	// left in, 1.2-r1 would become the unorderable 1.2-r1_p<date>.
+	if i := strings.LastIndex(gentooVersion, "-r"); i > 0 {
+		gentooVersion = gentooVersion[:i]
+	}
+	version, _ := commitTrackedVersion(gentooVersion, info)
+	return version, nil
+}
+
 // commitTrackedVersion builds the candidate version of a commit-tracked package
 // from the ebuild's current version and the tracked commit, and returns it with
 // the base version it was built on.
@@ -1256,14 +1284,6 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 			continue
 		}
 
-		// Best-effort upstream fetch; a failure just drops this package from the
-		// report (it remains disabled, exactly as before).
-		upstream, err := c.fetchUpstreamVersion(ctx, &cfg)
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("%s: upstream fetch failed: %v", pkg, err))
-			continue
-		}
-
 		// Highest version ::gentoo currently carries. A package ::gentoo does not
 		// have is simply not revivable from a gentoo base, so skip it silently.
 		versions, err := prov.GetPackageVersions(ctx, category, pkgName)
@@ -1276,6 +1296,14 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		}
 		gentooMax := maxGentooVersion(versions)
 		if gentooMax == "" {
+			continue
+		}
+
+		// Best-effort upstream fetch; a failure just drops this package from the
+		// report (it remains disabled, exactly as before).
+		upstream, err := c.reviveUpstreamVersion(ctx, &cfg, gentooMax)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s: upstream fetch failed: %v", pkg, err))
 			continue
 		}
 
