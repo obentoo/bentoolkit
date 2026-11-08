@@ -9,6 +9,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--revivable` no longer reports a commit-tracked orphan ::gentoo already
+  ships.** The revive scan compared the upstream commit's bare date
+  (`20261030`) with ::gentoo's snapshot version (`0_pre20261030`), and the bare
+  date always sorts higher, so `media-libs/tg_owt` was offered for revival on
+  the very commit ::gentoo pins. The candidate is now versioned as `--check`
+  versions it, on ::gentoo's base and suffix.
+
 ## [0.39.0] - 2026-11-07
 
 ### Added
