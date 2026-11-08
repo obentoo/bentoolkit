@@ -30,6 +30,10 @@ import (
 // context.Context (containedctx): a context is per-invocation and travels as a
 // parameter.
 type deps struct {
+	// cooldownPkgdbRoot is the system root whose var/db/pkg releases cooldown
+	// entries by installation at the start of an apply. Default "/"; tests
+	// point it at a root with no database.
+	cooldownPkgdbRoot string
 	// registryWriter is how the post-check reconciliation writes
 	// packages.toml. The test that must prove NOTHING was written keeps the
 	// real writer wired and compares the file's bytes before and after, instead
@@ -162,6 +166,7 @@ type deps struct {
 // field of one never reaches another.
 func defaultDeps() *deps {
 	return &deps{
+		cooldownPkgdbRoot:           "/",
 		registryWriter:              registry.SetPackageVersions,
 		confirmRegistryWrite:        confirmAction,
 		registryPromptIsInteractive: stdinAndStdoutAreTerminals,

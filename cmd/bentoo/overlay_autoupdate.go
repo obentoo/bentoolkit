@@ -87,6 +87,10 @@ type autoupdateOptions struct {
 	// interactive claude session, then re-validated and promoted. It is a mode
 	// of its own and refuses every other mode beside it.
 	repair string
+	// urgent names packages (cat/pkg or record key) whose --apply or --revive
+	// promotion skips the cooldown: a security fix must not wait. Each skip is
+	// logged and shown in the run summary.
+	urgent []string
 	// revivable, with --check, also reports revivable orphans (disabled
 	// entries absent from the overlay whose upstream is newer than ::gentoo) in
 	// the same pass — read-only, no mutation
@@ -344,6 +348,7 @@ Examples:
 	cmd.Flags().IntVar(&o.timeout, "timeout", 0, "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)")
 	cmd.Flags().StringVar(&o.only, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
+	cmd.Flags().StringSliceVar(&o.urgent, "urgent", nil, "With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary")
 	cmd.Flags().StringVar(&o.revive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	cmd.Flags().StringVar(&o.repair, "repair", "", "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH")
 	cmd.Flags().BoolVar(&o.revivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
@@ -773,6 +778,9 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// Handle different modes. Each returns its outcome (func exitWith), which
 	// is the command's: the deferred lock release runs before func main maps it
 	// to the exit status.
+	if len(ar.opts.urgent) > 0 && ar.opts.apply == "" && ar.opts.revive == "" {
+		return fmt.Errorf("--urgent only applies to --apply or --revive: it names promotions that skip the cooldown")
+	}
 	switch {
 	case ar.opts.repair != "":
 		// First: refuseRepairMisuse already rejected every other mode beside it.
@@ -1742,11 +1750,18 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	// buildApplyReporter wires the reporter into extra (WithApplierReporter), so
 	// the reporter value itself is not needed at this call site.
+	// The cooldown releases what is due before anything is checked (R3.1).
+	cd, err := ar.cooldownApplyStart(ctx, overlayPath)
+	if err != nil {
+		return err
+	}
+
 	extra, finish := ar.buildApplyReporter(applyCtx, cancel, 1)
 	// Every early return closes the batch and restores the terminal through
 	// this; finish is idempotent (func buildApplyReporter), so the explicit
 	// call before the summary below is the one that does the work there.
 	defer finish()
+	extra = append(extra, cd.option)
 
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
@@ -1763,12 +1778,11 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// history stays in scrollback and displayApplyResult prints to a clean line.
 	finish()
 
+	ar.displayApplyResult(result)
+	displayCooldownSummary(cd, []*autoupdate.ApplyResult{result})
 	if err != nil {
-		ar.displayApplyResult(result)
 		return exitWith(1)
 	}
-
-	ar.displayApplyResult(result)
 	return nil
 }
 
@@ -1781,7 +1795,7 @@ func (ar *autoupdateRun) newSingleApplier(overlayPath, configDir string, llmCfg 
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
 		applierFixerOption(ar.log(), llmCfg),
 	}
-	opts = append(opts, applierGentooPathOption())
+	opts = append(opts, applierGentooPathOption(), autoupdate.WithApplierUrgent(ar.opts.urgent))
 	opts = append(opts, ar.applierDistfileOptions()...)
 	opts = append(opts, ar.applierVendorOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
@@ -1822,8 +1836,16 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 		return failWith(1, fmt.Errorf("failed to load pending list: %w", err))
 	}
 	updates := pending.List()
+
+	// The cooldown releases what is due before anything is checked (R3.1),
+	// with or without pending updates.
+	cd, err := ar.cooldownApplyStart(ctx, overlayPath)
+	if err != nil {
+		return err
+	}
 	if len(updates) == 0 {
 		ar.log().Info("No pending updates to apply")
+		displayCooldownSummary(cd, nil)
 		return nil
 	}
 
@@ -1847,7 +1869,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 		autoupdate.WithApplierPendingList(pending),
 		applierFixerOption(ar.log(), llmCfg),
 	}
-	opts = append(opts, applierGentooPathOption())
+	opts = append(opts, applierGentooPathOption(), autoupdate.WithApplierUrgent(ar.opts.urgent))
 	opts = append(opts, ar.applierDistfileOptions()...)
 	opts = append(opts, ar.applierVendorOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
@@ -1856,6 +1878,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	// no claude CLI, and pay the PATH lookup as many times.
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
+	opts = append(opts, cd.option)
 
 	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
@@ -1871,6 +1894,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	finish()
 
 	ar.displayApplyAllResults(results, failures)
+	displayCooldownSummary(cd, results)
 
 	if failures > 0 {
 		return exitWith(1)
@@ -2283,7 +2307,7 @@ func (ar *autoupdateRun) reviveApplierOptions(overlayPath, configDir string, pen
 	reviveOpts = append(reviveOpts, ar.applierVendorOptions()...)
 	// The ::gentoo tree too, as on the apply paths: a revived package whose
 	// `requires` is met only by ::gentoo would otherwise always read as waiting.
-	reviveOpts = append(reviveOpts, applierGentooPathOption())
+	reviveOpts = append(reviveOpts, applierGentooPathOption(), autoupdate.WithApplierUrgent(ar.opts.urgent))
 	// R3 reaches the revive path through the same option block as the two apply
 	// paths, which is what keeps a second entry point from growing a second,
 	// gate-free way into the published overlay.

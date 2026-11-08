@@ -142,7 +142,9 @@ type sweepPlan struct {
 //     permissive there. Blocked stays empty — there is no entry to name.
 //  3. Every live -9999 ebuild is kept: selection ignores them, so no pin can.
 //  4. Every version a claiming entry HOLDS — the union of its pin and the version
-//     it resolves to, as unclaimedIn computes it — is kept; other non-live go.
+//     it resolves to, as unclaimedIn computes it — is kept, and so is every
+//     version the cooldown block holds (cooldownHeld: masked versions and their
+//     installable predecessor); other non-live go.
 //  5. If that would leave no non-live ebuild, the highest one is kept instead.
 //
 // Rules 3-5 run whether or not the plan is blocked; a block only routes the
@@ -150,7 +152,17 @@ type sweepPlan struct {
 // calculation. A pin naming a version not on disk keeps nothing. An unreadable
 // or absent directory is an error, never an empty plan ("nothing to keep" is
 // one caller away from "remove everything").
-func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) (sweepPlan, error) {
+//
+// It keeps the signature the sweep's own tests drive; every production caller
+// goes through planSweepHolding, which adds the cooldown's held versions.
+func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) (sweepPlan, error) { //nolint:unparam // test-facing wrapper: the tests pass a nil logger
+
+	return planSweepHolding(log, overlayPath, cfgs, atom, nil)
+}
+
+// planSweepHolding is planSweep with the versions the cooldown block holds
+// for atom added to rule 4's keep set.
+func planSweepHolding(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string, cooldownHeld []string) (sweepPlan, error) {
 	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
 		return sweepPlan{}, fmt.Errorf("cannot plan sweep: %q is not a category/package atom", atom)
@@ -183,6 +195,11 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 	// "simplify" this back to the pin alone.
 	heldBy, blocked := collectHolders(claims)
 	plan.Blocked = blocked
+	for _, v := range cooldownHeld {
+		if _, dup := heldBy[v]; !dup {
+			heldBy[v] = cooldownHolder
+		}
+	}
 
 	// The directory is read exactly once, here.
 	live, nonLive := splitEbuildVersions(paths, category, pkgName)
@@ -209,6 +226,10 @@ func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 
 	return plan, nil
 }
+
+// cooldownHolder names the cooldown block as the holder of a version in a
+// sweep plan's Keep map.
+const cooldownHolder = "cooldown"
 
 // collectHolders maps each version a pinned claim holds — its pin and its
 // resolved version — to the first claiming key, and names the first pinless
@@ -412,8 +433,22 @@ type Divergence struct {
 // sorted, so two runs differ only when the overlay did. It costs about 2-3
 // readdir per enabled entry; CheckResult could not replace the scan, as it
 // carries no directory listing. Skips are warned about to log; nil discards them.
+//
+// Versions the cooldown block holds are claimed. When the block cannot be
+// read, no ebuild is reported unclaimed (a Warn says why): reporting what the
+// block might hold would invite deleting it.
 func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig) []Divergence {
 	log = logging.OrDiscard(log)
+	held, err := loadHeldVersions(log, overlayPath, cfgs)
+	if err != nil {
+		log.Warn("reconcile: skipping the unclaimed-ebuild scan", "err", err)
+	}
+	return reconcile(log, overlayPath, cfgs, held, err == nil)
+}
+
+// reconcile is Reconcile over an already-loaded held set; scanUnclaimed false
+// skips the unclaimed-ebuild scan.
+func reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, held map[string][]string, scanUnclaimed bool) []Divergence {
 	var divs []Divergence
 	// Directories already scanned for unclaimed ebuilds, keyed by atom: several
 	// entries routinely share one, and the finding belongs to the file, not to
@@ -469,7 +504,7 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 		}
 
 		atom := category + "/" + pkgName
-		if scanned[atom] {
+		if scanned[atom] || !scanUnclaimed {
 			continue
 		}
 		// ErrNoEbuildFound is the one sentinel that does not prove the directory
@@ -482,7 +517,7 @@ func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.Pa
 			continue
 		}
 		scanned[atom] = true
-		divs = append(divs, unclaimedIn(log, overlayPath, cfgs, atom)...)
+		divs = append(divs, unclaimedIn(log, overlayPath, cfgs, atom, held[atom])...)
 	}
 
 	// Sorted by key, then by class, so the order is total and no map iteration
@@ -561,7 +596,10 @@ func StalePinBatch(divs []Divergence) map[string]string {
 //
 // An unreadable directory yields a warning and no divergences at all, never a
 // guess about what is in it.
-func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) []Divergence {
+//
+// The versions the cooldown block holds for atom (cooldownHeld) count as
+// claimed.
+func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string, cooldownHeld []string) []Divergence {
 	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
 		return nil
@@ -580,6 +618,9 @@ func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]registry.
 	// knows who holds what; re-deriving it here would give the report a second,
 	// drifting answer to that question.
 	claimed := make(map[string]bool)
+	for _, v := range cooldownHeld {
+		claimed[v] = true
+	}
 	for _, c := range resolveClaims(log, overlayPath, cfgs, atom) {
 		if c.Pin != "" {
 			claimed[c.Pin] = true

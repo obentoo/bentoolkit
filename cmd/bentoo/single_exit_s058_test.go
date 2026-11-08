@@ -3,8 +3,9 @@ package main
 // Authored for story 058, sub-task 7.1 — R1.1, R1.4.
 //
 // Two whole-package sweeps. The first walks the tree newRootCmd builds and
-// requires the exact set of 29 runnable commands (27 at 6be73ec, plus
-// notice new and notice revise from main at e051559), each on RunE; the second
+// requires the exact set of 33 runnable commands (27 at 6be73ec, plus
+// notice new and notice revise from main at e051559, plus the four `overlay
+// cooldown` subcommands of bentoo story 003), each on RunE; the second
 // parses every production file of this package and requires that nothing but
 // func main ends the process (and that main does, exactly once). Both assert
 // what they swept, so a sweep that finds nothing cannot pass.
@@ -29,6 +30,7 @@ var s058AllRunnable = []string{
 	"completion", "distfile fetch",
 	"notice new", "notice revise",
 	"overlay add", "overlay analyze", "overlay autoupdate", "overlay commit", "overlay compare",
+	"overlay cooldown add", "overlay cooldown confirm", "overlay cooldown status", "overlay cooldown sweep",
 	"overlay diff", "overlay init", "overlay log", "overlay manifest", "overlay prune",
 	"overlay pull", "overlay push", "overlay rename", "overlay staged clean", "overlay status",
 	"overlay targets",
@@ -57,7 +59,7 @@ func TestS058EveryRunnableCommandUsesRunE(t *testing.T) {
 	sort.Strings(found)
 
 	if strings.Join(found, "\n") != strings.Join(s058AllRunnable, "\n") {
-		t.Errorf("the tree's runnable commands are not the 30 the story covers:\n got  %q\n want %q", found, s058AllRunnable)
+		t.Errorf("the tree's runnable commands are not the %d the stories cover:\n got  %q\n want %q", len(s058AllRunnable), found, s058AllRunnable)
 	}
 	if len(bad) > 0 {
 		t.Errorf("%d runnable command(s) are not RunE-only (R1.1):\n  %s", len(bad), strings.Join(bad, "\n  "))

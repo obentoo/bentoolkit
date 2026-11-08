@@ -235,6 +235,20 @@ type PackageConfig struct {
 	// to be old enough. It works only beside MinAgeDays.
 	PublishedPath string `toml:"published_path,omitempty"`
 
+	// CooldownWith names the packages (bare "cat/pkg") that are masked and
+	// released together with this one by the autoupdate cooldown: a pair that
+	// cannot be installed apart (ai-jail and ai-jail-bin, hplip and
+	// hplip-plugin). The relation is a clique — every member lists every other
+	// member, sorted, never itself — so every member derives the same group.
+	CooldownWith []string `toml:"cooldown_with,omitempty"`
+	// CooldownExempt takes the package out of the autoupdate cooldown: its
+	// promotions land unmasked. The value is the reason, and it must say one;
+	// the pointer tells an absent key from an empty one, which is an error.
+	CooldownExempt *string `toml:"cooldown_exempt,omitempty"`
+	// CooldownDays overrides, for this record's release line, the days=N of
+	// the overlay's cooldown block (1 to 3650). Zero means the block's.
+	CooldownDays int `toml:"cooldown_days,omitempty"`
+
 	// Suffix is the Gentoo version suffix (_alpha, _beta, _pre, _rc, _p, each
 	// optionally numbered) appended to the detected version, declaring that what
 	// this record extracts is a pre-release rather than a final release.
@@ -1330,6 +1344,9 @@ func ValidatePackageConfig(log *slog.Logger, pkg string, cfg *PackageConfig) err
 	if err := validateMinAge(pkg, cfg); err != nil {
 		return err
 	}
+	if err := validateCooldownFields(pkg, cfg); err != nil {
+		return err
+	}
 
 	// The [meta] map is free-form except for the fetch_* namespace, which the
 	// applier reads as a typed sub-schema. Every key inside a map[string]string
@@ -1834,7 +1851,10 @@ func (c *PackagesConfig) ValidateAll(log *slog.Logger) error {
 			return err
 		}
 	}
-	return validateDistinctEntries(c.Packages)
+	if err := validateDistinctEntries(c.Packages); err != nil {
+		return err
+	}
+	return validateCooldownGroups(c.Packages)
 }
 
 // validateDistinctEntries rejects two entries that would scan the same ebuilds.

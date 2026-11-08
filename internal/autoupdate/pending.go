@@ -65,6 +65,15 @@ type PendingUpdate struct {
 	// track="commit". When non-empty, Apply substitutes the old commit variable
 	// (EGIT_COMMIT / GIT_COMMIT / COMMIT) in the copied ebuild with this hash.
 	CommitHash string `json:"commit_hash,omitempty"`
+	// GraduateVersion and GraduateCommit name, for a commit-tracked line under
+	// the autoupdate cooldown, the newest upstream snapshot that is already the
+	// cooldown's days old. Apply bumps the line's newest UNMASKED version to it,
+	// unmasked, before it masks NewVersion as the line's candidate: so the
+	// installable snapshot keeps moving, always at least that old, while the
+	// candidate is replaced by every newer commit. Empty when the line is not
+	// under the cooldown or its URL cannot be asked for an older commit.
+	GraduateVersion string `json:"graduate_version,omitempty"`
+	GraduateCommit  string `json:"graduate_commit,omitempty"`
 	// AuxValue is the free-text value captured via the package's aux_pattern
 	// (e.g. "esr-bb24"). When non-empty, Apply substitutes the aux_var assignment
 	// in the copied ebuild with this value.
