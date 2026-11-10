@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"testing"
 
@@ -30,6 +31,9 @@ type fakeFixer struct {
 	// edit the ebuild so the subsequent manifest re-run can succeed).
 	onCall  func(req fixer.ManifestFixRequest)
 	lastReq fixer.ManifestFixRequest
+	// noEdit leaves the ebuild untouched. By default a successful call appends
+	// a comment to it, as a real fixer that reports a change edits the file.
+	noEdit bool
 }
 
 func (f *fakeFixer) FixManifest(_ context.Context, req fixer.ManifestFixRequest) (fixer.ManifestFixResult, error) {
@@ -40,6 +44,12 @@ func (f *fakeFixer) FixManifest(_ context.Context, req fixer.ManifestFixRequest)
 	}
 	if f.err != nil {
 		return fixer.ManifestFixResult{}, f.err
+	}
+	if !f.noEdit && req.EbuildPath != "" {
+		if fh, err := os.OpenFile(req.EbuildPath, os.O_APPEND|os.O_WRONLY, 0); err == nil {
+			_, _ = fh.WriteString("# edited by fakeFixer\n")
+			_ = fh.Close()
+		}
 	}
 	return fixer.ManifestFixResult{Summary: f.summary}, nil
 }
