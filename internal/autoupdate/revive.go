@@ -104,11 +104,32 @@ func NewReviver(overlayPath string, applier ReviveApplier, prov provider.Provide
 	return r, nil
 }
 
+// reviveHeldDetail is the outcome detail of a revive refused by hold = true.
+const reviveHeldDetail = "held (hold = true): nothing seeded; drop hold from packages.toml to revive it"
+
+// isHeld reports whether pkg's packages.toml record carries hold = true. With
+// no packages.toml there is no record and nothing is held; the re-enable step
+// reports that case, as it did before this check existed. Any other load error
+// (a file that does not decode) is returned: it cannot prove the record is not
+// held, so the revive must stop before it writes.
+func (r *Reviver) isHeld(pkg string) (bool, error) {
+	cfg, err := registry.LoadPackagesConfig(r.overlayPath)
+	if errors.Is(err, registry.ErrPackagesConfigNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	rec, ok := cfg.Packages[pkg]
+	return ok && rec.IsHeld(), nil
+}
+
 // Revive performs the full revive of one package and returns its outcome. It
 // never returns an error: every failure is an outcome, so the caller can
 // continue with the remaining targets.
 //
-// Steps, in order: locate the ::gentoo package dir, pick the highest ::gentoo
+// Steps, in order: refuse a held record (nothing is written), locate the
+// ::gentoo package dir, pick the highest ::gentoo
 // version, seed it into the overlay, re-enable the entry in packages.toml
 // BEFORE checking (so the checker does not skip it), CheckPackage(force=true)
 // on a fresh Checker to populate pending with the upstream version, then Apply.
@@ -120,6 +141,18 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 	category, pkgName, ok := ebuilds.SplitPackageKey(pkg)
 	if !ok {
 		return failed(fmt.Sprintf("invalid package name %q (want category/package)", pkg))
+	}
+
+	// A held record is a maintainer's "keep this out of autoupdate", and a
+	// revive must not undo it. Ask BEFORE any step that writes: the apply
+	// refuses a held bump too, but by then the ::gentoo ebuild is seeded and
+	// enabled = false is gone, so the overlay keeps a copy nobody asked for.
+	held, err := r.isHeld(pkg)
+	if err != nil {
+		return failed(fmt.Sprintf("read packages.toml failed: %v", err))
+	}
+	if held {
+		return ReviveOutcome{Package: pkg, Status: ReviveSkipped, Detail: reviveHeldDetail}
 	}
 
 	// On-disk ::gentoo package dir to seed from.
