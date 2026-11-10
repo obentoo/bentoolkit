@@ -32,14 +32,10 @@ const RecordEndMarker = "# END"
 // not "tidy" it: every edit is a churn bill payable in records, so change it only
 // with a fresh measurement in hand.
 //
-// `cooldown_with`, `cooldown_exempt` and `cooldown_days` follow `published_path`: like the age
-// gate, they decide what happens to a version once it is found. They were placed
-// while no record carried them, so their position costs no reordering now.
-//
-// `patched` sits right after `type` because both classify the PACKAGE rather
-// than describe how to probe it, and `disabled_by` right after `enabled` because
-// it names WHO wrote the `enabled = false` beside it. Both were placed while no
-// record carried them, so their positions cost nothing now and churn later.
+// The `cooldown_*` keys follow `published_path`: like the age gate, they decide
+// what happens to a found version. `patched` follows `type` (both classify the
+// package) and `disabled_by` follows `enabled` (it names who disabled it). All
+// were placed while no record carried them, so they cost no reordering.
 //
 // It covers every `toml:` tag of PackageConfig exactly once, as
 // TestCanonicalFieldOrderCoversPackageConfig pins; `binary` (no struct field, the

@@ -65,11 +65,6 @@ func (p pkgdbInstalled) HighestFromRepo(pkg, repo string) (string, bool) {
 	return v, ok
 }
 
-// NewPkgdbInstalled is NewPkgdbInstalledContext without a deadline.
-func NewPkgdbInstalled(root string) (Installed, error) {
-	return NewPkgdbInstalledContext(context.Background(), root)
-}
-
 // NewPkgdbInstalledContext reads <root>/var/db/pkg once and answers from that
 // snapshot; ctx bounds the read. A package with no repository record answers
 // for no repository.
@@ -223,7 +218,7 @@ func (b *Block) installedRule(s liftSet, inst Installed) {
 }
 
 // groupInstalled reports whether every member is installed from ::bentoo
-// (R4.3: a member with no entry left still has to be), each at or above
+// (a member with no entry left still has to be), each at or above
 // every one of its masked versions.
 func (b *Block) groupInstalled(members []string, inst Installed) bool {
 	for _, m := range members {

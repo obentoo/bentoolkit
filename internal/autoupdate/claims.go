@@ -147,14 +147,10 @@ type sweepPlan struct {
 //     installable predecessor); other non-live go.
 //  5. If that would leave no non-live ebuild, the highest one is kept instead.
 //
-// Rules 3-5 run whether or not the plan is blocked; a block only routes the
-// result to WouldRemove instead of Remove, so the blocked report is the same
-// calculation. A pin naming a version not on disk keeps nothing. An unreadable
-// or absent directory is an error, never an empty plan ("nothing to keep" is
-// one caller away from "remove everything").
-//
-// It keeps the signature the sweep's own tests drive; every production caller
-// goes through planSweepHolding, which adds the cooldown's held versions.
+// Rules 3-5 run even when blocked; a block only routes the result to
+// WouldRemove instead of Remove. A pin naming a version not on disk keeps
+// nothing. An unreadable or absent directory is an error, never an empty plan.
+// Production callers use planSweepHolding, which adds the cooldown's versions.
 func planSweep(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string) (sweepPlan, error) { //nolint:unparam // test-facing wrapper: the tests pass a nil logger
 
 	return planSweepHolding(log, overlayPath, cfgs, atom, nil)
@@ -430,13 +426,10 @@ type Divergence struct {
 // file. Resolution goes through selectCurrentEbuild; its not-found sentinels
 // land in NoEbuild, and any other error skips that entry with a warning — a
 // fabricated divergence would become a fabricated, published pin. The result is
-// sorted, so two runs differ only when the overlay did. It costs about 2-3
-// readdir per enabled entry; CheckResult could not replace the scan, as it
-// carries no directory listing. Skips are warned about to log; nil discards them.
-//
-// Versions the cooldown block holds are claimed. When the block cannot be
-// read, no ebuild is reported unclaimed (a Warn says why): reporting what the
-// block might hold would invite deleting it.
+// sorted, so two runs differ only when the overlay did. Skips are warned about
+// to log; nil discards them. Versions the cooldown block holds are claimed;
+// when the block cannot be read, no ebuild is reported unclaimed (a Warn says
+// why), since reporting what it might hold would invite deleting it.
 func Reconcile(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig) []Divergence {
 	log = logging.OrDiscard(log)
 	held, err := loadHeldVersions(log, overlayPath, cfgs)
@@ -594,11 +587,8 @@ func StalePinBatch(divs []Divergence) map[string]string {
 // overlay and means nothing. Reporting them would put the one file that cannot
 // be restored by re-fetching a release at the top of a removal candidate list.
 //
-// An unreadable directory yields a warning and no divergences at all, never a
-// guess about what is in it.
-//
-// The versions the cooldown block holds for atom (cooldownHeld) count as
-// claimed.
+// An unreadable directory yields a warning and no divergences, never a guess.
+// The versions the cooldown block holds for atom (cooldownHeld) are claimed.
 func unclaimedIn(log *slog.Logger, overlayPath string, cfgs map[string]registry.PackageConfig, atom string, cooldownHeld []string) []Divergence {
 	category, pkgName, ok := ebuilds.SplitPkgAtom(atom)
 	if !ok {
