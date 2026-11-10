@@ -1656,7 +1656,7 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	}
 	r.gatesPassed = true
 
-	// Masked before it is published (R1.1); a failure refuses the promotion.
+	// Masked before it is published; a failure refuses the promotion.
 	// See cooldownMask for why this is not warn-only like completeApply.
 	if err := a.cooldownMask(pkg, r.newVersion, r.cand.ebuildPath, result); err != nil {
 		return r.fail(err)

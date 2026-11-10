@@ -25,21 +25,17 @@ const RecordEndMarker = "# END"
 // its fields — the single source the linter (LintFieldOrder), the repair and
 // `overlay analyze` all use, so generator and linter agree by construction.
 //
-// IT IS DERIVED FROM MEASUREMENT, NOT FROM TASTE: it was read off the registry's
-// 411 hand-written records, with the four `base_*` siblings grouped and
-// `comments` pinned last (see PackageConfig.Comments and LintCommentsNotLast).
-// That costs 13 records a reordering; a prettier order would have cost 178. Do
-// not "tidy" it: every edit is a churn bill payable in records, so change it only
-// with a fresh measurement in hand.
+// IT IS DERIVED FROM MEASUREMENT, NOT FROM TASTE: read off the registry's 411
+// hand-written records, the four `base_*` siblings grouped and `comments` last
+// (see PackageConfig.Comments and LintCommentsNotLast). It cost 13 records a
+// reordering, a prettier order 178: change it only with a fresh measurement.
 //
-// `cooldown_with`, `cooldown_exempt` and `cooldown_days` follow `published_path`: like the age
-// gate, they decide what happens to a version once it is found. They were placed
-// while no record carried them, so their position costs no reordering now.
-//
+// `cooldown_with`, `cooldown_exempt` and `cooldown_days` follow `published_path`:
+// like the age gate, they decide what happens to a version once it is found.
 // `patched` sits right after `type` because both classify the PACKAGE rather
 // than describe how to probe it, and `disabled_by` right after `enabled` because
-// it names WHO wrote the `enabled = false` beside it. Both were placed while no
-// record carried them, so their positions cost nothing now and churn later.
+// it names WHO wrote the `enabled = false` beside it. All five were placed while
+// no record carried them, so their positions cost no reordering now.
 //
 // It covers every `toml:` tag of PackageConfig exactly once, as
 // TestCanonicalFieldOrderCoversPackageConfig pins; `binary` (no struct field, the
