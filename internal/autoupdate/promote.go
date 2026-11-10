@@ -211,6 +211,16 @@ func (a *Applier) promote(ctx context.Context, cand candidatePaths, pkg, version
 		// published tree's own, taken from the captured Manifest. With no
 		// published Manifest the staged bytes are written as they are, and only
 		// the counts come from the merge.
+		if conflicts := distfiles.ManifestDistConflicts(promoted.manifestBefore, stagedBody); len(conflicts) > 0 {
+			c := conflicts[0]
+			wrapped := fmt.Errorf("%w: %s in %s-%s (%d record(s); published %q, validated %q)",
+				ErrDistDigestConflict, c.Name, pkg, version, len(conflicts), c.Published, c.Staged)
+			promoted.log.Error("promotion: refused, a published distfile changed size or digest under the same name",
+				"package", pkg, "version", version, "manifest", promoted.manifestPath, "distfile", c.Name,
+				"published", c.Published, "staged", c.Staged, "conflicts", len(conflicts))
+			promoted.undo(wrapped)
+			return nil, wrapped
+		}
 		body := stagedBody
 		merged, merge := distfiles.MergeManifestDist(promoted.manifestBefore, stagedBody)
 		if promoted.manifestExisted {

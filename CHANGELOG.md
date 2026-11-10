@@ -9,6 +9,28 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A truncated download can no longer rewrite a published Manifest.** When
+  the validated Manifest gives a distfile the published Manifest already
+  declares a different size or digest, `--apply` now refuses the promotion,
+  leaves the package directory untouched and logs both records at ERROR.
+  Before, the merge silently replaced the published record: a download killed
+  by the manifest timeout left a partial archive under its final name, the
+  re-check digested it, and every version using that archive stopped
+  installing. Identical records under the same name still promote.
+- **The manifest repair no longer works on partial downloads.** Before the
+  LLM fixer runs and again before the `--force` re-check, every file in the
+  repair distdir whose name the published Manifest declares is checked by
+  size and SHA512, and a mismatch is removed so it is fetched again. After a
+  first run stopped by its timeout, files the published Manifest does not
+  declare are not carried over either: pkgcore writes downloads under their
+  final name, so a killed one looks complete.
+- **A re-check that passes over an untouched ebuild is no longer reported as
+  a repair.** When the fixer leaves the ebuild byte-identical, the first
+  failure was transient; the apply succeeds without "LLM fixer repaired" or
+  `Fixed:`.
+
 ## [0.40.0] - 2026-11-08
 
 ### Added
