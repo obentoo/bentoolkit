@@ -81,6 +81,11 @@ var (
 	// already at/beyond the target version. The entry is pruned and the outcome
 	// is reported as obsolete, not as a failure.
 	ErrObsoletePending = errors.New("obsolete pending entry")
+	// ErrDistDigestConflict marks a promotion refused because the validated
+	// Manifest gives a distfile the published Manifest already declares a
+	// different size or digest. Same name means same bytes in Gentoo, so the
+	// validated record most likely digests a truncated or corrupt download.
+	ErrDistDigestConflict = errors.New("validated Manifest changes the digest of an already published distfile")
 	// ErrEbuildExists is returned when the destination ebuild a copy would write
 	// is already present in the overlay. Overwriting it would destroy a file the
 	// applier never authored — see copyEbuild's guard for why this is fatal

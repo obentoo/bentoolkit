@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A truncated download can no longer rewrite a published Manifest.** When
+  the validated Manifest gives a distfile the published Manifest already
+  declares a different size or digest, `--apply` now refuses the promotion,
+  leaves the package directory untouched and logs both records at ERROR.
+  Before, the merge silently replaced the published record: a download killed
+  by the manifest timeout left a partial archive under its final name, the
+  re-check digested it, and every version using that archive stopped
+  installing. Identical records under the same name still promote.
+
 ## [0.40.0] - 2026-11-08
 
 ### Added
