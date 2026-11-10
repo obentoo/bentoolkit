@@ -67,7 +67,7 @@ func (p pkgdbInstalled) HighestFromRepo(pkg, repo string) (string, bool) {
 
 // NewPkgdbInstalled is NewPkgdbInstalledContext without a deadline.
 func NewPkgdbInstalled(root string) (Installed, error) {
-	return NewPkgdbInstalledContext(context.Background(), root)
+	return NewPkgdbInstalledContext(context.Background(), root) // SAFE: deadline-free convenience wrapper; production calls NewPkgdbInstalledContext
 }
 
 // NewPkgdbInstalledContext reads <root>/var/db/pkg once and answers from that
