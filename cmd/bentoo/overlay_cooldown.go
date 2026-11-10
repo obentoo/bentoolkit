@@ -39,8 +39,8 @@ by time (days= on the BEGIN line), by installation from ::bentoo, or by hand.
 	return cmd
 }
 
-// cooldownStatusRow is one object of `status --json`: the tray's contract
-// (R6.2). Exactly these seven keys.
+// cooldownStatusRow is one object of `status --json`: the tray's contract.
+// Exactly these seven keys.
 type cooldownStatusRow struct {
 	Package   string   `json:"package"`
 	Version   string   `json:"version"`
@@ -294,7 +294,7 @@ func cooldownOverlay(cmd *cobra.Command) (string, error) {
 	return appCtx.OverlayPath, nil
 }
 
-// takeCooldownLock takes the apply's overlay lock (R6.6), waiting up to the
+// takeCooldownLock takes the apply's overlay lock, waiting up to the
 // lock's own timeout; a busy lock is an exit-1 error naming the lock and its
 // holder.
 func takeCooldownLock(overlayPath string) (release func(), err error) {

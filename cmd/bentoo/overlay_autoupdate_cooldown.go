@@ -33,10 +33,10 @@ func ebuildExistsFn(overlayPath string) func(pkg, ver string) bool {
 	}
 }
 
-// sweepCooldown loads the block of overlayPath and applies every release rule
-// (R3.1): elapsed, installed under pkgdbRoot, stale. It logs one Warn per
+// sweepCooldown loads the block of overlayPath and applies every release rule:
+// elapsed, installed under pkgdbRoot, stale. It logs one Warn per
 // entry dated in the future and per stale lift, one Info per lift, and one
-// Warn when the installed-package database cannot be read (R3.8). It does not
+// Warn when the installed-package database cannot be read. It does not
 // save. A nil block with a nil error is cooldown disabled.
 func sweepCooldown(ctx context.Context, log *slog.Logger, overlayPath, pkgdbRoot string, confirms []cooldown.Confirm) (*cooldown.Block, []cooldown.Lift, error) {
 	block, err := cooldown.Load(overlayPath)
@@ -58,7 +58,7 @@ func sweepCooldown(ctx context.Context, log *slog.Logger, overlayPath, pkgdbRoot
 	return rest, lifts, nil
 }
 
-// logCooldownLifts logs one Info per lift, and a Warn for a stale one (R8.1).
+// logCooldownLifts logs one Info per lift, and a Warn for a stale one.
 func logCooldownLifts(log *slog.Logger, lifts []cooldown.Lift) {
 	for _, l := range lifts {
 		if l.Reason == cooldown.ReasonStale {
@@ -72,7 +72,7 @@ func logCooldownLifts(log *slog.Logger, lifts []cooldown.Lift) {
 // cooldownApplyStart runs under the apply lock, before any candidate is
 // checked: it releases what is due, saves, and hands the swept block to the
 // Applier. A block that cannot be read is reported and the run continues
-// with every promotion that needs an entry refused (R7.3); a failed save
+// with every promotion that needs an entry refused; a failed save
 // stops the run before anything is staged.
 func (ar *autoupdateRun) cooldownApplyStart(ctx context.Context, overlayPath string) (cooldownRun, error) {
 	block, lifts, err := sweepCooldown(ctx, ar.log(), overlayPath, ar.deps.cooldownPkgdbRoot, nil)
@@ -90,7 +90,7 @@ func (ar *autoupdateRun) cooldownApplyStart(ctx context.Context, overlayPath str
 	return cooldownRun{enabled: true, lifts: lifts, option: autoupdate.WithApplierCooldown(block, nil)}, nil
 }
 
-// displayCooldownSummary prints the run's Cooldown section (R8.2): the
+// displayCooldownSummary prints the run's Cooldown section: the
 // versions this run masked and the ones it released, each by atom.
 func displayCooldownSummary(run cooldownRun, results []*autoupdate.ApplyResult) {
 	if !run.enabled {

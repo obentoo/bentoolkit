@@ -7,7 +7,7 @@ package cooldown_test
 //
 //	Sweep(b *Block, now time.Time, inst Installed, confirms []Confirm,
 //	      exists func(pkg, ver string) bool) (lifts []Lift, rest *Block)
-//	NewPkgdbInstalled(root string) (Installed, error)
+//	NewPkgdbInstalledContext(ctx context.Context, root string) (Installed, error)
 //
 // ASSUMPTION (not fixed by the contract excerpt): Confirm is a struct with the
 // fields Package ("cat/pkg") and Version (the PVR), mirroring Lift. If the
@@ -396,9 +396,9 @@ func TestCooldownInstalled_ReadsTheHighestVersionPerRepository(t *testing.T) {
 	writeInstalled(t, root, "media-libs", "libfoo-2d-1.0-r1", "bentoo")
 	writeInstalled(t, root, "dev-libs", "norepo-1.0", "")
 
-	inst, err := cooldown.NewPkgdbInstalled(root)
+	inst, err := cooldown.NewPkgdbInstalledContext(t.Context(), root)
 	if err != nil {
-		t.Fatalf("NewPkgdbInstalled(%s): %v", root, err)
+		t.Fatalf("NewPkgdbInstalledContext(%s): %v", root, err)
 	}
 	if inst == nil {
 		t.Fatal("NewPkgdbInstalled returned a nil Installed with no error")
@@ -428,7 +428,7 @@ func TestCooldownInstalled_ReadsTheHighestVersionPerRepository(t *testing.T) {
 // with no var/db/pkg is reported, so the caller can warn once and pass nil.
 func TestCooldownInstalled_AnUnreadableDatabaseIsAnError(t *testing.T) {
 	root := t.TempDir()
-	if _, err := cooldown.NewPkgdbInstalled(root); err == nil {
-		t.Errorf("NewPkgdbInstalled(%s) with no var/db/pkg returned no error", root)
+	if _, err := cooldown.NewPkgdbInstalledContext(t.Context(), root); err == nil {
+		t.Errorf("NewPkgdbInstalledContext(%s) with no var/db/pkg returned no error", root)
 	}
 }

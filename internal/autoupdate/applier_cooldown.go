@@ -35,7 +35,7 @@ type cooldownState struct {
 // WithApplierCooldown hands the Applier the run's cooldown block, already
 // swept by the caller. A nil block with a nil loadErr means cooldown is off
 // for this overlay. A non-nil loadErr refuses every promotion that needs an
-// entry (R7.3) while the rest of the run continues.
+// entry while the rest of the run continues.
 func WithApplierCooldown(block *cooldown.Block, loadErr error) ApplierOption {
 	return func(a *Applier) {
 		a.cooldown = &cooldownState{loaded: true, block: block, err: loadErr}
@@ -82,7 +82,7 @@ func CooldownGroup(pkg string, cfg registry.PackageConfig) string {
 	return strings.Join(slices.Compact(members), ",")
 }
 
-// cooldownMask masks the version about to be promoted (R1.1): it runs after
+// cooldownMask masks the version about to be promoted: it runs after
 // the promotion decision and before the candidate reaches the published
 // overlay. An error refuses the promotion. ebuildPath is the candidate's
 // ebuild (staged or in place), read for the unkeyworded exemption.
@@ -97,11 +97,11 @@ func CooldownGroup(pkg string, cfg registry.PackageConfig) string {
 // This is a DELIBERATE EXCEPTION to completeApply's warn-only rule: a bump
 // published unmasked because its cooldown entry could not be written is the
 // exact failure the cooldown exists to prevent, so here a write error or an
-// unreadable block fails closed (R1.3, R7.3).
+// unreadable block fails closed.
 func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyResult) error {
 	cfg := a.configs[key]
 	if cfg.CooldownExempt != nil {
-		return nil // R5.1, even under a malformed block: no entry is needed
+		return nil // even under a malformed block: no entry is needed
 	}
 	category, name, ok := ebuilds.SplitPkgAtom(key)
 	if !ok {
@@ -125,7 +125,7 @@ func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyRes
 		return fmt.Errorf("cooldown: refusing to promote %s-%s unmasked: %w", pkg, version, err)
 	}
 	if block == nil {
-		return nil // R1.4: no block, no cooldown
+		return nil // no block, no cooldown
 	}
 	if err := cooldown.ValidateAtom(pkg, version); err != nil {
 		return fmt.Errorf("cooldown: refusing to promote %s-%s: %w", pkg, version, err)
@@ -284,7 +284,7 @@ func (a *Applier) cooldownHeldFor(atom string, cfgs map[string]registry.PackageC
 }
 
 // heldVersions returns, per package with an entry, the versions that must
-// stay in the tree (R2.1): Block.Held over the directory — every masked
+// stay in the tree: Block.Held over the directory — every masked
 // version and the predecessor below the oldest — plus, for each registry
 // record (release line: ":slot" and series) holding a masked version, the
 // highest unmasked version of THAT line below its oldest masked one. A

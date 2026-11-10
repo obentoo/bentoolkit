@@ -1750,7 +1750,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	// buildApplyReporter wires the reporter into extra (WithApplierReporter), so
 	// the reporter value itself is not needed at this call site.
-	// The cooldown releases what is due before anything is checked (R3.1).
+	// The cooldown releases what is due before anything is checked.
 	cd, err := ar.cooldownApplyStart(ctx, overlayPath)
 	if err != nil {
 		return err
@@ -1837,7 +1837,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	}
 	updates := pending.List()
 
-	// The cooldown releases what is due before anything is checked (R3.1),
+	// The cooldown releases what is due before anything is checked,
 	// with or without pending updates.
 	cd, err := ar.cooldownApplyStart(ctx, overlayPath)
 	if err != nil {
