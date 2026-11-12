@@ -15,7 +15,7 @@
 //	# END bentoo-cooldown
 //
 // The presence of the BEGIN line is what enables cooldown for an overlay; an
-// overlay without it is untouched. The package never logs: it returns errors
+// overlay without it is untouched. Enable writes it. The package never logs: it returns errors
 // and leaves logging to its callers.
 package cooldown
 

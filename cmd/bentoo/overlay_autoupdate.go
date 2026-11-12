@@ -21,6 +21,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/cooldown"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
@@ -91,6 +92,13 @@ type autoupdateOptions struct {
 	// promotion skips the cooldown: a security fix must not wait. Each skip is
 	// logged and shown in the run summary.
 	urgent []string
+	// cooldown, with --apply or --revive, switches the overlay's cooldown on
+	// (or retunes it) with this many days before anything is promoted. 0 =
+	// not passed: the overlay's block, or its absence, decides alone.
+	cooldown int
+	// cooldownSet records that --cooldown was passed, so --cooldown=0 is
+	// refused rather than read as "not passed".
+	cooldownSet bool
 	// revivable, with --check, also reports revivable orphans (disabled
 	// entries absent from the overlay whose upstream is newer than ::gentoo) in
 	// the same pass — read-only, no mutation
@@ -349,6 +357,8 @@ Examples:
 	cmd.Flags().StringVar(&o.only, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
 	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
 	cmd.Flags().StringSliceVar(&o.urgent, "urgent", nil, "With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary")
+	cmd.Flags().IntVar(&o.cooldown, "cooldown", 0, "With --apply or --revive: switch the overlay's cooldown ON before anything is promoted, so every promoted version is masked for this many days (bare --cooldown = 7, range 1-3650) while the previous version stays installable. It writes the managed bentoo-cooldown block into the overlay's profiles/package.mask — PUBLISHED, so the mask reaches every host that syncs the overlay — and it is persistent: later runs mask without the flag. On an overlay already under cooldown it rewrites days= only")
+	cmd.Flags().Lookup("cooldown").NoOptDefVal = strconv.Itoa(cooldown.DefaultDays)
 	cmd.Flags().StringVar(&o.revive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
 	cmd.Flags().StringVar(&o.repair, "repair", "", "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH")
 	cmd.Flags().BoolVar(&o.revivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
@@ -701,6 +711,13 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// simply never looks at it.
 	ar.dirs = o.resolveAutoupdateDistfileDirs(ar.log(), appCtx.Config, cmd.Flags().Changed("distfiles-cache"))
 
+	// --cooldown writes the published package.mask, so a misuse is refused
+	// before the lock and before any package work.
+	o.cooldownSet = cmd.Flags().Changed("cooldown")
+	if err := o.validateCooldownFlag(); err != nil {
+		return err
+	}
+
 	// The staged-bump validation policy, resolved here for the same reason and in
 	// the same place as the distfile directories above. A --depth that
 	// does not name a rung is fatal BEFORE any package work: it is a typo the
@@ -780,6 +797,9 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// to the exit status.
 	if len(ar.opts.urgent) > 0 && ar.opts.apply == "" && ar.opts.revive == "" {
 		return fmt.Errorf("--urgent only applies to --apply or --revive: it names promotions that skip the cooldown")
+	}
+	if err := ar.enableCooldownFlag(overlayPath); err != nil {
+		return err
 	}
 	switch {
 	case ar.opts.repair != "":
