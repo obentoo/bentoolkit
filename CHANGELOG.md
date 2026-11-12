@@ -9,6 +9,26 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Security
+
+- **Built with Go 1.27.4** (GO-2026-6859: an HTTP/1 server crash from a race
+  between `MaxBytesReader` and the response headers in `net/http`).
+  bentoolkit and `bentoo-tray` only act as HTTP clients, so the crash path is
+  a server one, but `govulncheck` reaches the affected `net/http` code from
+  the HTTP client paths and the toolchain in `go.mod` decides what a release
+  links against. Taken ahead of the usual seven-day wait, because it is the
+  Go team's own security release.
+
+### Changed
+
+- **Dependencies updated.** `chromedp/cdproto` v0.159.2 → v0.159.3,
+  `go-json-experiment/json` to its first tagged release after the pinned
+  snapshot (v1.27.2), `golang.org/x/mod` v0.43.0, `golang.org/x/sync`
+  v0.25.0, `golang.org/x/sys` v0.50.0, `golang.org/x/text` v0.44.0 and
+  `golang.org/x/telemetry` to its 2026-11-11 snapshot. CI's
+  `osv-scanner-action` moves to v2.7.1. Taken ahead of the usual seven-day
+  wait.
+
 ## [0.40.1] - 2026-11-10
 
 ### Fixed
