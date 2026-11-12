@@ -141,3 +141,44 @@ func cooldownAtomOf(key string) string {
 	}
 	return key
 }
+
+// validateCooldownFlag refuses --cooldown outside --apply and --revive, and a
+// value outside 1..cooldown.MaxDays.
+func (o *autoupdateOptions) validateCooldownFlag() error {
+	if !o.cooldownSet {
+		return nil
+	}
+	if o.apply == "" && o.revive == "" {
+		return fmt.Errorf("--cooldown only applies to --apply or --revive: it switches on the cooldown those promotions are masked by")
+	}
+	if o.cooldown < 1 || o.cooldown > cooldown.MaxDays {
+		return fmt.Errorf("--cooldown=%d: the delay must be 1 to %d days", o.cooldown, cooldown.MaxDays)
+	}
+	return nil
+}
+
+// enableCooldownFlag runs under the overlay lock, before any mode: with
+// --cooldown it writes or retunes the overlay's cooldown block, which every
+// host syncing the overlay then reads. A failure stops the run before
+// anything is promoted, since the user asked for masked promotions.
+func (ar *autoupdateRun) enableCooldownFlag(overlayPath string) error {
+	if !ar.opts.cooldownSet {
+		return nil
+	}
+	outcome, prev, err := cooldown.Enable(overlayPath, ar.opts.cooldown)
+	if err != nil {
+		return failWith(1, fmt.Errorf("--cooldown: %w", err))
+	}
+	days := ar.opts.cooldown
+	switch outcome {
+	case cooldown.EnableCreated:
+		ar.log().Info("cooldown: enabled for the overlay", "days", days, "file", cooldown.MaskRel)
+		output.Info.Printf("Cooldown enabled: every promoted version stays masked in %s for %d days\n", cooldown.MaskRel, days)
+	case cooldown.EnableRetuned:
+		ar.log().Info("cooldown: delay changed", "from", prev, "to", days, "file", cooldown.MaskRel)
+		output.Info.Printf("Cooldown delay changed from %d to %d days\n", prev, days)
+	default:
+		ar.log().Debug("cooldown: already enabled with the requested delay", "days", days)
+	}
+	return nil
+}

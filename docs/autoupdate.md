@@ -492,7 +492,11 @@ someone has built it:
 ```
 
 - **The block is the switch.** No BEGIN line, no cooldown: an overlay without
-  the block is never touched. `format=1` versions the block — a bentoolkit
+  the block is never touched. `--apply` or `--revive` with `--cooldown[=N]`
+  writes it (bare `--cooldown` is `days=7`) before anything is promoted, so
+  that run's bumps are already masked; on an overlay already under cooldown it
+  rewrites `days=` only. Because the block lives in the overlay, it reaches
+  every host that syncs it, and later runs keep masking without the flag. `format=1` versions the block — a bentoolkit
   that meets another format refuses it, naming it — and `days=` (1 to 3650) is
   the policy. Every entry is two lines, sorted by package then version, and the
   atom is bare (Portage stamps `::<repo>` on it). Bytes outside the block are
