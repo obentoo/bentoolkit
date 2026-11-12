@@ -680,3 +680,82 @@ func MergeManifestDist(published, staged []byte) ([]byte, ManifestMerge) {
 	}
 	return []byte(b.String()), merge
 }
+
+// DistConflict is an archive both Manifests declare under one filename but
+// with a different size or digest. Published and Staged are the two records as
+// read.
+type DistConflict struct {
+	Name, Published, Staged string
+}
+
+// ManifestDistConflicts lists the filenames staged declares that published also
+// declares with different bytes, in staged order.
+//
+// In a Gentoo repository a distfile name stands for one fixed set of bytes:
+// every ebuild that names it fetches the same archive, so a record that changes
+// size or digest under the same name breaks every published version that uses
+// it. A staged record that does so most often digests a truncated or otherwise
+// corrupt local copy, not a new upstream archive, so promotion must not let it
+// silently displace the published one.
+//
+// Two records conflict when their sizes differ, when a digest algorithm both
+// list has different values, or when they share no algorithm at all (nothing
+// then proves the bytes are the same). Published records with no usable
+// filename are ignored here; MergeManifestDist drops them.
+func ManifestDistConflicts(published, staged []byte) []DistConflict {
+	type parsed struct {
+		line   string
+		size   string
+		hashes map[string]string
+	}
+	parse := func(line string, fields []string) parsed {
+		p := parsed{line: line, hashes: map[string]string{}}
+		if len(fields) > 2 {
+			p.size = fields[2]
+		}
+		for i := 3; i+1 < len(fields); i += 2 {
+			p.hashes[fields[i]] = fields[i+1]
+		}
+		return p
+	}
+	pub := map[string][]parsed{}
+	eachManifestDistRecord(published, func(line string, fields []string) {
+		if len(fields) < 2 || !isManifestFilename(fields[1]) {
+			return
+		}
+		pub[fields[1]] = append(pub[fields[1]], parse(line, fields))
+	})
+	var conflicts []DistConflict
+	eachManifestDistRecord(staged, func(line string, fields []string) {
+		if len(fields) < 2 {
+			return
+		}
+		s := parse(line, fields)
+		for _, p := range pub[fields[1]] {
+			if !sameDistBytes(p.size, p.hashes, s.size, s.hashes) {
+				conflicts = append(conflicts, DistConflict{Name: fields[1], Published: p.line, Staged: s.line})
+				return
+			}
+		}
+	})
+	return conflicts
+}
+
+// sameDistBytes reports whether two DIST records can describe the same archive.
+func sameDistBytes(sizeA string, hashesA map[string]string, sizeB string, hashesB map[string]string) bool {
+	if sizeA != sizeB {
+		return false
+	}
+	shared := 0
+	for algo, a := range hashesA {
+		b, ok := hashesB[algo]
+		if !ok {
+			continue
+		}
+		if a != b {
+			return false
+		}
+		shared++
+	}
+	return shared > 0
+}

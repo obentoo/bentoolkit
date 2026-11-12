@@ -101,7 +101,7 @@ func CooldownGroup(pkg string, cfg registry.PackageConfig) string {
 func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyResult) error {
 	cfg := a.configs[key]
 	if cfg.CooldownExempt != nil {
-		return nil // exempt, even under a malformed block: no entry is needed
+		return nil // even under a malformed block: no entry is needed
 	}
 	category, name, ok := ebuilds.SplitPkgAtom(key)
 	if !ok {

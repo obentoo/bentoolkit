@@ -19,6 +19,52 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--revive-list`, `--check --revivable` and `--revive all`, and
   `--revive <pkg>` reports it skipped before anything is written.
 
+## [0.40.2] - 2026-11-12
+
+### Security
+
+- **Built with Go 1.27.4** (GO-2026-6859: an HTTP/1 server crash from a race
+  between `MaxBytesReader` and the response headers in `net/http`).
+  bentoolkit and `bentoo-tray` only act as HTTP clients, so the crash path is
+  a server one, but `govulncheck` reaches the affected `net/http` code from
+  the HTTP client paths and the toolchain in `go.mod` decides what a release
+  links against. Taken ahead of the usual seven-day wait, because it is the
+  Go team's own security release.
+
+### Changed
+
+- **Dependencies updated.** `chromedp/cdproto` v0.159.2 → v0.159.3,
+  `go-json-experiment/json` to its first tagged release after the pinned
+  snapshot (v1.27.2), `golang.org/x/mod` v0.43.0, `golang.org/x/sync`
+  v0.25.0, `golang.org/x/sys` v0.50.0, `golang.org/x/text` v0.44.0 and
+  `golang.org/x/telemetry` to its 2026-11-11 snapshot. CI's
+  `osv-scanner-action` moves to v2.7.1. Taken ahead of the usual seven-day
+  wait.
+
+## [0.40.1] - 2026-11-10
+
+### Fixed
+
+- **A truncated download can no longer rewrite a published Manifest.** When
+  the validated Manifest gives a distfile the published Manifest already
+  declares a different size or digest, `--apply` now refuses the promotion,
+  leaves the package directory untouched and logs both records at ERROR.
+  Before, the merge silently replaced the published record: a download killed
+  by the manifest timeout left a partial archive under its final name, the
+  re-check digested it, and every version using that archive stopped
+  installing. Identical records under the same name still promote.
+- **The manifest repair no longer works on partial downloads.** Before the
+  LLM fixer runs and again before the `--force` re-check, every file in the
+  repair distdir whose name the published Manifest declares is checked by
+  size and SHA512, and a mismatch is removed so it is fetched again. After a
+  first run stopped by its timeout, files the published Manifest does not
+  declare are not carried over either: pkgcore writes downloads under their
+  final name, so a killed one looks complete.
+- **A re-check that passes over an untouched ebuild is no longer reported as
+  a repair.** When the fixer leaves the ebuild byte-identical, the first
+  failure was transient; the apply succeeds without "LLM fixer repaired" or
+  `Fixed:`.
+
 ## [0.40.0] - 2026-11-08
 
 ### Added
@@ -1755,7 +1801,9 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.40.2...HEAD
+[0.40.2]: https://github.com/obentoo/bentoolkit/compare/v0.40.1...v0.40.2
+[0.40.1]: https://github.com/obentoo/bentoolkit/compare/v0.40.0...v0.40.1
 [0.40.0]: https://github.com/obentoo/bentoolkit/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/obentoo/bentoolkit/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/obentoo/bentoolkit/compare/v0.37.4...v0.38.0

@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -170,6 +171,10 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 			label = childRunManifestRecheck
 		}
 		run := s.newChildRunError(label, pkg, version, sc.Captured(), spill, runErr)
+		if errors.Is(opCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+			return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w after %s: %w",
+				ErrManifestFailed, pkg, version, stagedPkgDir, ErrManifestTimedOut, manifestTimeout, run)
+		}
 		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w",
 			ErrManifestFailed, pkg, version, stagedPkgDir, run)
 	}

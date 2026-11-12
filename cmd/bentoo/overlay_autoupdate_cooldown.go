@@ -33,8 +33,8 @@ func ebuildExistsFn(overlayPath string) func(pkg, ver string) bool {
 	}
 }
 
-// sweepCooldown loads the block of overlayPath and applies every release rule
-// (elapsed, installed under pkgdbRoot, stale). It logs one Warn per
+// sweepCooldown loads the block of overlayPath and applies every release rule:
+// elapsed, installed under pkgdbRoot, stale. It logs one Warn per
 // entry dated in the future and per stale lift, one Info per lift, and one
 // Warn when the installed-package database cannot be read. It does not
 // save. A nil block with a nil error is cooldown disabled.

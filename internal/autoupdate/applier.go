@@ -81,6 +81,15 @@ var (
 	// already at/beyond the target version. The entry is pruned and the outcome
 	// is reported as obsolete, not as a failure.
 	ErrObsoletePending = errors.New("obsolete pending entry")
+	// ErrManifestTimedOut marks a `pkgdev manifest` run stopped by its own
+	// deadline. Its downloads may have been killed mid-file, and pkgcore writes
+	// under the final name, so the distdir it leaves can hold partial archives.
+	ErrManifestTimedOut = errors.New("manifest step timed out")
+	// ErrDistDigestConflict marks a promotion refused because the validated
+	// Manifest gives a distfile the published Manifest already declares a
+	// different size or digest. Same name means same bytes in Gentoo, so the
+	// validated record most likely digests a truncated or corrupt download.
+	ErrDistDigestConflict = errors.New("validated Manifest changes the digest of an already published distfile")
 	// ErrEbuildExists is returned when the destination ebuild a copy would write
 	// is already present in the overlay. Overwriting it would destroy a file the
 	// applier never authored — see copyEbuild's guard for why this is fatal
@@ -2680,6 +2689,10 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 			a.logger().Warn("manifest fix: could not carry a downloaded distfile over",
 				"package", pkg, "version", version, "file", e.Name, "error", e.Err)
 		}
+		// A timed-out first run may have been killed mid-download, and pkgcore
+		// writes under the final name, so only what the published Manifest can
+		// vouch for survives; the rest is fetched again.
+		carried -= a.dropUnverifiedDistfiles(pkg, version, fixDistdir, !errors.Is(firstErr, ErrManifestTimedOut))
 		sw := a.sweeper()
 		copied, copyErrs := distfiles.CopyFromSources(fixDistdir,
 			sw.stagedDistfileSources(ctx, fixDistdir), sw.stagedExpectedDistfiles(pkg, version))
@@ -2717,6 +2730,9 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	a.substage(result, pkg, fixer.StageManifestFix)
 	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
 
+	// Read to tell a repair from a transient failure after the re-check; an
+	// unreadable ebuild only means the run is reported as a repair, as before.
+	ebuildBefore, beforeErr := os.ReadFile(cand.ebuildPath)
 	progress, progressDone := a.agentProgress(pkg)
 	fixRes, fixErr := withSlot(ctx, a.slots.llm, func() (fixer.ManifestFixResult, error) {
 		return a.fixer.FixManifest(ctx, fixer.ManifestFixRequest{
@@ -2757,6 +2773,10 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// The path returned is whatever the re-check ran against, on its failure paths
 	// too — the caller must be able to take the directory back however this ends.
 	a.substage(result, pkg, "re-check")
+	// `--force` digests whatever is in the directory without fetching, so a
+	// copy that contradicts a published record is removed first and fetched
+	// again instead of being written into the Manifest.
+	a.dropUnverifiedDistfiles(pkg, version, distdir, true)
 	recheckDistdir, secondErr := a.runManifestForIn(ctx, sw, distdir, cand, pkg, version)
 	distdir = recheckDistdir
 	if secondErr != nil {
@@ -2765,6 +2785,15 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		// Two %w rather than errors.Join, whose newline separator would make the
 		// error two lines.
 		return distdir, fmt.Errorf("%w (LLM fix applied but manifest still failed: %w)%s", firstErr, secondErr, llm.RefusedToolsNote(fixRes.DeniedTools))
+	}
+
+	if ebuildAfter, err := os.ReadFile(cand.ebuildPath); err == nil && beforeErr == nil && bytes.Equal(ebuildBefore, ebuildAfter) {
+		// The re-check passed over an ebuild the fixer left byte-identical: the
+		// first failure was transient (a timeout, a flaky mirror), not repaired.
+		a.logger().Info("manifest re-check passed without an ebuild edit; the first failure was transient",
+			"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
+		a.reporter.Log("info", fmt.Sprintf("manifest re-check passed for %s-%s without an ebuild edit", pkg, version))
+		return distdir, nil
 	}
 
 	result.Fixed = true
@@ -3764,4 +3793,31 @@ func (a *Applier) refusal(pkg string) string {
 		return ""
 	}
 	return reason
+}
+
+// dropUnverifiedDistfiles removes from dir the files the published Manifest of
+// pkg contradicts (and, unless keepUnlisted, the ones it does not declare),
+// logs each removal and returns how many went.
+func (a *Applier) dropUnverifiedDistfiles(pkg, version, dir string, keepUnlisted bool) int {
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
+	if !ok || dir == "" {
+		return 0
+	}
+	manifestPath := filepath.Join(a.overlayPath, category, pkgName, "Manifest")
+	published, err := os.ReadFile(manifestPath) //nolint:gosec // G304: <overlay>/<category>/<pkg>/Manifest from an atom SplitPkgAtom confined
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		a.logger().Warn("manifest fix: could not read the published Manifest to verify distfiles",
+			"package", pkg, "version", version, "manifest", manifestPath, "error", err)
+		return 0
+	}
+	dropped, failures := distfiles.DropUnverified(dir, published, keepUnlisted)
+	for _, e := range failures {
+		a.logger().Warn("manifest fix: could not verify a distfile",
+			"package", pkg, "version", version, "file", e.Name, "error", e.Err)
+	}
+	for _, name := range dropped {
+		a.logger().Warn("manifest fix: removed a distfile the published Manifest does not vouch for; it will be fetched again",
+			"package", pkg, "version", version, "file", name, "dir", dir)
+	}
+	return len(dropped)
 }

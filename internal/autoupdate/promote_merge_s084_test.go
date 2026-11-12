@@ -260,11 +260,11 @@ func TestS084PromoteNearNamesSurviveAndASharedFilenameTakesTheStagedRecord(t *te
 			"\tDIST  gst-plugins-qt6-1.28.6.tar.xz 100 BLAKE2B old SHA512 old",
 			"DIST gst-plugins-qt6-1.28.60.tar.xz 160 BLAKE2B n1 SHA512 n2",
 		)),
-		staged:    s084Str("DIST gst-plugins-qt6-1.28.6.tar.xz 100 BLAKE2B new SHA512 new\n"),
+		staged:    s084Str("DIST gst-plugins-qt6-1.28.6.tar.xz 100 BLAKE2B old SHA512 old\n"),
 		candidate: "1.28.6-r1",
 	})
 	s084AssertManifest(t, p.manifest, s084Lines(
-		"DIST gst-plugins-qt6-1.28.6.tar.xz 100 BLAKE2B new SHA512 new",
+		"DIST gst-plugins-qt6-1.28.6.tar.xz 100 BLAKE2B old SHA512 old",
 		"DIST gst-plugins-qt6-1.28.6.tar.xz.asc 5 BLAKE2B s1 SHA512 s2",
 		"DIST gst-plugins-qt6-1.28.60.tar.xz 160 BLAKE2B n1 SHA512 n2",
 	))
@@ -350,7 +350,7 @@ func TestS084PromoteLogsTheMergeCounts(t *testing.T) {
 			"DIST x-1.tar.xz 9 BLAKE2B old SHA512 old",
 		)),
 		staged: s084Str(s084Lines(
-			"DIST x-1.tar.xz 9 BLAKE2B new SHA512 new",
+			"DIST x-1.tar.xz 9 BLAKE2B old SHA512 old",
 			"DIST b-1.tar.xz 2 BLAKE2B b SHA512 b",
 			"DIST d-1.tar.xz 4 BLAKE2B d SHA512 d",
 		)),
