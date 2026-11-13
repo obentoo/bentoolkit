@@ -363,8 +363,36 @@ func rowReason(outcome report.Outcome, result validate.EbuildResult, entry valid
 		if detail := failureDetail(result); detail != "" {
 			return detail
 		}
+		if reason := gateReasons(result, validate.OutcomeFailed); reason != "" {
+			return reason
+		}
 	}
 	return skipReason(result, entry)
+}
+
+// gateReasons joins the distinct reasons of every gate that ended in outcome,
+// each named by its gate when there is more than one. Taking only the first
+// gate made every row read as the `options` gate's, which runs first, while
+// the gate that stopped the bump sat further on.
+func gateReasons(result validate.EbuildResult, outcome validate.Outcome) string {
+	type stated struct{ gate, reason string }
+	var reasons []stated
+	seen := map[string]bool{}
+	for _, gate := range result.Gates {
+		if gate.Outcome != outcome || gate.Reason == "" || seen[gate.Reason] {
+			continue
+		}
+		seen[gate.Reason] = true
+		reasons = append(reasons, stated{string(gate.Gate), gate.Reason})
+	}
+	if len(reasons) == 1 {
+		return reasons[0].reason
+	}
+	parts := make([]string, 0, len(reasons))
+	for _, r := range reasons {
+		parts = append(parts, r.gate+": "+r.reason)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // failureDetail is every finding a failed package produced, each named by the
