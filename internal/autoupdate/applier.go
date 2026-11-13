@@ -3850,8 +3850,15 @@ func (a *Applier) dropUnverifiedDistfiles(pkg, version, dir string, keepUnlisted
 		a.logger().Warn("manifest fix: could not verify a distfile",
 			"package", pkg, "version", version, "file", e.Name, "error", e.Err)
 	}
+	// One WARN per package: a bump of libreoffice-l10n drops one helppack per
+	// language, and 39 identical lines buried everything else the run said.
+	// The names stay on the record, and one DEBUG line per file keeps the detail.
+	if len(dropped) > 0 {
+		a.logger().Warn("manifest fix: removed distfiles the published Manifest does not vouch for; they will be fetched again",
+			"package", pkg, "version", version, "count", len(dropped), "files", dropped, "dir", dir)
+	}
 	for _, name := range dropped {
-		a.logger().Warn("manifest fix: removed a distfile the published Manifest does not vouch for; it will be fetched again",
+		a.logger().Debug("manifest fix: removed an unverified distfile",
 			"package", pkg, "version", version, "file", name, "dir", dir)
 	}
 	return len(dropped)

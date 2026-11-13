@@ -37,6 +37,37 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   failed those checks still carried the marker. The deepest phase now also
   needs a clean exit.
 
+- **`--check --llm` plans only what this run found.** The plan read the whole
+  pending list, so an old entry nobody would apply was priced and validated:
+  on 2026-11-13 it counted 46 bumps against 45 found, the extra one a failed
+  entry for a package removed two weeks before. The plan now takes only the
+  entries this scan confirmed as updates, and a check drops the pending entry
+  of every package that is `enabled = false`.
+
+- **The `--check` report counts the packages it could not check.** A package
+  whose check failed was left out of the report, so the progress counter
+  reached 599 while the report said 595. Each one is now a row, with its
+  error, under "could not be checked".
+
+- **No log line lands on the `--check` progress counter.** A record logged
+  during the scan was printed after the counter, on the same line. The
+  terminal copy now waits until the counter is cleared; the log file still
+  gets it at once.
+
+- **An interrupted `--check --revivable` no longer says "Nothing to revive".**
+  The scan kept going on a cancelled run, turned every lookup into a soft
+  error (171 of them) and then printed that nothing could be revived. It now
+  stops at once and prints nothing; the run reports its own interruption.
+
+- **One warning per package for distfiles a Manifest fix removes.** A bump
+  that drops many unverified distfiles printed one identical warning per
+  file (39 for `libreoffice-l10n`). It now prints one, with the count and
+  the file names.
+
+- **The `bentoo` binary is no longer tracked in git.** A 24 MB build of
+  `cmd/bentoo` was committed by mistake; it is removed from the index and
+  ignored.
+
 ### Changed
 
 - **Dependencies updated.** `chromedp/cdproto` v0.159.3 → v0.160.0 (linked
