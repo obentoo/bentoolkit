@@ -421,7 +421,7 @@ func s094RunApplyOnPTY(t *testing.T, auOpts *autoupdateOptions, rows, cols int) 
 		}
 		auCmd := testAutoupdateCmd()
 		auCmd.SetContext(logging.NewContext(context.Background(), slog.New(slog.NewTextHandler(os.Stderr, nil))))
-		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, ttyDeps(false, true)))
+		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, validating(ttyDeps(false, true))))
 	}()
 	slave.Close()
 	select {

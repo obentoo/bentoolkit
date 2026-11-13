@@ -83,7 +83,7 @@ autoupdate:
   # Every key is optional; the commented values below are the defaults.
   # Depth rungs, shallowest first, each including the ones before it:
   #   none | options | patches | configure | compile | install
-  # `compile` is never a default: ask for it with --depth/--compile or with a
+  # `compile` is never a default: ask for it with --depth or with a
   # per-package override that states its reason.
   # --------------------------------------------------------------------------
   # validate:
@@ -122,6 +122,11 @@ autoupdate:
   #     dev-libs/example:
   #       depth: compile
   #       reason: carries a local patch that only a build exercises
+
+  # How long a proof taken by `--check --llm` lets `--apply` publish the bump
+  # it proved; an older proof must be taken again.
+  # proof:
+  #   max_age_days: 7
 
   # --------------------------------------------------------------------------
   # vendor — the Go vendor-tarball step.

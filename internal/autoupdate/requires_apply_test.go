@@ -446,6 +446,11 @@ func TestRequiresApplyValidateReportsWaiting(t *testing.T) {
 		if g.Outcome != validate.OutcomeSkipped {
 			t.Errorf("gate %s reported %s for a bump that must not be validated (waiting on %s)", g.Gate, g.Outcome, requiresApplyWaiting)
 		}
+		// Another package has to land first; nothing about this candidate is
+		// wrong, so the wait is the host's, and the report reads it as WAIT.
+		if g.Declined != validate.DeclineHost {
+			t.Errorf("gate %s declined over %q while waiting on %s, want %q", g.Gate, g.Declined, requiresApplyWaiting, validate.DeclineHost)
+		}
 	}
 	f.assertNothingWritten(t)
 	f.assertPendingKept(t, requires)
