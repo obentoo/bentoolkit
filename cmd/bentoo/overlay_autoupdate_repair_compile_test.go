@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/repair"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
 // TestRepairRevalidatesACompileFailureWithTheCompileGate: a bundle left by a
@@ -16,42 +17,56 @@ import (
 // explicit --compile asks for the gate whatever the bundle's stage.
 func TestRepairRevalidatesACompileFailureWithTheCompileGate(t *testing.T) {
 	const compilePrompt = "Run compile test for " + repairPkg + "-" + repairCand
-	for _, tc := range []struct {
-		name        string
-		stage       string
-		flag        bool
-		wantCompile bool
-	}{
-		{"gate:compile", "gate:compile", false, true},
-		{"re-check", "re-check", false, false},
-		{"gate:build", "gate:build", false, false},
-		{"re-check with --compile", "re-check", true, true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, stage := range []string{"gate:compile", "re-check", "gate:build"} {
+		t.Run(stage, func(t *testing.T) {
 			auOpts := testAutoupdateOptions()
 			auOpts.noTUI = true
-			auOpts.compile = tc.flag
 			f := repairFixture(t, auOpts, 0)
 			b, err := repair.ReadBundle(f.bundlePath)
 			if err != nil {
 				t.Fatal(err)
 			}
-			b.Stage = tc.stage
+			b.Stage = stage
 			if err := repair.WriteBundle(b); err != nil {
 				t.Fatal(err)
 			}
 			code, out := runRepair(t, auOpts, ttyDeps(true, true), "y\n")
-			if got := strings.Contains(out, compilePrompt); got != tc.wantCompile {
-				t.Fatalf("stage %q: compile gate asked = %v, want %v (exit %d):\n%s", tc.stage, got, tc.wantCompile, code, out)
-			}
-			if tc.wantCompile {
-				if code != 1 {
-					t.Fatalf("a declined compile gate exited %d, want 1:\n%s", code, out)
-				}
-				if _, err := repair.ReadBundle(f.bundlePath); err != nil {
-					t.Fatalf("bundle gone after a declined compile gate: %v", err)
-				}
+			if strings.Contains(out, compilePrompt) {
+				t.Fatalf("stage %q asked for the privileged compile gate, which is gone (exit %d):\n%s", stage, code, out)
 			}
 		})
+	}
+
+	t.Run("--compile is refused", func(t *testing.T) {
+		auOpts := testAutoupdateOptions()
+		auOpts.noTUI = true
+		auOpts.compile = true
+		repairFixture(t, auOpts, 0)
+		code, out := runRepair(t, auOpts, ttyDeps(true, true), "y\n")
+		if code != 1 || !strings.Contains(out, "--compile was removed") {
+			t.Fatalf("--repair --compile exited %d without the removal notice:\n%s", code, out)
+		}
+	})
+}
+
+// TestRepairDepth_RaisesACompileFailureToTheCompileDepth: a bundle that failed
+// at the compile gate re-validates at --depth=compile on the unprivileged
+// ladder, unless the operator already asked for as much or more.
+func TestRepairDepth_RaisesACompileFailureToTheCompileDepth(t *testing.T) {
+	install, configure := validate.DepthInstall, validate.DepthConfigure
+	for _, tc := range []struct {
+		stage string
+		asked *validate.Depth
+		raise bool
+	}{
+		{"gate:compile", nil, true},
+		{"gate:compile", &configure, true},
+		{"gate:compile", &install, false},
+		{"re-check", nil, false},
+	} {
+		depth, raise := repairDepth(repair.Bundle{Stage: tc.stage}, tc.asked)
+		if raise != tc.raise || (raise && depth != validate.DepthCompile) {
+			t.Errorf("stage %q asked %v: repairDepth = %v, %v; want raise=%v to compile", tc.stage, tc.asked, depth, raise, tc.raise)
+		}
 	}
 }
