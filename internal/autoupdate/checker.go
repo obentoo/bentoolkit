@@ -832,6 +832,7 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 		return result, result.Error
 	}
 	result.CurrentVersion = currentVersion
+	c.dropStalePending(pkg, currentVersion)
 
 	// Classify the package (bin vs source) for reporting and filtering. This is
 	// metadata only and never blocks the check, so it runs after the version is
@@ -853,6 +854,33 @@ func (c *Checker) CheckPackage(ctx context.Context, pkg string, force bool) (*Ch
 	}
 
 	return c.checkUpstream(ctx, pkg, &pkgConfig, currentVersion, result)
+}
+
+// dropStalePending removes pkg's pending entry when the tree already holds
+// its target or something newer: a bump done by hand, or one applied by a
+// run that failed to clear the entry. Left in place, every --check would
+// queue it for validation again and every validation would end inconclusive
+// on an ebuild that already exists. It runs before upstream is asked, so a
+// failed fetch does not keep a stale entry alive. An entry whose versions do
+// not compare is left alone.
+func (c *Checker) dropStalePending(pkg, currentVersion string) {
+	if c.pending == nil {
+		return
+	}
+	entry, ok := c.pending.Get(pkg)
+	if !ok {
+		return
+	}
+	if newer, comparable := c.compareVersions(entry.NewVersion, currentVersion); newer || !comparable {
+		return
+	}
+	if err := c.pending.Delete(pkg); err != nil {
+		c.logger().Warn("pending: could not drop an entry the tree already holds",
+			"package", pkg, "target", entry.NewVersion, "current", currentVersion, "err", err)
+		return
+	}
+	c.logger().Info("pending: dropped an entry the tree already holds",
+		"package", pkg, "target", entry.NewVersion, "current", currentVersion)
 }
 
 // checkCommitTracked is CheckPackage for a package that tracks a commit: the

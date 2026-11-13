@@ -9,6 +9,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--check` drops a pending update the tree already holds.** A version
+  bumped by hand, or applied by a run that failed to clear its entry, stayed
+  in `pending.json`: every later `--check --llm` put it back in the
+  Validation Plan, and every validation ended `inconclusive` on an ebuild
+  that already existed (#304). The check now removes, before asking upstream,
+  any entry whose target is not newer than the version in the overlay, and
+  logs each removal. An entry still above the tree is kept.
+
 ## [0.41.0] - 2026-11-12
 
 ### Added
