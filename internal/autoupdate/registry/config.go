@@ -12,6 +12,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode"
 
 	"github.com/BurntSushi/toml"
@@ -1158,6 +1159,12 @@ func indexOutsideComments(body []string, inComments []bool, match func(line stri
 // input slices must not be mutated.
 type sectionBodyEditor func(name string, body []string, inComments []bool) ([]string, bool)
 
+// packagesConfigEditMu serialises editPackagesConfigSections within the
+// process: ApplyAll pins each promoted record from its own goroutine, and two
+// unserialised read-modify-write cycles let the last writer drop the other's
+// edit. Other processes are kept out by the overlay lock.
+var packagesConfigEditMu sync.Mutex
+
 // editPackagesConfigSections is the shared raw-text surgery behind
 // setPackagesEnabled and SetPackageVersions: one read, one linear pass locating
 // each target `[section]` by table name, one atomic write. What to change
@@ -1173,11 +1180,13 @@ type sectionBodyEditor func(name string, body []string, inComments []bool) ([]st
 //
 // The write is atomic (temp file + rename) and preserves the original file
 // mode; an empty target set, or an edit that changes nothing, returns before
-// any write, leaving the file untouched.
+// any write, leaving the file untouched. Calls are serialised.
 func editPackagesConfigSections(overlayPath string, targets map[string]bool, edit sectionBodyEditor) error {
 	if len(targets) == 0 {
 		return nil
 	}
+	packagesConfigEditMu.Lock()
+	defer packagesConfigEditMu.Unlock()
 
 	configPath := filepath.Join(overlayPath, ".autoupdate", "packages.toml")
 	data, err := os.ReadFile(configPath) //nolint:gosec // G304: configPath is <overlay>/.autoupdate/packages.toml, a constant join on the overlay path the user configured
