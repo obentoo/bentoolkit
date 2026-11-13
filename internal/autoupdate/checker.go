@@ -1292,6 +1292,12 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		if cfg.IsEnabled() {
 			continue
 		}
+		// A held entry was declined on purpose: a disabled+absent record with
+		// hold = true is that decision's expected state, not an orphan. Skip it
+		// silently and before the upstream fetch, as the other expected states.
+		if cfg.IsHeld() {
+			continue
+		}
 
 		// Split category/package the same way getCurrentVersion does, dropping
 		// any ":slot" suffix so the ::gentoo lookup below gets a real path.
