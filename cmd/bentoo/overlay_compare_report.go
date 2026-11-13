@@ -91,7 +91,8 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 		// `func JSON` in internal/common/report/render/json.go marshals what it
 		// is given and normalises nothing, and null and [] say different
 		// things in the document a consumer holds.
-		Notes: append([]string{}, notes...),
+		Notes:      append([]string{}, notes...),
+		Unanswered: []report.CompareUnanswered{},
 	}
 	if rep == nil {
 		// No run to ask, so no gap to state: the empty report of a run that
@@ -206,7 +207,8 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 	// Interruption stays a recorded FACT rather than a count — a run cut short
 	// after its last package has a gap of zero and was still cut short — so it
 	// is OR-ed in and never inferred.
-	notEvaluated := compareNotEvaluated(rep, whole)
+	notEvaluated, unanswered := compareNotEvaluated(rep, whole)
+	payload.Unanswered = unanswered
 	return compareEnvelope(payload, !rep.Interrupted && notEvaluated == 0, notEvaluated, rep.Interrupted)
 }
 
@@ -226,10 +228,9 @@ func buildCompareReport(rep *overlay.CompareReport, repository string, unfiltere
 // shortfall), and a refused pair whose verdict no content could change
 // (compareVerdictIgnoresContent).
 //
-// The rows are an ARGUMENT because the call site narrows CompareReport.Results
-// first; the caller passes the whole run's rows, so what the operator chose to
-// LOOK AT cannot change what the run says it ESTABLISHED.
-func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareResult) int {
+// The rows are the whole run's, never the narrowed view. Population two also
+// comes back NAMED, from the same walk, so list and count cannot disagree.
+func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareResult) (int, []report.CompareUnanswered) {
 	// Population one: dispatched never, so established nothing.
 	unreached := rep.TotalPackages - rep.ComparedPackages
 	if unreached < 0 {
@@ -237,27 +238,44 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 	}
 
 	// Population two: reached, and still short of an answer.
-	unestablished := 0
+	unanswered := []report.CompareUnanswered{}
 	for _, result := range results {
+		var why string
 		switch {
 		case result.Status == overlay.StatusError:
 			// The lookup itself did not come back, so nothing downstream of it
 			// was established either.
-			unestablished++
+			why = "upstream lookup failed"
+			if result.FailureText != "" {
+				why += ": " + compareOneLine(result.FailureText)
+			}
 		case result.Reading == overlay.ReadingNotComparable && compareVerdictIgnoresContent(result.Status):
 			// A pair the content check refused, on a package whose verdict the
 			// versions alone decide. No comparison could change it, so nothing
 			// the run set out to establish is missing.
-		case result.Reading == overlay.ReadingFailed,
-			result.Reading == overlay.ReadingNotComparable:
-			// A review that was attempted and did not return, and a pair of
-			// versions the content check refused. Both leave a recommendation
-			// standing on evidence nobody has.
-			unestablished++
+			continue
+		case result.Reading == overlay.ReadingFailed:
+			// A review that was attempted and did not return.
+			why = "review failed (" + compareCauseWord(result) + ")"
+		case result.Reading == overlay.ReadingNotComparable:
+			// A pair of versions the content check refused: the recommendation
+			// stands on evidence nobody has.
+			why = "content check could not read both ebuilds"
+			if result.LocalVersion != result.RemoteVersion {
+				why = "versions differ; content check needs equal ones"
+			}
+		default:
+			continue
 		}
+		unanswered = append(unanswered, report.CompareUnanswered{
+			Package: result.Category + "/" + result.Package,
+			Local:   result.LocalVersion,
+			Remote:  result.RemoteVersion,
+			Reason:  why,
+		})
 	}
 
-	return unreached + unestablished
+	return unreached + len(unanswered), unanswered
 }
 
 // compareVerdictIgnoresContent reports whether a package's verdict is settled by

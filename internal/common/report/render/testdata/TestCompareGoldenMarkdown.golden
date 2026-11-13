@@ -4,6 +4,16 @@
 
 12 comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked [reading failed] — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it. The failed reviews, by cause: 1 timed out, 1 could not start.
 
+## Left Without an Answer
+
+1 package(s) reached but left without an answer: the units the incomplete-run notice counts.
+
+| PACKAGE | LOCAL | REMOTE | WHY |
+| --- | --- | --- | --- |
+| dev-build/automake | 1.19 | 1.20 | versions differ; content check needs equal ones |
+
+A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one.
+
 ## Redundant — ::gentoo ships the version, and nothing cleared the content check
 
 4 package(s), of which 1 carries a reading. 1 was never compared at all, because the check refuses to diff two different versions; 1 had a review that was attempted and failed; 1 was never submitted for review. The recommendation to remove covers the 1 somebody read, and none of the rest.

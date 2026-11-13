@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -896,5 +897,49 @@ func TestCompareRedundantRowCarriesProvedOurs(t *testing.T) {
 	}
 	if got["virtual/linux-sources"] {
 		t.Error("virtual/linux-sources was never proved ours and its row claims it")
+	}
+}
+
+// TestCompareUnansweredNamesTheCountedRows is issue #306: "Run Incomplete"
+// stated a count and named nothing, so a refused pair read like a real gap.
+// Every reached unit NotEvaluated counts must be named, with its versions and
+// why, and a refusal the verdict ignores must be neither counted nor named.
+func TestCompareUnansweredNamesTheCountedRows(t *testing.T) {
+	refused := compareFixtureResultStatus("dev-build", "automake", overlay.StatusOutdated)
+	refused.LocalVersion, refused.RemoteVersion = "1.19", "1.20"
+	refused.Reading = overlay.ReadingNotComparable
+	ignored := compareFixtureResultStatus("dev-lang", "nim", overlay.StatusNewer)
+	ignored.Reading = overlay.ReadingNotComparable
+	errored := compareFixtureResultStatus("dev-lang", "rust", overlay.StatusError)
+
+	rep := &overlay.CompareReport{
+		TotalPackages:    5,
+		ComparedPackages: 4,
+		Results: []overlay.CompareResult{
+			compareFixtureResultReading("dev-lang", "go", overlay.ReadingDone),
+			refused, ignored, errored,
+		},
+	}
+
+	run := buildCompareReport(rep, "gentoo", nil)
+	payload, ok := run.Payload.(report.CompareRun)
+	if !ok {
+		t.Fatalf("payload is %T, want report.CompareRun", run.Payload)
+	}
+
+	var got []string
+	for _, u := range payload.Unanswered {
+		got = append(got, u.Package+" "+u.Local+" "+u.Remote+" | "+u.Reason)
+	}
+	want := []string{
+		"dev-build/automake 1.19 1.20 | versions differ; content check needs equal ones",
+		"dev-lang/rust " + errored.LocalVersion + " " + errored.RemoteVersion + " | upstream lookup failed",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("Unanswered =\n %q\nwant\n %q", got, want)
+	}
+	// One unreached package has no row; the rest of the count is the list.
+	if run.NotEvaluated != len(payload.Unanswered)+1 {
+		t.Errorf("NotEvaluated = %d, want the %d named rows plus 1 unreached", run.NotEvaluated, len(payload.Unanswered))
 	}
 }

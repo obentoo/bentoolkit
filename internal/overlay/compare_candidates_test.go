@@ -1,6 +1,8 @@
 package overlay
 
 import (
+	"crypto/md5" // #nosec G501 -- builds md5-cache fixtures
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -178,5 +180,78 @@ func TestComparedDetail_NamesSetAsideVersion(t *testing.T) {
 	r.RemoteNewest = ""
 	if got := comparedDetail(r); strings.Contains(got, "not comparable") {
 		t.Errorf("comparedDetail = %q, want no note when nothing was set aside", got)
+	}
+}
+
+// writeMd5Cache writes the md5-cache entry Portage would keep for an ebuild
+// written by writeVerifyEbuild; a fresh entry carries the ebuild's own md5.
+func writeMd5Cache(t *testing.T, root, category, pkg, version string, fresh bool, lines ...string) {
+	t.Helper()
+	text, err := os.ReadFile(filepath.Join(root, category, pkg, pkg+"-"+version+".ebuild"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := md5.Sum(text) // #nosec G401 -- fixture for md5-cache's _md5_
+	if !fresh {
+		sum = md5.Sum([]byte("an older ebuild")) // #nosec G401 -- fixture for md5-cache's _md5_
+	}
+	dir := filepath.Join(root, "metadata", "md5-cache", category)
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Join(append(lines, "_md5_="+hex.EncodeToString(sum[:])), "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, pkg+"-"+version), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestComparableRemoteVersions_CachedSlot is issue #307: automake computes its
+// SLOT (SLOT="${MANGLED_SLOT}"), which the text cannot resolve, so 1.20 read as
+// a newer copy of the overlay's 1.19 although they are separate SLOTs. The
+// md5-cache holds the resolved SLOT; a stale entry must not be trusted.
+func TestComparableRemoteVersions_CachedSlot(t *testing.T) {
+	const body = "MANGLED_SLOT=${PV:0:4}\nSLOT=\"${MANGLED_SLOT}\"\nKEYWORDS=\"~amd64\"\n"
+	setup := func(t *testing.T, fresh bool) (string, string) {
+		overlay, gentoo := t.TempDir(), t.TempDir()
+		writeVerifyEbuild(t, overlay, "dev-build", "automake", "1.19", body)
+		writeVerifyEbuild(t, gentoo, "dev-build", "automake", "1.19", body)
+		writeVerifyEbuild(t, gentoo, "dev-build", "automake", "1.20", body)
+		writeMd5Cache(t, overlay, "dev-build", "automake", "1.19", true, "KEYWORDS=~amd64", "SLOT=1.19")
+		writeMd5Cache(t, gentoo, "dev-build", "automake", "1.19", true, "KEYWORDS=~amd64", "SLOT=1.19")
+		writeMd5Cache(t, gentoo, "dev-build", "automake", "1.20", fresh, "KEYWORDS=~amd64", "SLOT=1.20")
+		return overlay, gentoo
+	}
+	for _, tc := range []struct {
+		name  string
+		fresh bool
+		want  []string
+	}{
+		{"fresh cache sets 1.20 aside", true, []string{"1.19"}},
+		{"stale cache narrows nothing", false, []string{"1.19", "1.20"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			overlay, gentoo := setup(t, tc.fresh)
+			got := comparableRemoteVersions([]string{"1.19", "1.20"},
+				filepath.Join(overlay, "dev-build", "automake"), "automake", "1.19",
+				filepath.Join(gentoo, "dev-build", "automake"))
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("comparableRemoteVersions = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestComparableRemoteVersions_CachedKeywords trusts the cache's KEYWORDS: an
+// eclass can set them where the text has none.
+func TestComparableRemoteVersions_CachedKeywords(t *testing.T) {
+	overlay, gentoo := t.TempDir(), t.TempDir()
+	writeVerifyEbuild(t, overlay, "cat", "pkg", "1.0", "SLOT=\"0\"\nKEYWORDS=\"~amd64\"\n")
+	writeVerifyEbuild(t, gentoo, "cat", "pkg", "1.0", "SLOT=\"0\"\nKEYWORDS=\"~amd64\"\n")
+	writeVerifyEbuild(t, gentoo, "cat", "pkg", "2.0", "SLOT=\"0\"\nKEYWORDS=\"~amd64\"\n")
+	writeMd5Cache(t, gentoo, "cat", "pkg", "2.0", true, "KEYWORDS=~arm64", "SLOT=0")
+	got := comparableRemoteVersions([]string{"1.0", "2.0"}, filepath.Join(overlay, "cat", "pkg"), "pkg", "1.0",
+		filepath.Join(gentoo, "cat", "pkg"))
+	if !slices.Equal(got, []string{"1.0"}) {
+		t.Errorf("comparableRemoteVersions = %v, want [1.0]", got)
 	}
 }

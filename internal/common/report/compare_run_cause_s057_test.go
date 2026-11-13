@@ -149,7 +149,7 @@ func TestComparePayloadPublishesCauseErrorAndReadingFailures(t *testing.T) {
 
 	t.Run("CompareRun gains reading_failures and loses nothing", func(t *testing.T) {
 		want := []string{"in_both", "keep", "keep_groups", "needs_rebase", "notes", "only_local",
-			"reading_failures", "redundant", "repository", "scanned", "unknown", "unread", "verdicts"}
+			"reading_failures", "redundant", "repository", "scanned", "unanswered", "unknown", "unread", "verdicts"}
 		if got := s057SortedKeys(s057Keys(t, CompareRun{})); !reflect.DeepEqual(got, want) {
 			t.Errorf("CompareRun keys\n got: %v\nwant: %v", got, want)
 		}
