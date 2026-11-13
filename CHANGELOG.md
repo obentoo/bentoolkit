@@ -11,6 +11,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **`--apply all` no longer drops a promoted record's pin.** Concurrent
+  promotions each rewrote `.autoupdate/packages.toml` with an unguarded
+  read-modify-write, so one could overwrite the other's `version =` edit:
+  the ebuild was promoted, its record kept the old version, and the next
+  `--check` offered the same update again (#305). Every edit of the file
+  is now serialised.
+
 - **A revive no longer resurrects a held package.** `--revive all` took every
   removed, disabled record as an orphan, so it seeded the ::gentoo ebuild and
   stripped `enabled = false` from a record that also said `hold = true`; only
