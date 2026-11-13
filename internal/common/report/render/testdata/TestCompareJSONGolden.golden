@@ -275,6 +275,14 @@
         "cause": "could not start",
         "count": 1
       }
+    ],
+    "unanswered": [
+      {
+        "package": "dev-build/automake",
+        "local_version": "1.19",
+        "remote_version": "1.20",
+        "reason": "versions differ; content check needs equal ones"
+      }
     ]
   }
 }

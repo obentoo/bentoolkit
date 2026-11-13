@@ -133,7 +133,7 @@ func assertKeys(t *testing.T, value any, want []string) {
 var (
 	compareRunKeys = []string{
 		"in_both", "keep", "keep_groups", "needs_rebase", "notes", "only_local",
-		"reading_failures", "redundant", "repository", "scanned", "unknown", "unread", "verdicts",
+		"reading_failures", "redundant", "repository", "scanned", "unanswered", "unknown", "unread", "verdicts",
 	}
 	comparePkgKeys = []string{
 		"cause", "diff", "error", "further_findings", "local_version", "package", "proved_ours", "reading",

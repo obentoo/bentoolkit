@@ -190,6 +190,21 @@ type CompareRun struct {
 	// spells Reading. No omitempty: a run with no failed review publishes an
 	// empty list, which is the good case.
 	ReadingFailures []CauseCount `json:"reading_failures"`
+	// Unanswered names every package the run reached and left without an
+	// answer — the rows behind the envelope's NotEvaluated, which before it
+	// stated only a count (issue #306). NotEvaluated minus its length is the
+	// packages never reached, which have no row to name. No omitempty: [] is
+	// the good case.
+	Unanswered []CompareUnanswered `json:"unanswered"`
+}
+
+// CompareUnanswered is one package the run reached and could not answer: the
+// two versions compared and, in the adapter's words, why no answer came back.
+type CompareUnanswered struct {
+	Package string `json:"package"`
+	Local   string `json:"local_version"`
+	Remote  string `json:"remote_version"`
+	Reason  string `json:"reason"`
 }
 
 // ComparePkg is what the run established about one package: which package, the
@@ -828,14 +843,43 @@ func compareFailureCounts(failures []CauseCount) string {
 // Only the keep section reads ShowAll, and it changes what is LISTED, never a
 // count. SectionOptions.SkipPlan is not read: none of the six blocks is a plan.
 func (r CompareRun) Sections(opts SectionOptions) []Section {
-	return []Section{
+	blocks := []Section{
 		compareScopeSection(r),
+		compareUnansweredSection(r),
 		compareRedundantSection(r),
 		compareNeedsRebaseSection(r),
 		compareKeepSection(r, opts.ShowAll),
 		compareUnknownSection(r),
 		compareSummarySection(r),
 	}
+	out := blocks[:0]
+	for _, b := range blocks {
+		if b.Title != "" {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+// compareUnansweredSection lists the packages behind the "Run Incomplete"
+// count, so an operator can tell a harmless refusal from a real gap. It is the
+// one block that may be absent: it qualifies the envelope's gap block, which is
+// itself printed only on an incomplete run, and with nothing unanswered it
+// returns the zero Section, which Sections drops.
+func compareUnansweredSection(r CompareRun) Section {
+	if len(r.Unanswered) == 0 {
+		return Section{}
+	}
+	s := Section{Title: "Left Without an Answer"}
+	s.Lead = []string{fmt.Sprintf(
+		"%d package(s) reached but left without an answer: the units the incomplete-run notice counts.",
+		len(r.Unanswered))}
+	s.Notes = []string{"A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."}
+	s.Rows.Headers = []string{"PACKAGE", "LOCAL", "REMOTE", "WHY"}
+	for _, u := range r.Unanswered {
+		s.Rows.Rows = append(s.Rows.Rows, Row{Cells: []string{u.Package, u.Local, u.Remote, u.Reason}})
+	}
+	return s
 }
 
 // compareAgrees picks the form of a verb that agrees with n.

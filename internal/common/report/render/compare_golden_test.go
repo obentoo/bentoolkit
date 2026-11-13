@@ -161,6 +161,10 @@ func comparePopulatedRun() report.Run {
 			// compareUnreadRun fixture keeps a failed row with NO cause, so the
 			// bare marker stays pinned too.
 			ReadingFailures: []report.CauseCount{{Cause: "timed out", Count: 1}, {Cause: "could not start", Count: 1}},
+			Unanswered: []report.CompareUnanswered{{
+				Package: "dev-build/automake", Local: "1.19", Remote: "1.20",
+				Reason: "versions differ; content check needs equal ones",
+			}},
 			Redundant: []report.ComparePkg{
 				{
 					Package: "dev-lang/go", Local: "1.27.0", Remote: "1.27.0", Status: "up-to-date",

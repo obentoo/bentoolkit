@@ -1,6 +1,8 @@
 package overlay
 
 import (
+	"crypto/md5" // #nosec G501 -- md5-cache's own _md5_ field, a freshness check, not security
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -34,22 +36,21 @@ const compareArch = "amd64"
 // list comes back unchanged — the old behaviour, never an invented "not in
 // remote".
 func comparableRemoteVersions(versions []string, localDir, pkg, localVersion, remoteDir string) []string {
-	localSlot, localOK := ebuildMainSlot(filepath.Join(localDir, pkg+"-"+localVersion+".ebuild"), localVersion)
+	localSlot, localOK := ebuildMainSlot(localDir, pkg, localVersion)
 	masks := readPackageMask(filepath.Join(filepath.Dir(filepath.Dir(remoteDir)), "profiles", "package.mask"),
 		filepath.Base(filepath.Dir(remoteDir))+"/"+pkg)
 
 	kept := make([]string, 0, len(versions))
 	for _, v := range versions {
-		text, err := os.ReadFile(filepath.Join(remoteDir, pkg+"-"+v+".ebuild")) // #nosec G304 -- built from scanned directory names and the provider's own version list
-		if err != nil {
+		meta, ok := readEbuildMeta(remoteDir, pkg, v)
+		if !ok {
 			kept = append(kept, v)
 			continue
 		}
-		body := string(text)
-		if !keywordedFor(body, compareArch) {
+		if !meta.keyworded(compareArch) {
 			continue
 		}
-		slot, sub, slotOK := mainSlot(body, v)
+		slot, sub, slotOK := meta.slot(v)
 		if localOK && slotOK && slot != localSlot {
 			continue
 		}
@@ -84,13 +85,69 @@ func keywordedFor(body, arch string) bool {
 
 var slotRe = regexp.MustCompile(`(?m)^[ \t]*SLOT=("[^"]*"|'[^']*'|\S*)`)
 
-// ebuildMainSlot reads the file and resolves its main SLOT.
-func ebuildMainSlot(path, version string) (string, bool) {
-	text, err := os.ReadFile(path) // #nosec G304 -- path built from scanned directory names
+// ebuildMeta is what the narrowing needs from one ebuild: its text and, when
+// the tree's md5-cache holds a fresh entry for it, the SLOT and KEYWORDS
+// Portage computed. The cache is what covers a SLOT the text cannot resolve
+// without bash — automake's SLOT="${MANGLED_SLOT}" (issue #307).
+type ebuildMeta struct {
+	body string
+	// cache holds the md5-cache entry's KEY=value lines; nil when there is no
+	// entry or its _md5_ does not match the ebuild, so a stale entry never
+	// outranks the text.
+	cache map[string]string
+}
+
+// readEbuildMeta reads pkgDir/pkg-version.ebuild and its md5-cache entry at
+// <tree>/metadata/md5-cache/<category>/<pkg>-<version>, pkgDir being
+// <tree>/<category>/<pkg>.
+func readEbuildMeta(pkgDir, pkg, version string) (ebuildMeta, bool) {
+	text, err := os.ReadFile(filepath.Join(pkgDir, pkg+"-"+version+".ebuild")) // #nosec G304 -- built from scanned directory names and the provider's own version list
 	if err != nil {
+		return ebuildMeta{}, false
+	}
+	meta := ebuildMeta{body: string(text)}
+	tree, category := filepath.Dir(filepath.Dir(pkgDir)), filepath.Base(filepath.Dir(pkgDir))
+	entry, err := os.ReadFile(filepath.Join(tree, "metadata", "md5-cache", category, pkg+"-"+version)) // #nosec G304 -- the tree's own metadata directory
+	if err != nil {
+		return meta, true
+	}
+	cache := map[string]string{}
+	for _, line := range strings.Split(string(entry), "\n") {
+		if k, v, found := strings.Cut(line, "="); found {
+			cache[k] = v
+		}
+	}
+	sum := md5.Sum(text) // #nosec G401 -- compared with md5-cache's _md5_, a freshness check
+	if cache["_md5_"] == hex.EncodeToString(sum[:]) {
+		meta.cache = cache
+	}
+	return meta, true
+}
+
+func (m ebuildMeta) keyworded(arch string) bool {
+	if kw, ok := m.cache["KEYWORDS"]; ok {
+		return keywordedFor("KEYWORDS=\""+kw+"\"", arch)
+	}
+	return keywordedFor(m.body, arch)
+}
+
+// slot prefers the cached SLOT, which Portage resolved with bash and eclasses,
+// over expanding the text.
+func (m ebuildMeta) slot(version string) (main, sub string, ok bool) {
+	if s := m.cache["SLOT"]; s != "" {
+		main, sub, _ = strings.Cut(s, "/")
+		return main, sub, true
+	}
+	return mainSlot(m.body, version)
+}
+
+// ebuildMainSlot resolves the main SLOT of pkgDir/pkg-version.ebuild.
+func ebuildMainSlot(pkgDir, pkg, version string) (string, bool) {
+	meta, ok := readEbuildMeta(pkgDir, pkg, version)
+	if !ok {
 		return "", false
 	}
-	slot, _, ok := mainSlot(string(text), version)
+	slot, _, ok := meta.slot(version)
 	return slot, ok
 }
 

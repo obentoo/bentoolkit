@@ -9,6 +9,21 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`overlay compare` reads a computed SLOT.** automake sets its SLOT
+  through a variable (`SLOT="${MANGLED_SLOT}"`), which the ebuild text cannot
+  resolve, so `::gentoo`'s 1.20 read as a newer copy of the overlay's 1.19 and
+  the package was listed as Needs Rebase (#307). SLOT and KEYWORDS now come
+  from each tree's `metadata/md5-cache` when its entry is fresh (its `_md5_`
+  matches the ebuild); otherwise the text is read as before.
+
+- **"Run Incomplete" names what it counts.** The notice gave only a number,
+  so a refused version pair looked like a real gap (#306). A new
+  "Left Without an Answer" section lists each package behind that number,
+  with both versions and the reason, and the JSON export carries the same rows
+  under `payload.unanswered`.
+
 ## [0.41.1] - 2026-11-13
 
 ### Fixed
