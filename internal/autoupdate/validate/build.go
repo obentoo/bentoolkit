@@ -901,9 +901,16 @@ func (r buildRun) derive(gate string, phase buildPhase) GateResult {
 //
 // install is NOT given the same exception, deliberately: a zero exit without
 // `>>> Completed installing ` is a gate that could not be derived, never a pass.
+//
+// The deepest phase also needs a clean exit beside its marker: Portage prints
+// `>>> Completed installing ` before install_qa_check runs, so a fatal QA
+// failure leaves the marker in a run that failed the install phase.
 func (r buildRun) completed(p buildPhase) bool {
 	if p == phaseCompile && r.phase == phaseCompile {
 		return r.runErr == nil
+	}
+	if p == r.phase && r.runErr != nil {
+		return false
 	}
 	return r.trace.completed[p]
 }

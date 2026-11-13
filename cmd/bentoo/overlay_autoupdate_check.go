@@ -760,10 +760,8 @@ func reportedDepth(result validate.EbuildResult, entry validationPlanEntry) stri
 // verdict was produced AND that nothing explained why, which is a reportable
 // defect in whatever left every reason blank.
 func skipReason(result validate.EbuildResult, entry validationPlanEntry) string {
-	for _, gate := range result.Gates {
-		if gate.Outcome == validate.OutcomeSkipped && gate.Reason != "" {
-			return gate.Reason
-		}
+	if reason := gateReasons(result, validate.OutcomeSkipped); reason != "" {
+		return reason
 	}
 	if result.DepthReason != "" {
 		return result.DepthReason
