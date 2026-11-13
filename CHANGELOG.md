@@ -85,6 +85,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Changed
 
+- **`--apply` publishes only what `--check --llm` proved.** It no longer
+  validates a bump itself: with no retained proof that matches the bump,
+  proves the depth the policy asks for and is younger than
+  `autoupdate.proof.max_age_days` (new key, 7 by default), the bump is
+  reported as **Unproven**, left in the pending list, and nothing is staged,
+  fetched or written for it. `--apply <pkg>` then exits 1; `--apply all`
+  counts it apart from failures. Proofs written before this release carry no
+  time and are no longer accepted: run `--check --llm` once. `--repair` is
+  unchanged.
+
 - **Dependencies updated.** `chromedp/cdproto` v0.159.3 → v0.160.0 (linked
   only into the `chromedp`-tagged build); the local VM gate's CodeQL moves
   from 2.27.1 to 2.27.4. Neither carries a security fix; both were taken

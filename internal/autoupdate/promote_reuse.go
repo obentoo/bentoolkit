@@ -278,6 +278,15 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 			record.ProducedBy)}
 	}
 
+	if a.proofMaxAge > 0 {
+		switch age := time.Since(record.RecordedAt); {
+		case record.RecordedAt.IsZero():
+			return stagedReuse{root: root, reason: "the retained tree's record carries no time, so how old its proof is cannot be told"}
+		case age > a.proofMaxAge:
+			return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree was proved %s ago, past the %s a proof stays valid",
+				age.Round(time.Hour), a.proofMaxAge)}
+		}
+	}
 	proved, why := record.Proves(want)
 	if !proved {
 		return stagedReuse{root: root, reason: why + ", so the gates run in this run"}

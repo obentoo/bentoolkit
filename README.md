@@ -13,7 +13,7 @@ before it ships, publish notices, and protect the machine with btrfs snapshots.
 | Command | What for |
 |---|---|
 | `bentoo overlay` | The overlay's git workflow (`status`, `add`, `commit` with a generated message, `push`, `pull`), `compare` against `::gentoo`, `prune` what `::gentoo` already ships identically, `manifest`, `rename` |
-| `bentoo overlay autoupdate` | Read each package's upstream version (`--check`), then stage, validate and commit the bump (`--apply`); `packages.toml` says where each version is read |
+| `bentoo overlay autoupdate` | Read each package's upstream version (`--check`), prove the bump in a staged tree (`--check --llm`), then publish what was proven (`--apply`); `packages.toml` says where each version is read |
 | `bentoo overlay validate` | Check that an ebuild still matches the source it points at, on a ladder of depths from build options to a full install |
 | `bentoo distfile fetch` | Download a distfile Portage cannot fetch by itself (behind a registration form or a POST) into `DISTDIR` |
 | `bentoo notice` | Write a notice once, as a GLEP 42 news item in the overlay and an entry in the website's feed |
@@ -52,8 +52,8 @@ $EDITOR ~/.config/bentoo/config.yaml      # set overlay.path to your checkout
 
 bentoo overlay status                      # what changed in the overlay
 bentoo overlay autoupdate --check          # which packages have a newer upstream
-bentoo overlay autoupdate --list           # the updates found, waiting to be applied
-bentoo overlay autoupdate --apply all      # stage, validate and commit them
+bentoo overlay autoupdate --check --llm    # prove each one in a staged tree
+bentoo overlay autoupdate --apply all      # publish what the check proved
 ```
 
 `bentoo --help` lists every command, and `bentoo <command> --help` explains one.

@@ -123,6 +123,11 @@ autoupdate:
   #       depth: compile
   #       reason: carries a local patch that only a build exercises
 
+  # How long a proof taken by `--check --llm` lets `--apply` publish the bump
+  # it proved; an older proof must be taken again.
+  # proof:
+  #   max_age_days: 7
+
   # --------------------------------------------------------------------------
   # vendor — the Go vendor-tarball step.
   #

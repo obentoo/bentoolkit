@@ -255,6 +255,13 @@ type ApplyResult struct {
 	// Error nil) and the pending entry is kept: the bump applies once the
 	// required version is in the overlay or ::gentoo.
 	Waiting []string
+	// Unproven reports that the apply refused the bump because no valid proof
+	// from `--check --llm` stood behind it. Like Held it is NOT a failure
+	// (Success false, Error nil) and the pending entry is kept: the check proves
+	// it, then an apply publishes it. UnprovenReason says why the proof did not
+	// hold.
+	Unproven       bool
+	UnprovenReason string
 	// HoldReason is the packages.toml key that refused the package
 	// ("hold = true" or "enabled = false"). Empty unless Held is true.
 	HoldReason string
@@ -528,7 +535,11 @@ type Applier struct {
 	// host that lacks a build dependency says nothing about the bump and
 	// refusing every one of them would make the feature inert on an ordinary
 	// workstation.
-	requireProof bool
+	// publishOnlyProven and proofMaxAge: see WithApplierPublishOnlyProven
+	// and WithApplierProofMaxAge.
+	publishOnlyProven bool
+	proofMaxAge       time.Duration
+	requireProof      bool
 	// reviewer, when non-nil, reads the two versions' build-declaration
 	// difference and may ask for MORE validation than policy chose. Its proposal is advisory and one-way: validate.Escalate combines it
 	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
@@ -928,6 +939,25 @@ func WithApplierRequireProof(require bool) ApplierOption {
 	}
 }
 
+// WithApplierPublishOnlyProven makes Apply publish only a bump a retained
+// staged tree already proves (see reusableStagedTree): with no valid proof it
+// refuses with ApplyResult.Unproven instead of running the gates itself. An
+// adopted tree (`--repair`) is exempt: it is promoted on the gates that run
+// over it. `--check --llm` is where a proof is made.
+func WithApplierPublishOnlyProven(only bool) ApplierOption {
+	return func(a *Applier) {
+		a.publishOnlyProven = only
+	}
+}
+
+// WithApplierProofMaxAge makes a retained proof older than maxAge, or one that
+// records no time, not reusable. Zero means a proof never ages.
+func WithApplierProofMaxAge(maxAge time.Duration) ApplierOption {
+	return func(a *Applier) {
+		a.proofMaxAge = maxAge
+	}
+}
+
 // WithApplierBumpReviewer wires an LLM bump reviewer into the applier. It reads
 // the difference between the two versions' upstream build declarations and may
 // ask for MORE validation than policy chose; validate.Escalate
@@ -1155,7 +1185,10 @@ type applyRun struct {
 
 	inputs          stagedInputs
 	retainedVerdict string
-	cand            candidatePaths
+	// reuseWhy is why the retained tree was not promoted, kept for the
+	// refusal of an apply that publishes only proven bumps.
+	reuseWhy string
+	cand     candidatePaths
 
 	// gatesPassed is set once every gate allowed promotion; only then does the
 	// record beside the staged tree name the bytes the gates read.
@@ -1387,6 +1420,9 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 		if done, err := r.reuseRetainedTree(ctx); done != nil {
 			return done, err
 		}
+		if r.a.publishOnlyProven {
+			return r.refuseUnproven(), nil
+		}
 	}
 
 	// Materialise the candidate where the gates will read it: in a staged tree
@@ -1448,6 +1484,17 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 	}
 
 	return r.gateAndPromote(ctx)
+}
+
+// refuseUnproven ends an apply that publishes only proven bumps when no
+// retained proof holds. Nothing is staged, fetched or written, and the
+// pending entry stays for the check that will prove it.
+func (r *applyRun) refuseUnproven() *ApplyResult {
+	r.result.Unproven = true
+	r.result.UnprovenReason = fmt.Sprintf("%s; run `bentoo overlay autoupdate --check --llm %s` to prove it, then apply again",
+		r.reuseWhy, r.pkg)
+	r.a.logger().Info("apply: not published, no valid proof", "package", r.pkg, "version", r.newVersion, "reason", r.reuseWhy)
+	return r.result
 }
 
 // refuseRepairPending ends the apply when the staged tree this run would
@@ -1518,6 +1565,7 @@ func (a *Applier) repairPending(pkg, version string) (root, bundle string, err e
 // the half where the retained tree was NOT used.
 func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) {
 	if r.a.stagingRoot == "" {
+		r.reuseWhy = "this run has no staging root, so no proof can be looked up"
 		return nil, nil
 	}
 	r.stage("retained")
@@ -1526,6 +1574,7 @@ func (r *applyRun) reuseRetainedTree(ctx context.Context) (*ApplyResult, error) 
 	}
 
 	reuse := r.a.reusableStagedTree(r.pkg, r.newVersion, r.inputs, r.depth.Depth)
+	r.reuseWhy = reuse.reason
 	if reuse.root != "" {
 		// Only when a tree was actually there. "Which of the two
 		// happened" is already on the result and in the summary line; what
