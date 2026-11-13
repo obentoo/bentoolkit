@@ -76,9 +76,9 @@ audit() {
 
 # CodeQL, pinned by version and by the SHA-256 GitHub publishes for each
 # per-language bundle. A version is taken once it is at least 7 days old.
-CODEQL_VERSION=2.27.1
-CODEQL_GO_SHA256=c7fd9efd7bdd93b89a6d8daa6023611156be13608042c39ae6701722a1fef04e
-CODEQL_ACTIONS_SHA256=71247327cf3afe4115acc546fe3ac77f2865928205d7688d6a0b7153e055603f
+CODEQL_VERSION=2.27.4
+CODEQL_GO_SHA256=d79b33f86ec8b20af73d3456041349a2780c1081ee8c0eca624b9a25c5cb2e15
+CODEQL_ACTIONS_SHA256=f12b84c1ed3540c54691257ddea1b72b62f785c8bb3eca907562c6a8a2361d32
 
 codeql_bin() { # <language> <sha256>: install the bundle once, print its CLI path
   local lang=$1 sha=$2 dir="$HOME/gate/tools/codeql-$1-$CODEQL_VERSION" file
