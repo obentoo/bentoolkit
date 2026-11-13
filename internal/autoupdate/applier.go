@@ -2858,6 +2858,31 @@ func (a *Applier) refuseFixOnEnvironmentFailure(pkg, version string, firstErr er
 	return envErr
 }
 
+// fetchStatus matches the HTTP status a fetcher prints on a failed download:
+// wget's "ERROR 502: Bad Gateway." and curl's "returned error: 503".
+var fetchStatus = regexp.MustCompile(`(?:ERROR|returned error:) ([1-5][0-9][0-9])\b`)
+
+// upstreamServerError reports the 5xx a failed manifest run's output names,
+// when it names one and no 4xx. The fetcher's own status line is the only
+// record of what the server said; a 4xx beside it means a URI is wrong, which
+// the ebuild can fix, so it keeps the run repairable.
+func upstreamServerError(err error) (string, bool) {
+	var run *ChildRunError
+	if !errors.As(err, &run) {
+		return "", false
+	}
+	server := ""
+	for _, m := range fetchStatus.FindAllStringSubmatch(run.Output, -1) {
+		switch m[1][0] {
+		case '4':
+			return "", false
+		case '5':
+			server = m[1]
+		}
+	}
+	return server, server != ""
+}
+
 // environmentVerdict returns an ErrManifestEnvironment-wrapped verdict when the
 // failure is the machine's rather than the ebuild's, and nil when the ebuild
 // still might be at fault. Three classes are recognised, none of them uncertain:
@@ -2885,6 +2910,16 @@ func environmentVerdict(firstErr error) error {
 		// apart because they are different news: a held distfile is transient,
 		// an unwritable distdir will still be unwritable next run.
 		return fmt.Errorf("%w: %w", ErrManifestEnvironment, firstErr)
+	}
+
+	// Upstream trouble: the run hit its deadline, or the fetcher reported a
+	// server-side HTTP error and no 4xx. Neither is something an ebuild edit
+	// can repair, and a fixer handed one edits a correct SRC_URI.
+	if errors.Is(firstErr, ErrManifestTimedOut) {
+		return fmt.Errorf("%w: %w", ErrManifestEnvironment, firstErr)
+	}
+	if code, ok := upstreamServerError(firstErr); ok {
+		return fmt.Errorf("%w: upstream answered HTTP %s: %w", ErrManifestEnvironment, code, firstErr)
 	}
 
 	// The spawned command's working directory does not exist: a
@@ -3815,8 +3850,15 @@ func (a *Applier) dropUnverifiedDistfiles(pkg, version, dir string, keepUnlisted
 		a.logger().Warn("manifest fix: could not verify a distfile",
 			"package", pkg, "version", version, "file", e.Name, "error", e.Err)
 	}
+	// One WARN per package: a bump of libreoffice-l10n drops one helppack per
+	// language, and 39 identical lines buried everything else the run said.
+	// The names stay on the record, and one DEBUG line per file keeps the detail.
+	if len(dropped) > 0 {
+		a.logger().Warn("manifest fix: removed distfiles the published Manifest does not vouch for; they will be fetched again",
+			"package", pkg, "version", version, "count", len(dropped), "files", dropped, "dir", dir)
+	}
 	for _, name := range dropped {
-		a.logger().Warn("manifest fix: removed a distfile the published Manifest does not vouch for; it will be fetched again",
+		a.logger().Debug("manifest fix: removed an unverified distfile",
 			"package", pkg, "version", version, "file", name, "dir", dir)
 	}
 	return len(dropped)

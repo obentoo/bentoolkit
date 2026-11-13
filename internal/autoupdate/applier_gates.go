@@ -160,7 +160,7 @@ func (a *Applier) scanStaticGates(ctx context.Context, cand candidatePaths, pkg,
 	opts := validate.Options{
 		Overlay:  cand.repoRoot,
 		Distdir:  a.staticGateDistdir(cand),
-		Selector: pkg,
+		Selector: scanSelector(pkg),
 		Logger:   a.logger(),
 	}
 	if !stagedTreeNamesArchive(cand) {
@@ -203,6 +203,17 @@ func (a *Applier) scanStaticGates(ctx context.Context, cand candidatePaths, pkg,
 		Reason: fmt.Sprintf("the staged tree of %s holds no ebuild for version %s, so the option gate had nothing to read",
 			pkg, version),
 	}}
+}
+
+// scanSelector is the bare category/package a registry key names. The key
+// may carry `@label` or `:slot`, and validate matches its selector against a
+// bare atom, so the full key matched nothing and every labelled or slotted
+// record read as "holds no ebuild". A key that does not parse is passed as is.
+func scanSelector(pkg string) string {
+	if category, name, ok := ebuilds.SplitPkgAtom(pkg); ok {
+		return category + "/" + name
+	}
+	return pkg
 }
 
 // staticGateDistdir names the directory the option gate reads archives from.
@@ -754,8 +765,8 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 		// `overlay autoupdate --apply` inert on any workstation that does not
 		// already hold the bump's build dependencies, which is most of them.
 		return hostDeclinedGates(depth, fmt.Sprintf(
-			"this host does not hold the build dependencies of %s-%s, so no build phase was run; install %s to validate it here",
-			pkg, version, strings.Join(missing, ", "))), nil
+			"this host does not hold the build dependencies of %s-%s, so no build phase was run; %s to validate it here",
+			pkg, version, validate.DependencyAction(missing))), nil
 	}
 
 	// The child's own failure, captured through the runner seam. RunBuildGates

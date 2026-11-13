@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -145,6 +146,7 @@ func buildReport(plan validationPlan, results []validate.EbuildResult) report.Ru
 		row := validationRowFacts(plan.Entries[i], results[i])
 		out.Results = append(out.Results, row)
 		countInExactlyOneColumn(&out.Tally, row.Outcome)
+		out.States.Add(row.State)
 	}
 
 	// A complete run answered for every planned package, so its tally
@@ -278,13 +280,15 @@ func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult)
 	if selectedDepth == "" {
 		selectedDepth = result.Depth
 	}
-	outcome := report.Classify(entry.Skipped, decidingGateFacts(result.Gates, selectedDepth))
+	facts := decidingGateFacts(result.Gates, selectedDepth)
+	outcome := report.Classify(entry.Skipped, facts)
 	reason := rowReason(outcome, result, entry)
 
 	return report.ValidationRow{
 		Package:          entry.Package,
 		CandidateVersion: entry.Version,
 		Outcome:          outcome,
+		State:            report.StateOf(outcome, facts),
 		Depth:            reportedDepth(result, entry),
 		Reason:           reason,
 		SameReasonAsPlan: reason == entry.Reason,
@@ -312,38 +316,7 @@ func validationRowFacts(entry validationPlanEntry, result validate.EbuildResult)
 // rewording must never move a package between columns; skipReason reads those
 // sentences only to produce the human line.
 func decidingGateFacts(gates []validate.GateResult, selectedDepth string) []report.GateFact {
-	facts := make([]report.GateFact, 0, len(gates))
-
-	// The depth->gate mapping is resolved HERE and travels as a bool, because
-	// internal/common/report must not import internal/autoupdate. This is
-	// the same crossing Cause makes as a plain string.
-	//
-	// A depth that does not parse, or one no gate stands for, marks nothing:
-	// selectedGate stays empty and no fact matches it, so the result falls
-	// through to Inconclusive instead of guessing a gate whose pass would read
-	// as proof of a rung nobody climbed.
-	selectedGate := ""
-	if depth, err := validate.ParseDepth(selectedDepth); err == nil {
-		if gate, ok := validate.GateForDepth(depth); ok {
-			selectedGate = gate
-		}
-	}
-
-	for _, gate := range gates {
-		if gate.Gate == validate.GateQA {
-			continue
-		}
-
-		facts = append(facts, report.GateFact{
-			Deciding:            gate.Outcome != validate.OutcomeSkipped,
-			Passed:              gate.Outcome == validate.OutcomePass,
-			Failed:              gate.Outcome == validate.OutcomeFailed,
-			Cause:               string(gate.Declined),
-			ProvesSelectedDepth: selectedGate != "" && gate.Gate == selectedGate,
-		})
-	}
-
-	return facts
+	return validate.ReportGateFacts(gates, selectedDepth)
 }
 
 // rowReason is why this package earned this outcome, in full.
@@ -363,8 +336,36 @@ func rowReason(outcome report.Outcome, result validate.EbuildResult, entry valid
 		if detail := failureDetail(result); detail != "" {
 			return detail
 		}
+		if reason := gateReasons(result, validate.OutcomeFailed); reason != "" {
+			return reason
+		}
 	}
 	return skipReason(result, entry)
+}
+
+// gateReasons joins the distinct reasons of every gate that ended in outcome,
+// each named by its gate when there is more than one. Taking only the first
+// gate made every row read as the `options` gate's, which runs first, while
+// the gate that stopped the bump sat further on.
+func gateReasons(result validate.EbuildResult, outcome validate.Outcome) string {
+	type stated struct{ gate, reason string }
+	var reasons []stated
+	seen := map[string]bool{}
+	for _, gate := range result.Gates {
+		if gate.Outcome != outcome || gate.Reason == "" || seen[gate.Reason] {
+			continue
+		}
+		seen[gate.Reason] = true
+		reasons = append(reasons, stated{string(gate.Gate), gate.Reason})
+	}
+	if len(reasons) == 1 {
+		return reasons[0].reason
+	}
+	parts := make([]string, 0, len(reasons))
+	for _, r := range reasons {
+		parts = append(parts, r.gate+": "+r.reason)
+	}
+	return strings.Join(parts, "; ")
 }
 
 // failureDetail is every finding a failed package produced, each named by the
@@ -413,4 +414,25 @@ func countInExactlyOneColumn(tally *report.Tally, outcome report.Outcome) {
 	default:
 		tally.Inconclusive++
 	}
+}
+
+// scannedWithFailures is the scan as the report must count it: every package
+// the progress counter counted, the ones whose check failed included.
+//
+// CheckAll files a failed package under Failures, not Items, so a report built
+// from Items alone dropped it: on 2026-11-13 the counter reached 599 and the
+// report said 595 packages checked, with the four failures nowhere in it. Each
+// failure becomes a row carrying its error, which the report already states as
+// "could not be checked".
+func scannedWithFailures(result autoupdate.BatchResult[autoupdate.CheckResult]) []autoupdate.CheckResult {
+	if len(result.Failures) == 0 {
+		return result.Items
+	}
+	scanned := make([]autoupdate.CheckResult, 0, len(result.Items)+len(result.Failures))
+	scanned = append(scanned, result.Items...)
+	for name, err := range result.Failures {
+		scanned = append(scanned, autoupdate.CheckResult{Package: name, Error: err})
+	}
+	sort.Slice(scanned, func(i, j int) bool { return scanned[i].Package < scanned[j].Package })
+	return scanned
 }
