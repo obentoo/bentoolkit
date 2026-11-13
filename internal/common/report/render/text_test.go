@@ -84,15 +84,16 @@ func fixtureReport() report.AutoupdateCheck {
 			{Package: "sys-apps/portage", CurrentVersion: "3.0.66", CandidateVersion: "3.0.67", Class: "patch", Depth: "none", Reason: planReason, Skipped: true},
 		},
 		Results: []report.ValidationRow{
-			{Package: "app-misc/jq", CandidateVersion: "1.8.0", Outcome: report.Proved, Depth: "compile", Reason: "every deciding gate passed"},
-			{Package: "dev-libs/libayatana-appindicator-glib", CandidateVersion: "0.5.93", Outcome: report.Errored, Depth: "configure", Reason: "configure failed: missing dependency dev-libs/ayatana-ido"},
+			{Package: "app-misc/jq", CandidateVersion: "1.8.0", Outcome: report.Proved, State: report.Ready, Depth: "compile", Reason: "every deciding gate passed"},
+			{Package: "dev-libs/libayatana-appindicator-glib", CandidateVersion: "0.5.93", Outcome: report.Errored, State: report.Human, Depth: "configure", Reason: "configure failed: missing dependency dev-libs/ayatana-ido"},
 			// The reason DIFFERS from the plan's: the plan asked for manifest,
 			// and the host could not produce one. That is new information (R7.3).
-			{Package: "media-plugins/gst-plugins-adaptivedemux2", CandidateVersion: "1.28.1", Outcome: report.Inconclusive, Depth: "none", Reason: "no Manifest could be produced: distfile fetch returned 404"},
+			{Package: "media-plugins/gst-plugins-adaptivedemux2", CandidateVersion: "1.28.1", Outcome: report.Inconclusive, State: report.Human, Depth: "none", Reason: "no Manifest could be produced: distfile fetch returned 404"},
 			// The reason REPEATS the plan's, word for word (R7.2).
-			{Package: "sys-apps/portage", CandidateVersion: "3.0.67", Outcome: report.Skipped, Depth: "none", Reason: planReason, SameReasonAsPlan: true},
+			{Package: "sys-apps/portage", CandidateVersion: "3.0.67", Outcome: report.Skipped, State: report.Excluded, Depth: "none", Reason: planReason, SameReasonAsPlan: true},
 		},
-		Tally: report.Tally{Proved: 1, Errored: 1, Inconclusive: 1, Skipped: 1},
+		Tally:  report.Tally{Proved: 1, Errored: 1, Inconclusive: 1, Skipped: 1},
+		States: report.StateTally{Ready: 1, Human: 2, Excluded: 1},
 	}
 }
 

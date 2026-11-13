@@ -187,10 +187,10 @@ func validationResultsSection(r AutoupdateCheck) Section {
 		return s
 	}
 
-	s.Rows.Headers = []string{"PACKAGE", "CANDIDATE", "DEPTH", "OUTCOME"}
+	s.Rows.Headers = []string{"PACKAGE", "CANDIDATE", "DEPTH", "STATE"}
 	for _, result := range r.Results {
 		s.Rows.Rows = append(s.Rows.Rows, Row{
-			Cells:  []string{result.Package, result.CandidateVersion, result.Depth, string(result.Outcome)},
+			Cells:  []string{result.Package, result.CandidateVersion, result.Depth, string(result.State)},
 			Detail: resultDetail(result),
 		})
 	}
@@ -233,6 +233,8 @@ func validationSummarySection(r AutoupdateCheck) Section {
 		Lead: []string{
 			fmt.Sprintf("%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped.",
 				counted.Total(), counted.Proved, counted.Errored, counted.Inconclusive, counted.Skipped),
+			fmt.Sprintf("Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded.",
+				r.States.Ready, r.States.Wait, r.States.Human, r.States.Excluded),
 		},
 		Notes: []string{
 			"Nothing was published: a check writes no ebuild and no version pin.",

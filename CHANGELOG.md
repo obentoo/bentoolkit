@@ -9,6 +9,21 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **`--check --llm` says what to do next with each bump.** The results table
+  shows a STATE instead of the outcome: READY (proven, `--apply` may publish
+  it), WAIT (only the environment was in the way), HUMAN (the maintainer must
+  look) or EXCLUDED (the policy asked for no gate). The summary counts them
+  on a "Next:" line, and the JSON export carries `state` per row and a
+  `states` tally. A Manifest failure classified as the environment's, and a
+  bump waiting for another to land, now count as WAIT instead of blaming the
+  candidate.
+
+- **The stage record says where and when a proof was taken.**
+  `.bentoo-stage-record.json` gains `backend` (`host`), `environment` (the
+  `::gentoo` sync time), `recorded_at`, `state` and `fresh_environment`.
+
 ### Fixed
 
 - **The option gate finds a labelled or slotted package.** A registry key
