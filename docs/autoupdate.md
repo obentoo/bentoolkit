@@ -702,6 +702,29 @@ when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
 set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
 check off.
 
+#### What `--check --llm` reports
+
+Each planned bump ends in one of four states, shown in the STATE column of
+"Validation Results" and counted on the summary's "Next:" line:
+
+| State | Meaning | What to do |
+|---|---|---|
+| READY | proven at the depth the policy asked for | `--apply` may publish it |
+| WAIT | only the environment stood in the way: a missing or blocking package, an upstream timeout or 5xx, a full disk, another bump this one requires | run the check again later, or fix the host |
+| HUMAN | a gate failed, the candidate itself could not be read, or nothing recorded whose fault it was | look at the ebuild or the registry entry |
+| EXCLUDED | the policy asked for no gate (`depth = none`) | nothing was proven; raise the depth to validate it |
+
+The same state is written into the `.bentoo-stage-record.json` beside the
+retained staged tree, with the backend (`host`), the `::gentoo` sync time the
+gates ran against, and when they answered.
+
+`--apply` publishes only what such a record proves: the retained tree must
+match the bump byte for byte, prove the depth the policy asks for, and be no
+older than `autoupdate.proof.max_age_days` (7 by default). Anything else is
+reported as **Unproven** and left in the pending list; `--apply` runs no gate,
+fetches nothing and regenerates no Manifest for it. `--repair` is the one
+exception: the tree it adopts is promoted on the gates that run over it.
+
 #### What `--apply` prints
 
 On a terminal, `--apply` draws a live region;

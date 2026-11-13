@@ -30,6 +30,10 @@ import (
 // context.Context (containedctx): a context is per-invocation and travels as a
 // parameter.
 type deps struct {
+	// validatingApply lets `--apply` validate a bump that has no proof, as it
+	// did before apply became publish-only. Production leaves it false; it
+	// exists for the tests that still drive the validating path.
+	validatingApply bool
 	// cooldownPkgdbRoot is the system root whose var/db/pkg releases cooldown
 	// entries by installation at the start of an apply. Default "/"; tests
 	// point it at a root with no database.

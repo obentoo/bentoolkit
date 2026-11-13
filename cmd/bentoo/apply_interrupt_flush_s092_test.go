@@ -100,7 +100,7 @@ func s092RunInterruptedApply(t *testing.T, auOpts *autoupdateOptions, pkgs []str
 		}()
 		auCmd := testAutoupdateCmd() //nolint:contextcheck // the run reads ctx from auCmd, set below
 		auCmd.SetContext(logging.NewContext(ctx, slog.New(slog.DiscardHandler)))
-		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, ttyDeps(false, true))) //nolint:contextcheck // ctx reaches the run through auCmd
+		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, validating(ttyDeps(false, true)))) //nolint:contextcheck // ctx reaches the run through auCmd
 	}()
 	drawn = <-watched
 	data, err := os.ReadFile(f.Name())

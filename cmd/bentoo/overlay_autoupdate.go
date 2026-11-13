@@ -266,6 +266,9 @@ type autoupdateValidatePolicy struct {
 	// --require-isolation and the refusal to promote an unproved bump.
 	RequireIsolation bool
 	RequireProof     bool
+	// ProofMaxAge is autoupdate.proof.max_age_days: how long a proof taken by
+	// `--check --llm` lets `--apply` publish the bump it proved.
+	ProofMaxAge time.Duration
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -860,6 +863,17 @@ func (ar *autoupdateRun) resolveHTTPTimeout(cfg *config.Config) time.Duration {
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
 func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
+	// The batch progress counter rewrites one line with `\r` and no newline, so a
+	// log record written to the terminal meanwhile lands glued to the counter.
+	// Hold the terminal copy for as long as the counter is on screen; the log
+	// file still gets every record at once. Taken BEFORE the options so the
+	// Checker is built with the held logger.
+	releaseLog := func() {}
+	if !quiet && len(args) == 0 {
+		releaseLog = ar.holdLogUnderRegion()
+	}
+	defer releaseLog()
+
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithConcurrency(ar.opts.concurrency),
@@ -985,6 +999,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	if !quiet {
 		fmt.Print("\r                                        \r")
 	}
+	releaseLog()
 
 	// Emit one stderr line per per-package failure. FormatFailures is called
 	// only after CheckAll has fully completed, so the output is deterministic.
@@ -1047,7 +1062,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// is the envelope's fact, established by buildReport above and carried
 	// inside the very value being joined here — so the screen and the export
 	// state it once, from one place.
-	joined := checkReport(ar.log(), result.Items, validated)
+	joined := checkReport(ar.log(), scannedWithFailures(result), validated)
 	ar.presentCheckReport(joined, planPrinted)
 
 	// Compare the registry against the overlay and, behind
@@ -1374,6 +1389,11 @@ func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *au
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
+	if errors.Is(ferr, context.Canceled) {
+		// Same as above: the run reports its own interruption, and a list
+		// drawn now would claim "Nothing to revive" for a scan that stopped.
+		return
+	}
 	if ferr != nil {
 		ar.log().Warn("revivable-orphan scan completed with soft errors", "err", ferr)
 	}
@@ -1643,6 +1663,7 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		// key gave the setting a home, and neither supersedes the other.
 		RequireIsolation: o.requireIsolation || validateCfg.GetRequireIsolation(),
 		RequireProof:     validateCfg.GetRequireProof(),
+		ProofMaxAge:      cfg.Autoupdate.GetProofMaxAge(),
 	}
 
 	for class, name := range map[validate.Class]string{
@@ -1782,6 +1803,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// call before the summary below is the one that does the work there.
 	defer finish()
 	extra = append(extra, cd.option)
+	extra = append(extra, ar.publishOnlyProvenOptions()...)
 
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
@@ -1800,10 +1822,25 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	ar.displayApplyResult(result)
 	displayCooldownSummary(cd, []*autoupdate.ApplyResult{result})
-	if err != nil {
+	// An unproven bump is not a failure of the bump, but the operator asked
+	// for this one package to be published and it was not.
+	if err != nil || (result != nil && result.Unproven) {
 		return exitWith(1)
 	}
 	return nil
+}
+
+// publishOnlyProvenOptions makes an apply publish only what `--check --llm`
+// proved, within autoupdate.proof.max_age_days. `--repair` does not take
+// them: its adopted tree is promoted on the gates that run over it.
+func (ar *autoupdateRun) publishOnlyProvenOptions() []autoupdate.ApplierOption {
+	if ar.deps != nil && ar.deps.validatingApply {
+		return nil
+	}
+	return []autoupdate.ApplierOption{
+		autoupdate.WithApplierPublishOnlyProven(true),
+		autoupdate.WithApplierProofMaxAge(ar.validate.ProofMaxAge),
+	}
 }
 
 // newSingleApplier builds the Applier a one-package apply runs with — the
@@ -1899,6 +1936,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 	opts = append(opts, cd.option)
+	opts = append(opts, ar.publishOnlyProvenOptions()...)
 
 	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
@@ -1929,10 +1967,12 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 		ar.displayApplyResult(result)
 	}
 
-	applied, obsolete, held, waiting := 0, 0, 0, 0
+	applied, obsolete, held, waiting, unproven := 0, 0, 0, 0, 0
 	for _, r := range results {
 		switch {
 		case r == nil:
+		case r.Unproven:
+			unproven++
 		case r.Obsolete:
 			obsolete++
 		case len(r.Waiting) > 0:
@@ -1955,6 +1995,9 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 	}
 	if waiting > 0 {
 		output.Warning.Printf("  Waiting:  %d (required version not available yet; kept in pending)\n", waiting)
+	}
+	if unproven > 0 {
+		output.Warning.Printf("  Unproven: %d (no valid proof; run --check --llm, kept in pending)\n", unproven)
 	}
 	if failures > 0 {
 		output.Error.Printf("  Failed:   %d\n", failures)
@@ -1987,6 +2030,12 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		if result.ObsoleteReason != "" {
 			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
 		}
+		return
+	}
+
+	if result.Unproven {
+		output.Warning.Println("    Status:  Unproven (not published; kept in pending)")
+		output.Info.Printf("    Reason:  %s\n", result.UnprovenReason)
 		return
 	}
 

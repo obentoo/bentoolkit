@@ -883,6 +883,33 @@ func (c *Checker) dropStalePending(pkg, currentVersion string) {
 		"package", pkg, "target", entry.NewVersion, "current", currentVersion)
 }
 
+// dropDisabledPending removes the pending entry of every package whose record
+// is `enabled = false`. CheckAll never checks such a package, so dropStalePending
+// never runs for it and the entry would stay forever: on 2026-11-13 a `failed`
+// kde-plasma/kwin entry outlived the package's removal by two weeks. Enabling
+// the record again lets the next check queue the bump afresh.
+func (c *Checker) dropDisabledPending() {
+	if c.pending == nil || c.config == nil {
+		return
+	}
+	for name, pkg := range c.config.Packages {
+		if pkg.IsEnabled() {
+			continue
+		}
+		entry, ok := c.pending.Get(name)
+		if !ok {
+			continue
+		}
+		if err := c.pending.Delete(name); err != nil {
+			c.logger().Warn("pending: could not drop the entry of a disabled package",
+				"package", name, "target", entry.NewVersion, "err", err)
+			continue
+		}
+		c.logger().Info("pending: dropped the entry of a disabled package",
+			"package", name, "target", entry.NewVersion, "status", string(entry.Status))
+	}
+}
+
 // checkCommitTracked is CheckPackage for a package that tracks a commit: the
 // candidate version is built from the tracked commit's base and date.
 func (c *Checker) checkCommitTracked(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion string, result *CheckResult) (*CheckResult, error) {
@@ -1286,6 +1313,12 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		notes      []string
 	)
 	for _, pkg := range names {
+		// A cancelled run stops here: every lookup left would fail on the same
+		// dead context, and returning those as soft errors made the caller
+		// print "Nothing to revive" over a scan that never ran.
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("revive scan stopped before %s: %w", pkg, err)
+		}
 		cfg := c.config.Packages[pkg]
 		// Only orphaned (disabled) entries are revivable; enabled entries are
 		// handled by the normal check flow.
@@ -2453,6 +2486,7 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	// before the origin field existed, so those are named once below rather
 	// than left silent: each is a repair someone must make by hand.
 	c.reconcileDisabled()
+	c.dropDisabledPending()
 
 	// Narrow the package set up front so excluded packages incur no network
 	// fetch and are absent from progress and totals. Three filters apply:
