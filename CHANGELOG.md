@@ -9,6 +9,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **Dependencies updated.** `chromedp/cdproto` v0.159.3 → v0.160.0 (linked
+  only into the `chromedp`-tagged build); the local VM gate's CodeQL moves
+  from 2.27.1 to 2.27.4. Neither carries a security fix; both were taken
+  ahead of the usual seven-day wait.
+
 ## [0.41.2] - 2026-11-13
 
 ### Fixed
