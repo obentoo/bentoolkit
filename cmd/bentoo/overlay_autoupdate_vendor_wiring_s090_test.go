@@ -11,6 +11,9 @@ package main
 
 import (
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -118,7 +121,14 @@ func TestAutoupdateAppliersGetVendorWiring(t *testing.T) {
 			args: []string{"overlay", "autoupdate", "--check", "--llm", "--yes"},
 			setup: func(t *testing.T, c *testCLI) {
 				t.Helper()
-				writeReviveRegexConfig(t, c.Overlay(), "dev-test/foo", "http://127.0.0.1:1")
+				// The plan takes only bumps this scan confirms, so the package
+				// is enabled, has its ebuild, and upstream answers newer.
+				upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					fmt.Fprint(w, `{"version":"1.0.1"}`)
+				}))
+				t.Cleanup(upstream.Close)
+				writeExitTestPackagesConfig(t, c.Overlay(), upstream.URL, []string{"dev-test/foo"})
+				writeExitTestEbuild(t, c.Overlay(), "dev-test/foo", "1.0.0")
 				s090SeedPending(t, c)
 			},
 		},

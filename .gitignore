@@ -54,3 +54,4 @@ dist/
 # Playwright
 .playwright-mcp/
 .playwright-cli/
+/cmd/bentoo/bentoo

@@ -860,6 +860,17 @@ func (ar *autoupdateRun) resolveHTTPTimeout(cfg *config.Config) time.Duration {
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
 func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
+	// The batch progress counter rewrites one line with `\r` and no newline, so a
+	// log record written to the terminal meanwhile lands glued to the counter.
+	// Hold the terminal copy for as long as the counter is on screen; the log
+	// file still gets every record at once. Taken BEFORE the options so the
+	// Checker is built with the held logger.
+	releaseLog := func() {}
+	if !quiet && len(args) == 0 {
+		releaseLog = ar.holdLogUnderRegion()
+	}
+	defer releaseLog()
+
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithConcurrency(ar.opts.concurrency),
@@ -985,6 +996,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	if !quiet {
 		fmt.Print("\r                                        \r")
 	}
+	releaseLog()
 
 	// Emit one stderr line per per-package failure. FormatFailures is called
 	// only after CheckAll has fully completed, so the output is deterministic.
@@ -1047,7 +1059,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// is the envelope's fact, established by buildReport above and carried
 	// inside the very value being joined here — so the screen and the export
 	// state it once, from one place.
-	joined := checkReport(ar.log(), result.Items, validated)
+	joined := checkReport(ar.log(), scannedWithFailures(result), validated)
 	ar.presentCheckReport(joined, planPrinted)
 
 	// Compare the registry against the overlay and, behind
@@ -1374,6 +1386,11 @@ func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *au
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
+	if errors.Is(ferr, context.Canceled) {
+		// Same as above: the run reports its own interruption, and a list
+		// drawn now would claim "Nothing to revive" for a scan that stopped.
+		return
+	}
 	if ferr != nil {
 		ar.log().Warn("revivable-orphan scan completed with soft errors", "err", ferr)
 	}
