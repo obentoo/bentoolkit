@@ -103,7 +103,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 		fixErr := fmt.Errorf("%s: %w", fixText, llm.ErrClaudeTimedOut)
 		fixer.err = fixErr
 
-		result, err := applier.Apply(t.Context(), pkg, false)
+		result, err := applier.Apply(t.Context(), pkg)
 		if err == nil || result == nil || result.Success {
 			t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
 		}
@@ -132,7 +132,7 @@ func TestS064ManifestFixWrapKeepsManifestFailureAsCause(t *testing.T) {
 			pkgdevFailsPrinting(s064ManifestOutput),
 			gatePkg{pkg, "4.7_rc3", "4.7"})
 
-		result, err := applier.Apply(t.Context(), pkg, false)
+		result, err := applier.Apply(t.Context(), pkg)
 		if err == nil || result == nil || result.Success {
 			t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
 		}

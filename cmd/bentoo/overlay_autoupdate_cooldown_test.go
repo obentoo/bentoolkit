@@ -42,6 +42,7 @@ import (
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
 // cooldownCmdEntry is one planted entry.
@@ -174,7 +175,6 @@ var cooldownLongAgo = time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 func cooldownApplyCLI(t *testing.T) *testCLI {
 	t.Helper()
 	return newTestCLI(t, withDeps(func(d *deps) {
-		validating(d)
 		d.newApplier = func(overlayPath, configDir string, opts ...autoupdate.ApplierOption) (*autoupdate.Applier, error) {
 			opts = append(opts,
 				autoupdate.WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
@@ -183,7 +183,17 @@ func cooldownApplyCLI(t *testing.T) *testCLI {
 				autoupdate.WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 				autoupdate.WithApplierSetVersionsFunc(func(string, map[string]string) error { return nil }),
 			)
-			return autoupdate.NewApplier(overlayPath, configDir, opts...)
+			opts = append(opts, cleanBuildOptions()...)
+			a, err := autoupdate.NewApplier(overlayPath, configDir, opts...)
+			if err != nil {
+				return nil, err
+			}
+			// The check that proves each pending bump, so the apply has a
+			// proof to publish.
+			for _, u := range a.Pending().List() {
+				a.Validate(context.Background(), u.Package, validate.DepthNone)
+			}
+			return a, nil
 		}
 	}))
 }

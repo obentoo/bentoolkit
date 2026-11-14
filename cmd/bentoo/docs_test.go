@@ -284,12 +284,12 @@ func TestCompileFlag_IsRefusedWithTheCommandThatReplacesIt(t *testing.T) {
 		{"--revive --compile", autoupdateOptions{compile: true}, "--check --llm --depth=compile"},
 		{"--apply --llm", autoupdateOptions{apply: "app-misc/jq", llm: true}, "--check --llm <package>"},
 	} {
-		err := tc.opts.removedApplyFlags(false)
+		err := tc.opts.removedApplyFlags()
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want one naming %q", tc.name, err, tc.want)
 		}
 	}
-	if err := (&autoupdateOptions{llm: true}).removedApplyFlags(false); err != nil {
+	if err := (&autoupdateOptions{llm: true}).removedApplyFlags(); err != nil {
 		t.Errorf("--check --llm was refused: %v", err)
 	}
 }

@@ -74,7 +74,7 @@ func TestRequiresReviewCaptureRefusesRevisionForTilde(t *testing.T) {
 func TestRequiresReviewObsoleteBeatsWaiting(t *testing.T) {
 	f := newRequiresApplyFixture(t, requiresApplyOptions{requires: map[string]string{requiresApplyAtom: requiresApplyDartNew}})
 	f.place(t, f.overlay, requiresApplyPkg, requiresApplyNew)
-	result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+	result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

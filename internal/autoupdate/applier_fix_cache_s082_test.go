@@ -277,7 +277,6 @@ func TestS082RepairCopiesExpectedDistfilesThroughApply(t *testing.T) {
 		WithApplierFixer(fx),
 		WithApplierReporter(rec),
 		WithApplierLogger(sink.logger()),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(host, ""),
 		WithApplierDistfilesCache(cache),
@@ -291,7 +290,7 @@ func TestS082RepairCopiesExpectedDistfilesThroughApply(t *testing.T) {
 	seen := s081Observe(t, fx, rec, s082Inodes(t, inodes, &mu))
 	hostBefore, cacheBefore := hashDistdirTree(t, host), hashDistdirTree(t, cache)
 
-	_, _ = applier.Apply(t.Context(), s082Pkg, false)
+	_, _ = applier.Apply(t.Context(), s082Pkg)
 
 	if fx.called != 1 {
 		t.Fatalf("the fixer ran %d time(s), want 1; this test is about the distdir it was given", fx.called)
@@ -362,7 +361,6 @@ func s082RepairFixture(t *testing.T, seam func(ctx context.Context, name string,
 		WithApplierFixer(fx),
 		WithApplierReporter(rec),
 		WithApplierLogger(sink.logger()),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierDistdir(host, ""),
 		WithApplierDistfilesCache(cache),
 	)

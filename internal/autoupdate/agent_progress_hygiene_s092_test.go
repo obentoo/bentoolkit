@@ -128,7 +128,7 @@ func TestAgentProgressHygieneAbandonedCallbackAddsNothingLate(t *testing.T) {
 		WithApplierBuildFixer(agent)(h.applier)
 		rec := &recordingReporter{}
 		WithApplierReporter(rec)(h.applier)
-		if result, _ := h.applier.Apply(t.Context(), h.pkg, true); result.Success {
+		if result, _ := h.applier.Apply(t.Context(), h.pkg); result.Success {
 			t.Fatal("fixture: the fix was scripted to fail")
 		}
 		s092v2AssertNoLateLine(t, rec, agent, h.pkg)

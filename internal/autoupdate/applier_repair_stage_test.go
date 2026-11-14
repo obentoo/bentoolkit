@@ -27,7 +27,7 @@ func failedStagedApply(t *testing.T, opts ...ApplierOption) *ApplyResult {
 	t.Helper()
 	opts = append([]ApplierOption{WithApplierDistdir(t.TempDir(), "")}, opts...)
 	a, _, pkg, _, _ := promoteFixture(t, opts...)
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err == nil || result == nil || result.Success {
 		t.Fatalf("fixture: the bump did not fail (err %v)", err)
 	}

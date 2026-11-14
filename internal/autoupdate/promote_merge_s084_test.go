@@ -474,7 +474,7 @@ func TestS084ApplyKeepsTheCurrentVersionsRecords(t *testing.T) {
 		WithApplierLogger(rec.logger()),
 	)
 
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("apply failed: err=%v result.Error=%v", err, result.Error)
 	}
@@ -498,7 +498,7 @@ func TestS084ApplyCleanPrunesTheRemovedVersionsRecords(t *testing.T) {
 		}}),
 	)
 
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("apply failed: err=%v result.Error=%v", err, result.Error)
 	}

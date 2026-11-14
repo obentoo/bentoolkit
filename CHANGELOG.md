@@ -103,6 +103,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   never configures or builds. `validate.depths.revision`/`patch` still set
   it per class.
 
+- **`--revive` proves before it publishes.** It runs the same gates as
+  `--check --llm` over the revived bump and then publishes the proof; a bump
+  whose gates measured nothing is reported failed with the gates' reasons.
+
+- **A `requires` pair lands in two rounds.** A bump that needs another bump
+  of the same batch is checked before that one is published, so the check
+  reports it as WAIT; after the apply publishes the required bump, the next
+  `--check --llm` proves it.
+
 - **`--compile` is removed, and `--apply` takes no `--llm`.** A build runs only
   in `--check --llm`, unprivileged, up to `--depth=install`; the privileged
   `sudo ebuild … compile` step and its prompt are gone from every mode. Both

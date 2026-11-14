@@ -27,6 +27,7 @@ import (
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
 // --- sub-task 2.1 — the staged manifest accepts a supplied distdir ----------
@@ -179,6 +180,7 @@ func filepathHasPrefix(path, root string) bool {
 // over this same bug.
 func TestGateReadsTheDistdirTheFixFetched(t *testing.T) {
 	applier, manifestFixer, _ := newGateApplier(t, pkgdevFailsUntilFixed(), gatePkg{"a/b", "1.0", "2.0"})
+	WithApplierStagingRoot(filepath.Join(t.TempDir(), "staging"))(applier)
 
 	var fetched string
 	manifestFixer.onCall = func(req fixer.ManifestFixRequest) {
@@ -192,17 +194,13 @@ func TestGateReadsTheDistdirTheFixFetched(t *testing.T) {
 		}
 	}
 
-	res, _ := applier.Apply(t.Context(), "a/b", true)
+	res := applier.Validate(t.Context(), "a/b", validate.DepthCompile)
 	if fetched == "" {
 		t.Fatal("the fixer was never invoked; this test cannot fail for its own reason")
 	}
 
-	read := gateDistdirFrom(t, res)
-	if read == "" {
-		t.Fatal("no gate reported which directory it searched")
-	}
-	if !strings.HasPrefix(read, fetched) {
-		t.Errorf("the gate read %q, not the directory this run fetched into (%q)", read, fetched)
+	if said := gateReasons(res); !strings.Contains(said, fetched) {
+		t.Errorf("no gate read the directory this run fetched into (%q); the gates said:\n%s", fetched, said)
 	}
 }
 
@@ -221,6 +219,7 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			applier, manifestFixer, _ := newGateApplier(t, tc.recheck(), gatePkg{"a/b", "1.0", "2.0"})
+			WithApplierStagingRoot(filepath.Join(t.TempDir(), "staging"))(applier)
 			var dir string
 			manifestFixer.onCall = func(req fixer.ManifestFixRequest) {
 				dir = req.DistDir
@@ -232,13 +231,13 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 				}
 			}
 
-			applier.Apply(t.Context(), "a/b", true)
+			applier.Validate(t.Context(), "a/b", validate.DepthCompile)
 
 			if dir == "" {
 				t.Fatal("the fixer was never invoked")
 			}
 			if _, err := os.Stat(dir); !os.IsNotExist(err) {
-				t.Errorf("the distdir survived the apply: %v", err)
+				t.Errorf("the distdir survived the check: %v", err)
 			}
 		})
 	}
@@ -251,6 +250,7 @@ func TestTheTransferredDistdirIsStillRemoved(t *testing.T) {
 // unread. This is the row that stops the fix from becoming the bug's mirror image.
 func TestAnEmptyFixDistdirStillFallsBack(t *testing.T) {
 	applier, manifestFixer, _ := newGateApplier(t, pkgdevFailsUntilFixed(), gatePkg{"a/b", "1.0", "2.0"})
+	WithApplierStagingRoot(filepath.Join(t.TempDir(), "staging"))(applier)
 
 	var fetched string
 	manifestFixer.onCall = func(req fixer.ManifestFixRequest) {
@@ -259,14 +259,13 @@ func TestAnEmptyFixDistdirStillFallsBack(t *testing.T) {
 		fetched = req.DistDir
 	}
 
-	res, _ := applier.Apply(t.Context(), "a/b", true)
+	res := applier.Validate(t.Context(), "a/b", validate.DepthCompile)
 	if fetched == "" {
 		t.Fatal("the fixer was never invoked; this test cannot fail for its own reason")
 	}
 
-	read := gateDistdirFrom(t, res)
-	if read != "" && strings.HasPrefix(read, fetched) {
-		t.Errorf("the gate was pointed at the empty directory %q instead of falling back; "+
-			"an empty private distdir means nothing was fetched, not that nothing is there", read)
+	if said := gateReasons(res); strings.Contains(said, fetched) {
+		t.Errorf("a gate was pointed at the empty directory %q instead of falling back; "+
+			"an empty private distdir means nothing was fetched, not that nothing is there:\n%s", fetched, said)
 	}
 }

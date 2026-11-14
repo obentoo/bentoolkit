@@ -16,9 +16,9 @@ import (
 func TestPublishOnlyProven_RefusesWithoutAProof(t *testing.T) {
 	builds := 0
 	a, pkg := scriptedBuildApplier(t, buildRun{output: cleanCompile}, &builds)
-	a.publishOnlyProven = true
+	a.validateUnproven = false
 
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 
 	if err != nil {
 		t.Fatalf("an unproven bump is a refusal, not a failure: %v", err)
@@ -45,12 +45,12 @@ func TestPublishOnlyProven_RefusesWithoutAProof(t *testing.T) {
 func TestPublishOnlyProven_PublishesWhatTheCheckProved(t *testing.T) {
 	builds := 0
 	a, pkg := scriptedBuildApplier(t, buildRun{output: cleanCompile}, &builds)
-	a.publishOnlyProven = true
+	a.validateUnproven = false
 	a.proofMaxAge = 7 * 24 * time.Hour
 
 	a.Validate(t.Context(), pkg, validate.DepthCompile)
 	before := builds
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 
 	if err != nil || !result.Success {
 		t.Fatalf("Apply: success=%v err=%v unproven=%q", result.Success, err, result.UnprovenReason)
@@ -70,7 +70,8 @@ func TestProofMaxAge_AnOldOrUndatedProofDoesNotHold(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			builds := 0
 			a, pkg := scriptedBuildApplier(t, buildRun{output: cleanCompile}, &builds)
-			a.publishOnlyProven = true
+			a.validateUnproven = false
+			a.validateUnproven = false
 			a.proofMaxAge = 7 * 24 * time.Hour
 			a.Validate(t.Context(), pkg, validate.DepthCompile)
 
@@ -87,7 +88,7 @@ func TestProofMaxAge_AnOldOrUndatedProofDoesNotHold(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			result, err := a.Apply(t.Context(), pkg, false)
+			result, err := a.Apply(t.Context(), pkg)
 
 			if err != nil || !result.Unproven {
 				t.Fatalf("a %s proof was not refused: unproven=%v success=%v err=%v", name, result.Unproven, result.Success, err)

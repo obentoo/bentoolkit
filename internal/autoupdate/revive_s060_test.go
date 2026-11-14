@@ -12,7 +12,6 @@ package autoupdate
 //	    Apply(ctx context.Context, pkg string, compile bool) (*ApplyResult, error)
 //	}
 //	func CanRevive(prov provider.Provider) error
-//	func WithReviveCompile(compile bool) ReviverOption
 //	func NewReviver(overlayPath string, applier ReviveApplier, prov provider.Provider,
 //	    newChecker func() (*Checker, error), opts ...ReviverOption) (*Reviver, error)
 //	func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome
@@ -37,6 +36,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -107,7 +107,6 @@ type s060ReviveRig struct {
 	events     *s060Events
 	pending    *PendingList
 	applier    *Applier
-	prompts    []string
 	upstream   string
 	newChecker func() (*Checker, error)
 }
@@ -159,10 +158,6 @@ func newS060ReviveRig(t *testing.T, gentooVersions []string, upstream string) *s
 		WithExecCommand(func(ctx context.Context, name string, _ ...string) *exec.Cmd {
 			rig.events.add("spawn " + name)
 			return exec.CommandContext(ctx, "true")
-		}),
-		WithConfirmFunc(func(prompt string) bool {
-			rig.prompts = append(rig.prompts, prompt)
-			return false
 		}),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 		WithApplierDistdir(t.TempDir(), ""),
@@ -254,43 +249,6 @@ func TestS060ReviveRevivesInOrder(t *testing.T) {
 	if _, err := os.Stat(rig.applier.EbuildPath(s060RevivePkg, "2.0.0")); err != nil {
 		t.Errorf("the bump was not applied: %v", err)
 	}
-}
-
-// TestS060ReviveCompileReachesTheApply is R4.4 and R4.7: the compile request
-// reaches the apply only when asked for.
-func TestS060ReviveCompileReachesTheApply(t *testing.T) {
-	t.Run("with compile", func(t *testing.T) {
-		rig := newS060ReviveRig(t, []string{"1.0.0"}, "2.0.0")
-
-		got := rig.reviver(t, WithReviveCompile(true)).Revive(t.Context(), s060RevivePkg)
-
-		if len(rig.prompts) != 1 || !strings.Contains(rig.prompts[0], s060RevivePkg) {
-			t.Errorf("compile prompts = %q; want exactly one, for %s (R4.4)", rig.prompts, s060RevivePkg)
-		}
-		// The compile was declined, so the apply failed with that reason.
-		if got.Status != ReviveFailed || got.Detail != ErrUserDeclined.Error() {
-			t.Errorf("outcome = %+v, want failed with detail %q", got, ErrUserDeclined.Error())
-		}
-	})
-	t.Run("without compile", func(t *testing.T) {
-		rig := newS060ReviveRig(t, []string{"1.0.0"}, "2.0.0")
-
-		got := rig.reviver(t).Revive(t.Context(), s060RevivePkg)
-
-		if len(rig.prompts) != 0 {
-			t.Errorf("compile prompts = %q; want none without --compile (R4.7)", rig.prompts)
-		}
-		assertOutcome(t, got, s060RevivePkg, ReviveRevived, "1.0.0 → 2.0.0")
-	})
-	t.Run("explicitly false", func(t *testing.T) {
-		rig := newS060ReviveRig(t, []string{"1.0.0"}, "2.0.0")
-
-		rig.reviver(t, WithReviveCompile(false)).Revive(t.Context(), s060RevivePkg)
-
-		if len(rig.prompts) != 0 {
-			t.Errorf("compile prompts = %q; want none (R4.7)", rig.prompts)
-		}
-	})
 }
 
 // TestS060ReviveSkipsWhenGentooIsCurrent is R4.3's first clause.
@@ -415,7 +373,6 @@ type s060ObsoleteApplier struct {
 	real    *Applier
 	reason  string
 	applied []string
-	compile []bool
 }
 
 func (a *s060ObsoleteApplier) SeedFromGentoo(pkg, srcDir, version string) error {
@@ -424,9 +381,12 @@ func (a *s060ObsoleteApplier) SeedFromGentoo(pkg, srcDir, version string) error 
 
 func (a *s060ObsoleteApplier) MarkReenabled(pkg string) { a.real.MarkReenabled(pkg) }
 
-func (a *s060ObsoleteApplier) Apply(_ context.Context, pkg string, compile bool) (*ApplyResult, error) {
+func (a *s060ObsoleteApplier) Validate(context.Context, string, validate.Depth) validate.EbuildResult {
+	return validate.EbuildResult{}
+}
+
+func (a *s060ObsoleteApplier) Apply(_ context.Context, pkg string) (*ApplyResult, error) {
 	a.applied = append(a.applied, pkg)
-	a.compile = append(a.compile, compile)
 	return &ApplyResult{Package: pkg, Obsolete: true, ObsoleteReason: a.reason}, nil
 }
 
@@ -446,8 +406,8 @@ func TestS060ReviveSkipsAnObsoleteBump(t *testing.T) {
 	got := rv.Revive(t.Context(), s060RevivePkg)
 
 	assertOutcome(t, got, s060RevivePkg, ReviveSkipped, stub.reason)
-	if len(stub.applied) != 1 || stub.applied[0] != s060RevivePkg || stub.compile[0] {
-		t.Errorf("Apply calls = %v (compile %v), want one for %s without compile", stub.applied, stub.compile, s060RevivePkg)
+	if len(stub.applied) != 1 || stub.applied[0] != s060RevivePkg {
+		t.Errorf("Apply calls = %v, want one for %s", stub.applied, s060RevivePkg)
 	}
 }
 

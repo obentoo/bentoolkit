@@ -108,7 +108,7 @@ var s090UploadCmd = []string{s090Uploader, "obentoo-distfiles/{file}", "--file={
 // served bytes compared after the upload, then promotion.
 func TestApplyUploadsAndVerifiesTheGeneratedTarball(t *testing.T) {
 	e := s090ApplyFixture(t, s090UploadCmd, false)
-	result, err := e.applier.Apply(t.Context(), s090Pkg, false)
+	result, err := e.applier.Apply(t.Context(), s090Pkg)
 	if err != nil || result == nil || !result.Success {
 		t.Fatalf("Apply = (%+v, %v), want a promoted bump", result, err)
 	}
@@ -161,7 +161,7 @@ func TestApplyDoesNotPublishWhenTheUploadIsNotProved(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			e := s090ApplyFixture(t, s090UploadCmd, tc.corrupt)
 			e.exec.uploadFail = tc.fail
-			result, err := e.applier.Apply(t.Context(), s090Pkg, false)
+			result, err := e.applier.Apply(t.Context(), s090Pkg)
 			if err == nil || (result != nil && result.Success) {
 				t.Fatalf("Apply = (%+v, %v), want a failure", result, err)
 			}
@@ -187,7 +187,7 @@ func TestApplyDoesNotPublishWhenTheUploadIsNotProved(t *testing.T) {
 // keeping the tarball in the staged tree and failing the pending entry.
 func TestApplyWithoutUploadCommandParksTheTarball(t *testing.T) {
 	e := s090ApplyFixture(t, nil, false)
-	result, err := e.applier.Apply(t.Context(), s090Pkg, false)
+	result, err := e.applier.Apply(t.Context(), s090Pkg)
 	if !errors.Is(err, ErrVendorUploadPending) {
 		t.Fatalf("Apply error = %v, want ErrVendorUploadPending", err)
 	}

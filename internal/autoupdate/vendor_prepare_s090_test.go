@@ -629,7 +629,6 @@ func (f *s090Fix) applier(t *testing.T, fx *fakeFixer, opts ...ApplierOption) *A
 		WithApplierHTTPClient(s090Client(f.tr)),
 		WithApplierReporter(f.rec),
 		WithApplierLogger(f.sink.logger()),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierDistdir(f.host, ""),
 		WithApplierDistfilesCache(f.cache),
 	}

@@ -228,43 +228,6 @@ func TestGroupBitsForMirrorsTheOwnerAndNeverExceedsIt(t *testing.T) {
 	}
 }
 
-// The published overlay is not this gate's to re-permission, so an unstaged
-// candidate's repoRoot must be left exactly as it was found.
-func TestGrantCompileAccessLeavesAnUnstagedOverlayAlone(t *testing.T) {
-	withPortageGroupID(t, os.Getgid(), true)
-	overlay, _, file := stagedLikeTree(t)
-
-	a := &Applier{}
-	if err := a.grantCompileAccess(candidatePaths{staged: false, repoRoot: overlay}); err != nil {
-		t.Fatalf("grantCompileAccess: %v", err)
-	}
-
-	if got := modeOf(t, file); got != 0o600 {
-		t.Errorf("%s is %04o, was 0600; an unstaged candidate's overlay was re-permissioned", file, got)
-	}
-}
-
-// The staged tree and the private distdir are opened together, each with its own
-// stance — the distdir writable, the tree not.
-func TestGrantCompileAccessOpensStagedTreeAndPrivateDistdir(t *testing.T) {
-	withPortageGroupID(t, os.Getgid(), true)
-	staged, _, stagedFile := stagedLikeTree(t)
-	distdir, _, distFile := stagedLikeTree(t)
-
-	a := &Applier{}
-	err := a.grantCompileAccess(candidatePaths{staged: true, repoRoot: staged, fetchedDistdir: distdir})
-	if err != nil {
-		t.Fatalf("grantCompileAccess: %v", err)
-	}
-
-	if got := modeOf(t, stagedFile); got&0o040 == 0 || got&0o020 != 0 {
-		t.Errorf("staged file is %04o; want the group to read it and not write it", got)
-	}
-	if got := modeOf(t, distFile); got&0o060 != 0o060 {
-		t.Errorf("distdir file is %04o; want the group to read and write it", got)
-	}
-}
-
 // stagingLikeLayout builds the shape the applier really stages into —
 // <staging>/<category>/<package>/<version> — every level 0750, which is what
 // stagedDirMode makes and what refused uid portage at the staging root.
@@ -384,24 +347,5 @@ func TestGrantPortageTraversalIsANoOpWhenTheRootsAreTheSame(t *testing.T) {
 	}
 	if got := modeOf(t, filepath.Dir(root)); got&0o010 == 0 {
 		t.Skip("this host's temp parent is not traversable; nothing to assert")
-	}
-}
-
-// grantCompileAccess must open the path as well as the tree — the whole point of
-// the outer half of the fix.
-func TestGrantCompileAccessOpensThePathToTheStagedTree(t *testing.T) {
-	want := aSecondaryGID(t)
-	withPortageGroupID(t, want, true)
-	stagingRoot, repoRoot, levels := stagingLikeLayout(t)
-
-	a := &Applier{stagingRoot: stagingRoot}
-	if err := a.grantCompileAccess(candidatePaths{staged: true, repoRoot: repoRoot}); err != nil {
-		t.Fatalf("grantCompileAccess: %v", err)
-	}
-
-	for _, dir := range levels {
-		if got := gidOf(t, dir); got != want {
-			t.Errorf("directory %s is owned by gid %d, want %d; grantCompileAccess opened the tree but not the path to it", dir, got, want)
-		}
 	}
 }

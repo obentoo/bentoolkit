@@ -87,7 +87,7 @@ func TestApplierReporterSuccessEventOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, err := applier.Apply(t.Context(), pkg, false)
+	res, err := applier.Apply(t.Context(), pkg)
 	if err != nil || res == nil || !res.Success {
 		t.Fatalf("apply failed: err=%v result=%+v", err, res)
 	}
@@ -122,7 +122,7 @@ func TestApplierReporterFailThenFixEventOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, err := applier.Apply(t.Context(), pkg, false)
+	res, err := applier.Apply(t.Context(), pkg)
 	if err != nil || res == nil || !res.Success || !res.Fixed {
 		t.Fatalf("apply (fix) failed: err=%v result=%+v", err, res)
 	}
@@ -157,7 +157,7 @@ func TestApplierReporterNoopUnchanged(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewApplier: %v", err)
 		}
-		res, err := applier.Apply(t.Context(), pkg, false)
+		res, err := applier.Apply(t.Context(), pkg)
 		if err != nil || res == nil || !res.Success {
 			t.Fatalf("apply failed: err=%v result=%+v", err, res)
 		}
@@ -168,19 +168,6 @@ func TestApplierReporterNoopUnchanged(t *testing.T) {
 
 	t.Run("no reporter (default nil)", func(t *testing.T) { run(t) })
 	t.Run("explicit Noop", func(t *testing.T) { run(t, WithApplierReporter(tui.Noop())) })
-}
-
-// hasPrivilegeTool reports whether sudo or doas is on PATH (detectPrivilegeTool
-// calls exec.LookPath directly and is not seam-injectable, so compile-path tests
-// skip when neither exists).
-func hasPrivilegeTool() bool {
-	if _, err := exec.LookPath("doas"); err == nil {
-		return true
-	}
-	if _, err := exec.LookPath("sudo"); err == nil {
-		return true
-	}
-	return false
 }
 
 // R1.1/R1.2: runManifest streams the pkgdev output live as TaskLine events
@@ -212,7 +199,7 @@ func TestApplierManifestStreamsTaskLines(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, err := applier.Apply(t.Context(), pkg, false)
+	res, err := applier.Apply(t.Context(), pkg)
 	if err != nil || res == nil || !res.Success {
 		t.Fatalf("apply failed: err=%v result=%+v", err, res)
 	}
@@ -256,66 +243,11 @@ func TestApplierManifestErrorStringPreserved(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	res, _ := applier.Apply(t.Context(), pkg, false)
+	res, _ := applier.Apply(t.Context(), pkg)
 	if res == nil || res.Success || res.Error == nil {
 		t.Fatalf("expected a manifest failure, got %+v", res)
 	}
 	if !strings.Contains(res.Error.Error(), "BOOM-OUTPUT-7F3A") {
 		t.Errorf("manifest error must preserve captured output (R7.1):\n%v", res.Error)
-	}
-}
-
-// R7.1: a compile failure still writes the compile log file with the captured
-// output unchanged (through the new runAttached seam's default path).
-func TestApplierCompileLogPreserved(t *testing.T) {
-	if !hasPrivilegeTool() {
-		t.Skip("compile path requires sudo/doas on PATH (detectPrivilegeTool)")
-	}
-	tmp := t.TempDir()
-	overlay := filepath.Join(tmp, "overlay")
-	cfg := filepath.Join(tmp, "config")
-	logs := filepath.Join(tmp, "logs")
-	if err := os.MkdirAll(logs, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	pkg := "dev-libs/compiler"
-
-	createTestEbuildFile(t, overlay, pkg, "1.0")
-	pending, _ := NewPendingList(cfg)
-	pending.Add(PendingUpdate{Package: pkg, CurrentVersion: "1.0", NewVersion: "1.1", Status: StatusPending})
-
-	seam := func(ctx context.Context, name string, arg ...string) *exec.Cmd {
-		switch name {
-		case "pkgdev":
-			return exec.CommandContext(ctx, "true")
-		case "sudo", "doas":
-			return exec.CommandContext(ctx, "sh", "-c", "printf 'COMPILE-FAIL-LOG-9C2B\\n'; exit 1")
-		default:
-			return exec.CommandContext(ctx, "true")
-		}
-	}
-
-	applier, err := NewApplier(overlay, cfg,
-		WithApplierPendingList(pending),
-		WithExecCommand(seam),
-		WithConfirmFunc(func(string) bool { return true }),
-		WithLogsDir(logs),
-	)
-	if err != nil {
-		t.Fatalf("NewApplier: %v", err)
-	}
-	res, _ := applier.Apply(t.Context(), pkg, true)
-	if res == nil || res.Success {
-		t.Fatalf("expected a compile failure, got %+v", res)
-	}
-	if res.LogPath == "" {
-		t.Fatalf("expected a compile log path on failure")
-	}
-	data, err := os.ReadFile(res.LogPath)
-	if err != nil {
-		t.Fatalf("read compile log: %v", err)
-	}
-	if !strings.Contains(string(data), "COMPILE-FAIL-LOG-9C2B") {
-		t.Errorf("compile log must preserve captured output (R7.1):\n%q", string(data))
 	}
 }

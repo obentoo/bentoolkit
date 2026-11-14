@@ -384,7 +384,7 @@ func rwApplyAllKeepsResultsAtInputIndices(t *testing.T, concurrency int) {
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 
-	results, failures := applier.ApplyAll(t.Context(), updates, false, concurrency)
+	results, failures := applier.ApplyAll(t.Context(), updates, concurrency)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)
@@ -443,7 +443,7 @@ func TestRequiresWavesDependentWaitsWhenRequiredFails(t *testing.T) {
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwFailIn("/dev-lang/dart"))
 
-	results, failures := applier.ApplyAll(t.Context(), updates, false, 4)
+	results, failures := applier.ApplyAll(t.Context(), updates, 4)
 
 	if failures != 1 {
 		t.Errorf("failures = %d, want 1 (dart failed; a waiting flutter is not a failure)", failures)
@@ -501,7 +501,7 @@ func TestRequiresWavesDependentWaitsWhenRequiredWaits(t *testing.T) {
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 
-	results, failures := applier.ApplyAll(t.Context(), updates, false, 4)
+	results, failures := applier.ApplyAll(t.Context(), updates, 4)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0 (waiting is not failing)", failures)
@@ -547,7 +547,7 @@ func TestRequiresWavesCycleAttemptsEveryEntry(t *testing.T) {
 	}
 	applier := rwApplier(t, overlay, configDir, gentoo, pending, records, rwTrue)
 
-	results, failures := applier.ApplyAll(t.Context(), updates, false, 4)
+	results, failures := applier.ApplyAll(t.Context(), updates, 4)
 
 	if failures != 0 {
 		t.Errorf("failures = %d, want 0", failures)

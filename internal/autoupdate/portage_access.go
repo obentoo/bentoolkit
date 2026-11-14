@@ -150,39 +150,6 @@ func groupBitsFor(mode fs.FileMode, writable bool) fs.FileMode {
 	return g
 }
 
-// grantCompileAccess opens the directories a PRIVILEGED compile makes uid
-// `portage` read to that group, and nothing else.
-//
-// # What is deliberately absent from this list
-//
-// A candidate that is not staged lives in the published overlay — the repository
-// that auto-commits and pushes — and re-permissioning that tree is not this
-// gate's business; it is also unnecessary, an overlay being world-readable
-// already. The host's own DISTDIR is absent for the mirror-image reason: it is
-// where Portage keeps its archives and already belongs to the group. Only
-// cand.fetchedDistdir, the private directory THIS run's manifest step created
-// and this run will delete, is ours to open.
-func (a *Applier) grantCompileAccess(cand candidatePaths) error {
-	if cand.staged {
-		// Read, never written: the build must not be able to edit the candidate
-		// whose verdict it is producing.
-		if err := grantPortageAccess(cand.repoRoot, false); err != nil {
-			return fmt.Errorf("preparing the staged tree for a privileged build: %w", err)
-		}
-		// And the directories that lead to it. Opening the tree without opening
-		// the path to it fixes nothing: uid `portage` is refused at the staging
-		// root and never reaches the tree whose modes were just corrected.
-		if err := grantPortageTraversal(cand.repoRoot, a.stagingRoot); err != nil {
-			return fmt.Errorf("opening the path to the staged tree for a privileged build: %w", err)
-		}
-	}
-	// Written: a fetch under `userfetch` downloads into it as uid `portage`.
-	if err := grantPortageAccess(cand.fetchedDistdir, true); err != nil {
-		return fmt.Errorf("preparing the private distdir for a privileged build: %w", err)
-	}
-	return nil
-}
-
 // grantPortageTraversal opens the DIRECTORIES BETWEEN upto and from to the
 // `portage` group.
 //

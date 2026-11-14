@@ -8,6 +8,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -45,7 +46,10 @@ type ReviveApplier interface {
 	// MarkReenabled tells the applier the entry was re-enabled after it loaded
 	// packages.toml, so its stale enabled = false does not refuse the bump.
 	MarkReenabled(pkg string)
-	Apply(ctx context.Context, pkg string, compile bool) (*ApplyResult, error)
+	// Validate proves the revived bump the way `--check --llm` does; Apply
+	// publishes only what it proved.
+	Validate(ctx context.Context, pkg string, ceiling validate.Depth) validate.EbuildResult
+	Apply(ctx context.Context, pkg string) (*ApplyResult, error)
 }
 
 var _ ReviveApplier = (*Applier)(nil)
@@ -69,17 +73,10 @@ type Reviver struct {
 	prov        provider.Provider
 	pdp         provider.PackageDirProvider
 	newChecker  func() (*Checker, error)
-	compile     bool
 }
 
 // ReviverOption configures a Reviver.
 type ReviverOption func(*Reviver)
-
-// WithReviveCompile passes the compile request to the apply of every revived
-// bump (--compile).
-func WithReviveCompile(compile bool) ReviverOption {
-	return func(r *Reviver) { r.compile = compile }
-}
 
 // NewReviver returns ErrNoLocalPackageDir (wrapped) when prov is not a
 // provider.PackageDirProvider. newChecker must build a Checker that shares the
@@ -208,7 +205,11 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 			Detail: fmt.Sprintf("gentoo %s already current with upstream %s", gentooVersion, result.UpstreamVersion)}
 	}
 
-	applyResult, err := r.applier.Apply(ctx, pkg, r.compile)
+	// Proved first, then published: the apply publishes only the tree a check
+	// proved, and a revive is no exception. No plan was confirmed by anyone, so
+	// there is no ceiling.
+	proof := r.applier.Validate(ctx, pkg, validate.DepthNone)
+	applyResult, err := r.applier.Apply(ctx, pkg)
 	if err != nil {
 		detail := err.Error()
 		if applyResult != nil && applyResult.LogPath != "" {
@@ -233,6 +234,25 @@ func (r *Reviver) Revive(ctx context.Context, pkg string) ReviveOutcome {
 	if applyResult != nil && applyResult.Obsolete {
 		return ReviveOutcome{Package: pkg, Status: ReviveSkipped, Detail: applyResult.ObsoleteReason}
 	}
+	if applyResult != nil && applyResult.Unproven {
+		return failed(fmt.Sprintf("not published, the revived bump was not proven: %s (%s)",
+			proofSummary(proof), applyResult.UnprovenReason))
+	}
 
 	return ReviveOutcome{Package: pkg, Status: ReviveRevived, Detail: fmt.Sprintf("%s → %s", gentooVersion, result.UpstreamVersion)}
+}
+
+// proofSummary names the gates of a revive's check that did not pass, or says
+// that every gate passed.
+func proofSummary(proof validate.EbuildResult) string {
+	var stopped []string
+	for _, gate := range proof.Gates {
+		if gate.Outcome != validate.OutcomePass {
+			stopped = append(stopped, fmt.Sprintf("%s %s: %s", gate.Gate, gate.Outcome, gate.Reason))
+		}
+	}
+	if len(stopped) == 0 {
+		return "every gate passed"
+	}
+	return strings.Join(stopped, "; ")
 }

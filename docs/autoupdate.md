@@ -724,6 +724,12 @@ older than `autoupdate.proof.max_age_days` (7 by default). Anything else is
 reported as **Unproven** and left in the pending list; `--apply` runs no gate,
 fetches nothing and regenerates no Manifest for it. `--repair` is the one
 exception: the tree it adopts is promoted on the gates that run over it.
+`--revive` proves the revived bump first, the way the check does, and then
+publishes it.
+
+A bump that requires another bump of the same batch (`requires`) is proved
+only once that one is published: the first check reports it as WAIT, the
+apply publishes what it waited for, and the next check proves it.
 
 #### What `--apply` prints
 
