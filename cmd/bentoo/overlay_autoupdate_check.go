@@ -206,6 +206,22 @@ func planValidation(
 	return plan
 }
 
+// capBudget applies the build budget to every entry, the same way the run's
+// own depth resolution does (validate.BuildBudget.Cap), so the plan the
+// operator confirms shows the depth that runs and why.
+func (p *validationPlan) capBudget(budget validate.BuildBudget) {
+	if budget.Limit <= 0 {
+		return
+	}
+	p.DepthDistribution = map[string]int{}
+	for i := range p.Entries {
+		entry := &p.Entries[i]
+		capped := budget.Cap(entry.Package, validate.DepthDecision{Depth: entry.depth, Reason: entry.Reason})
+		entry.depth, entry.Depth, entry.Reason = capped.Depth, capped.Depth.String(), capped.Reason
+		p.DepthDistribution[entry.Depth]++
+	}
+}
+
 // packageTierFromName is the tier fallback for a plan built without a check
 // beside it: a package whose name ends in `-bin` is a prebuilt record.
 //
@@ -436,6 +452,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 
 	plan := planValidation(updates, ar.validate.Policy, ar.validate.Depth,
 		func(update autoupdate.PendingUpdate) string { return tier[update.Package] })
+	plan.capBudget(ar.validate.Budget)
 
 	// Printed here rather than left to runValidationCheck, because the
 	// confirmation below is about this plan: a question about a cost nobody has

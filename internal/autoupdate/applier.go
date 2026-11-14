@@ -398,6 +398,8 @@ type Applier struct {
 	// verified rather than the one Portage's FEATURES implies. Defaults to
 	// validate.ProbeIsolation; injectable via WithApplierIsolationProbe.
 	isolationProbe func() (bool, string)
+	// buildBudget caps the depth of an expensive build; zero is no budget.
+	buildBudget validate.BuildBudget
 	// requireIsolation, when true, makes the compile gate SKIP rather than run
 	// unisolated: an unisolated compile after the operator asked for isolation
 	// produces exactly the meaningless green they asked to avoid. Set via
@@ -876,6 +878,15 @@ func WithApplierStagingRoot(dir string) ApplierOption {
 func WithApplierValidatePolicy(policy validate.DepthPolicy) ApplierOption {
 	return func(a *Applier) {
 		a.validatePolicy = policy
+	}
+}
+
+// WithApplierBuildBudget caps the depth of a bump whose build costs more than
+// budget.Limit on this host (validate.BuildBudget). The caller reads the history
+// once and hands the same value to the plan it shows, so the two agree.
+func WithApplierBuildBudget(budget validate.BuildBudget) ApplierOption {
+	return func(a *Applier) {
+		a.buildBudget = budget
 	}
 }
 

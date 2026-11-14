@@ -42,6 +42,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   ISO and its pin), and a failed build in an environment that no longer
   answers is the machine's failure: WAIT, no fixer.
 
+- **A build budget.** `autoupdate.build.budget` (or `--build-budget 45m`
+  for one run) caps how deep a bump is built: a package that averages more
+  than the budget on this host, by `qlop`, or has no build history here, is
+  taken no further than `configure`, `--depth` included. The plan shows the
+  capped depth and the reason per package, and the run resolves the same
+  depth: the history is read once and shared. Give `--apply` the same budget,
+  or set the key, so it asks for the depth the check proved.
+
 - **One build session at a time.** A run that may build takes
   `build-session.bentoo-lock` in the autoupdate state directory; a second one
   exits at once, naming the PID and start time of the run that holds it.

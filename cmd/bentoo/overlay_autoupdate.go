@@ -70,6 +70,7 @@ type autoupdateOptions struct {
 	requireIsolation bool
 	// buildBackend is --build-backend: where the build gates run for this run.
 	buildBackend string
+	buildBudget  time.Duration
 	// clean removes the old ebuild after a successful apply, keeping
 	// only the newly created version
 	clean bool
@@ -283,6 +284,9 @@ type autoupdateValidatePolicy struct {
 	Container config.BuildContainerConfig
 	// VM is autoupdate.build.vm.
 	VM config.BuildVMConfig
+	// Budget is --build-budget, else autoupdate.build.budget, with this
+	// host's build history read once; a zero Limit is no budget.
+	Budget validate.BuildBudget
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -368,6 +372,7 @@ Examples:
 	// be answering a question nobody could ask, and `--compile` would be the only
 	// way to reach a build gate.
 	cmd.Flags().String("depth", "", "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time")
+	cmd.Flags().DurationVar(&o.buildBudget, "build-budget", 0, "Cap how deep a bump is built: a package whose average build on this host (qlop) is above this duration, or which has no build history, is taken no further than configure. Overrides autoupdate.build.budget for this run; give the same budget to --apply, or set the key, so the apply asks for the depth the check proved")
 	cmd.Flags().StringVar(&o.buildBackend, "build-backend", "", "Where the build gates of --check --llm, --revive and --repair run: host (the default), vm or container. Overrides autoupdate.build.backend for this run; a backend that is not available stops the run before any work, it never falls back to host")
 	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, "SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
 	cmd.Flags().BoolVarP(&o.clean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
@@ -1751,6 +1756,21 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 	policy.Container = cfg.Autoupdate.Build.Container
 	policy.VM = cfg.Autoupdate.Build.VM
 
+	// The flag wins, so the key is not even read when the flag is given.
+	var limit time.Duration
+	if cmd.Flags().Changed("build-budget") {
+		if limit = o.buildBudget; limit < 0 {
+			return policy, errors.New("--build-budget: a budget cannot be negative")
+		}
+	} else if spelled := strings.TrimSpace(cfg.Autoupdate.Build.Budget); spelled != "" {
+		if limit, err = time.ParseDuration(spelled); err != nil || limit < 0 {
+			return policy, fmt.Errorf("autoupdate.build.budget: %q is not a duration such as 45m or 2h", spelled)
+		}
+	}
+	if limit > 0 {
+		policy.Budget = validate.BuildBudget{Limit: limit, History: readBuildHistory(contextOrBackground(cmd.Context()))}
+	}
+
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
 		return policy, fmt.Errorf("reading --depth: %w", err)
@@ -1786,6 +1806,7 @@ func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.A
 		autoupdate.WithApplierRequireIsolation(ar.validate.RequireIsolation),
 		autoupdate.WithApplierRequireProof(ar.validate.RequireProof),
 		autoupdate.WithApplierBuildBackend(ar.validate.Backend),
+		autoupdate.WithApplierBuildBudget(ar.validate.Budget),
 	}
 	if ar.validate.Depth != nil {
 		opts = append(opts, autoupdate.WithApplierDepth(*ar.validate.Depth))
@@ -2645,4 +2666,22 @@ func (ar *autoupdateRun) openBuildEnvironment(ctx context.Context) (closeEnv fun
 		unregister()
 		stop()
 	}, nil
+}
+
+// buildHistoryTimeout bounds the one qlop call a budgeted run makes.
+const buildHistoryTimeout = 30 * time.Second
+
+// readBuildHistory is this host's average build time per package, from
+// `qlop -a -M`. It is read once, before the plan, and shared by the plan and
+// the run. A host where qlop cannot answer has no history: every package then
+// counts as expensive, which is said once here.
+func readBuildHistory(ctx context.Context) map[string]validate.BuildEstimate {
+	ctx, cancel := context.WithTimeout(ctx, buildHistoryTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "qlop", "-a", "-M").Output()
+	if err != nil {
+		output.Warning.Printf("  The build budget has no history to read (qlop -a -M: %v); every package counts as expensive.\n", err)
+		return map[string]validate.BuildEstimate{}
+	}
+	return validate.ParseBuildHistory(out)
 }

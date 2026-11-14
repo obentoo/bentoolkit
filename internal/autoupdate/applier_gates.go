@@ -95,7 +95,7 @@ func (a *Applier) depthFor(pkg, currentVersion, newVersion string) validate.Dept
 	if note != "" {
 		decision.Reason = note + "; " + decision.Reason
 	}
-	return decision
+	return a.buildBudget.Cap(pkg, decision)
 }
 
 // resolvedPackageType classifies pkg as "bin" or "source", mirroring

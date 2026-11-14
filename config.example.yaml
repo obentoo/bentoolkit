@@ -144,6 +144,9 @@ autoupdate:
   #   vm:
   #     iso: /var/tmp/shidashi-isos/bentoo-2026.11.12-minimal-systemd-v3.iso
   #     shidashi: /usr/bin/shidashi
+  #   # Cap the depth of expensive builds: a package averaging more than this on
+  #   # this host (qlop), or with no history, stops at configure. Unset: no cap.
+  #   budget: 45m
 
   # --------------------------------------------------------------------------
   # vendor — the Go vendor-tarball step.
