@@ -887,7 +887,8 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	// The free rung: the transcript this run already holds. Reported to every
 	// operator, LLM or not, because the verdict is a fact about the failure and
 	// not about the configuration.
-	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, buildFaultEvidence{transcript: first.transcript}); machineErr != nil {
+	free := a.buildFaultEvidenceFor(ctx, first)
+	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, free); machineErr != nil {
 		return nil, machineErr
 	}
 	if a.buildFixer == nil {
@@ -895,10 +896,13 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	}
 
 	// The paid rungs, now that the alternative is a full agent invocation.
-	paid := buildFaultEvidence{
-		transcript:  first.transcript,
-		deps:        a.buildDependencyAnswer(ctx, cand, pkg, version),
-		buildTmpdir: fixSandboxRoot(ctx),
+	// They ask this host's Portage and build directory, so a build that ran in
+	// a separate environment skips them: that environment installed its own
+	// dependencies, and its build directory is not this one.
+	paid := free
+	if a.environment() == nil {
+		paid.deps = a.buildDependencyAnswer(ctx, cand, pkg, version)
+		paid.buildTmpdir = fixSandboxRoot(ctx)
 	}
 	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, paid); machineErr != nil {
 		return nil, machineErr

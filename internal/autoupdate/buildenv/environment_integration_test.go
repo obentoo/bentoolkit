@@ -18,28 +18,55 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
 
-// containerImageEnv names a Gentoo image already loaded in Podman or Docker.
-// The test is skipped without it, so the suite never needs a runtime or an
-// image; with it, the container backend is proven against a real Portage.
-const containerImageEnv = "BENTOO_TEST_CONTAINER_IMAGE"
+// containerImageEnv names a Gentoo image already loaded in Podman or Docker,
+// and shidashiEnv a shidashi that has `vm start --dev`. Each test is skipped
+// without its variable, so the suite never needs a runtime, an image or a VM;
+// with it, the backend is proven against a real Portage.
+const (
+	containerImageEnv = "BENTOO_TEST_CONTAINER_IMAGE"
+	shidashiEnv       = "BENTOO_TEST_SHIDASHI"
+)
 
 // TestContainerIntegration_TheBuildGatesRunInARealContainer drives the real
-// transport and the real build gates: a staged tree and its distfile are
-// shipped in, the staged repository is registered, the build dependencies are
-// installed by emerge, and one ebuild run up to install happens inside the
-// container. Nothing is mocked. Under rootless Podman the container can
-// isolate the build, so Portage's sandbox must work and no pass may read as
-// unverified.
+// container transport through realEnvironmentBuild.
 func TestContainerIntegration_TheBuildGatesRunInARealContainer(t *testing.T) {
 	image := os.Getenv(containerImageEnv)
 	if image == "" {
 		t.Skipf("%s is not set: no image to run the container backend against", containerImageEnv)
 	}
-	ctx := t.Context()
-	transport, err := buildenv.NewContainer(ctx, os.Getenv("BENTOO_TEST_CONTAINER_RUNTIME"), image, buildenv.ContainerSeams{})
+	transport, err := buildenv.NewContainer(t.Context(), os.Getenv("BENTOO_TEST_CONTAINER_RUNTIME"), image, buildenv.ContainerSeams{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	realEnvironmentBuild(t, transport)
+}
+
+// TestVMIntegration_TheBuildGatesRunInARealVM drives the real VM transport
+// through realEnvironmentBuild; BENTOO_TEST_SHIDASHI_ISO picks the ISO.
+func TestVMIntegration_TheBuildGatesRunInARealVM(t *testing.T) {
+	shidashi := os.Getenv(shidashiEnv)
+	if shidashi == "" {
+		t.Skipf("%s is not set: no shidashi to run the vm backend against", shidashiEnv)
+	}
+	transport, err := buildenv.NewVM(t.Context(), shidashi, os.Getenv("BENTOO_TEST_SHIDASHI_ISO"), buildenv.VMSeams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	realEnvironmentBuild(t, transport)
+	if !strings.Contains(transport.Identity(), ".iso") {
+		t.Errorf("identity %q does not name the ISO the VM booted", transport.Identity())
+	}
+}
+
+// realEnvironmentBuild drives a real transport and the real build gates: a
+// staged tree and its distfile are shipped in, the staged repository is
+// registered, the build dependencies are installed by emerge, and one ebuild
+// run up to install happens inside. Nothing is mocked. The environments this
+// runs against can isolate a build (rootless Podman, a VM), so Portage's
+// sandbox must work and no pass may read as unverified.
+func realEnvironmentBuild(t *testing.T, transport buildenv.Transport) {
+	t.Helper()
+	ctx := t.Context()
 	session := buildenv.NewSession(transport)
 	t.Cleanup(func() {
 		if err := session.Close(context.Background()); err != nil {

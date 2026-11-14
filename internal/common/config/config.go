@@ -137,11 +137,22 @@ type AutoupdateConfig struct {
 
 // BuildConfig is the autoupdate.build block.
 type BuildConfig struct {
-	// Backend is where the build gates run: "host" (the default), "vm" or
-	// "container". --build-backend overrides it for one run.
+	// Backend is where the build gates run: "host" (the default), "container"
+	// or "vm". --build-backend overrides it for one run.
 	Backend string `yaml:"backend,omitempty"`
 	// Container configures the container backend.
 	Container BuildContainerConfig `yaml:"container,omitempty"`
+	// VM configures the vm backend.
+	VM BuildVMConfig `yaml:"vm,omitempty"`
+}
+
+// BuildVMConfig is the autoupdate.build.vm block.
+type BuildVMConfig struct {
+	// ISO is the Bentoo ISO the build VM boots; unset, Shidashi boots its
+	// newest minimal ISO.
+	ISO string `yaml:"iso,omitempty"`
+	// Shidashi is the shidashi binary; unset, the one on PATH.
+	Shidashi string `yaml:"shidashi,omitempty"`
 }
 
 // BuildContainerConfig is the autoupdate.build.container block.

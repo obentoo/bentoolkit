@@ -115,6 +115,22 @@ func (s *Session) Isolated(ctx context.Context) (bool, string) {
 	return true, ""
 }
 
+// Identity is what the running environment was started from.
+func (s *Session) Identity() string { return s.t.Identity() }
+
+// Alive reports whether the environment still runs commands. After a failed
+// build it tells a build that failed from an environment that died under it:
+// the transports exit with the command's own code, so the code alone cannot.
+func (s *Session) Alive(ctx context.Context) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.running {
+		return false
+	}
+	_, err := s.runLocked(ctx, []string{"sh", "-c", "exit 0"}, nil)
+	return err == nil
+}
+
 // Fresh replaces an environment that has already built with a new one, so the
 // pass whose verdict is recorded starts from a clean disk. An environment that
 // has built nothing is fresh already and is left alone.

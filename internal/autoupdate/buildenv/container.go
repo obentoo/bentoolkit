@@ -51,6 +51,8 @@ type Container struct {
 	image   string
 	seams   ContainerSeams
 	name    string
+	// imageID is the id the runtime gave the image, read when it was checked.
+	imageID string
 	// sysAdmin grants the container CAP_SYS_ADMIN, which Portage needs to put
 	// a build in its own network, IPC and PID namespaces, and CAP_NET_ADMIN,
 	// which brings the loopback up inside them. Only rootless Podman
@@ -81,7 +83,8 @@ func NewContainer(ctx context.Context, runtime, image string, seams ContainerSea
 		return nil, fmt.Errorf("%w: %s has no image %q (bentoolkit never pulls one; load it with `%s load -i <file>`): %w",
 			ErrImageNotLoaded, resolved, image, resolved, err)
 	}
-	return &Container{runtime: resolved, image: image, seams: seams, sysAdmin: rootlessPodman(ctx, resolved, seams)}, nil
+	return &Container{runtime: resolved, image: image, imageID: strings.TrimSpace(out.String()), seams: seams,
+		sysAdmin: rootlessPodman(ctx, resolved, seams)}, nil
 }
 
 // rootlessPodman reports whether runtime is Podman running without root. Any
@@ -114,6 +117,14 @@ func resolveRuntime(runtime string, lookPath func(string) (string, error)) (stri
 
 // Name is "container".
 func (c *Container) Name() string { return "container" }
+
+// Identity names the image and the id the runtime gave it.
+func (c *Container) Identity() string {
+	if c.imageID == "" {
+		return c.image
+	}
+	return c.image + " (" + c.imageID + ")"
+}
 
 // Start runs a new detached container that only sleeps; every command then
 // runs in it through exec. --pull=never keeps the no-pull promise, --rm

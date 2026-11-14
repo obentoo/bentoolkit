@@ -740,7 +740,7 @@ build gates of `--check --llm`, `--revive` and `--repair` run:
 |---|---|---|
 | `host` (default) | this machine's Portage | available |
 | `container` | a disposable container started from a local image | available |
-| `vm` | a disposable Bentoo VM | reserved: stops the run with a message |
+| `vm` | a disposable Bentoo VM started by Shidashi | available |
 
 A run never falls back to the host in silence. The backend that proved a bump
 is written into its stage record.
@@ -799,7 +799,43 @@ podman build --build-context gentoo=/var/db/repos/gentoo \
 ```
 
 The ISO's own trees are empty, which is why the second layer copies the
-host's. The proof records the `::gentoo` sync time it ran against.
+host's.
+
+##### The vm backend
+
+```yaml
+autoupdate:
+  build:
+    backend: vm
+    vm:
+      iso: /var/tmp/shidashi-isos/bentoo-2026.11.12-minimal-systemd-v3.iso  # optional
+      shidashi: /usr/bin/shidashi                                           # optional
+```
+
+Each build VM is `shidashi vm start --dev`: the ISO's own pinned `::gentoo`
+and `::bentoo` trees, a work disk created anew for `/var/tmp` and the
+distfiles, and the binhost the ISO was built against. Without `iso`, Shidashi
+boots its newest minimal ISO. The steps are the container's (fresh VM before
+each pass, `tar`, `repos.conf`, `emerge --onlydeps`, build inside), and
+commands run with `shidashi vm run --stream --timeout 0`: no time limit, the
+output passed through as it is written. The build runs as root in the guest,
+where Portage's sandbox works, so its passes are isolated.
+
+A Shidashi without `vm start --dev`, an `iso` that is not a file, or no ISO
+at all stops every mode that builds before any work.
+
+##### What the proof records, and a lost environment
+
+The stage record names what the gates ran against: the container image and
+its id, or the ISO and its tree pin (`bentoo-2026.11.12-minimal-systemd-v3.iso
+(p20261101.28ad071a)`). On the host it is the `::gentoo` sync time.
+
+When a build fails in a container or VM, bentoo asks the environment to run a
+no-op before blaming the ebuild. An environment that no longer answers (a VM
+that died, a container that was removed) failed the build: the bump is WAIT
+and the LLM fixer is not called. The checks that read this host's Portage and
+build directory are skipped for such a build, because the environment
+installed its own dependencies and built in its own directory.
 
 Only one run uses the build environment at a time: a second `--check --llm`,
 `--revive` or `--repair` exits at once, naming the PID and start time of the

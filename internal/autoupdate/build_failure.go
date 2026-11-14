@@ -45,6 +45,8 @@ var ErrBuildEnvironment = errors.New("the build failed on the environment, not o
 // keys on ErrBuildEnvironment alone, and these exist for the operator reading the
 // message and for the test that pins WHICH rung fired.
 var (
+	// errBuildEnvironmentLost marks the lost-environment verdict (rung 0).
+	errBuildEnvironmentLost = errors.New("the build environment stopped answering, so the build did not fail on its own")
 	// errBuildDependenciesMissing marks the dependency verdict (rung 1).
 	errBuildDependenciesMissing = errors.New("this host does not have build dependencies the candidate needs")
 	// errBuildBeforePrepare marks the phase verdict (rung 2).
@@ -95,6 +97,9 @@ type buildDependencyAnswer struct {
 type buildFaultEvidence struct {
 	// transcript is the failed build child's captured output.
 	transcript string
+	// environmentLost is true when the build ran in a separate environment
+	// that no longer answers.
+	environmentLost bool
 	// deps is what Portage said about this host's build dependencies.
 	deps buildDependencyAnswer
 	// buildTmpdir is PORTAGE_TMPDIR as this host reports it, or "" when the host
@@ -108,6 +113,8 @@ type buildFaultEvidence struct {
 //
 // The rungs run in order of CONFIDENCE, not of cost:
 //
+//  0. A lost environment: a VM or container that no longer answers took the
+//     build down with it, whatever the transcript says.
 //  1. Unsatisfied dependencies: `ebuild … compile` installs nothing, so absent
 //     build dependencies fail the build for a reason unrelated to the bump.
 //  2. The phase: a run that never got INTO src_prepare died in setup, fetch or
@@ -120,6 +127,11 @@ type buildFaultEvidence struct {
 // removes; the caller gathered every input. A zero evidence value yields nil —
 // no evidence is not a verdict.
 func buildFaultVerdict(ev buildFaultEvidence) error {
+	// Rung 0 — the environment the build ran in is gone.
+	if ev.environmentLost {
+		return fmt.Errorf("%w: %w", ErrBuildEnvironment, errBuildEnvironmentLost)
+	}
+
 	// Rung 1 — Portage's own answer, and only when it gave one.
 	if ev.deps.determined && !ev.deps.satisfied {
 		return fmt.Errorf("%w: %w: %s", ErrBuildEnvironment, errBuildDependenciesMissing,

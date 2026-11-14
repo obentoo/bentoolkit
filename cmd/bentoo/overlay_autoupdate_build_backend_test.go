@@ -10,12 +10,10 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
 )
 
-// TestBuildBackend_AnUnavailableOrUnknownBackendStopsBeforeAnyWork: vm is
-// named but not built yet, and a typo is not a backend; neither may fall back
-// to the host in silence.
-func TestBuildBackend_AnUnavailableOrUnknownBackendStopsBeforeAnyWork(t *testing.T) {
+// TestBuildBackend_AnUnknownBackendStopsBeforeAnyWork: a typo is not a
+// backend, and may not fall back to the host in silence.
+func TestBuildBackend_AnUnknownBackendStopsBeforeAnyWork(t *testing.T) {
 	for _, tc := range []struct{ name, want string }{
-		{"vm", "not available yet"},
 		{"kvm", "unknown build backend"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -37,7 +35,7 @@ func TestBuildBackend_TheConfigKeyIsReadAndTheFlagWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString("autoupdate:\n  build:\n    backend: vm\n"); err != nil {
+	if _, err := f.WriteString("autoupdate:\n  build:\n    backend: kvm\n"); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()
@@ -102,5 +100,30 @@ func TestBuildBackend_TheContainerNeedsAnImageOnlyWhenItBuilds(t *testing.T) {
 	}
 	if _, stderr, _ := c.Run("overlay", "autoupdate", "--check", "--build-backend", "container"); strings.Contains(stderr, "build image") {
 		t.Errorf("a check that builds nothing asked for an image:\n%s", stderr)
+	}
+}
+
+// TestBuildBackend_TheVMNeedsShidashiOnlyWhenItBuilds: a mode that builds
+// stops before any work when the configured shidashi cannot run; one that does
+// not build does not need it.
+func TestBuildBackend_TheVMNeedsShidashiOnlyWhenItBuilds(t *testing.T) {
+	c := newTestCLI(t)
+	path := filepath.Join(c.Home(), ".config", "bentoo", "config.yaml")
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(t.TempDir(), "shidashi")
+	if _, err := f.WriteString("autoupdate:\n  build:\n    vm:\n      shidashi: " + missing + "\n"); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.Close()
+
+	_, stderr, code := c.Run("overlay", "autoupdate", "--check", "--llm", "--yes", "--build-backend", "vm")
+	if code == 0 || !strings.Contains(stderr, "the vm build backend cannot run") || !strings.Contains(stderr, missing) {
+		t.Errorf("a building run with no shidashi exited %d:\n%s", code, stderr)
+	}
+	if _, stderr, _ := c.Run("overlay", "autoupdate", "--check", "--build-backend", "vm"); strings.Contains(stderr, "shidashi") {
+		t.Errorf("a check that builds nothing asked for shidashi:\n%s", stderr)
 	}
 }

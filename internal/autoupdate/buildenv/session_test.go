@@ -32,7 +32,8 @@ type fakeCall struct {
 	stdinFile string
 }
 
-func (f *fakeTransport) Name() string { return "fake" }
+func (f *fakeTransport) Name() string     { return "fake" }
+func (f *fakeTransport) Identity() string { return "fake-image" }
 func (f *fakeTransport) Start(context.Context) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
