@@ -731,6 +731,19 @@ A bump that requires another bump of the same batch (`requires`) is proved
 only once that one is published: the first check reports it as WAIT, the
 apply publishes what it waited for, and the next check proves it.
 
+#### Where the build gates run
+
+`autoupdate.build.backend` (or `--build-backend` for one run) says where the
+build gates of `--check --llm`, `--revive` and `--repair` run: `host`, the
+default, is this machine's Portage. `vm` and `container` are reserved for the
+isolated backends and stop the run with a message until they exist; a run
+never falls back to the host in silence. The backend that proved a bump is
+written into its stage record.
+
+Only one run uses the build environment at a time: a second `--check --llm`,
+`--revive` or `--repair` exits at once, naming the PID and start time of the
+run that holds `build-session.bentoo-lock` in the autoupdate state directory.
+
 #### What `--apply` prints
 
 On a terminal, `--apply` draws a live region;

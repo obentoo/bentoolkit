@@ -504,6 +504,9 @@ type Applier struct {
 	// workstation.
 	// proofMaxAge: see WithApplierProofMaxAge.
 	proofMaxAge time.Duration
+	// buildBackend is where the build gates' commands run; see
+	// WithApplierBuildBackend.
+	buildBackend validate.BuildBackend
 	// validateUnproven lets an apply with no proof run the validation pipeline
 	// instead of refusing. Only this package's tests set it (through
 	// testsValidateUnproven), to drive the pipeline --repair still runs.
@@ -901,6 +904,17 @@ func WithApplierRequireProof(require bool) ApplierOption {
 	}
 }
 
+// WithApplierBuildBackend runs the build gates' commands in backend instead of
+// on this host. Only the build children are moved: the manifest step, git and
+// the agents still run here. A nil backend keeps the host.
+func WithApplierBuildBackend(backend validate.BuildBackend) ApplierOption {
+	return func(a *Applier) {
+		if backend != nil {
+			a.buildBackend = backend
+		}
+	}
+}
+
 // WithApplierProofMaxAge makes a retained proof older than maxAge, or one that
 // records no time, not reusable. Zero means a proof never ages.
 func WithApplierProofMaxAge(maxAge time.Duration) ApplierOption {
@@ -956,6 +970,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	logsDir := filepath.Join(configDir, "logs")
 
 	applier := &Applier{
+		buildBackend:     validate.HostBackend{},
 		validateUnproven: testsValidateUnproven,
 		spillSweep:       &sync.Once{},
 		overlayPath:      overlayPath,
@@ -3111,7 +3126,7 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 // branch through the real absence rather than through a substitute.
 func (a *Applier) buildDependencyAnswer(ctx context.Context, cand candidatePaths, pkg, version string) buildDependencyAnswer {
 	ok, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, validate.BuildDeps{
-		ExecCommand: a.execCommand,
+		ExecCommand: a.backendCommand,
 	})
 	if err != nil {
 		a.logger().Debug("build fix gate: could not determine whether the build dependencies are satisfied",

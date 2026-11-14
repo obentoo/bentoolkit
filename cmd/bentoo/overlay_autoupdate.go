@@ -67,6 +67,8 @@ type autoupdateOptions struct {
 	// record. That key defaults to false, so this flag stays the way the
 	// stricter behaviour is asked for on a run.
 	requireIsolation bool
+	// buildBackend is --build-backend: where the build gates run for this run.
+	buildBackend string
 	// clean removes the old ebuild after a successful apply, keeping
 	// only the newly created version
 	clean bool
@@ -269,6 +271,9 @@ type autoupdateValidatePolicy struct {
 	// ProofMaxAge is autoupdate.proof.max_age_days: how long a proof taken by
 	// `--check --llm` lets `--apply` publish the bump it proved.
 	ProofMaxAge time.Duration
+	// Backend is where the build gates run: --build-backend, else
+	// autoupdate.build.backend, else the host.
+	Backend validate.BuildBackend
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -354,7 +359,8 @@ Examples:
 	// be answering a question nobody could ask, and `--compile` would be the only
 	// way to reach a build gate.
 	cmd.Flags().String("depth", "", "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time")
-	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, "With --compile: SKIP the compile test rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
+	cmd.Flags().StringVar(&o.buildBackend, "build-backend", "", "Where the build gates of --check --llm, --revive and --repair run: host (the default), vm or container. Overrides autoupdate.build.backend for this run; a backend that is not available stops the run before any work, it never falls back to host")
+	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, "SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
 	cmd.Flags().BoolVarP(&o.clean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
 	cmd.Flags().IntVar(&o.concurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured")
 	cmd.Flags().IntVar(&o.timeout, "timeout", 0, "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)")
@@ -799,6 +805,16 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		}()
 		sweepStaleTemps(ar.log(), overlayPath, configDir)
 	}
+
+	// One build session per machine: the build environment (this host's
+	// Portage today, a VM or a container tomorrow) is shared by every overlay,
+	// so a mode that may build takes this lock as well and refuses at once,
+	// naming the session that holds it, instead of queueing behind it.
+	release, err := ar.takeBuildSession(configDir)
+	if err != nil {
+		return failWith(1, err)
+	}
+	defer release()
 
 	// Handle different modes. Each returns its outcome (func exitWith), which
 	// is the command's: the deferred lock release runs before func main maps it
@@ -1704,6 +1720,17 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		policy.Policy.Overrides[pkg] = validate.DepthOverride{Depth: depth, Reason: override.Reason}
 	}
 
+	backendName := cfg.Autoupdate.GetBuildBackend()
+	source := "autoupdate.build.backend"
+	if cmd.Flags().Changed("build-backend") {
+		backendName, source = strings.TrimSpace(o.buildBackend), "--build-backend"
+	}
+	backend, err := validate.NewBuildBackend(backendName)
+	if err != nil {
+		return policy, fmt.Errorf("%s: %w", source, err)
+	}
+	policy.Backend = backend
+
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
 		return policy, fmt.Errorf("reading --depth: %w", err)
@@ -1738,6 +1765,7 @@ func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.A
 		autoupdate.WithApplierValidatePolicy(ar.validate.Policy),
 		autoupdate.WithApplierRequireIsolation(ar.validate.RequireIsolation),
 		autoupdate.WithApplierRequireProof(ar.validate.RequireProof),
+		autoupdate.WithApplierBuildBackend(ar.validate.Backend),
 	}
 	if ar.validate.Depth != nil {
 		opts = append(opts, autoupdate.WithApplierDepth(*ar.validate.Depth))
@@ -2515,4 +2543,49 @@ func (o *autoupdateOptions) removedApplyFlags() error {
 			"run: bentoo overlay autoupdate --check --llm <package>, then --apply <package>")
 	}
 	return nil
+}
+
+// buildSessionLockName is the build session lock, in the autoupdate state
+// directory: one per machine, whatever overlay the run works on.
+const buildSessionLockName = "build-session.bentoo-lock"
+
+// needsBuildSession reports whether the mode may run build gates: a check
+// with --llm, a revive, or a repair's re-validation.
+func (ar *autoupdateRun) needsBuildSession() bool {
+	return (ar.opts.check && ar.opts.llm) || ar.opts.revive != "" || ar.opts.repair != ""
+}
+
+// buildBackendName names the resolved build backend, the host when none was
+// resolved.
+func (ar *autoupdateRun) buildBackendName() string {
+	if ar.validate.Backend == nil {
+		return validate.BackendHost
+	}
+	return ar.validate.Backend.Name()
+}
+
+// takeBuildSession takes the build session lock when the mode may build, and
+// returns the func that gives it up (a no-op when it was not taken). A held
+// lock is refused at once, naming its holder.
+func (ar *autoupdateRun) takeBuildSession(configDir string) (release func(), err error) {
+	if !ar.needsBuildSession() {
+		return func() {}, nil
+	}
+	// A first run on a fresh install has no state directory yet.
+	if err := os.MkdirAll(configDir, 0o750); err != nil {
+		return nil, fmt.Errorf("creating the autoupdate state directory %s for the build session lock: %w", configDir, err)
+	}
+	session, err := filelock.TryAcquire(filepath.Join(configDir, buildSessionLockName),
+		"bentoo build session ("+ar.buildBackendName()+")")
+	if err != nil {
+		if errors.Is(err, filelock.ErrLocked) {
+			return nil, fmt.Errorf("another bentoo run is using the build environment: %w", err)
+		}
+		return nil, fmt.Errorf("cannot take the build session lock: %w", err)
+	}
+	unregister := registerExitCleanup(session.Release)
+	return func() {
+		unregister()
+		session.Release()
+	}, nil
 }

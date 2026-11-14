@@ -11,6 +11,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Added
 
+- **The build gates have a backend.** `autoupdate.build.backend`, or
+  `--build-backend` for one run, says where the build gates of `--check --llm`,
+  `--revive` and `--repair` run. `host`, today's behaviour, is the default and
+  the only one available; `vm` and `container` stop the run before any work
+  instead of falling back to the host. The stage record names the backend that
+  proved each bump.
+
+- **One build session at a time.** A run that may build takes
+  `build-session.bentoo-lock` in the autoupdate state directory; a second one
+  exits at once, naming the PID and start time of the run that holds it.
+
 - **`--check --llm` says what to do next with each bump.** The results table
   shows a STATE instead of the outcome: READY (proven, `--apply` may publish
   it), WAIT (only the environment was in the way), HUMAN (the maintainer must

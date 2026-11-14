@@ -128,6 +128,11 @@ autoupdate:
   # proof:
   #   max_age_days: 7
 
+  # Where the build gates run: host (default), vm or container (not available
+  # yet). --build-backend overrides it for one run.
+  # build:
+  #   backend: host
+
   # --------------------------------------------------------------------------
   # vendor — the Go vendor-tarball step.
   #
