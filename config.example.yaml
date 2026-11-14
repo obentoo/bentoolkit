@@ -89,8 +89,8 @@ autoupdate:
   # validate:
   #   # Depth per bump class.
   #   depths:
-  #     revision: options      # -r1 -> -r2
-  #     patch: options         # 1.2.3 -> 1.2.4
+  #     revision: patches      # -r1 -> -r2
+  #     patch: patches         # 1.2.3 -> 1.2.4
   #     series: configure      # 1.2.x -> 1.3.0
   #     major: configure       # 1.x -> 2.0
   #

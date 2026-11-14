@@ -2050,8 +2050,8 @@ func TestValidateConfig_AbsentBlockYieldsTheDocumentedDefaults(t *testing.T) {
 	// gate; series and major earn a configure. `compile` is deliberately not a
 	// default for anything — see the case below.
 	for class, want := range map[string]string{
-		"revision": "options",
-		"patch":    "options",
+		"revision": "patches",
+		"patch":    "patches",
 		"series":   "configure",
 		"major":    "configure",
 	} {
@@ -2188,7 +2188,7 @@ func TestValidateConfig_PartialBlockLeavesTheRestAtDefault(t *testing.T) {
 	if !v.GetRequireIsolation() {
 		t.Error("require_isolation: true was not read")
 	}
-	if got := v.GetDepthForClass("revision"); got != "options" {
+	if got := v.GetDepthForClass("revision"); got != "patches" {
 		t.Errorf("setting require_isolation moved the revision depth to %q; a partial block leaves the rest at default", got)
 	}
 	if got := v.GetDepthForClass("series"); got != "configure" {
@@ -2337,8 +2337,8 @@ func TestValidateConfig_OverrideWithoutAReasonIsInvalidAndNamesThePackage(t *tes
 // where they were.
 func TestValidateConfig_InstallIsAcceptedAndTheShippedDefaultsDidNotMove(t *testing.T) {
 	shipped := []struct{ class, want string }{
-		{"revision", "options"},
-		{"patch", "options"},
+		{"revision", "patches"},
+		{"patch", "patches"},
 		{"series", "configure"},
 		{"major", "configure"},
 	}

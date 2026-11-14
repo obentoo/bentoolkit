@@ -95,6 +95,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   time and are no longer accepted: run `--check --llm` once. `--repair` is
   unchanged.
 
+- **Revision and patch bumps are validated to `patches` by default** (was
+  `options`). A proof needs one gate that measured something, and the option
+  gate reads meson projects only: at `options` a cmake, cargo or binary bump
+  was measured by nothing and could never be published. `patches` unpacks
+  the archive the option gate already fetched and runs `src_prepare`; it
+  never configures or builds. `validate.depths.revision`/`patch` still set
+  it per class.
+
 - **Dependencies updated.** `chromedp/cdproto` v0.159.3 → v0.160.0 (linked
   only into the `chromedp`-tagged build); the local VM gate's CodeQL moves
   from 2.27.1 to 2.27.4. Neither carries a security fix; both were taken

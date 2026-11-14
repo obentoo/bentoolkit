@@ -921,8 +921,8 @@ func (c *AutoupdateConfig) GetDistfilesCache() string {
 // yesterday's sweep costing what it cost yesterday. `install` is reached by
 // --depth=install or by an explicit key here, never by default.
 const (
-	DefaultDepthRevision = "options"
-	DefaultDepthPatch    = "options"
+	DefaultDepthRevision = "patches"
+	DefaultDepthPatch    = "patches"
 	DefaultDepthSeries   = "configure"
 	DefaultDepthMajor    = "configure"
 )
