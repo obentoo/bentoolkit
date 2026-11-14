@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
@@ -1572,14 +1573,88 @@ func selectDistfile(names []string, source distNameSource, distdir, version stri
 	// can be the ONLY thing telling two names apart. Only when no name carries
 	// it does the revision-stripped version decide.
 	matching := namesMatchingVersion(present, version)
-	if len(matching) == 0 {
-		matching = namesMatchingVersion(present, revisionSuffix.ReplaceAllString(version, ""))
+	for _, spelling := range versionSpellings(revisionSuffix.ReplaceAllString(version, "")) {
+		if len(matching) > 0 {
+			break
+		}
+		matching = namesMatchingVersion(present, spelling)
 	}
 	if len(matching) == 1 {
 		return filepath.Join(distdir, matching[0]), nil
 	}
+	if len(matching) == 0 {
+		return "", fmt.Errorf("none of the %d distfiles present in %s carries version %s, so this release's own archive is not on disk: %s%s",
+			len(present), distdir, version, strings.Join(present, ", "), source.attributed)
+	}
+	if main, ok := mainArchive(matching, runtime.GOARCH); ok {
+		return filepath.Join(distdir, main), nil
+	}
 	return "", fmt.Errorf("cannot tell which of %d distfiles in %s belongs to version %s: %s%s",
 		len(present), distdir, version, strings.Join(present, ", "), source.attributed)
+}
+
+// mainArchive picks the release's own archive among several that carry its
+// version: the bundles a package ships beside it (vendored modules, crates,
+// dependency tarballs) are set aside, and of per-architecture builds the one
+// for goarch is kept. ok is false when that still leaves more than one, or
+// none: the caller then declines by name rather than guess.
+func mainArchive(names []string, goarch string) (string, bool) {
+	var primary []string
+	for _, name := range names {
+		if !isBundledDistfile(name) {
+			primary = append(primary, name)
+		}
+	}
+	if len(primary) == 1 {
+		return primary[0], true
+	}
+	var forHost []string
+	for _, name := range primary {
+		if arch, found := archOfDistfile(name); found && arch == goarch {
+			forHost = append(forHost, name)
+		}
+	}
+	if len(forHost) == 1 {
+		return forHost[0], true
+	}
+	return "", false
+}
+
+// bundledDistfileMarkers are the name parts of archives that travel beside a
+// release rather than being it.
+var bundledDistfileMarkers = []string{"-vendor.", "-crates.", "-deps.", "-node_modules.", "-go-mod."}
+
+func isBundledDistfile(name string) bool {
+	if strings.HasSuffix(name, ".crate") {
+		return true
+	}
+	for _, marker := range bundledDistfileMarkers {
+		if strings.Contains(name, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+// distfileArchTokens maps the architecture spellings found in release names to
+// Go's GOARCH.
+var distfileArchTokens = map[string]string{
+	"amd64": "amd64", "x86_64": "amd64", "x64": "amd64",
+	"arm64": "arm64", "aarch64": "arm64",
+	"i386": "386", "i686": "386", "x86": "386",
+	"armv7": "arm", "armhf": "arm",
+	"riscv64": "riscv64", "ppc64le": "ppc64le", "s390x": "s390x", "loong64": "loong64",
+}
+
+// archOfDistfile reads the architecture a release name was built for, as a
+// whole token between separators.
+func archOfDistfile(name string) (string, bool) {
+	for _, token := range strings.FieldsFunc(name, func(r rune) bool { return r == '-' || r == '_' || r == '.' }) {
+		if arch, ok := distfileArchTokens[strings.ToLower(token)]; ok {
+			return arch, true
+		}
+	}
+	return "", false
 }
 
 var (
@@ -1606,7 +1681,25 @@ var (
 // would make every revbumped ebuild in the overlay decline to validate. That is
 // a false SKIP, and a gate that skips silently is as useless as one that lies.
 func carriesVersion(name, version string) bool {
-	return matchesVersionToken(name, revisionSuffix.ReplaceAllString(version, ""))
+	for _, spelling := range versionSpellings(revisionSuffix.ReplaceAllString(version, "")) {
+		if matchesVersionToken(name, spelling) {
+			return true
+		}
+	}
+	return false
+}
+
+// versionSpellings is version as Gentoo writes it, then as upstreams write a
+// Gentoo suffix in a release name: 27.0.0_pre20261112 is published as
+// mesa-27.0.0-pre20261112.tar.gz, 1.0_rc1 as 1.0.rc1 or 1.0rc1.
+func versionSpellings(version string) []string {
+	spellings := []string{version}
+	if strings.Contains(version, "_") {
+		for _, sep := range []string{"-", ".", ""} {
+			spellings = append(spellings, strings.ReplaceAll(version, "_", sep))
+		}
+	}
+	return spellings
 }
 
 // namesMatchingVersion returns the names carrying version as a whole token.

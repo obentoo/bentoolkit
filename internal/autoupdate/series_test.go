@@ -174,8 +174,10 @@ func TestCheckPackageTwoSeries(t *testing.T) {
 }
 
 // TestFetchUpstreamVersionOutsideSeries pins that a single-value extraction path
-// (no select) refuses a version from another line instead of comparing it
-// against an ebuild it does not track.
+// (no select) never compares a version from another line against an ebuild it
+// does not track: the package is answered as a manual promotion, nothing is
+// queued, and the scan does not count it as a failure (the alarm the series
+// exists for is not an error of the run).
 func TestFetchUpstreamVersionOutsideSeries(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"version":"26.8.0.1"}`)
@@ -202,15 +204,14 @@ func TestFetchUpstreamVersionOutsideSeries(t *testing.T) {
 	}
 
 	res, err := checker.CheckPackage(t.Context(), key, true)
-	if err == nil && res.Error == nil {
-		t.Fatalf("a version outside the series was accepted: %+v", res)
+	if err != nil || res.Error != nil {
+		t.Fatalf("leaving the series failed the scan: err=%v result=%v", err, res.Error)
 	}
-	got := err
-	if got == nil {
-		got = res.Error
+	if res.HasUpdate || !strings.Contains(res.ManualPromotion, "outside this entry's series") || res.UpstreamVersion != "26.8.0.1" {
+		t.Fatalf("want a manual promotion naming the series, no update: %+v", res)
 	}
-	if !strings.Contains(got.Error(), "outside this entry's series") {
-		t.Fatalf("unexpected error: %v", got)
+	if pending, _ := checker.pending.Get(key); pending != nil {
+		t.Errorf("a version outside the series was queued: %+v", pending)
 	}
 }
 
@@ -267,5 +268,38 @@ func TestCleanPackageDirLeavesOtherSeries(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(pkgDir, "libreoffice-26.2.5.2.ebuild")); !os.IsNotExist(err) {
 		t.Fatalf("the superseded ebuild was not removed: %v", err)
+	}
+}
+
+// TestCheckAll_AManualPromotionLeavesTheExitCodeAlone: a batch whose only
+// finding is an entry that left its series succeeded; the exit code is 0.
+func TestCheckAll_AManualPromotionLeavesTheExitCodeAlone(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"version":"3.14.0"}`)
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	overlay := filepath.Join(tmp, "overlay")
+	createTestEbuild(t, overlay, "dev-lang/dart", "3.13.7")
+	key := "dev-lang/dart@stable"
+	checker, err := NewChecker(overlay,
+		WithConfigDir(filepath.Join(tmp, "config")),
+		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
+			key: {URL: server.URL, Parser: "json", Path: "version", Series: `^3\.13\.7$`},
+		}}),
+		WithRateLimiter(unlimitedRateLimiter()),
+	)
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+
+	batch := checker.CheckAll(t.Context(), true)
+
+	if code := batch.ExitCode(); code != 0 {
+		t.Errorf("exit code = %d with failures %v; a manual promotion is not a failure", code, batch.Failures)
+	}
+	if len(batch.Items) != 1 || batch.Items[0].ManualPromotion == "" {
+		t.Errorf("items = %+v, want the dart entry as a manual promotion", batch.Items)
 	}
 }

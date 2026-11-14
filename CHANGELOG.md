@@ -69,6 +69,22 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **The option gate reads the release among its bundles.** With several
+  archives carrying the version it declined ("cannot tell which of N
+  distfiles"): codex beside its crates tarball, trufflehog beside its vendor
+  tarball, dart's amd64 and arm64 zips. Bundles (`-vendor.`, `-crates.`,
+  `-deps.`, `-node_modules.`, `-go-mod.`, `.crate`) are set aside and, of
+  per-architecture builds, the host's is read. A Gentoo suffix spelled the
+  upstream way (`27.0.0_pre20261112` published as `mesa-27.0.0-pre20261112`)
+  now counts as the version, and a disk holding only other files says the
+  release's own archive is missing instead of that it could not choose.
+
+- **An entry whose upstream left its `series` no longer fails the check.** It
+  is reported as **manual promotion** with the version upstream offers, not
+  counted among the packages that could not be checked, and the exit code is
+  left alone (`dev-lang/dart@stable` turned a clean run into exit 1). The
+  JSON report carries it as `manual_promotion`.
+
 - **The option gate finds a labelled or slotted package.** A registry key
   such as `app-office/libreoffice-l10n@stable` or `cat/pkg:0` was handed to
   the scan whole, matched no ebuild, and every such bump read as "the staged

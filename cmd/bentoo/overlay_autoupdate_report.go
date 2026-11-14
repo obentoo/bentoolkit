@@ -185,6 +185,7 @@ func scannedFacts(results []autoupdate.CheckResult) []report.PackageResult {
 			Orphaned:         result.Orphaned,
 			FromCache:        result.FromCache,
 			Held:             result.HeldBy,
+			ManualPromotion:  result.ManualPromotion,
 		}
 		if result.Error != nil {
 			fact.Error = result.Error.Error()
