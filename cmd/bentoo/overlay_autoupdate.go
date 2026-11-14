@@ -21,6 +21,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/buildenv"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/cooldown"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
@@ -274,6 +275,11 @@ type autoupdateValidatePolicy struct {
 	// Backend is where the build gates run: --build-backend, else
 	// autoupdate.build.backend, else the host.
 	Backend validate.BuildBackend
+	// Environment names a backend that is a separate machine ("container"),
+	// started only by a mode that builds; Backend stays the host until then.
+	Environment string
+	// Container is autoupdate.build.container.
+	Container config.BuildContainerConfig
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -815,6 +821,11 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		return failWith(1, err)
 	}
 	defer release()
+	closeEnvironment, err := ar.openBuildEnvironment(runCtx)
+	if err != nil {
+		return failWith(1, err)
+	}
+	defer closeEnvironment()
 
 	// Handle different modes. Each returns its outcome (func exitWith), which
 	// is the command's: the deferred lock release runs before func main maps it
@@ -1726,10 +1737,15 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		backendName, source = strings.TrimSpace(o.buildBackend), "--build-backend"
 	}
 	backend, err := validate.NewBuildBackend(backendName)
-	if err != nil {
+	switch {
+	case errors.Is(err, validate.ErrBackendIsAnEnvironment):
+		policy.Backend, policy.Environment = validate.HostBackend{}, backendName
+	case err != nil:
 		return policy, fmt.Errorf("%s: %w", source, err)
+	default:
+		policy.Backend = backend
 	}
-	policy.Backend = backend
+	policy.Container = cfg.Autoupdate.Build.Container
 
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
@@ -2558,6 +2574,9 @@ func (ar *autoupdateRun) needsBuildSession() bool {
 // buildBackendName names the resolved build backend, the host when none was
 // resolved.
 func (ar *autoupdateRun) buildBackendName() string {
+	if ar.validate.Environment != "" {
+		return ar.validate.Environment
+	}
 	if ar.validate.Backend == nil {
 		return validate.BackendHost
 	}
@@ -2587,5 +2606,31 @@ func (ar *autoupdateRun) takeBuildSession(configDir string) (release func(), err
 	return func() {
 		unregister()
 		session.Release()
+	}, nil
+}
+
+// openBuildEnvironment starts nothing yet, but builds the environment backend
+// a mode that builds will use, and returns the func that stops it, also run on
+// the way out of an interrupted run. A mode that does not build keeps the host
+// backend and needs no image.
+func (ar *autoupdateRun) openBuildEnvironment(ctx context.Context) (closeEnv func(), err error) {
+	if ar.validate.Environment != validate.BackendContainer || !ar.needsBuildSession() {
+		return func() {}, nil
+	}
+	transport, err := buildenv.NewContainer(ctx, ar.validate.Container.Runtime, ar.validate.Container.Image, buildenv.ContainerSeams{})
+	if err != nil {
+		return nil, fmt.Errorf("the container build backend cannot run: %w", err)
+	}
+	session := buildenv.NewSession(transport)
+	ar.validate.Backend = session
+	stop := func() {
+		if err := session.Close(context.WithoutCancel(ctx)); err != nil {
+			ar.log().Warn("the build environment could not be stopped", "backend", session.Name(), "err", err)
+		}
+	}
+	unregister := registerExitCleanup(stop)
+	return func() {
+		unregister()
+		stop()
 	}, nil
 }

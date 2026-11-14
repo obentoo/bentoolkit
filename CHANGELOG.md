@@ -13,10 +13,22 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 - **The build gates have a backend.** `autoupdate.build.backend`, or
   `--build-backend` for one run, says where the build gates of `--check --llm`,
-  `--revive` and `--repair` run. `host`, today's behaviour, is the default and
-  the only one available; `vm` and `container` stop the run before any work
-  instead of falling back to the host. The stage record names the backend that
+  `--revive` and `--repair` run. `host`, today's behaviour, is the default; `vm`
+  stops the run before any work instead of falling back to the host. The stage record names the backend that
   proved each bump.
+
+- **The build gates can run in a container.** `--build-backend=container`
+  (or `autoupdate.build.backend: container`) builds every bump in a disposable
+  container started from `autoupdate.build.container.image`, an image already
+  loaded in Podman or Docker; `autoupdate.build.container.runtime` picks one,
+  Podman first when unset. The staged tree and its archives are sent in by
+  `tar`, the build dependencies are installed there from the binhost, and the
+  pass whose verdict is recorded runs in a fresh container; the stage record
+  says so. A dependency the container cannot install makes the bump WAIT.
+  bentoo never pulls an image: a missing one stops the run before any work.
+  Isolation is measured inside the container; rootless Podman gets
+  `CAP_SYS_ADMIN` and `CAP_NET_ADMIN` so Portage's network sandbox works
+  there. `vm` is still reserved.
 
 - **One build session at a time.** A run that may build takes
   `build-session.bentoo-lock` in the autoupdate state directory; a second one

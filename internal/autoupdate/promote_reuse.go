@@ -420,7 +420,7 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		Environment:        hostEnvironment(a.gentooPath),
 		RecordedAt:         time.Now().UTC(),
 		State:              proofState(gates, depth),
-		FreshEnvironment:   false,
+		FreshEnvironment:   a.lastPassFresh(),
 	})
 	if err != nil {
 		a.logger().Warn("could not record what the gates said beside the retained tree "+

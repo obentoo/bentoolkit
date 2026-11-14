@@ -10,13 +10,12 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
 )
 
-// TestBuildBackend_AnUnavailableOrUnknownBackendStopsBeforeAnyWork: vm and
-// container are named but not built yet, and a typo is not a backend; neither
-// may fall back to the host in silence.
+// TestBuildBackend_AnUnavailableOrUnknownBackendStopsBeforeAnyWork: vm is
+// named but not built yet, and a typo is not a backend; neither may fall back
+// to the host in silence.
 func TestBuildBackend_AnUnavailableOrUnknownBackendStopsBeforeAnyWork(t *testing.T) {
 	for _, tc := range []struct{ name, want string }{
 		{"vm", "not available yet"},
-		{"container", "not available yet"},
 		{"kvm", "unknown build backend"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -38,7 +37,7 @@ func TestBuildBackend_TheConfigKeyIsReadAndTheFlagWins(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString("autoupdate:\n  build:\n    backend: container\n"); err != nil {
+	if _, err := f.WriteString("autoupdate:\n  build:\n    backend: vm\n"); err != nil {
 		t.Fatal(err)
 	}
 	_ = f.Close()
@@ -90,4 +89,18 @@ func TestBuildSession_AFreshInstallHasNoStateDirectoryYet(t *testing.T) {
 		t.Fatalf("takeBuildSession on a missing state directory: %v", err)
 	}
 	release()
+}
+
+// TestBuildBackend_TheContainerNeedsAnImageOnlyWhenItBuilds: a mode that
+// builds stops before any work when no image is configured; one that does not
+// build does not need one.
+func TestBuildBackend_TheContainerNeedsAnImageOnlyWhenItBuilds(t *testing.T) {
+	c := newTestCLI(t)
+	_, stderr, code := c.Run("overlay", "autoupdate", "--check", "--llm", "--yes", "--build-backend", "container")
+	if code == 0 || !strings.Contains(stderr, "no build image is configured") {
+		t.Errorf("a building run with no image exited %d:\n%s", code, stderr)
+	}
+	if _, stderr, _ := c.Run("overlay", "autoupdate", "--check", "--build-backend", "container"); strings.Contains(stderr, "build image") {
+		t.Errorf("a check that builds nothing asked for an image:\n%s", stderr)
+	}
 }

@@ -1,6 +1,9 @@
 package validate
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 // BuildBackend is where the build gates' commands run: this host, a virtual
 // machine, a container. The gates build the same argv on every backend; a
@@ -33,7 +36,12 @@ func (HostBackend) Wrap(name string, arg []string) (string, []string) { return n
 
 // ErrBackendUnavailable is returned for a backend name that is known but not
 // implemented yet.
-var ErrBackendUnavailable = fmt.Errorf("build backend not available yet")
+var ErrBackendUnavailable = errors.New("build backend not available yet")
+
+// ErrBackendIsAnEnvironment is returned for a backend that runs in a separate
+// machine: the caller builds it (buildenv), because it needs a running
+// environment this package does not start.
+var ErrBackendIsAnEnvironment = errors.New("the build backend is a separate environment")
 
 // NewBuildBackend returns the backend named name. An unknown name is an error,
 // and so is a known one that is not built yet: a build never falls back to
@@ -42,8 +50,10 @@ func NewBuildBackend(name string) (BuildBackend, error) {
 	switch name {
 	case "", BackendHost:
 		return HostBackend{}, nil
-	case BackendVM, BackendContainer:
-		return nil, fmt.Errorf("%w: %q — use %q until it is", ErrBackendUnavailable, name, BackendHost)
+	case BackendContainer:
+		return nil, ErrBackendIsAnEnvironment
+	case BackendVM:
+		return nil, fmt.Errorf("%w: %q — use %q or %q until it is", ErrBackendUnavailable, name, BackendHost, BackendContainer)
 	}
 	return nil, fmt.Errorf("unknown build backend %q: want one of %v", name, BackendNames)
 }

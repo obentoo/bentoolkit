@@ -734,11 +734,72 @@ apply publishes what it waited for, and the next check proves it.
 #### Where the build gates run
 
 `autoupdate.build.backend` (or `--build-backend` for one run) says where the
-build gates of `--check --llm`, `--revive` and `--repair` run: `host`, the
-default, is this machine's Portage. `vm` and `container` are reserved for the
-isolated backends and stop the run with a message until they exist; a run
-never falls back to the host in silence. The backend that proved a bump is
-written into its stage record.
+build gates of `--check --llm`, `--revive` and `--repair` run:
+
+| Backend | Where | Status |
+|---|---|---|
+| `host` (default) | this machine's Portage | available |
+| `container` | a disposable container started from a local image | available |
+| `vm` | a disposable Bentoo VM | reserved: stops the run with a message |
+
+A run never falls back to the host in silence. The backend that proved a bump
+is written into its stage record.
+
+##### The container backend
+
+```yaml
+autoupdate:
+  build:
+    backend: container
+    container:
+      image: localhost/bentoo-build:2026.11.12   # required
+      runtime: podman                            # optional: podman, then docker
+```
+
+One container is started at the first build and removed at the end of the
+run. For every bump, bentoo:
+
+1. replaces a container that has already built with a new one, so the pass
+   whose verdict is recorded never inherits an earlier build's disk;
+2. sends the staged tree and the archives its Manifest names into the
+   container by `tar`, at the same absolute paths;
+3. registers the staged tree in the container's `repos.conf`;
+4. installs the build dependencies with
+   `emerge -1 --onlydeps --with-bdeps=y --getbinpkg`. A failure here is the
+   environment's: the bump is WAIT and the LLM fixer is not called;
+5. runs the build gates inside, with the gate's own environment and none of
+   this host's `PATH` or `HOME`.
+
+Manifests, git and the LLM agents stay on the host. bentoo **never pulls or
+imports an image**: an image missing from the runtime's store stops every
+mode that builds before any work, saying how to load one.
+
+Isolation is measured inside the container, not on the host. Under rootless
+Podman the container gets `CAP_SYS_ADMIN` and `CAP_NET_ADMIN`, bounded by its
+user namespace, so Portage's network, IPC and PID sandbox works and a pass is
+not labelled `unverified isolation`. Docker and rootful Podman get neither,
+because there the capabilities would reach the host; their passes say
+`unverified isolation`.
+
+The image must carry a Portage tree: `::gentoo`, and `::bentoo` too when a
+candidate depends on a package only the overlay has. Without it that
+dependency cannot be installed and the bump stays WAIT. A Bentoo live ISO can
+be turned into such an image without root:
+
+```sh
+bsdtar -xf bentoo-<date>-minimal-systemd-v3.iso LiveOS/squashfs.img
+sqfs2tar LiveOS/squashfs.img | podman import - localhost/bentoo-base:<date>
+cat > Containerfile <<'END'
+FROM localhost/bentoo-base:<date>
+COPY --from=gentoo . /var/db/repos/gentoo
+COPY --from=bentoo . /var/db/repos/bentoo
+END
+podman build --build-context gentoo=/var/db/repos/gentoo \
+  --build-context bentoo=/var/db/repos/bentoo -t localhost/bentoo-build:<date> .
+```
+
+The ISO's own trees are empty, which is why the second layer copies the
+host's. The proof records the `::gentoo` sync time it ran against.
 
 Only one run uses the build environment at a time: a second `--check --llm`,
 `--revive` or `--repair` exits at once, naming the PID and start time of the

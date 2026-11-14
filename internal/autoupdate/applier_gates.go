@@ -737,36 +737,20 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 	}
 
 	deps := a.buildDeps(nil)
-	satisfied, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, deps)
-	switch {
-	case err != nil:
-		if res, ok := a.requiredUseResolveFailure(pkg, version, err); ok {
-			return append(hostDeclinedGates(depth, fmt.Sprintf(
-				"no build phase was run for %s-%s: the pretend resolve refused its REQUIRED_USE (see the %s gate)",
-				pkg, version, validate.GateRequiredUse)), res), nil
+	if env := a.environment(); env != nil {
+		// One environment, shared: a fresh start for one package must not
+		// pull the disk from under another's build.
+		unlock := a.lockEnvironment()
+		defer unlock()
+		if err := a.prepareEnvironment(ctx, env, cand, pkg, version); err != nil {
+			return hostDeclinedGates(depth, fmt.Sprintf(
+				"the %s build environment could not be readied for %s-%s, so no build phase was run: %v",
+				a.buildBackend.Name(), pkg, version, err)), nil
 		}
-		// UNDETERMINED. The caller still skips, but must NOT name a missing
-		// dependency, because it does not know of one.
-		//
-		// Declined = host. Without it PromotionDecision would read this
-		// all-SKIPPED list as a candidate nothing measured and REFUSE the bump —
-		// conflating "this host cannot tell" with "the bump is unproven". The probe failing to
-		// answer is this machine's problem, not the ebuild's.
-		return hostDeclinedGates(depth, fmt.Sprintf(
-			"whether this host holds the build dependencies of %s-%s could not be determined, so no build phase was run: %v",
-			pkg, version, err)), nil
-	case !satisfied:
-		// Determined and unsatisfied. The atoms are named because
-		// they are the operator's next action, and the promotion report says the
-		// depth this bump therefore did not reach.
-		//
-		// Declined = host, the plainest host case: the operator's next
-		// action is `emerge` on THIS BOX. Refusing here would make
-		// `overlay autoupdate --apply` inert on any workstation that does not
-		// already hold the bump's build dependencies, which is most of them.
-		return hostDeclinedGates(depth, fmt.Sprintf(
-			"this host does not hold the build dependencies of %s-%s, so no build phase was run; %s to validate it here",
-			pkg, version, validate.DependencyAction(missing))), nil
+		// Isolation is measured where the build runs, not on this host.
+		deps.IsolationProbe = func() (bool, string) { return env.Isolated(ctx) }
+	} else if declined, stop := a.hostDependencyGates(ctx, cand, pkg, version, depth, deps); stop {
+		return declined, nil
 	}
 
 	// The child's own failure, captured through the runner seam. RunBuildGates
@@ -824,6 +808,7 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 // attribution of a concurrent apply depend on which package finished last.
 func (a *Applier) recordingRunner(ctx context.Context, into *buildAttempt) func(cmd *exec.Cmd) ([]byte, error) {
 	return func(cmd *exec.Cmd) ([]byte, error) {
+		cmd = a.adaptBuildChild(ctx, cmd)
 		var output []byte
 		var err error
 		if cmd.Stdin != nil {
@@ -957,6 +942,14 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	// The authoritative re-run: bentoo's own build of the same gates, never
 	// the agent's account of what it did.
 	a.substage(result, pkg, "re-check")
+	// The verdict pass, in a fresh environment with the fixer's edit shipped in.
+	if env := a.environment(); env != nil {
+		if err := a.prepareEnvironment(ctx, env, cand, pkg, version); err != nil {
+			return hostDeclinedGates(req.Depth, fmt.Sprintf(
+				"the %s build environment could not be readied for the re-run of %s-%s after the LLM fix: %v",
+				a.buildBackend.Name(), pkg, version, err)), nil
+		}
+	}
 	second := buildAttempt{pkg: pkg}
 	deps.RunAttached = a.recordingRunner(ctx, &second)
 	gates, err := validate.RunBuildGates(ctx, req, deps)
@@ -1108,4 +1101,42 @@ func skippedBuildReasons(gates []validate.GateResult) []string {
 		}
 	}
 	return reasons
+}
+
+// hostDependencyGates asks this host's Portage whether it holds the
+// candidate's build dependencies, and returns the declined gates and true when
+// no build may run here.
+func (a *Applier) hostDependencyGates(ctx context.Context, cand candidatePaths, pkg, version string, depth validate.Depth, deps validate.BuildDeps) ([]validate.GateResult, bool) {
+	satisfied, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, deps)
+	switch {
+	case err != nil:
+		if res, ok := a.requiredUseResolveFailure(pkg, version, err); ok {
+			return append(hostDeclinedGates(depth, fmt.Sprintf(
+				"no build phase was run for %s-%s: the pretend resolve refused its REQUIRED_USE (see the %s gate)",
+				pkg, version, validate.GateRequiredUse)), res), true
+		}
+		// UNDETERMINED. The caller still skips, but must NOT name a missing
+		// dependency, because it does not know of one.
+		//
+		// Declined = host. Without it PromotionDecision would read this
+		// all-SKIPPED list as a candidate nothing measured and REFUSE the bump —
+		// conflating "this host cannot tell" with "the bump is unproven". The probe failing to
+		// answer is this machine's problem, not the ebuild's.
+		return hostDeclinedGates(depth, fmt.Sprintf(
+			"whether this host holds the build dependencies of %s-%s could not be determined, so no build phase was run: %v",
+			pkg, version, err)), true
+	case !satisfied:
+		// Determined and unsatisfied. The atoms are named because
+		// they are the operator's next action, and the promotion report says the
+		// depth this bump therefore did not reach.
+		//
+		// Declined = host, the plainest host case: the operator's next
+		// action is `emerge` on THIS BOX. Refusing here would make
+		// `overlay autoupdate --apply` inert on any workstation that does not
+		// already hold the bump's build dependencies, which is most of them.
+		return hostDeclinedGates(depth, fmt.Sprintf(
+			"this host does not hold the build dependencies of %s-%s, so no build phase was run; %s to validate it here",
+			pkg, version, validate.DependencyAction(missing))), true
+	}
+	return nil, false
 }

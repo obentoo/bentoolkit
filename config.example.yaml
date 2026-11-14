@@ -128,10 +128,16 @@ autoupdate:
   # proof:
   #   max_age_days: 7
 
-  # Where the build gates run: host (default), vm or container (not available
-  # yet). --build-backend overrides it for one run.
+  # Where the build gates run: host (default), container, or vm (not
+  # available yet). --build-backend overrides it for one run.
   # build:
   #   backend: host
+  #   # The container backend: an image already loaded in Podman or Docker
+  #   # (bentoo never pulls one) carrying ::gentoo, and ::bentoo for overlay
+  #   # dependencies. runtime is podman or docker; unset tries podman first.
+  #   container:
+  #     image: localhost/bentoo-build:2026.11.12
+  #     runtime: podman
 
   # --------------------------------------------------------------------------
   # vendor — the Go vendor-tarball step.
