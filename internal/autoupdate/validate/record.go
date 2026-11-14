@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // Beside every retained staged tree sits one record: per gate, what it answered
@@ -150,6 +151,20 @@ type StageRecord struct {
 	// while it is set and the vendor step runs again. A record written before the
 	// field existed reads as empty.
 	VendorUnpublished string `json:"vendor_unpublished,omitempty"`
+
+	// Backend names where the gates ran: "host" today; the VM and container
+	// backends will name themselves.
+	Backend string `json:"backend,omitempty"`
+	// Environment identifies what the gates ran against, so a later run can
+	// tell a proof taken against an older ::gentoo tree from a current one.
+	Environment string `json:"environment,omitempty"`
+	// RecordedAt is when the gates answered.
+	RecordedAt time.Time `json:"recorded_at,omitzero"`
+	// State is report.StateOf over Gates at Depth: READY, WAIT or HUMAN.
+	State string `json:"state,omitempty"`
+	// FreshEnvironment reports that the final pass ran in a newly started,
+	// clean environment. Always false on the host backend.
+	FreshEnvironment bool `json:"fresh_environment"`
 }
 
 // stageRecordWire is the on-disk shape.
@@ -160,6 +175,9 @@ type StageRecord struct {
 // silently re-interpret every record already on disk. The name is the same
 // spelling `--depth` accepts and Depth.String prints, so a record stays readable
 // by a human and by the next version of this program.
+// BackendHost names the host backend in a stage record.
+const BackendHost = "host"
+
 type stageRecordWire struct {
 	Package            string       `json:"package,omitempty"`
 	Version            string       `json:"version,omitempty"`
@@ -171,6 +189,11 @@ type stageRecordWire struct {
 	SubstitutionDigest string       `json:"substitution_digest,omitempty"`
 	DistfileDigest     string       `json:"distfile_digest,omitempty"`
 	VendorUnpublished  string       `json:"vendor_unpublished,omitempty"`
+	Backend            string       `json:"backend,omitempty"`
+	Environment        string       `json:"environment,omitempty"`
+	RecordedAt         time.Time    `json:"recorded_at,omitzero"`
+	State              string       `json:"state,omitempty"`
+	FreshEnvironment   bool         `json:"fresh_environment"`
 }
 
 // StageRecordPath names the record of one staged tree. It is exported so an
@@ -215,6 +238,11 @@ func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 		SubstitutionDigest: rec.SubstitutionDigest,
 		DistfileDigest:     rec.DistfileDigest,
 		VendorUnpublished:  rec.VendorUnpublished,
+		Backend:            rec.Backend,
+		Environment:        rec.Environment,
+		RecordedAt:         rec.RecordedAt,
+		State:              rec.State,
+		FreshEnvironment:   rec.FreshEnvironment,
 	}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encoding the validation record of %s: %w", stagedRoot, err)
@@ -292,6 +320,11 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 		SubstitutionDigest: wire.SubstitutionDigest,
 		DistfileDigest:     wire.DistfileDigest,
 		VendorUnpublished:  wire.VendorUnpublished,
+		Backend:            wire.Backend,
+		Environment:        wire.Environment,
+		RecordedAt:         wire.RecordedAt,
+		State:              wire.State,
+		FreshEnvironment:   wire.FreshEnvironment,
 	}, nil
 }
 

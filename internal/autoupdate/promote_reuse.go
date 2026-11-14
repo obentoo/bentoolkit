@@ -11,9 +11,11 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
 // This file exists so the same hours are not spent twice.
@@ -276,6 +278,15 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 			record.ProducedBy)}
 	}
 
+	if a.proofMaxAge > 0 {
+		switch age := time.Since(record.RecordedAt); {
+		case record.RecordedAt.IsZero():
+			return stagedReuse{root: root, reason: "the retained tree's record carries no time, so how old its proof is cannot be told"}
+		case age > a.proofMaxAge:
+			return stagedReuse{root: root, reason: fmt.Sprintf("the retained tree was proved %s ago, past the %s a proof stays valid",
+				age.Round(time.Hour), a.proofMaxAge)}
+		}
+	}
 	proved, why := record.Proves(want)
 	if !proved {
 		return stagedReuse{root: root, reason: why + ", so the gates run in this run"}
@@ -405,6 +416,11 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		SubstitutionDigest: inputs.substitutions,
 		DistfileDigest:     inputs.distfile,
 		VendorUnpublished:  vendorUnpublished,
+		Backend:            validate.BackendHost,
+		Environment:        hostEnvironment(a.gentooPath),
+		RecordedAt:         time.Now().UTC(),
+		State:              proofState(gates, depth),
+		FreshEnvironment:   false,
 	})
 	if err != nil {
 		a.logger().Warn("could not record what the gates said beside the retained tree "+
@@ -437,4 +453,32 @@ func unpublishedVendor(out VendorOutcome, published bool) string {
 		return ""
 	}
 	return out.File
+}
+
+// proofState is the State the report derives for these gates at this depth,
+// computed by the same rule so the record and the screen cannot disagree. A
+// record is only written for a bump the policy asked to validate, so it is
+// never policy-skipped.
+func proofState(gates []validate.GateResult, depth validate.Depth) string {
+	facts := validate.ReportGateFacts(gates, depth.String())
+	return string(report.StateOf(report.Classify(false, facts), facts))
+}
+
+// hostEnvironment identifies the host the gates ran on by its ::gentoo tree:
+// the first line of metadata/timestamp.chk, the moment that tree was synced.
+// It is "" when the tree is unknown or the file unreadable, which a reader
+// takes as "environment not recorded".
+func hostEnvironment(gentooPath string) string {
+	if gentooPath == "" {
+		gentooPath = defaultGentooRepo
+	}
+	raw, err := os.ReadFile(filepath.Join(gentooPath, "metadata", "timestamp.chk")) //nolint:gosec // a fixed file inside the configured ::gentoo tree
+	if err != nil {
+		return ""
+	}
+	line, _, _ := strings.Cut(string(raw), "\n")
+	if line = strings.TrimSpace(line); line == "" {
+		return ""
+	}
+	return "::gentoo synced " + line
 }

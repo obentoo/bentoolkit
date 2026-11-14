@@ -40,7 +40,7 @@ func TestApply_ManifestFix_NoEditIsNotReportedAsRepaired(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := a.Apply(t.Context(), "dev-games/godot", false)
+	result, err := a.Apply(t.Context(), "dev-games/godot")
 	if err != nil || !result.Success {
 		t.Fatalf("Apply: err %v, result %+v", err, result)
 	}
@@ -111,7 +111,6 @@ func TestApply_ManifestFix_StagedDropsCopiesContradictingPublishedManifest(t *te
 				WithApplierPendingList(pending),
 				WithExecCommand(seam),
 				WithApplierFixer(fx),
-				WithConfirmFunc(func(string) bool { return true }),
 				WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 				WithApplierDistdir(filepath.Join(tmp, "host-distdir"), ""),
 				WithApplierDistfilesCache(filepath.Join(tmp, "cache")),
@@ -120,7 +119,7 @@ func TestApply_ManifestFix_StagedDropsCopiesContradictingPublishedManifest(t *te
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, _ = a.Apply(t.Context(), s082Pkg, false)
+			_, _ = a.Apply(t.Context(), s082Pkg)
 			if fx.called != 1 || calls < 2 {
 				t.Fatalf("fixer ran %d time(s), pkgdev %d time(s); the re-check never ran", fx.called, calls)
 			}

@@ -158,7 +158,6 @@ func newCooldownFixture(t *testing.T, bumps []cooldownBump, extra map[string][]s
 	base := []ApplierOption{
 		WithApplierPendingList(f.pending),
 		WithExecCommand(mockExecCommandSuccess),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: cfgs}),
@@ -241,7 +240,7 @@ func entryFor(b *cooldown.Block, pkg, version string) (cooldown.Entry, bool) {
 
 func applyOne(t *testing.T, f *cooldownFixture, pkg string) *ApplyResult {
 	t.Helper()
-	result, _ := f.a.Apply(t.Context(), pkg, false)
+	result, _ := f.a.Apply(t.Context(), pkg)
 	if result == nil {
 		t.Fatalf("Apply(%s) returned a nil result", pkg)
 	}
@@ -250,7 +249,7 @@ func applyOne(t *testing.T, f *cooldownFixture, pkg string) *ApplyResult {
 
 func applyAll(t *testing.T, f *cooldownFixture) map[string]*ApplyResult {
 	t.Helper()
-	results, _ := f.a.ApplyAll(t.Context(), f.pending.List(), false, 1)
+	results, _ := f.a.ApplyAll(t.Context(), f.pending.List(), 1)
 	byPkg := map[string]*ApplyResult{}
 	for _, r := range results {
 		if r != nil {

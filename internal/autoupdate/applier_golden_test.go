@@ -191,7 +191,6 @@ func goldenApplyFixtureWith(t *testing.T, opts goldenFixtureOpts) (*Applier, *Pe
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(execCommand),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(distdir, ""),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -242,7 +241,7 @@ func TestGoldenApply_TheBumpThatBrokeIsNotPublished(t *testing.T) {
 	const pkg = "media-plugins/gst-plugins-qt6"
 
 	before := hashOverlayTree(t, overlayDir)
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("1.29.2 was published; upstream declares neither aalib nor libcaca and the ebuild passes both — " +
@@ -290,7 +289,7 @@ func TestGoldenApply_ThePreviousVersionStillPasses(t *testing.T) {
 		Package: pkg, CurrentVersion: "1.28.5", NewVersion: "1.28.6", Status: StatusPending,
 	})
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -344,7 +343,6 @@ func TestGoldenApply_EveryBumpFailedAndTheOverlayIsByteIdentical(t *testing.T) {
 		WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "false")
 		}),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierSetVersionsFunc(func(_ string, written map[string]string) error {
 			for k, v := range written {
@@ -361,7 +359,7 @@ func TestGoldenApply_EveryBumpFailedAndTheOverlayIsByteIdentical(t *testing.T) {
 	before := hashOverlayTree(t, overlayDir)
 
 	for _, pkg := range packages {
-		result, _ := applier.Apply(t.Context(), pkg, false)
+		result, _ := applier.Apply(t.Context(), pkg)
 		if result.Success {
 			t.Fatalf("%s succeeded although every child process failed", pkg)
 		}
@@ -420,7 +418,7 @@ func TestGoldenApply_TheGateReadsWhatTheRunFetched(t *testing.T) {
 			})
 
 			before := hashOverlayTree(t, overlayDir)
-			result, _ := applier.Apply(t.Context(), pkg, false)
+			result, _ := applier.Apply(t.Context(), pkg)
 
 			if result.Success {
 				t.Fatalf("1.29.2 was PUBLISHED. The run fetched the archive; the gate did not read it, so nothing " +

@@ -26,7 +26,7 @@ func writeTestFile(t *testing.T, path, body string) {
 func assertAdoptRefused(t *testing.T, a *Applier, overlayDir, pkg, staged, want string) {
 	t.Helper()
 	before := hashOverlayTree(t, overlayDir)
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err == nil || result.Success {
 		t.Fatalf("Apply promoted an adopted tree whose package files differ from the overlay")
 	}
@@ -76,7 +76,7 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 				assertAdoptRefused(t, a, overlayDir, pkg, staged, tt.want)
 				return
 			}
-			result, err := a.Apply(t.Context(), pkg, false)
+			result, err := a.Apply(t.Context(), pkg)
 			if err != nil || !result.Success {
 				t.Fatalf("Apply refused an adopted tree whose package files match the overlay: %v", err)
 			}
@@ -90,7 +90,7 @@ func TestApplyAdoptedTreeValidatesAtLeastTheRecordedDepth(t *testing.T) {
 	policyDepth := func(t *testing.T) string {
 		t.Helper()
 		a, _, pkg, _, _, _, _ := adoptedFixture(t, mockExecCommandSuccess)
-		result, _ := a.Apply(t.Context(), pkg, false)
+		result, _ := a.Apply(t.Context(), pkg)
 		return result.DepthRequested
 	}(t)
 	if policyDepth == validate.DepthInstall.String() {
@@ -113,7 +113,7 @@ func TestApplyAdoptedTreeValidatesAtLeastTheRecordedDepth(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			result, _ := a.Apply(t.Context(), pkg, false)
+			result, _ := a.Apply(t.Context(), pkg)
 			if result.DepthRequested != tc.want {
 				t.Fatalf("DepthRequested = %q, want %q (reason: %s)", result.DepthRequested, tc.want, result.DepthReason)
 			}
@@ -124,7 +124,7 @@ func TestApplyAdoptedTreeValidatesAtLeastTheRecordedDepth(t *testing.T) {
 		a, _, pkg, staged, _, _, _ := adoptedFixture(t, mockExecCommandSuccess)
 		// The record's file name, as validate/record.go spells it.
 		writeTestFile(t, filepath.Join(staged, ".bentoo-stage-record.json"), "{not json")
-		result, err := a.Apply(t.Context(), pkg, false)
+		result, err := a.Apply(t.Context(), pkg)
 		if err == nil || result.Success {
 			t.Fatalf("Apply went on past an unreadable record")
 		}
@@ -140,7 +140,7 @@ func TestApplyAdoptedTreeRefusesARootOutsideItsStagedPath(t *testing.T) {
 	t.Run("the same path spelled with a trailing slash is adopted", func(t *testing.T) {
 		a, _, pkg, staged, _, _, _ := adoptedFixture(t, mockExecCommandSuccess)
 		WithAdoptedStagedTree(staged + string(filepath.Separator))(a)
-		result, err := a.Apply(t.Context(), pkg, false)
+		result, err := a.Apply(t.Context(), pkg)
 		if err != nil || !result.Success {
 			t.Fatalf("Apply refused the bump's own staged tree: %v", err)
 		}
@@ -154,7 +154,7 @@ func TestApplyAdoptedTreeRefusesARootOutsideItsStagedPath(t *testing.T) {
 		}
 		WithAdoptedStagedTree(other)(a)
 		before := hashOverlayTree(t, overlayDir)
-		result, err := a.Apply(t.Context(), pkg, false)
+		result, err := a.Apply(t.Context(), pkg)
 		if err == nil || result.Success {
 			t.Fatalf("Apply adopted a tree outside the bump's staged path")
 		}
@@ -169,7 +169,7 @@ func TestApplyAdoptedTreeRefusesARootOutsideItsStagedPath(t *testing.T) {
 	t.Run("no staging root is a refusal", func(t *testing.T) {
 		a, _, pkg, staged, _, _, _ := adoptedFixture(t, mockExecCommandSuccess)
 		a.stagingRoot = ""
-		result, err := a.Apply(t.Context(), pkg, false)
+		result, err := a.Apply(t.Context(), pkg)
 		if err == nil || result.Success {
 			t.Fatalf("Apply adopted a tree with no staging root configured")
 		}

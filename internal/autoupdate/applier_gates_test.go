@@ -147,7 +147,6 @@ func gatesFixture(t *testing.T, setup gatesSetup) (*Applier, *PendingList, *gate
 	base := []ApplierOption{
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierValidatePolicy(gatesPolicy()),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -318,7 +317,6 @@ func TestApplyGates_NoFetchedDistfilesSurviveAnApply(t *testing.T) {
 			applier, err := NewApplier(overlayDir, configDir,
 				WithApplierPendingList(pending),
 				WithExecCommand(seam),
-				WithConfirmFunc(func(string) bool { return true }),
 				WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 				WithApplierValidatePolicy(gatesPolicy()),
 				WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -327,7 +325,7 @@ func TestApplyGates_NoFetchedDistfilesSurviveAnApply(t *testing.T) {
 				t.Fatalf("creating applier: %v", err)
 			}
 
-			result, _ := applier.Apply(t.Context(), pkg, false)
+			result, _ := applier.Apply(t.Context(), pkg)
 			if result.Success != tc.wantSuccess {
 				t.Fatalf("the apply returned success=%v, want %v (err=%v) — this case is about the removal on "+
 					"THAT path, so it must actually take it", result.Success, tc.wantSuccess, result.Error)
@@ -366,7 +364,7 @@ func TestApplyGates_NoFetchedDistfilesSurviveAnApply(t *testing.T) {
 func TestApplyGates_SeriesCrossingRunsTheConfigureGate(t *testing.T) {
 	applier, _, spy, _, pkg := gatesFixture(t, seriesBump())
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err != nil {
+	if _, err := applier.Apply(t.Context(), pkg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -382,7 +380,7 @@ func TestApplyGates_SeriesCrossingRunsTheConfigureGate(t *testing.T) {
 func TestApplyGates_PatchBumpRunsNoBuild(t *testing.T) {
 	applier, _, spy, _, pkg := gatesFixture(t, patchBump())
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err != nil {
+	if _, err := applier.Apply(t.Context(), pkg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -398,7 +396,7 @@ func TestApplyGates_PatchBumpRunsNoBuild(t *testing.T) {
 func TestApplyGates_DepthFlagReachesTheResolver(t *testing.T) {
 	applier, _, spy, _, pkg := gatesFixture(t, patchBump(WithApplierDepth(validate.DepthCompile)))
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -421,7 +419,7 @@ func TestApplyGates_DepthFlagReachesTheResolver(t *testing.T) {
 func TestApplyGates_DepthFlagAlsoLowersTheDepth(t *testing.T) {
 	applier, _, spy, _, pkg := gatesFixture(t, seriesBump(WithApplierDepth(validate.DepthOptions)))
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err != nil {
+	if _, err := applier.Apply(t.Context(), pkg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -447,7 +445,7 @@ func TestApplyGates_GateErrorLeavesTheOverlayUnchangedAndWritesNoPin(t *testing.
 	applier, _, _, overlayDir, pkg := gatesFixture(t, setup)
 	before := hashOverlayTree(t, overlayDir)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("the configure gate failed and the apply reported success")
@@ -475,7 +473,7 @@ func TestApplyGates_UnsatisfiedDependenciesPromoteWithTheUnreachedDepthNamed(t *
 
 	applier, _, spy, overlayDir, pkg := gatesFixture(t, setup)
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v — unsatisfied dependencies are a reported outcome, not a failed run", err)
 	}
@@ -533,7 +531,7 @@ func TestApplyGates_RequireProofRefusesTheSameBump(t *testing.T) {
 	applier, _, _, overlayDir, pkg := gatesFixture(t, setup)
 	before := hashOverlayTree(t, overlayDir)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("require_proof was set and a bump whose build gates never ran was published anyway (R3.13)")
@@ -559,7 +557,7 @@ func TestApplyGates_RequireProofRefusesTheSameBump(t *testing.T) {
 func TestApplyGates_StatusValidatedIsWrittenAfterTheStaticGates(t *testing.T) {
 	applier, _, spy, _, pkg := gatesFixture(t, seriesBump())
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err != nil {
+	if _, err := applier.Apply(t.Context(), pkg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -593,7 +591,7 @@ func TestApplyGates_FailedStaticGateNeverReachesValidated(t *testing.T) {
 
 	applier, pending, _, _, pkg := gatesFixture(t, setup)
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("a failing gate produced no error")
 	}
 
@@ -616,7 +614,7 @@ func TestApplyGates_ReviveUsesTheSamePipeline(t *testing.T) {
 		t.Fatalf("seeding the revived status: %v", err)
 	}
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err != nil {
+	if _, err := applier.Apply(t.Context(), pkg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -811,7 +809,6 @@ func seamGoldenBumpFixture(t *testing.T, hook func(stagedPkgDir, sharedDistdir s
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(staging),
 		WithApplierDistdir(distdir, ""),
 		WithApplierDepth(validate.DepthOptions),
@@ -848,7 +845,7 @@ func TestStaticGates_AnswerWriteFreeFromAReadOnlyStagedTree(t *testing.T) {
 	})
 
 	before := hashOverlayTree(t, overlayDir)
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if len(sealed) == 0 {
 		t.Fatal("the staged package directory was never found and sealed, so this case proved nothing " +
@@ -920,7 +917,7 @@ func TestStaticGates_AStagedManifestFromTheManifestStepIsReadDirectly(t *testing
 	})
 
 	before := hashOverlayTree(t, overlayDir)
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("the apply published the bump although the staged Manifest's own archive declares neither " +
@@ -1007,7 +1004,6 @@ func TestStaticGates_TheStagedManifestDecidesWhichArchiveIsRead(t *testing.T) {
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(staging),
 		WithApplierDistdir(distdir, ""),
 		WithApplierDepth(validate.DepthOptions),
@@ -1016,7 +1012,7 @@ func TestStaticGates_TheStagedManifestDecidesWhichArchiveIsRead(t *testing.T) {
 		t.Fatalf("creating applier: %v", err)
 	}
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 	if result.Success {
 		t.Fatal("the apply PUBLISHED the bump: the gate answered from the PUBLISHED Manifest's archive, which " +
 			"declares everything the ebuild passes. On a bump the published Manifest describes a different " +
@@ -1056,7 +1052,7 @@ func TestApplyGates_TheVacuityRefusalDoesNotReachAHostThatCannotBuild(t *testing
 
 	applier, _, _, _, pkg := gatesFixture(t, setup)
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

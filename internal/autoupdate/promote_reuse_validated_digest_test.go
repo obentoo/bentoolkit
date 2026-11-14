@@ -146,8 +146,7 @@ func editedBuildApplier(t *testing.T, spy *editingFixSpy, rerun buildRun) (a *Ap
 		WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}),
-		WithApplierRunAttached(attached),
-		WithConfirmFunc(func(string) bool { return true }),
+		WithApplierRunCaptured(capturedFrom(attached)),
 		WithApplierStagingRoot(stagingRoot),
 		WithApplierDistdir(t.TempDir(), ""),
 		WithApplierBuildFixer(spy),
@@ -169,7 +168,8 @@ func TestStageRecordValidatedDigestIsTheBytesTheGatesRead(t *testing.T) {
 	a, overlayDir, pkg, stagingRoot := editedBuildApplier(t, spy, buildRun{output: cleanCompile})
 	source := candidateBody(t, overlayDir)
 
-	result, err := a.Apply(t.Context(), pkg, true)
+	WithApplierDepth(validate.DepthCompile)(a)
+	result, err := a.Apply(t.Context(), pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("fixture: the repaired bump did not pass: %v", err)
 	}
@@ -216,7 +216,8 @@ func TestStageRecordFailedRunCarriesNoValidatedDigest(t *testing.T) {
 		a, _, pkg, stagingRoot := editedBuildApplier(t, spy,
 			buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")})
 
-		result, _ := a.Apply(t.Context(), pkg, true)
+		WithApplierDepth(validate.DepthCompile)(a)
+		result, _ := a.Apply(t.Context(), pkg)
 		if result.Success {
 			t.Fatalf("fixture: the bump passed although its re-run failed")
 		}
@@ -231,7 +232,7 @@ func TestStageRecordFailedRunCarriesNoValidatedDigest(t *testing.T) {
 
 	t.Run("a gate that fails with no fixer", func(t *testing.T) {
 		a, _, pkg, _, _ := promoteFixture(t, WithApplierDistdir(t.TempDir(), ""))
-		result, _ := a.Apply(t.Context(), pkg, false)
+		result, _ := a.Apply(t.Context(), pkg)
 		if result.Success || result.StagedPath == "" {
 			t.Fatalf("fixture: want a failed run that kept its staged tree, got success=%v path=%q", result.Success, result.StagedPath)
 		}
@@ -264,7 +265,7 @@ func reuseFixture(t *testing.T, suffix string, validated func(staged string) str
 func assertRevalidated(t *testing.T, a *Applier, pkg string, watch *promoteWatch, why string) {
 	t.Helper()
 	before := watch.spawns
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if result == nil {
 		t.Fatalf("Apply returned no result: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestReuseAcceptsUnchangedValidatedBytes(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			a, overlayDir, pkg, _, body, watch := reuseFixture(t, tc.suffix, digestOf, true)
 			before := watch.spawns
-			result, err := a.Apply(t.Context(), pkg, false)
+			result, err := a.Apply(t.Context(), pkg)
 			if err != nil || !result.Success {
 				t.Fatalf("Apply: %v", err)
 			}

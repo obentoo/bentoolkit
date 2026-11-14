@@ -214,7 +214,6 @@ func parityGateFixture(t *testing.T) (applier *Applier, overlayDir string, pkg s
 	applier, err = NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(staging),
 		WithApplierDistdir(distdir, ""),
 		WithApplierDepth(validate.DepthOptions),
@@ -273,7 +272,7 @@ func TestCheckPath_WriteFreeGateParityBetweenCheckAndApply(t *testing.T) {
 	// The apply driver, same input shape, fresh fixture.
 	applier, applyOverlay, pkg2, _ := parityGateFixture(t)
 	before := hashOverlayTree(t, applyOverlay)
-	result, _ := applier.Apply(t.Context(), pkg2, false)
+	result, _ := applier.Apply(t.Context(), pkg2)
 
 	if result.Success {
 		t.Fatal("the apply PUBLISHED the bump the check just failed; --check and --apply must produce the " +
@@ -331,7 +330,6 @@ func TestCheckPath_UnproducibleNamesSkipNamesThePackage(t *testing.T) {
 		WithExecCommand(func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(emptyDistdir, ""),
 		WithApplierDepth(validate.DepthOptions),
@@ -416,7 +414,6 @@ func TestApplyGates_ConcurrentAppliesKeepSeamValuesPerBump(t *testing.T) {
 		WithExecCommand(func(ctx context.Context, name string, arg ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(distdir, ""),
 		WithApplierDepth(validate.DepthOptions),
@@ -430,11 +427,11 @@ func TestApplyGates_ConcurrentAppliesKeepSeamValuesPerBump(t *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		resultA, _ = applier.Apply(t.Context(), pkgA, false)
+		resultA, _ = applier.Apply(t.Context(), pkgA)
 	}()
 	go func() {
 		defer wg.Done()
-		resultB, _ = applier.Apply(t.Context(), pkgB, false)
+		resultB, _ = applier.Apply(t.Context(), pkgB)
 	}()
 	wg.Wait()
 

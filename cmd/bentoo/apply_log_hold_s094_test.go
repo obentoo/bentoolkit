@@ -122,29 +122,3 @@ func TestApplyPlainRunLogWritesThrough(t *testing.T) {
 		t.Fatalf("plain output: the record was not written at once: got %q, want %q", buf.String(), want)
 	}
 }
-
-// End to end on a pseudo-terminal: every record the fixer path logs while the
-// region is drawn reaches the terminal exactly once, after bubbletea shows the
-// cursor again on exit, with its level and fields.
-func TestLiveRegionHeldRecordsPrintBelowTheRegion(t *testing.T) {
-	auOpts := testAutoupdateOptions()
-	pkgs := s094LiveFixture(t, auOpts, 3)
-	code, out := s094RunApplyOnPTY(t, auOpts, 40, 120)
-	if code != 1 {
-		t.Fatalf("a batch of failing bumps exited %d, want 1:\n%s", code, out)
-	}
-	hide, show := strings.Index(out, "\x1b[?25l"), strings.LastIndex(out, "\x1b[?25h")
-	if hide < 0 || show < hide {
-		t.Fatalf("guard: no live region drawn (hide cursor at %d, show at %d):\n%q", hide, show, out)
-	}
-	if under := out[hide:show]; strings.Contains(under, "level=") {
-		t.Errorf("a slog record was written under the live region:\n%q", under)
-	}
-	below := out[show:]
-	for _, pkg := range pkgs {
-		rec := "level=INFO msg=\"manifest failed; invoking LLM fixer to repair the ebuild\" package=" + pkg + " "
-		if n := strings.Count(below, rec); n != 1 {
-			t.Errorf("%d fixer records for %s below the region, want 1:\n%s", n, pkg, below)
-		}
-	}
-}

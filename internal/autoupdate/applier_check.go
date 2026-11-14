@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -70,7 +71,11 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	if waiting, err := a.unmetRequirements(pkg, update); err != nil {
 		return checkSkipped(pkg, newVersion, fmt.Sprintf("%v, so no gate was run for %s", err, pkg))
 	} else if len(waiting) > 0 {
-		return checkSkipped(pkg, newVersion, fmt.Sprintf("waiting for %s, so no gate was run for %s", strings.Join(waiting, ", "), pkg))
+		// Another package has to land first: nothing about this candidate is
+		// wrong, so the bump waits.
+		res := checkSkipped(pkg, newVersion, fmt.Sprintf("waiting for %s, so no gate was run for %s", strings.Join(waiting, ", "), pkg))
+		res.Gates[0].Declined = validate.DeclineHost
+		return res
 	}
 	newVersion = ebuilds.ApplyRevision(newVersion, a.configs[pkg].Revision)
 
@@ -179,13 +184,21 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		// validate's own core already answers this exact condition with the
 		// candidate's cause (run.go, prepareStagedManifest); reaching it through
 		// the applier instead must not change whose fault it is.
+		//
+		// Unless the failure was classified as the environment's (a timeout, an
+		// upstream 5xx, a full or unwritable distdir): then the candidate was
+		// never at fault, and the bump waits rather than asking the maintainer.
+		cause, declined := validate.DeclineCandidate, candidateDeclinedGates
+		if errors.Is(err, ErrManifestEnvironment) {
+			cause, declined = validate.DeclineHost, hostDeclinedGates
+		}
 		gates = append(gates, validate.GateResult{
 			Gate:     validate.GateOptions,
 			Outcome:  validate.OutcomeSkipped,
 			Reason:   fmt.Sprintf("the manifest step failed for %s-%s, so the candidate has no digested distfile for any gate to read: %v", pkg, newVersion, err),
-			Declined: validate.DeclineCandidate,
+			Declined: cause,
 		})
-		gates = append(gates, candidateDeclinedGates(depth.Depth, fmt.Sprintf("the manifest step failed for %s-%s: %v", pkg, newVersion, err))...)
+		gates = append(gates, declined(depth.Depth, fmt.Sprintf("the manifest step failed for %s-%s: %v", pkg, newVersion, err))...)
 		return checkResult(pkg, newVersion, local, depth, gates)
 	}
 

@@ -154,6 +154,9 @@ type AutoupdateCheck struct {
 	// ok and failed, and one universal tally would either lose the four or
 	// invent columns the other has no answer for.
 	Tally Tally `json:"tally"`
+	// States counts the same rows by State, so the operator reads at once
+	// how many bumps an apply could publish and how many wait on someone.
+	States StateTally `json:"states"`
 	// DistfilesToFetch is how many packages this run has to hold a tarball
 	// for: an upper bound per package, not a download count, since a distfile
 	// the host already holds is not fetched again and a package with several
@@ -293,6 +296,9 @@ type ValidationRow struct {
 	// Outcome is the one verdict that stands for the whole package, across
 	// every gate that spoke for it.
 	Outcome Outcome `json:"outcome"`
+	// State is who acts next on this bump, derived from Outcome and the
+	// gates' recorded causes by StateOf.
+	State State `json:"state"`
 	// Depth is how far validation actually got, which is not always how far it
 	// was asked to go — PlanEntry.Depth is the request. Both are needed to say
 	// "compile was asked for, configure is as far as it got", because an

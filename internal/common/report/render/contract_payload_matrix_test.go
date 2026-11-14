@@ -487,8 +487,9 @@ func everyKind() []report.Run {
 			Payload: report.AutoupdateCheck{
 				Scanned: []report.PackageResult{{Package: "app-misc/jq", Type: "source", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", HasUpdate: true}},
 				Plan:    []report.PlanEntry{{Package: "app-misc/jq", CurrentVersion: "1.7.1", CandidateVersion: "1.8.0", Class: "minor", Depth: "compile", Reason: "minor bump earns compile"}},
-				Results: []report.ValidationRow{{Package: "app-misc/jq", CandidateVersion: "1.8.0", Outcome: report.Proved, Depth: "compile", Reason: "every deciding gate passed"}},
+				Results: []report.ValidationRow{{Package: "app-misc/jq", CandidateVersion: "1.8.0", Outcome: report.Proved, State: report.Ready, Depth: "compile", Reason: "every deciding gate passed"}},
 				Tally:   report.Tally{Proved: 1},
+				States:  report.StateTally{Ready: 1},
 			},
 		},
 		{

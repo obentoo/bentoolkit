@@ -168,7 +168,6 @@ func (f *requiresApplyFixture) applier(t *testing.T, extra ...ApplierOption) *Ap
 		WithApplierPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{requiresApplyPkg: f.cfg}}),
 		WithApplierGentooPath(f.gentoo),
 		WithExecCommand(f.exec.command),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 	}
 	if f.staging != "" {
@@ -316,7 +315,7 @@ func TestRequiresApplyWaitsWhileRequirementUnmet(t *testing.T) {
 				f := newRequiresApplyFixture(t, requiresApplyOptions{requires: requires, staged: staged})
 				tc.setup(t, f)
 
-				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 
 				assertWaiting(t, result, err, requiresApplyWaiting)
 				f.assertNothingWritten(t)
@@ -354,7 +353,7 @@ func TestRequiresApplyProceedsWhenRequirementMet(t *testing.T) {
 			f := newRequiresApplyFixture(t, requiresApplyOptions{requires: map[string]string{requiresApplyAtom: requiresApplyDartNew}})
 			tc.setup(t, f)
 
-			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -395,7 +394,7 @@ func TestRequiresApplyWaitsWhenRequirementsNotCaptured(t *testing.T) {
 			f := newRequiresApplyFixture(t, requiresApplyOptions{requires: tc.requires})
 			f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 
 			assertWaiting(t, result, err, "--check")
 			f.assertNothingWritten(t)
@@ -417,7 +416,7 @@ func TestRequiresApplyWaitsWhenRequirementsNotCaptured(t *testing.T) {
 func TestRequiresApplyRecordWithoutRequiresIsNotGated(t *testing.T) {
 	f := newRequiresApplyFixture(t, requiresApplyOptions{noSpec: true, ebuild: strings.Replace(requiresApplyEbuild, "\t~dev-lang/dart-3.13.5\n", "", 1)})
 
-	result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+	result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -446,6 +445,11 @@ func TestRequiresApplyValidateReportsWaiting(t *testing.T) {
 		if g.Outcome != validate.OutcomeSkipped {
 			t.Errorf("gate %s reported %s for a bump that must not be validated (waiting on %s)", g.Gate, g.Outcome, requiresApplyWaiting)
 		}
+		// Another package has to land first; nothing about this candidate is
+		// wrong, so the wait is the host's, and the report reads it as WAIT.
+		if g.Declined != validate.DeclineHost {
+			t.Errorf("gate %s declined over %q while waiting on %s, want %q", g.Gate, g.Declined, requiresApplyWaiting, validate.DeclineHost)
+		}
 	}
 	f.assertNothingWritten(t)
 	f.assertPendingKept(t, requires)
@@ -468,7 +472,7 @@ func TestRequiresApplyRewritesPinnedAtom(t *testing.T) {
 			})
 			f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+			result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 			if err != nil {
 				t.Fatalf("Apply: %v", err)
 			}
@@ -558,7 +562,7 @@ func TestRequiresApplyFailsWhenPinNotFound(t *testing.T) {
 				})
 				f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 
 				if result == nil {
 					t.Fatalf("Apply returned a nil result (err %v)", err)
@@ -607,7 +611,7 @@ func TestRequiresApplyRefusesInvalidCapturedVersion(t *testing.T) {
 				f := newRequiresApplyFixture(t, requiresApplyOptions{requires: requires, staged: staged})
 				f.place(t, f.overlay, requiresApplyAtom, "3.14.0")
 
-				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg, false)
+				result, err := f.applier(t).Apply(t.Context(), requiresApplyPkg)
 
 				if result == nil {
 					t.Fatalf("Apply returned a nil result (err %v)", err)

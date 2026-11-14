@@ -266,6 +266,9 @@ type autoupdateValidatePolicy struct {
 	// --require-isolation and the refusal to promote an unproved bump.
 	RequireIsolation bool
 	RequireProof     bool
+	// ProofMaxAge is autoupdate.proof.max_age_days: how long a proof taken by
+	// `--check --llm` lets `--apply` publish the bump it proved.
+	ProofMaxAge time.Duration
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -340,7 +343,8 @@ Examples:
 	cmd.Flags().BoolVar(&o.list, "list", false, "List pending updates")
 	cmd.Flags().StringVar(&o.apply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	cmd.Flags().BoolVar(&o.force, "force", false, "Ignore cache when checking")
-	cmd.Flags().BoolVar(&o.compile, "compile", false, "Run compile test after apply. This PRIVILEGED gate stops at src_compile and never runs src_install: extending it would mean a second prompt, a second privilege escalation and a second copy of the repair loop. --depth=install is the unprivileged path that goes further, and the two are mutually exclusive")
+	cmd.Flags().BoolVar(&o.compile, "compile", false, "Removed: builds run only in --check --llm, unprivileged, up to --depth=install; kept so that typing it says what to run instead")
+	_ = cmd.Flags().MarkHidden("compile")
 	// --depth is read OFF THE COMMAND rather than bound to a package variable
 	// (newValidateCmd's convention): the value is a rung of a ladder that has to
 	// be parsed and rejected by name, and a package variable would carry one
@@ -522,18 +526,14 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 		autoupdate.WithApplierReporter(r),
 		// A failure that left a repair bundle names --repair on its row.
 		autoupdate.WithApplierOutcomeHint(applyRepairHint),
-		// In-UI y/n confirmation rendered by the model instead of reading stdin
-		// behind the program.
-		autoupdate.WithConfirmFunc(prog.Confirm),
-		// Hand the real terminal to the compile child (nil stdin) so a sudo/doas
-		// password prompt is visible, while teeing its stdout+stderr to a
-		// capture buffer the failure path still saves (the applier's Output: %s
-		// contract). A child with its own stdin never gets the terminal.
+		// A child that left its stdin nil gets the real terminal, while its
+		// stdout+stderr are teed to a capture buffer the failure path still
+		// saves (the applier's Output: %s contract). A child with its own stdin
+		// never gets the terminal.
 		autoupdate.WithApplierRunAttached(func(cmd *exec.Cmd) ([]byte, error) {
 			var buf bytes.Buffer
-			// Only a Stdin the caller left nil gets the terminal. The privileged
-			// compile leaves it nil so sudo/doas can prompt. A child that set its
-			// own (a build gate's `ebuild`, in its own process group, where
+			// Only a Stdin the caller left nil gets the terminal. A child that
+			// set its own (a build gate's `ebuild`, in its own process group, where
 			// reading the terminal stops it on SIGTTIN) is run captured while the
 			// live region keeps drawing; its output written to the terminal
 			// would tear the frame. The applier already routes such children to
@@ -674,6 +674,14 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// knows was skipped.
 	if ar.opts.markAutoDisabled && ar.opts.lint {
 		return failWith(1, fmt.Errorf("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other"))
+	}
+
+	// A build runs only in `--check --llm` now, unprivileged, and `--apply`
+	// publishes what that check proved. The two flags that asked an apply to
+	// build or to call an agent are refused before any work, with the command
+	// that does it now.
+	if err := ar.opts.removedApplyFlags(); err != nil {
+		return failWith(1, err)
 	}
 
 	appCtx, err := loadAppContextNoValidation(cmd)
@@ -860,6 +868,17 @@ func (ar *autoupdateRun) resolveHTTPTimeout(cfg *config.Config) time.Duration {
 // Checker default" and the WithCacheTTL option is skipped, since WithCacheTTL
 // rejects non-positive values at construction time.
 func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir string, args []string, cacheTTL time.Duration, cfg *config.Config, llmCfg config.LLMConfig) error {
+	// The batch progress counter rewrites one line with `\r` and no newline, so a
+	// log record written to the terminal meanwhile lands glued to the counter.
+	// Hold the terminal copy for as long as the counter is on screen; the log
+	// file still gets every record at once. Taken BEFORE the options so the
+	// Checker is built with the held logger.
+	releaseLog := func() {}
+	if !quiet && len(args) == 0 {
+		releaseLog = ar.holdLogUnderRegion()
+	}
+	defer releaseLog()
+
 	opts := []autoupdate.CheckerOption{
 		autoupdate.WithConfigDir(configDir),
 		autoupdate.WithConcurrency(ar.opts.concurrency),
@@ -985,6 +1004,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	if !quiet {
 		fmt.Print("\r                                        \r")
 	}
+	releaseLog()
 
 	// Emit one stderr line per per-package failure. FormatFailures is called
 	// only after CheckAll has fully completed, so the output is deterministic.
@@ -1047,7 +1067,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// is the envelope's fact, established by buildReport above and carried
 	// inside the very value being joined here — so the screen and the export
 	// state it once, from one place.
-	joined := checkReport(ar.log(), result.Items, validated)
+	joined := checkReport(ar.log(), scannedWithFailures(result), validated)
 	ar.presentCheckReport(joined, planPrinted)
 
 	// Compare the registry against the overlay and, behind
@@ -1374,6 +1394,11 @@ func (ar *autoupdateRun) reportRevivableOrphans(ctx context.Context, checker *au
 	defer prov.Close() //nolint:errcheck // every provider Close is a no-op that returns nil; there is nothing to act on
 
 	candidates, ferr := checker.FindRevivableOrphans(ctx, prov)
+	if errors.Is(ferr, context.Canceled) {
+		// Same as above: the run reports its own interruption, and a list
+		// drawn now would claim "Nothing to revive" for a scan that stopped.
+		return
+	}
 	if ferr != nil {
 		ar.log().Warn("revivable-orphan scan completed with soft errors", "err", ferr)
 	}
@@ -1643,6 +1668,7 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		// key gave the setting a home, and neither supersedes the other.
 		RequireIsolation: o.requireIsolation || validateCfg.GetRequireIsolation(),
 		RequireProof:     validateCfg.GetRequireProof(),
+		ProofMaxAge:      cfg.Autoupdate.GetProofMaxAge(),
 	}
 
 	for class, name := range map[validate.Class]string{
@@ -1782,6 +1808,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// call before the summary below is the one that does the work there.
 	defer finish()
 	extra = append(extra, cd.option)
+	extra = append(extra, ar.publishOnlyProvenOptions()...)
 
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
@@ -1792,7 +1819,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// (the plain backend prints a START line; the TUI shows the task), so the
 	// previous output.Info Printf is intentionally gone.
 
-	result, err := applier.Apply(applyCtx, pkg, ar.opts.compile)
+	result, err := applier.Apply(applyCtx, pkg)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyResult prints to a clean line.
@@ -1800,10 +1827,19 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	ar.displayApplyResult(result)
 	displayCooldownSummary(cd, []*autoupdate.ApplyResult{result})
-	if err != nil {
+	// An unproven bump is not a failure of the bump, but the operator asked
+	// for this one package to be published and it was not.
+	if err != nil || (result != nil && result.Unproven) {
 		return exitWith(1)
 	}
 	return nil
+}
+
+// publishOnlyProvenOptions makes an apply publish only what `--check --llm`
+// proved, within autoupdate.proof.max_age_days. `--repair` does not take
+// them: its adopted tree is promoted on the gates that run over it.
+func (ar *autoupdateRun) publishOnlyProvenOptions() []autoupdate.ApplierOption {
+	return []autoupdate.ApplierOption{autoupdate.WithApplierProofMaxAge(ar.validate.ProofMaxAge)}
 }
 
 // newSingleApplier builds the Applier a one-package apply runs with — the
@@ -1899,6 +1935,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 	opts = append(opts, cd.option)
+	opts = append(opts, ar.publishOnlyProvenOptions()...)
 
 	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
@@ -1907,7 +1944,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 
 	// The applier's TaskStart surfaces each package through the reporter, so the
 	// previous output.Info Printf per package is intentionally gone.
-	results, failures := applier.ApplyAll(applyCtx, updates, ar.opts.compile, ar.opts.concurrency)
+	results, failures := applier.ApplyAll(applyCtx, updates, ar.opts.concurrency)
 
 	// Stop the TUI and restore the terminal BEFORE the summary so the inline run
 	// history stays in scrollback and displayApplyAllResults prints cleanly.
@@ -1929,10 +1966,12 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 		ar.displayApplyResult(result)
 	}
 
-	applied, obsolete, held, waiting := 0, 0, 0, 0
+	applied, obsolete, held, waiting, unproven := 0, 0, 0, 0, 0
 	for _, r := range results {
 		switch {
 		case r == nil:
+		case r.Unproven:
+			unproven++
 		case r.Obsolete:
 			obsolete++
 		case len(r.Waiting) > 0:
@@ -1955,6 +1994,9 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 	}
 	if waiting > 0 {
 		output.Warning.Printf("  Waiting:  %d (required version not available yet; kept in pending)\n", waiting)
+	}
+	if unproven > 0 {
+		output.Warning.Printf("  Unproven: %d (no valid proof; run --check --llm, kept in pending)\n", unproven)
 	}
 	if failures > 0 {
 		output.Error.Printf("  Failed:   %d\n", failures)
@@ -1987,6 +2029,12 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		if result.ObsoleteReason != "" {
 			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
 		}
+		return
+	}
+
+	if result.Unproven {
+		output.Warning.Println("    Status:  Unproven (not published; kept in pending)")
+		output.Info.Printf("    Reason:  %s\n", result.UnprovenReason)
 		return
 	}
 
@@ -2023,7 +2071,6 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 // displayApplySuccess prints the details of a bump that was applied.
 func (ar *autoupdateRun) displayApplySuccess(result *autoupdate.ApplyResult) {
 	output.Success.Println("    Status:  Success")
-	ar.displayCompileIsolation(result)
 	if result.Fixed {
 		output.Warning.Printf("    Fixed:   manifest repaired by LLM — %s\n", result.FixSummary)
 	}
@@ -2080,32 +2127,6 @@ func displayApplyFailure(result *autoupdate.ApplyResult) {
 	if result.RepairBundle != "" {
 		output.Info.Printf("    Repair:  bentoo overlay autoupdate --repair %s\n", result.Package)
 	}
-}
-
-// displayCompileIsolation states how much the compile gate actually verified.
-//
-// It prints nothing when no compile ran — there is no fidelity to report about
-// a step that did not happen — and nothing extra when the namespace was
-// verified, since a plain "Success" already means what it says.
-//
-// The two lines it does print exist because the gate used to claim more than it
-// had. Portage reports network-sandbox in FEATURES whether or not the namespace
-// was created, creating one needs privilege an ordinary user does not have, and
-// Portage warns about neither. So a green could mean "built with the network
-// cut off" or "built with full network access", and nothing distinguished them.
-// The skip line is the same honesty one step further: with
-// --require-isolation the compile did not run, and saying "Success" without
-// saying that would be the same lie in a new place.
-func (ar *autoupdateRun) displayCompileIsolation(result *autoupdate.ApplyResult) {
-	if !ar.opts.compile || result.IsolationVerified || result.IsolationReason == "" {
-		return
-	}
-	if ar.opts.requireIsolation {
-		output.Warning.Println("    Compile: SKIPPED (--require-isolation, and no network namespace)")
-	} else {
-		output.Warning.Println("    Compile: PASS (unverified isolation)")
-	}
-	output.Info.Printf("    Reason:  %s\n", result.IsolationReason)
 }
 
 // displayCleanReport prints what the --clean sweep did to the package
@@ -2418,8 +2439,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 		return autoupdate.NewChecker(overlayPath,
 			append(ar.reviveCheckerOptions(configDir, cacheTTL, httpTimeout, llmCfg), autoupdate.WithPendingList(pending))...)
 	}
-	reviver, err := autoupdate.NewReviver(overlayPath, applier, prov, newChecker,
-		autoupdate.WithReviveCompile(ar.opts.compile))
+	reviver, err := autoupdate.NewReviver(overlayPath, applier, prov, newChecker)
 	if err != nil {
 		return failWith(1, err)
 	}
@@ -2482,3 +2502,17 @@ func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 const reviveLocalTreeHint = "configure a local gentoo repository in ~/.config/bentoo/config.yaml " +
 	"(repositories.gentoo.provider: local, repositories.gentoo.path: /var/db/repos/gentoo), " +
 	"or force a clone-backed provider so the package tree is available on disk"
+
+// removedApplyFlags refuses the flags that asked `--apply` (or a revive or a
+// repair) to build or to call an agent, naming the command that does it now.
+func (o *autoupdateOptions) removedApplyFlags() error {
+	if o.compile {
+		return errors.New("--compile was removed: a build runs only in the check, unprivileged — " +
+			"run: bentoo overlay autoupdate --check --llm --depth=compile <package>, then --apply <package>")
+	}
+	if o.llm && o.apply != "" {
+		return errors.New("--apply publishes what a check proved and runs no agent, so it takes no --llm — " +
+			"run: bentoo overlay autoupdate --check --llm <package>, then --apply <package>")
+	}
+	return nil
+}

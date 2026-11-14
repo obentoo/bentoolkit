@@ -9,7 +9,116 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **`--check --llm` says what to do next with each bump.** The results table
+  shows a STATE instead of the outcome: READY (proven, `--apply` may publish
+  it), WAIT (only the environment was in the way), HUMAN (the maintainer must
+  look) or EXCLUDED (the policy asked for no gate). The summary counts them
+  on a "Next:" line, and the JSON export carries `state` per row and a
+  `states` tally. A Manifest failure classified as the environment's, and a
+  bump waiting for another to land, now count as WAIT instead of blaming the
+  candidate.
+
+- **The stage record says where and when a proof was taken.**
+  `.bentoo-stage-record.json` gains `backend` (`host`), `environment` (the
+  `::gentoo` sync time), `recorded_at`, `state` and `fresh_environment`.
+
+### Fixed
+
+- **The option gate finds a labelled or slotted package.** A registry key
+  such as `app-office/libreoffice-l10n@stable` or `cat/pkg:0` was handed to
+  the scan whole, matched no ebuild, and every such bump read as "the staged
+  tree holds no ebuild for version". The scan now gets the bare
+  `category/package`.
+
+- **A blocker is an answer, not "undetermined".** When an installed package
+  blocks the candidate, `emerge -p` exits non-zero, and the dependency probe
+  reported that it could not tell. It now names the blocking package and says
+  to remove it, while missing dependencies are still listed to install.
+
+- **A Manifest timeout or an upstream 5xx no longer calls the LLM fixer.**
+  Both are the network's fault, and a fixer handed one rewrites a correct
+  `SRC_URI`. A 4xx still counts as the ebuild's, so it stays repairable.
+
+- **The report names the gate that stopped a bump.** A row showed the first
+  skipped gate's reason, nearly always `options`, even when a later gate had
+  failed or been skipped for another reason. A failed gate's reason now
+  reaches the row, and a skipped row lists every distinct reason with its
+  gate.
+
+- **A fatal post-install QA failure is no longer an install pass.** Portage
+  prints `>>> Completed installing` before its QA checks run, so a run that
+  failed those checks still carried the marker. The deepest phase now also
+  needs a clean exit.
+
+- **`--check --llm` plans only what this run found.** The plan read the whole
+  pending list, so an old entry nobody would apply was priced and validated:
+  on 2026-11-13 it counted 46 bumps against 45 found, the extra one a failed
+  entry for a package removed two weeks before. The plan now takes only the
+  entries this scan confirmed as updates, and a check drops the pending entry
+  of every package that is `enabled = false`.
+
+- **The `--check` report counts the packages it could not check.** A package
+  whose check failed was left out of the report, so the progress counter
+  reached 599 while the report said 595. Each one is now a row, with its
+  error, under "could not be checked".
+
+- **No log line lands on the `--check` progress counter.** A record logged
+  during the scan was printed after the counter, on the same line. The
+  terminal copy now waits until the counter is cleared; the log file still
+  gets it at once.
+
+- **An interrupted `--check --revivable` no longer says "Nothing to revive".**
+  The scan kept going on a cancelled run, turned every lookup into a soft
+  error (171 of them) and then printed that nothing could be revived. It now
+  stops at once and prints nothing; the run reports its own interruption.
+
+- **One warning per package for distfiles a Manifest fix removes.** A bump
+  that drops many unverified distfiles printed one identical warning per
+  file (39 for `libreoffice-l10n`). It now prints one, with the count and
+  the file names.
+
+- **The `bentoo` binary is no longer tracked in git.** A 24 MB build of
+  `cmd/bentoo` was committed by mistake; it is removed from the index and
+  ignored.
+
 ### Changed
+
+- **`--apply` publishes only what `--check --llm` proved.** It no longer
+  validates a bump itself: with no retained proof that matches the bump,
+  proves the depth the policy asks for and is younger than
+  `autoupdate.proof.max_age_days` (new key, 7 by default), the bump is
+  reported as **Unproven**, left in the pending list, and nothing is staged,
+  fetched or written for it. `--apply <pkg>` then exits 1; `--apply all`
+  counts it apart from failures. Proofs written before this release carry no
+  time and are no longer accepted: run `--check --llm` once. `--repair` is
+  unchanged.
+
+- **Revision and patch bumps are validated to `patches` by default** (was
+  `options`). A proof needs one gate that measured something, and the option
+  gate reads meson projects only: at `options` a cmake, cargo or binary bump
+  was measured by nothing and could never be published. `patches` unpacks
+  the archive the option gate already fetched and runs `src_prepare`; it
+  never configures or builds. `validate.depths.revision`/`patch` still set
+  it per class.
+
+- **`--revive` proves before it publishes.** It runs the same gates as
+  `--check --llm` over the revived bump and then publishes the proof; a bump
+  whose gates measured nothing is reported failed with the gates' reasons.
+
+- **A `requires` pair lands in two rounds.** A bump that needs another bump
+  of the same batch is checked before that one is published, so the check
+  reports it as WAIT; after the apply publishes the required bump, the next
+  `--check --llm` proves it.
+
+- **`--compile` is removed, and `--apply` takes no `--llm`.** A build runs only
+  in `--check --llm`, unprivileged, up to `--depth=install`; the privileged
+  `sudo ebuild … compile` step and its prompt are gone from every mode. Both
+  flags now stop the command before any work and name what to run instead:
+  `--check --llm --depth=compile <package>`, then `--apply <package>`.
+  `--repair` re-validates a bundle that failed at the compile gate at
+  `--depth=compile`.
 
 - **Dependencies updated.** `chromedp/cdproto` v0.159.3 → v0.160.0 (linked
   only into the `chromedp`-tagged build); the local VM gate's CodeQL moves

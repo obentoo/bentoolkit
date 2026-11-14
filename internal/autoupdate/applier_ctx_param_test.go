@@ -159,7 +159,7 @@ func TestApplyOnADoneContextTouchesNothing(t *testing.T) {
 			defer cancel()
 
 			before := snapshotApplyCtx059(t, f.overlayDir)
-			res, err := f.applier.Apply(ctx, pkg, false)
+			res, err := f.applier.Apply(ctx, pkg)
 			after := snapshotApplyCtx059(t, f.overlayDir)
 
 			if err == nil {
@@ -200,7 +200,7 @@ func TestApplyContextDoesNotLeakIntoTheNextApply(t *testing.T) {
 	assertApplied := func(t *testing.T, f *applyCtx059Fixture, pkg, label string) {
 		t.Helper()
 		ctx := context.WithValue(context.Background(), applyCtx059Key{}, label)
-		res, err := f.applier.Apply(ctx, pkg, false)
+		res, err := f.applier.Apply(ctx, pkg)
 		if err != nil || res == nil || !res.Success {
 			t.Fatalf("Apply(%s) with a live context = (%+v, %v); want success", pkg, res, err)
 		}
@@ -222,7 +222,7 @@ func TestApplyContextDoesNotLeakIntoTheNextApply(t *testing.T) {
 	}
 	assertRefused := func(t *testing.T, f *applyCtx059Fixture, pkg string) {
 		t.Helper()
-		if _, err := f.applier.Apply(cancelled(), pkg, false); !errors.Is(err, context.Canceled) {
+		if _, err := f.applier.Apply(cancelled(), pkg); !errors.Is(err, context.Canceled) {
 			t.Fatalf("Apply(%s) with a cancelled context: err = %v; want errors.Is(err, context.Canceled)", pkg, err)
 		}
 		if _, err := os.Stat(f.applier.EbuildPath(pkg, "2.0.0")); !errors.Is(err, os.ErrNotExist) {

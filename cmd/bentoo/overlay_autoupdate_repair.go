@@ -236,12 +236,15 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 		}
 	}()
 
-	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg,
-		append(extra, autoupdate.WithAdoptedStagedTree(b.StagedRoot))...)
+	extra = append(extra, autoupdate.WithAdoptedStagedTree(b.StagedRoot))
+	if depth, raise := repairDepth(b, ar.validate.Depth); raise {
+		extra = append(extra, autoupdate.WithApplierDepth(depth))
+	}
+	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
 		return err
 	}
-	result, err := applier.Apply(applyCtx, b.Package, ar.opts.compile || repairNeedsCompile(b))
+	result, err := applier.Apply(applyCtx, b.Package)
 	finish()
 
 	switch {
@@ -261,11 +264,21 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	return nil
 }
 
-// repairNeedsCompile reports whether the re-validation must run the compile
+// repairNeedsCompile reports whether the re-validation must reach the compile
 // gate: the adopted tree's depth floor does not reach it, so a bundle that
-// failed there asks for it explicitly. An explicit --compile asks for it too.
+// failed there asks for --depth=compile explicitly, on the unprivileged ladder.
 func repairNeedsCompile(b repair.Bundle) bool {
 	return b.Stage == "gate:"+validate.GateCompile
+}
+
+// repairDepth is the depth the re-validation is raised to, and whether to
+// raise it: compile for a bundle that failed there, unless --depth already
+// asks for as much or more.
+func repairDepth(b repair.Bundle, asked *validate.Depth) (validate.Depth, bool) {
+	if !repairNeedsCompile(b) || (asked != nil && *asked >= validate.DepthCompile) {
+		return 0, false
+	}
+	return validate.DepthCompile, true
 }
 
 // repairOutcome names why an apply that returned no error did not promote.

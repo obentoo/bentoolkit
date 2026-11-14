@@ -111,7 +111,6 @@ func buildFixFixture(t *testing.T, spy *buildFixSpy, script ...buildRun) *buildF
 		WithExecCommand(seam),
 		WithApplierRunAttached(attached),
 		WithApplierRunCaptured(capturedFrom(attached)),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierBuildFixer(spy),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -189,7 +188,8 @@ func TestBuildFixer_OutOfDiskIsReportedAndNeverReachesTheModel(t *testing.T) {
 	spy := &buildFixSpy{result: fixer.BuildFixResult{Summary: "should never be called"}}
 	h := buildFixFixture(t, spy, buildRun{output: failsOutOfDisk, err: errors.New("exit status 1")})
 
-	result, _ := h.applier.Apply(t.Context(), h.pkg, true)
+	WithApplierDepth(validate.DepthCompile)(h.applier)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if len(spy.calls) != 0 {
 		t.Errorf("the fixer was invoked %d time(s) for an out-of-disk failure; a machine fault is never handed to a model (R8.5)", len(spy.calls))
@@ -215,7 +215,8 @@ func TestBuildFixer_UnpackFailureNeverReachesTheModel(t *testing.T) {
 	spy := &buildFixSpy{}
 	h := buildFixFixture(t, spy, buildRun{output: failsDuringUnpack, err: errors.New("exit status 1")})
 
-	result, _ := h.applier.Apply(t.Context(), h.pkg, true)
+	WithApplierDepth(validate.DepthCompile)(h.applier)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if len(spy.calls) != 0 {
 		t.Errorf("the fixer was invoked for a failure that happened before %q; nothing about the ebuild had been exercised yet",
@@ -236,7 +237,8 @@ func TestBuildFixer_ConfigureFailureIsHandedToTheModel(t *testing.T) {
 		buildRun{output: cleanCompile}, // the authoritative re-run succeeds
 	)
 
-	result, _ := h.applier.Apply(t.Context(), h.pkg, true)
+	WithApplierDepth(validate.DepthCompile)(h.applier)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if len(spy.calls) != 1 {
 		t.Fatalf("the fixer was invoked %d time(s) for a configure failure, want exactly 1 (R8.1)", len(spy.calls))
@@ -270,7 +272,8 @@ func TestBuildFixer_TheRerunDecidesNotTheAgentsSelfReport(t *testing.T) {
 		buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")}, // still broken
 	)
 
-	result, _ := h.applier.Apply(t.Context(), h.pkg, true)
+	WithApplierDepth(validate.DepthCompile)(h.applier)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if len(spy.calls) == 0 {
 		t.Fatal("the fixer was never invoked, so this case proves nothing about its self-report")
@@ -299,7 +302,8 @@ func TestBuildFixer_TheSameGateIsRerun(t *testing.T) {
 		buildRun{output: cleanCompile},
 	)
 
-	if _, err := h.applier.Apply(t.Context(), h.pkg, true); err != nil {
+	WithApplierDepth(validate.DepthCompile)(h.applier)
+	if _, err := h.applier.Apply(t.Context(), h.pkg); err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
 
@@ -344,7 +348,8 @@ func TestBuildFixer_NoFixerWiredKeepsTheFailFastBehaviour(t *testing.T) {
 	// WithApplierFixer ignores one (applier.go:365).
 	WithApplierBuildFixer(nil)(h.applier)
 
-	result, _ := h.applier.Apply(t.Context(), h.pkg, true)
+	WithApplierDepth(validate.DepthCompile)(h.applier)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if result.Success {
 		t.Error("a failing configure reported success with no fixer wired")
@@ -366,14 +371,7 @@ func TestBuildFixer_InstallMachineFaultNeverReachesTheModel(t *testing.T) {
 	h := buildFixFixture(t, spy, buildRun{output: installFailsOutOfDisk, err: errors.New("exit status 1")})
 	WithApplierDepth(validate.DepthInstall)(h.applier)
 
-	// Apply's second argument is FALSE, and that is load-bearing rather than
-	// incidental. `true` selects the PRIVILEGED --compile gate, which is
-	// mutually exclusive with the depth gates (applier.go:1046) and has a repair
-	// loop of its own (repairBuildAndRerun). Every other test in this file
-	// passes true and therefore exercises that other loop; the install rung
-	// lives on the depth path, whose repair loop is repairBuildGatesAndRerun —
-	// the one gateForDepth is read by.
-	result, _ := h.applier.Apply(t.Context(), h.pkg, false)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if len(spy.calls) != 0 {
 		t.Errorf("the fixer was invoked %d time(s) for an install that ran the device out of space; a machine "+
@@ -401,14 +399,7 @@ func TestBuildFixer_InstallFailureIsHandedToTheModelAsInstall(t *testing.T) {
 	)
 	WithApplierDepth(validate.DepthInstall)(h.applier)
 
-	// Apply's second argument is FALSE, and that is load-bearing rather than
-	// incidental. `true` selects the PRIVILEGED --compile gate, which is
-	// mutually exclusive with the depth gates (applier.go:1046) and has a repair
-	// loop of its own (repairBuildAndRerun). Every other test in this file
-	// passes true and therefore exercises that other loop; the install rung
-	// lives on the depth path, whose repair loop is repairBuildGatesAndRerun —
-	// the one gateForDepth is read by.
-	result, _ := h.applier.Apply(t.Context(), h.pkg, false)
+	result, _ := h.applier.Apply(t.Context(), h.pkg)
 
 	if len(spy.calls) != 1 {
 		t.Fatalf("the fixer was invoked %d time(s) for an install failure, want exactly 1 — one class of failure "+

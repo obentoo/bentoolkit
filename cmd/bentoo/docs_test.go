@@ -268,24 +268,28 @@ func TestDepthFlags_EveryEnumerationNamesTheInstallRung(t *testing.T) {
 	}
 }
 
-// TestCompileFlag_NamesTheDeeperPathItDoesNotTake is S042-R5.3 and R6.2.
-//
-// The privileged --compile gate keeps its ceiling at src_compile by design D7:
-// teaching it a new phase would mean a second prompt, a second sudo invocation
-// and a second copy of the repair loop, for a path the protocol wants to
-// converge into --depth rather than extend. The consequence is DOCUMENTED here
-// rather than left to be discovered by an operator who assumed --compile was
-// the deepest thing on offer.
-func TestCompileFlag_NamesTheDeeperPathItDoesNotTake(t *testing.T) {
-	auCmd := testAutoupdateCmd()
-	usage := auCmd.Flags().Lookup("compile").Usage
-
-	if !strings.Contains(usage, "src_compile") {
-		t.Errorf("the --compile usage %q does not say where the privileged gate STOPS; its ceiling is the "+
-			"difference between the two paths", usage)
+// TestCompileFlag_IsRefusedWithTheCommandThatReplacesIt: --compile is gone,
+// hidden from the help, and typing it (or --llm with --apply) stops before any
+// work with the command that does the job now.
+func TestCompileFlag_IsRefusedWithTheCommandThatReplacesIt(t *testing.T) {
+	if flag := testAutoupdateCmd().Flags().Lookup("compile"); flag == nil || !flag.Hidden {
+		t.Error("--compile must stay defined, so typing it explains itself, and hidden from the help")
 	}
-	if !strings.Contains(usage, "--depth=install") {
-		t.Errorf("the --compile usage %q does not name --depth=install as the path that goes further; an "+
-			"operator who wants src_install validated has no way to learn which flag does it", usage)
+	for _, tc := range []struct {
+		name string
+		opts autoupdateOptions
+		want string
+	}{
+		{"--apply --compile", autoupdateOptions{apply: "all", compile: true}, "--check --llm --depth=compile"},
+		{"--revive --compile", autoupdateOptions{compile: true}, "--check --llm --depth=compile"},
+		{"--apply --llm", autoupdateOptions{apply: "app-misc/jq", llm: true}, "--check --llm <package>"},
+	} {
+		err := tc.opts.removedApplyFlags()
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: err = %v, want one naming %q", tc.name, err, tc.want)
+		}
+	}
+	if err := (&autoupdateOptions{llm: true}).removedApplyFlags(); err != nil {
+		t.Errorf("--check --llm was refused: %v", err)
 	}
 }
