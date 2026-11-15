@@ -9,13 +9,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.42.0] - 2026-11-14
+
 ### Added
 
 - **The build gates have a backend.** `autoupdate.build.backend`, or
   `--build-backend` for one run, says where the build gates of `--check --llm`,
-  `--revive` and `--repair` run. `host`, today's behaviour, is the default; `vm`
-  stops the run before any work instead of falling back to the host. The stage record names the backend that
-  proved each bump.
+  `--revive` and `--repair` run. `host`, today's behaviour, is the default;
+  `container` and `vm` are described below. A backend that cannot start stops
+  the run before any work instead of falling back to the host. The stage
+  record names the backend that proved each bump.
 
 - **The build gates can run in a container.** `--build-backend=container`
   (or `autoupdate.build.backend: container`) builds every bump in a disposable
@@ -2058,7 +2061,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.41.2...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/obentoo/bentoolkit/compare/v0.41.2...v0.42.0
 [0.41.2]: https://github.com/obentoo/bentoolkit/compare/v0.41.1...v0.41.2
 [0.41.1]: https://github.com/obentoo/bentoolkit/compare/v0.41.0...v0.41.1
 [0.41.0]: https://github.com/obentoo/bentoolkit/compare/v0.40.2...v0.41.0
