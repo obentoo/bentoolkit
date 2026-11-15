@@ -50,6 +50,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   depth: the history is read once and shared. Give `--apply` the same budget,
   or set the key, so it asks for the depth the check proved.
 
+- **The option gate reads CMake.** A CMake release's `CMakeLists.txt` and
+  `*.cmake` files are read beside Meson's option files: a `-DNAME=` the
+  ebuild passes that no CMake file of the release (or patch in `files/`)
+  mentions is a warning, because CMake ignores it and the switch does
+  nothing; an `option()` the ebuild does not pass is info. Over the overlay's
+  49 readable CMake packages this found 13 such names in 4 packages
+  (blender 5.3.0 dropped `WITH_CYCLES_EMBREE`, for one) and no false one. A
+  `-D` on a compiler flag line is no longer read as an option, and a failed
+  package's row folds the option infos into a count.
+
 - **One build session at a time.** A run that may build takes
   `build-session.bentoo-lock` in the autoupdate state directory; a second one
   exits at once, naming the PID and start time of the run that holds it.

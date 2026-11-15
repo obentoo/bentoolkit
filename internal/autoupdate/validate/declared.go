@@ -19,16 +19,27 @@ type Declared struct {
 	Root       []Option
 	Subproject map[string][]Option
 	Sources    []string
+	// System is the build system the options were read from: "" for Meson,
+	// systemCMake for CMake.
+	System string
+	// Known is, for CMake, every identifier any CMake file of the release
+	// mentions: a passed name outside it is one upstream does not know.
+	Known map[string]bool
+	// BuiltPrefixes is, for CMake, the literal prefix of every name the
+	// release assembles at configure time (BUILD_PLUGIN_ of
+	// BUILD_PLUGIN_${NAME}): such a name cannot be checked statically.
+	BuiltPrefixes map[string]bool
 }
 
-// ErrBuildSystemUndetermined reports that the archive carries no meson.build at
-// any project root, so nothing here can say what builds it.
+// ErrBuildSystemUndetermined reports that the archive carries neither a
+// meson.build nor a CMakeLists.txt at its project root, so nothing here can say
+// what builds it.
 //
 // This is a sentinel and not a guess on purpose. The caller turns it into a
 // SKIPPED outcome that says the build system was undetermined; inferring
 // "probably autotools" from the absence of one file would be unearned
 // confidence.
-var ErrBuildSystemUndetermined = errors.New("no meson.build found: build system undetermined")
+var ErrBuildSystemUndetermined = errors.New("no meson.build or CMakeLists.txt at the project root: build system undetermined")
 
 // Option-file names, newest first. Meson renamed meson_options.txt to
 // meson.options in 1.1 and still accepts both, so both are in the wild
@@ -62,6 +73,9 @@ func OptionsFromArchive(ctx context.Context, archive string) (Declared, error) {
 	}
 
 	prefix, ok := projectRoot(members)
+	if !ok && hasMember(members, archiveRoot(members)+"CMakeLists.txt") {
+		return cmakeFromArchive(ctx, archive, members)
+	}
 	if !ok {
 		// Name what WAS found rather than only what was not. "SKIPPED: build
 		// system is cmake" tells the operator this archive is out of scope by
@@ -297,4 +311,14 @@ func subprojectDirs(members []string, prefix string) map[string]string {
 		dirs[name] = base + name + "/"
 	}
 	return dirs
+}
+
+// hasMember reports whether members lists name exactly.
+func hasMember(members []string, name string) bool {
+	for _, m := range members {
+		if m == name {
+			return true
+		}
+	}
+	return false
 }

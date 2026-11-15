@@ -75,7 +75,7 @@ func OptionsFromEbuild(path string) (Passed, error) {
 		// switched off. Only a full-line comment is dropped: a mid-line `#` can
 		// be a parameter expansion like ${x#y}, and stripping that would be a
 		// worse bug than the one it fixes.
-		if strings.HasPrefix(strings.TrimSpace(text), "#") {
+		if strings.HasPrefix(strings.TrimSpace(text), "#") || setsCompilerFlags(text) {
 			continue
 		}
 		collectPassedOptions(text, line, base, &passed)
@@ -169,6 +169,21 @@ func isArgBoundary(c byte) bool {
 	switch c {
 	case ' ', '\t', '(', '"', '\'', '`':
 		return true
+	}
+	return false
+}
+
+// compilerFlagWords mark a line whose -DNAME=value is a C preprocessor define
+// for the compiler (append-cppflags -DSKCMS_HAS_MUSTTAIL=0), not an option of
+// the build system.
+var compilerFlagWords = []string{"append-cppflags", "append-cflags", "append-cxxflags", "append-flags",
+	"CPPFLAGS", "CFLAGS", "CXXFLAGS"}
+
+func setsCompilerFlags(line string) bool {
+	for _, word := range compilerFlagWords {
+		if strings.Contains(line, word) {
+			return true
+		}
 	}
 	return false
 }

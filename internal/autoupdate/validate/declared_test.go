@@ -131,12 +131,12 @@ func TestOptionsFromArchive_NoOptionFileIsZeroNotAnError(t *testing.T) {
 	}
 }
 
-// TestOptionsFromArchive_NoMesonBuildIsUndetermined is R4.3: with no meson.build
-// anywhere the build system is not something to guess at, it is something to
-// report.
+// TestOptionsFromArchive_NoMesonBuildIsUndetermined is R4.3: with neither a
+// meson.build nor a CMakeLists.txt at the root the build system is not
+// something to guess at, it is something to report.
 func TestOptionsFromArchive_NoMesonBuildIsUndetermined(t *testing.T) {
 	archive := buildTarGz(t, map[string]string{
-		"proj-1.0/CMakeLists.txt": "project(proj)\n",
+		"proj-1.0/configure.ac": "AC_INIT([proj], [1.0])\n",
 	})
 
 	_, err := OptionsFromArchive(context.Background(), archive)

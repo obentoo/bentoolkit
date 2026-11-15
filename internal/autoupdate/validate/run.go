@@ -1421,6 +1421,7 @@ func validateOptions(ctx context.Context, target ebuildTarget, distdir string, h
 			fmt.Sprintf("the upstream archive could not be read: %v", err))
 	}
 
+	declared.LearnCMakePatches(target.dir)
 	return comparedResult(target.atom, target.version, declared, passed)
 }
 

@@ -383,13 +383,27 @@ func gateReasons(result validate.EbuildResult, outcome validate.Outcome) string 
 // they stand. Giving findings their own type on ValidationRow is the
 // alternative, and it is a change to internal/common/report that only pays for
 // itself once a renderer is written to print them per finding.
+//
+// The one exception is the option gate's info findings ("upstream declares X,
+// which the ebuild does not pass"), folded into a count as `overlay validate`
+// folds them: a CMake project declares hundreds of options, and the line would
+// bury the finding that failed the package. --json still carries each one.
 func failureDetail(result validate.EbuildResult) string {
 	var details []string
+	notPassed := 0
 
 	for _, gate := range result.Gates {
 		for _, finding := range gate.Findings {
+			if finding.Gate == validate.GateOptions && finding.Severity == validate.SeverityInfo {
+				notPassed++
+				continue
+			}
 			details = append(details, fmt.Sprintf("%s: %s", gate.Gate, finding.Detail))
 		}
+	}
+	if notPassed > 0 {
+		details = append(details, fmt.Sprintf("%s: %d option(s) upstream declares that the ebuild does not pass (listed in --json)",
+			validate.GateOptions, notPassed))
 	}
 
 	return strings.Join(details, "; ")
