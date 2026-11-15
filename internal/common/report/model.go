@@ -239,6 +239,10 @@ type PackageResult struct {
 	// kept back: newer than the current version, too young to take, and not
 	// queued. Empty when no gate held it.
 	Held string `json:"held"`
+	// ManualPromotion is set when upstream offers a version outside the
+	// record's series. The entry needs a maintainer to move it; it is an
+	// answer, not a failed scan. Empty otherwise.
+	ManualPromotion string `json:"manual_promotion"`
 }
 
 // Requirement is one package a bump requires and whether its version is

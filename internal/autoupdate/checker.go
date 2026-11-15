@@ -113,6 +113,10 @@ type CheckResult struct {
 	// held: newer than the current version, too young to take. HasUpdate stays
 	// true — upstream IS newer — and nothing was queued. Empty when no gate held.
 	HeldBy string
+	// ManualPromotion is set when upstream offers a version outside the
+	// record's series: the entry needs a maintainer to move it. Nothing is
+	// queued, and the package does not count as a failure of the scan.
+	ManualPromotion string
 }
 
 // RequirementState is whether the version a bump requires is available yet.
@@ -1066,6 +1070,15 @@ func (c *Checker) checkCached(ctx context.Context, pkg string, pkgConfig *regist
 func (c *Checker) checkUpstream(ctx context.Context, pkg string, pkgConfig *registry.PackageConfig, currentVersion string, result *CheckResult) (*CheckResult, error) {
 	// Fetch upstream version
 	upstreamVersion, err := c.fetchUpstreamVersion(ctx, pkgConfig)
+	var outside *outsideSeriesError
+	if errors.As(err, &outside) {
+		// The alarm the series exists for: upstream moved on, and moving the
+		// entry with it is the maintainer's call. It is an answer, not a
+		// failure of the scan, so the batch's exit code is left alone.
+		result.UpstreamVersion = outside.version
+		result.ManualPromotion = outside.Error() + "; move the entry's version and series by hand when this line is wanted"
+		return result, nil
+	}
 	if err != nil {
 		result.Error = fetchFailure(err)
 		return result, result.Error
@@ -2027,8 +2040,7 @@ func (c *Checker) fetchUpstreamVersion(ctx context.Context, cfg *registry.Packag
 	// match, script, fallback, LLM). Failing loudly is the point: the entry's
 	// source moved, or its series is wrong, and both need a human.
 	if m := ebuilds.NewSeriesMatcher(c.logger(), cfg.Series); m.Active() && !m.Matches(parse.StripVersionPrefix(version)) {
-		return "", fmt.Errorf("%w: upstream version %q is outside this entry's series %q",
-			parse.ErrNoVersionFound, version, cfg.Series)
+		return "", &outsideSeriesError{version: version, series: cfg.Series}
 	}
 	return version, nil
 }
@@ -2763,4 +2775,20 @@ func packageCredentialScope(cfg *registry.PackageConfig) fetch.CredentialScope {
 		}
 	}
 	return scope
+}
+
+// ErrOutsideSeries reports an upstream version outside the record's series.
+var ErrOutsideSeries = errors.New("upstream version is outside this entry's series")
+
+// outsideSeriesError is ErrOutsideSeries with the version and the series. It
+// also matches parse.ErrNoVersionFound: no version this entry may take was
+// found, which is what callers of the fetch have always been told.
+type outsideSeriesError struct{ version, series string }
+
+func (e *outsideSeriesError) Error() string {
+	return fmt.Sprintf("upstream version %q is outside this entry's series %q", e.version, e.series)
+}
+
+func (e *outsideSeriesError) Is(target error) bool {
+	return target == ErrOutsideSeries || target == parse.ErrNoVersionFound
 }

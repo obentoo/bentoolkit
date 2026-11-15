@@ -222,3 +222,21 @@ func titlesOf(blocks []Section) []string {
 	}
 	return titles
 }
+
+// TestScanSection_AManualPromotionIsAnAnswerNotAnError: a package that left
+// its series is listed as a manual promotion with the reason, counted in its
+// own note, and never among the packages that could not be checked.
+func TestScanSection_AManualPromotionIsAnAnswerNotAnError(t *testing.T) {
+	s := versionCheckSection(AutoupdateCheck{Scanned: []PackageResult{{
+		Package: "dev-lang/dart@stable", CurrentVersion: "3.13.7", CandidateVersion: "3.14.0",
+		ManualPromotion: `upstream version "3.14.0" is outside this entry's series "^3\.13\.7$"`,
+	}}}, false)
+
+	if len(s.Rows.Rows) != 1 || s.Rows.Rows[0].Cells[4] != "manual promotion" || !strings.Contains(s.Rows.Rows[0].Detail, "outside this entry's series") {
+		t.Fatalf("rows = %+v, want one manual promotion row with its reason", s.Rows.Rows)
+	}
+	notes := strings.Join(s.Notes, "\n")
+	if !strings.Contains(notes, "1 package(s) left their series upstream and need a manual promotion.") || strings.Contains(notes, "could not be checked") {
+		t.Errorf("notes do not count the manual promotion on its own:\n%s", notes)
+	}
+}

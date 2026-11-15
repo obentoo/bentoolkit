@@ -97,6 +97,7 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 		text string
 	}{
 		{conditionOrphaned, "%d package(s) have no ebuild in the overlay."},
+		{conditionManualPromotion, "%d package(s) left their series upstream and need a manual promotion."},
 		{conditionFailed, "%d package(s) could not be checked."},
 		{conditionNotComparable, "%d package(s) reported a version that could not be ordered against the current one."},
 		{conditionHeld, "%d package(s) have an update held by min_age_days."},
@@ -260,6 +261,10 @@ const (
 	// when it holds the version fields say nothing, so no later branch may
 	// claim them.
 	conditionOrphaned condition = iota
+	// conditionManualPromotion: upstream left the record's series, and only a
+	// maintainer can move the entry. Read before conditionFailed: the scan
+	// answered, so it must not read as a failure.
+	conditionManualPromotion
 	// conditionFailed: the scan could not answer for this package.
 	conditionFailed
 	// conditionNotComparable: upstream answered something that could not be
@@ -286,6 +291,8 @@ func conditionOf(result PackageResult) condition {
 	switch {
 	case result.Orphaned:
 		return conditionOrphaned
+	case result.ManualPromotion != "":
+		return conditionManualPromotion
 	case result.Error != "":
 		return conditionFailed
 	case result.NotComparable:
@@ -394,6 +401,8 @@ func scanState(result PackageResult) (state, detail string) {
 	switch conditionOf(result) {
 	case conditionOrphaned:
 		return "orphaned", "no ebuild in the overlay: the version columns say nothing about this package"
+	case conditionManualPromotion:
+		return "manual promotion", result.ManualPromotion
 	case conditionFailed:
 		return "error", result.Error
 	case conditionNotComparable:

@@ -372,8 +372,11 @@ comments = """…"""
 `series` narrows **both ends** of the comparison: which ebuild counts as the
 entry's current version, and which upstream candidates survive selection. An
 extraction path that yields a single value (first match, `script`, fallback,
-LLM) *fails* when the version falls outside the series, rather than comparing it
-against an ebuild the entry does not track.
+LLM) never compares a version outside the series against an ebuild the entry
+does not track. `--check` reports that package as **manual promotion**, with the
+version upstream offers: the line moved on, and moving the entry with it is the
+maintainer's call. Nothing is queued, and it is an answer rather than a failed
+scan, so it leaves the exit code alone.
 
 The `@label` is identity only — it makes the key unique and never reaches a
 filesystem path or a `SLOT=` lookup. `@` rather than `:` because `:` already
