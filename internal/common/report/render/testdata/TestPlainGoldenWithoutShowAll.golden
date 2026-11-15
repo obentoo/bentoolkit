@@ -29,17 +29,18 @@ Validation Plan
 
 Validation Results
 ──────────────────
-  PACKAGE                                   CANDIDATE  DEPTH      OUTCOME
-  app-misc/jq                               1.8.0      compile    proved
+  PACKAGE                                   CANDIDATE  DEPTH      STATE
+  app-misc/jq                               1.8.0      compile    READY
     every deciding gate passed
-  dev-libs/libayatana-appindicator-glib     0.5.93     configure  errored
+  dev-libs/libayatana-appindicator-glib     0.5.93     configure  HUMAN
     configure failed: missing dependency dev-libs/ayatana-ido
-  media-plugins/gst-plugins-adaptivedemux2  1.28.1     none       inconclusive
+  media-plugins/gst-plugins-adaptivedemux2  1.28.1     none       HUMAN
     no Manifest could be produced: distfile fetch returned 404
-  sys-apps/portage                          3.0.67     none       skipped
+  sys-apps/portage                          3.0.67     none       EXCLUDED
 
 Validation Summary
 ──────────────────
   4 package(s) evaluated: 1 proved, 1 errored, 1 inconclusive, 1 skipped.
+  Next: 1 ready to apply, 0 waiting, 2 for the maintainer, 1 excluded.
 
   Nothing was published: a check writes no ebuild and no version pin.

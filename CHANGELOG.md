@@ -9,7 +9,48 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **`--check --llm` says what to do next with each bump.** The results table
+  shows a STATE instead of the outcome: READY (proven, `--apply` may publish
+  it), WAIT (only the environment was in the way), HUMAN (the maintainer must
+  look) or EXCLUDED (the policy asked for no gate). The summary counts them
+  on a "Next:" line, and the JSON export carries `state` per row and a
+  `states` tally. A Manifest failure classified as the environment's, and a
+  bump waiting for another to land, now count as WAIT instead of blaming the
+  candidate.
+
+- **The stage record says where and when a proof was taken.**
+  `.bentoo-stage-record.json` gains `backend` (`host`), `environment` (the
+  `::gentoo` sync time), `recorded_at`, `state` and `fresh_environment`.
+
 ### Fixed
+
+- **The option gate finds a labelled or slotted package.** A registry key
+  such as `app-office/libreoffice-l10n@stable` or `cat/pkg:0` was handed to
+  the scan whole, matched no ebuild, and every such bump read as "the staged
+  tree holds no ebuild for version". The scan now gets the bare
+  `category/package`.
+
+- **A blocker is an answer, not "undetermined".** When an installed package
+  blocks the candidate, `emerge -p` exits non-zero, and the dependency probe
+  reported that it could not tell. It now names the blocking package and says
+  to remove it, while missing dependencies are still listed to install.
+
+- **A Manifest timeout or an upstream 5xx no longer calls the LLM fixer.**
+  Both are the network's fault, and a fixer handed one rewrites a correct
+  `SRC_URI`. A 4xx still counts as the ebuild's, so it stays repairable.
+
+- **The report names the gate that stopped a bump.** A row showed the first
+  skipped gate's reason, nearly always `options`, even when a later gate had
+  failed or been skipped for another reason. A failed gate's reason now
+  reaches the row, and a skipped row lists every distinct reason with its
+  gate.
+
+- **A fatal post-install QA failure is no longer an install pass.** Portage
+  prints `>>> Completed installing` before its QA checks run, so a run that
+  failed those checks still carried the marker. The deepest phase now also
+  needs a clean exit.
 
 - **`--check --llm` plans only what this run found.** The plan read the whole
   pending list, so an old entry nobody would apply was priced and validated:

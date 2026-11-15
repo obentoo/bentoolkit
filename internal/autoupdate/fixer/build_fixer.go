@@ -132,8 +132,8 @@ type BuildFixRequest struct {
 	Package string
 	// Version is the candidate PV being validated (e.g. "1.29.2").
 	Version string
-	// Gate is the gate that failed — validate.GatePatches, GateConfigure or
-	// GateCompile. It names what "fixed" would mean, so it is stated to the
+	// Gate is the gate that failed — validate.GatePatches, GateConfigure,
+	// GateCompile or GateInstall. It names what "fixed" would mean, so it is stated to the
 	// agent verbatim.
 	Gate string
 	// StagedDir is the staged repository root Stage produced for this candidate

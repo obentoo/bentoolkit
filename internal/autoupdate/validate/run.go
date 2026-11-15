@@ -1056,8 +1056,8 @@ func unbuildableHereReason(ctx context.Context, stagedRoot string, target ebuild
 			target.atom, target.version, err)
 	case !satisfied:
 		return fmt.Sprintf(
-			"this host does not hold the build dependencies of %s-%s, so no build phase was run; install %s to validate it here",
-			target.atom, target.version, strings.Join(missing, ", "))
+			"this host does not hold the build dependencies of %s-%s, so no build phase was run; %s to validate it here",
+			target.atom, target.version, DependencyAction(missing))
 	}
 	return ""
 }

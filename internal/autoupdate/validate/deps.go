@@ -254,6 +254,11 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 		if constraints := requiredUseConstraints(stdout.String() + "\n" + stderr.String()); len(constraints) > 0 {
 			return nil, fmt.Errorf("the pretend resolve of %s failed: %w", spec, &RequiredUseError{Constraints: constraints, cause: err})
 		}
+		// A block is an answer, not a failure to ask: the host cannot build the
+		// bump until the named package is out of the way.
+		if blockers := blockersFrom(stdout.String() + "\n" + stderr.String()); len(blockers) > 0 {
+			return blockers, nil
+		}
 		return nil, fmt.Errorf("the pretend resolve of %s failed%s: %w", spec, diagnostic(stderr.String()), err)
 	}
 	// The CLEAN atom, matching the spec above: emerge's merge list names the
@@ -537,6 +542,52 @@ func unsatisfiedFrom(out, atom string) []string {
 		unsatisfied = append(unsatisfied, spec)
 	}
 	return unsatisfied
+}
+
+// blockerNote marks an unsatisfied entry that names a package in the
+// candidate's way rather than one to install.
+const blockerNote = " (blocks the candidate)"
+
+// DependencyAction is the operator's next step for an unsatisfied list:
+// install what is missing, remove what blocks. Saying "install" for a blocker
+// would send the operator the wrong way.
+func DependencyAction(missing []string) string {
+	var install, remove []string
+	for _, entry := range missing {
+		if atom, blocked := strings.CutSuffix(entry, blockerNote); blocked {
+			remove = append(remove, atom)
+			continue
+		}
+		install = append(install, entry)
+	}
+	var steps []string
+	if len(install) > 0 {
+		steps = append(steps, "install "+strings.Join(install, ", "))
+	}
+	if len(remove) > 0 {
+		steps = append(steps, "remove "+strings.Join(remove, ", ")+", which blocks it,")
+	}
+	return strings.Join(steps, " and ")
+}
+
+// blockersFrom names every package a `[blocks …]` line of a pretend run says
+// is in the candidate's way, each marked with blockerNote.
+func blockersFrom(out string) []string {
+	var blockers []string
+	for line := range strings.Lines(out) {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[blocks") {
+			continue
+		}
+		_, rest, closed := strings.Cut(trimmed, "]")
+		if !closed {
+			continue
+		}
+		if fields := strings.Fields(rest); len(fields) > 0 {
+			blockers = append(blockers, fields[0]+blockerNote)
+		}
+	}
+	return blockers
 }
 
 // listedPackage reads one merge-list line — `[ebuild  N    ] cat/pkg-1.2.3` —
