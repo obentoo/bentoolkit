@@ -718,6 +718,13 @@ The same state is written into the `.bentoo-stage-record.json` beside the
 retained staged tree, with the backend (`host`), the `::gentoo` sync time the
 gates ran against, and when they answered.
 
+`--apply` publishes only what such a record proves: the retained tree must
+match the bump byte for byte, prove the depth the policy asks for, and be no
+older than `autoupdate.proof.max_age_days` (7 by default). Anything else is
+reported as **Unproven** and left in the pending list; `--apply` runs no gate,
+fetches nothing and regenerates no Manifest for it. `--repair` is the one
+exception: the tree it adopts is promoted on the gates that run over it.
+
 #### What `--apply` prints
 
 On a terminal, `--apply` draws a live region;

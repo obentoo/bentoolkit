@@ -128,6 +128,30 @@ type AutoupdateConfig struct {
 	// applier may regenerate a missing vendor tarball for, and the command that
 	// publishes one.
 	Vendor VendorConfig `yaml:"vendor,omitempty"`
+	// Proof governs how long a proof taken by `--check --llm` lets an apply
+	// publish the bump it proved.
+	Proof ProofConfig `yaml:"proof,omitempty"`
+}
+
+// ProofConfig is the autoupdate.proof block.
+type ProofConfig struct {
+	// MaxAgeDays is how many days a proof stays valid; an older one must be
+	// taken again. Unset or non-positive means DefaultProofMaxAgeDays.
+	MaxAgeDays int `yaml:"max_age_days,omitempty"`
+}
+
+// DefaultProofMaxAgeDays is how long a proof stays valid when
+// autoupdate.proof.max_age_days is unset: long enough for a weekly check then
+// apply, short enough that ::gentoo has not moved far under it.
+const DefaultProofMaxAgeDays = 7
+
+// GetProofMaxAge returns autoupdate.proof.max_age_days as a duration.
+func (c *AutoupdateConfig) GetProofMaxAge() time.Duration {
+	days := DefaultProofMaxAgeDays
+	if c != nil && c.Proof.MaxAgeDays > 0 {
+		days = c.Proof.MaxAgeDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }
 
 // DefaultVendorHost is the distfiles host the overlay serves its Go vendor
@@ -897,8 +921,8 @@ func (c *AutoupdateConfig) GetDistfilesCache() string {
 // yesterday's sweep costing what it cost yesterday. `install` is reached by
 // --depth=install or by an explicit key here, never by default.
 const (
-	DefaultDepthRevision = "options"
-	DefaultDepthPatch    = "options"
+	DefaultDepthRevision = "patches"
+	DefaultDepthPatch    = "patches"
 	DefaultDepthSeries   = "configure"
 	DefaultDepthMajor    = "configure"
 )

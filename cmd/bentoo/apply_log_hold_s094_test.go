@@ -54,7 +54,7 @@ func s094ApplyRun(t *testing.T, live bool, lg *slog.Logger) *autoupdateRun {
 		_ = inR.Close()
 		_ = out.Close()
 	})
-	d := defaultDeps()
+	d := validating(defaultDeps())
 	stubUIIsTerminal(d, live)
 	d.stdinPollable = func() bool { return true }
 	return &autoupdateRun{opts: testAutoupdateOptions(), deps: d, uiConfig: &config.Config{}, lg: lg}

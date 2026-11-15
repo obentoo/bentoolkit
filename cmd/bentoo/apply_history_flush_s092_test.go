@@ -205,7 +205,7 @@ func s092RunApply(t *testing.T, auOpts *autoupdateOptions) (code int, out string
 		}()
 		auCmd := testAutoupdateCmd()
 		auCmd.SetContext(logging.NewContext(context.Background(), slog.New(slog.NewTextHandler(os.Stderr, nil))))
-		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, ttyDeps(false, true)))
+		code = exitCodeFor(runAutoupdate(auCmd, nil, auOpts, validating(ttyDeps(false, true))))
 	}()
 	data, err := os.ReadFile(f.Name())
 	if err != nil {

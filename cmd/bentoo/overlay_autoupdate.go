@@ -266,6 +266,9 @@ type autoupdateValidatePolicy struct {
 	// --require-isolation and the refusal to promote an unproved bump.
 	RequireIsolation bool
 	RequireProof     bool
+	// ProofMaxAge is autoupdate.proof.max_age_days: how long a proof taken by
+	// `--check --llm` lets `--apply` publish the bump it proved.
+	ProofMaxAge time.Duration
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -1660,6 +1663,7 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		// key gave the setting a home, and neither supersedes the other.
 		RequireIsolation: o.requireIsolation || validateCfg.GetRequireIsolation(),
 		RequireProof:     validateCfg.GetRequireProof(),
+		ProofMaxAge:      cfg.Autoupdate.GetProofMaxAge(),
 	}
 
 	for class, name := range map[validate.Class]string{
@@ -1799,6 +1803,7 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 	// call before the summary below is the one that does the work there.
 	defer finish()
 	extra = append(extra, cd.option)
+	extra = append(extra, ar.publishOnlyProvenOptions()...)
 
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
@@ -1817,10 +1822,25 @@ func (ar *autoupdateRun) runApply(ctx context.Context, overlayPath, configDir, p
 
 	ar.displayApplyResult(result)
 	displayCooldownSummary(cd, []*autoupdate.ApplyResult{result})
-	if err != nil {
+	// An unproven bump is not a failure of the bump, but the operator asked
+	// for this one package to be published and it was not.
+	if err != nil || (result != nil && result.Unproven) {
 		return exitWith(1)
 	}
 	return nil
+}
+
+// publishOnlyProvenOptions makes an apply publish only what `--check --llm`
+// proved, within autoupdate.proof.max_age_days. `--repair` does not take
+// them: its adopted tree is promoted on the gates that run over it.
+func (ar *autoupdateRun) publishOnlyProvenOptions() []autoupdate.ApplierOption {
+	if ar.deps != nil && ar.deps.validatingApply {
+		return nil
+	}
+	return []autoupdate.ApplierOption{
+		autoupdate.WithApplierPublishOnlyProven(true),
+		autoupdate.WithApplierProofMaxAge(ar.validate.ProofMaxAge),
+	}
 }
 
 // newSingleApplier builds the Applier a one-package apply runs with — the
@@ -1916,6 +1936,7 @@ func (ar *autoupdateRun) runApplyAll(ctx context.Context, overlayPath, configDir
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
 	opts = append(opts, extra...)
 	opts = append(opts, cd.option)
+	opts = append(opts, ar.publishOnlyProvenOptions()...)
 
 	applier, err := ar.deps.newApplier(overlayPath, configDir, opts...)
 	if err != nil {
@@ -1946,10 +1967,12 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 		ar.displayApplyResult(result)
 	}
 
-	applied, obsolete, held, waiting := 0, 0, 0, 0
+	applied, obsolete, held, waiting, unproven := 0, 0, 0, 0, 0
 	for _, r := range results {
 		switch {
 		case r == nil:
+		case r.Unproven:
+			unproven++
 		case r.Obsolete:
 			obsolete++
 		case len(r.Waiting) > 0:
@@ -1972,6 +1995,9 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 	}
 	if waiting > 0 {
 		output.Warning.Printf("  Waiting:  %d (required version not available yet; kept in pending)\n", waiting)
+	}
+	if unproven > 0 {
+		output.Warning.Printf("  Unproven: %d (no valid proof; run --check --llm, kept in pending)\n", unproven)
 	}
 	if failures > 0 {
 		output.Error.Printf("  Failed:   %d\n", failures)
@@ -2004,6 +2030,12 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 		if result.ObsoleteReason != "" {
 			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
 		}
+		return
+	}
+
+	if result.Unproven {
+		output.Warning.Println("    Status:  Unproven (not published; kept in pending)")
+		output.Info.Printf("    Reason:  %s\n", result.UnprovenReason)
 		return
 	}
 

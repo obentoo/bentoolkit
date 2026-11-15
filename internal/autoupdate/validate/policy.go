@@ -71,8 +71,13 @@ type DepthPolicy struct {
 }
 
 // DefaultDepthPolicy is the depth table this toolkit SHIPS: a revision or patch
-// bump is read but never built, and a series or major bump is taken as far as
-// configure.
+// bump is unpacked and prepared but never configured, and a series or major
+// bump is taken as far as configure.
+//
+// The floor is patches, not options, because `--apply` publishes only a proof
+// and a proof needs one gate that measured something. The option gate reads
+// meson projects only and skips everything else, so at options a cmake, cargo
+// or binary bump would be measured by nothing and could never be published.
 //
 // An empty policy must not mean this one's fallback. classDepth falls back to
 // DepthCompile, which is right for a hole in a filled-in table but wrong for a
@@ -86,8 +91,8 @@ type DepthPolicy struct {
 func DefaultDepthPolicy() DepthPolicy {
 	return DepthPolicy{
 		ByClass: map[Class]Depth{
-			ClassRevision: DepthOptions,
-			ClassPatch:    DepthOptions,
+			ClassRevision: DepthPatches,
+			ClassPatch:    DepthPatches,
 			ClassSeries:   DepthConfigure,
 			ClassMajor:    DepthConfigure,
 		},

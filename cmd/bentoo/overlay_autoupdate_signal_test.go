@@ -226,7 +226,7 @@ func TestRunAutoupdate_SignalCancels_Apply(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = runAutoupdate(auCmd, nil, auOpts, defaultDeps())
+		_ = runAutoupdate(auCmd, nil, auOpts, validating(defaultDeps()))
 	}()
 
 	// Signal only once runApply has copied the ebuild and spawned the stub
