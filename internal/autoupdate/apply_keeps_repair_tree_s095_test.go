@@ -80,7 +80,7 @@ func TestApplyKeepsRepairTreeSurvivesByteForByte(t *testing.T) {
 	overlayBefore := hashOverlayTree(t, f.overlayDir)
 	entryBefore, _ := f.a.pending.Get(f.pkg)
 
-	result, err := f.a.Apply(t.Context(), f.pkg, false)
+	result, err := f.a.Apply(t.Context(), f.pkg)
 
 	if !errors.Is(err, ErrRepairPending) {
 		t.Fatalf("Apply error = %v, want one wrapping ErrRepairPending", err)
@@ -117,7 +117,7 @@ func TestApplyKeepsRepairTreeSurvivesByteForByte(t *testing.T) {
 // bundle, so the --repair hint and the Apply Result point at it.
 func TestApplyKeepsRepairTreeSetsRepairBundle(t *testing.T) {
 	f := repairPendingFixture(t, markedBundle)
-	result, _ := f.a.Apply(t.Context(), f.pkg, false)
+	result, _ := f.a.Apply(t.Context(), f.pkg)
 	if result == nil {
 		t.Fatal("Apply returned no result")
 	}
@@ -151,7 +151,7 @@ func TestApplyKeepsRepairTreeDoesNotRestage(t *testing.T) {
 	}
 	spawnsBefore := f.watch.spawns
 
-	_, _ = f.a.Apply(t.Context(), f.pkg, false)
+	_, _ = f.a.Apply(t.Context(), f.pkg)
 
 	if f.watch.spawns != spawnsBefore {
 		t.Fatalf("%d child process(es) ran for a refused package", f.watch.spawns-spawnsBefore)
@@ -176,7 +176,7 @@ func TestApplyKeepsRepairTreeGuardUnmarkedStillRestages(t *testing.T) {
 	for name, kind := range map[string]bundleKind{"no bundle": noBundle, "unmarked bundle": unmarkedBundle} {
 		t.Run(name, func(t *testing.T) {
 			f := repairPendingFixture(t, kind)
-			result, err := f.a.Apply(t.Context(), f.pkg, false)
+			result, err := f.a.Apply(t.Context(), f.pkg)
 			if err != nil || !result.Success {
 				t.Fatalf("Apply failed: %v", err)
 			}
@@ -242,7 +242,7 @@ func TestApplyKeepsRepairTreeFailedRepairWritesMark(t *testing.T) {
 			f := repairPendingFixture(t, unmarkedBundle)
 			setup(t, f)
 			WithAdoptedStagedTree(f.staged)(f.a)
-			result, err := f.a.Apply(t.Context(), f.pkg, false)
+			result, err := f.a.Apply(t.Context(), f.pkg)
 			if err == nil || result.Success {
 				t.Fatalf("fixture: the re-validation passed")
 			}
@@ -261,7 +261,7 @@ func TestApplyKeepsRepairTreeFailedRepairWritesMark(t *testing.T) {
 // failed --apply writes carries no repair mark.
 func TestApplyKeepsRepairTreeGuardPlainFailureLeavesNoMark(t *testing.T) {
 	a, _, pkg, _, _ := promoteFixture(t, WithApplierDistdir(t.TempDir(), ""))
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err == nil || result.RepairBundle == "" {
 		t.Fatalf("fixture: want a failed apply with a bundle, got err %v, bundle %q", err, result.RepairBundle)
 	}
@@ -279,7 +279,7 @@ func TestApplyKeepsRepairTreeGuardPlainFailureLeavesNoMark(t *testing.T) {
 func TestApplyKeepsRepairTreeGuardAdoptedPathStillAdopts(t *testing.T) {
 	f := repairPendingFixture(t, markedBundle)
 	WithAdoptedStagedTree(f.staged)(f.a)
-	result, err := f.a.Apply(t.Context(), f.pkg, false)
+	result, err := f.a.Apply(t.Context(), f.pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("Apply on the adopted tree failed: %v", err)
 	}

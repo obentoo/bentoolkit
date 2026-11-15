@@ -22,18 +22,14 @@ const DefaultApplyLLMConcurrency = 2
 type applySlots struct {
 	// build bounds the build gates selected by the depth policy.
 	build chan struct{}
-	// compile serialises the privileged --compile step: its confirmation prompt
-	// and its sudo/doas invocation share one terminal and must not interleave.
-	compile chan struct{}
 	// llm bounds the LLM agents.
 	llm chan struct{}
 }
 
 func newApplySlots(build, llm int) applySlots {
 	return applySlots{
-		build:   make(chan struct{}, max(build, 1)),
-		compile: make(chan struct{}, 1),
-		llm:     make(chan struct{}, max(llm, 1)),
+		build: make(chan struct{}, max(build, 1)),
+		llm:   make(chan struct{}, max(llm, 1)),
 	}
 }
 

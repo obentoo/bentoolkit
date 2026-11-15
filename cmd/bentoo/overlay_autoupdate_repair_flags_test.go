@@ -295,12 +295,3 @@ func TestRepairFlagNeedsTheOverlayLock(t *testing.T) {
 		t.Fatalf("autoupdateNeedsOverlayLock() = false for --repair")
 	}
 }
-
-// validating lets d's `--apply` validate a bump that has no proof, the way
-// apply worked before it became publish-only. It is for the tests that drive
-// the apply path's own screen, cooldown and signal handling through a bump
-// they never proved; they move to seeding a proof when that path is removed.
-func validating(d *deps) *deps {
-	d.validatingApply = true
-	return d
-}

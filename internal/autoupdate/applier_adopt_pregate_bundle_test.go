@@ -88,7 +88,7 @@ func TestAdoptedMissingCandidateRewritesTheBundle(t *testing.T) {
 	removeAdoptedCandidate(t, staged)
 	before := hashOverlayTree(t, overlayDir)
 
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	assertBundleRewrittenAtAdopt(t, result, err, staged)
 	if _, serr := os.Stat(adoptedCandidatePath(staged)); serr == nil {
 		t.Fatalf("a fresh candidate was staged into the adopted tree")
@@ -104,7 +104,7 @@ func TestAdoptedUnreadableInputsRewriteTheBundle(t *testing.T) {
 	a, overlayDir, pkg, staged, body, _, _ := adoptedFixture(t, mockExecCommandSuccess)
 	makePublishedManifestUnreadable(t, overlayDir)
 
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	assertBundleRewrittenAtAdopt(t, result, err, staged)
 	got, rerr := os.ReadFile(adoptedCandidatePath(staged))
 	if rerr != nil || string(got) != body {
@@ -139,7 +139,7 @@ func TestAdoptedRefusedRootLeavesEveryBundleAlone(t *testing.T) {
 			WithAdoptedStagedTree(other)(a)
 
 			stagedBefore, otherBefore, overlayBefore := hashOverlayTree(t, staged), hashOverlayTree(t, other), hashOverlayTree(t, overlayDir)
-			result, err := a.Apply(t.Context(), pkg, false)
+			result, err := a.Apply(t.Context(), pkg)
 			if err == nil || result.Success {
 				t.Fatalf("Apply adopted %s, which is not the bump's staged tree %s", other, staged)
 			}
@@ -163,7 +163,7 @@ func TestAdoptedRefusedRootLeavesEveryBundleAlone(t *testing.T) {
 		removeAdoptedCandidate(t, staged)
 		a.stagingRoot = ""
 		before := hashOverlayTree(t, staged)
-		result, err := a.Apply(t.Context(), pkg, false)
+		result, err := a.Apply(t.Context(), pkg)
 		if err == nil || result.Success {
 			t.Fatalf("Apply adopted a tree with no staging root configured")
 		}
@@ -187,7 +187,7 @@ func TestAdoptedPreCandidateFailureWritesNoRecord(t *testing.T) {
 		t.Run(f.name+" with no record", func(t *testing.T) {
 			a, overlayDir, pkg, staged, _, _, _ := adoptedFixture(t, mockExecCommandSuccess)
 			f.breakIt(t, overlayDir, staged)
-			if result, err := a.Apply(t.Context(), pkg, false); err == nil || result.Success {
+			if result, err := a.Apply(t.Context(), pkg); err == nil || result.Success {
 				t.Fatalf("fixture: Apply succeeded")
 			}
 			if _, serr := os.Stat(validate.StageRecordPath(staged)); serr == nil {
@@ -208,7 +208,7 @@ func TestAdoptedPreCandidateFailureWritesNoRecord(t *testing.T) {
 				t.Fatal(err)
 			}
 			f.breakIt(t, overlayDir, staged)
-			if result, err := a.Apply(t.Context(), pkg, false); err == nil || result.Success {
+			if result, err := a.Apply(t.Context(), pkg); err == nil || result.Success {
 				t.Fatalf("fixture: Apply succeeded")
 			}
 			got, err := os.ReadFile(validate.StageRecordPath(staged))

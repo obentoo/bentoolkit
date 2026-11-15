@@ -24,7 +24,7 @@ import (
 // so after a cancel each unstarted package still gets a non-nil, failed result
 // in input order; an early break would leave nil results instead. A bump that requires another pending bump runs in a later
 // wave (applyWaves), so its requirement gate sees what the earlier one published.
-func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile bool, concurrency int) ([]*ApplyResult, int) {
+func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, concurrency int) ([]*ApplyResult, int) {
 	results := make([]*ApplyResult, len(updates))
 
 	pins := func(pkg, atom string) string {
@@ -37,7 +37,7 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 	}
 	failures := 0
 	for _, wave := range applyWaves(updates, pins) {
-		failures += a.applyWave(ctx, updates, wave, results, compile, concurrency)
+		failures += a.applyWave(ctx, updates, wave, results, concurrency)
 	}
 	return results, failures
 }
@@ -45,7 +45,7 @@ func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, compile
 // applyWave applies the entries of updates named by wave on a bounded worker
 // pool, writing each result at its original index in results, and returns how
 // many failed.
-func (a *Applier) applyWave(ctx context.Context, updates []PendingUpdate, wave []int, results []*ApplyResult, compile bool, concurrency int) int {
+func (a *Applier) applyWave(ctx context.Context, updates []PendingUpdate, wave []int, results []*ApplyResult, concurrency int) int {
 	// Workers write results[i] at distinct indices (no lock) and tally failures
 	// atomically.
 	jobs := concurrency
@@ -69,7 +69,7 @@ func (a *Applier) applyWave(ctx context.Context, updates []PendingUpdate, wave [
 		go func() {
 			defer wg.Done()
 			for i := range queue {
-				result, err := a.Apply(ctx, updates[i].Package, compile)
+				result, err := a.Apply(ctx, updates[i].Package)
 				results[i] = result
 				if err != nil {
 					atomic.AddInt64(&failures, 1)

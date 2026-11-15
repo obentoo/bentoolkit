@@ -47,6 +47,8 @@ func TestReviveAppliesAfterReenable(t *testing.T) {
 		autoupdate.WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}),
+		autoupdate.WithApplierStagingRoot(filepath.Join(configDir, "staging")),
+		cleanBuildOptions()[0], cleanBuildOptions()[1],
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)

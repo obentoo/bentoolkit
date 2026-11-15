@@ -140,7 +140,7 @@ func (a *Applier) liberatedVersion(key string) (string, error) {
 // touched: the candidate apply that follows owns those. Nothing is done when
 // the line has no unmasked version or is already at or past the target. The
 // returned result is nil when nothing was attempted.
-func (a *Applier) applyGraduation(ctx context.Context, key string, upd PendingUpdate, compile bool) *ApplyResult {
+func (a *Applier) applyGraduation(ctx context.Context, key string, upd PendingUpdate) *ApplyResult {
 	current, err := a.liberatedVersion(key)
 	if err != nil {
 		a.logger().Warn("cooldown: graduation skipped: the line's unmasked version cannot be read", "package", key, "err", err)
@@ -182,7 +182,7 @@ func (a *Applier) applyGraduation(ctx context.Context, key string, upd PendingUp
 	view.reporter = tui.Noop()
 	// The error is also on res.Error, logged below; a failed graduation never
 	// fails the candidate, so it is not returned.
-	res, _ := view.Apply(ctx, key, compile)
+	res, _ := view.Apply(ctx, key)
 	if res != nil {
 		res.Graduation = true
 		if res.Success {

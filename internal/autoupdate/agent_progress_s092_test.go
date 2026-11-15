@@ -79,7 +79,7 @@ func TestAgentProgressManifestFixStreamsIntoTheTask(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("fixture: the re-check was scripted to fail")
 	}
 
@@ -114,25 +114,6 @@ func TestAgentProgressManifestFixStreamsIntoTheTask(t *testing.T) {
 	if fi, err := os.Stat(logPath); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Errorf("agent log mode: %v (err %v), want 0600", fi.Mode().Perm(), err)
 	}
-}
-
-// The build fixer on the --compile path: its request carries the task's
-// callback and the stage's log path.
-func TestAgentProgressBuildFixCompilePath(t *testing.T) {
-	spy := &progressBuildFixSpy{stage: fixer.StageBuildFix, buildFixSpy: buildFixSpy{err: errors.New("stop after the request is recorded")}}
-	h := buildFixFixture(t, &spy.buildFixSpy, buildRun{output: preparedThenConfigureFails, err: errors.New("exit status 1")})
-	WithApplierBuildFixer(spy)(h.applier)
-	rec := &recordingReporter{}
-	WithApplierReporter(rec)(h.applier)
-
-	if result, _ := h.applier.Apply(t.Context(), h.pkg, true); result.Success {
-		t.Fatal("fixture: the fix was scripted to fail")
-	}
-	if len(spy.calls) != 1 {
-		t.Fatalf("the build fixer ran %d time(s), want 1", len(spy.calls))
-	}
-	assertAgentWiring(t, h.applier, rec, spy.calls[0].Progress, spy.calls[0].LogPath,
-		h.pkg, "1.29.2", fixer.StageBuildFix)
 }
 
 // The build fixer on the depth-driven gates path.

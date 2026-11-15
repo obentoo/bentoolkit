@@ -52,7 +52,7 @@ func adoptedFixture(t *testing.T, seam func(ctx context.Context, name string, ar
 // R5.4: the operator's edited bytes are what is published, no agent runs.
 func TestApplyAdoptedTreePassingGatesPromotesTheEditedBytes(t *testing.T) {
 	a, overlayDir, pkg, _, body, mf, bf := adoptedFixture(t, mockExecCommandSuccess)
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("Apply on the adopted tree failed: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestApplyAdoptedTreeFailingGateRewritesBundleAndKeepsTree(t *testing.T) {
 	failing := func(ctx context.Context, _ string, _ ...string) *exec.Cmd { return exec.CommandContext(ctx, "false") }
 	a, overlayDir, pkg, staged, body, mf, bf := adoptedFixture(t, failing)
 	before := hashOverlayTree(t, overlayDir)
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err == nil || result.Success {
 		t.Fatalf("fixture: re-validation passed although every child failed")
 	}
@@ -117,7 +117,7 @@ func TestApplyAdoptedTreeMissingCandidateIsAnErrorNamingTheRoot(t *testing.T) {
 		t.Fatal(err)
 	}
 	WithAdoptedStagedTree(empty)(a)
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err == nil || result.Success {
 		t.Fatalf("Apply succeeded on an adopted tree with no candidate ebuild")
 	}

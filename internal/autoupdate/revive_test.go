@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 )
 
@@ -62,7 +63,11 @@ func (a *failingApplier) SeedFromGentoo(pkg, srcDir, version string) error {
 
 func (a *failingApplier) MarkReenabled(pkg string) { a.real.MarkReenabled(pkg) }
 
-func (a *failingApplier) Apply(context.Context, string, bool) (*ApplyResult, error) {
+func (a *failingApplier) Validate(context.Context, string, validate.Depth) validate.EbuildResult {
+	return validate.EbuildResult{}
+}
+
+func (a *failingApplier) Apply(context.Context, string) (*ApplyResult, error) {
 	return a.result, a.err
 }
 

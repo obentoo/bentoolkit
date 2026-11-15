@@ -73,7 +73,6 @@ func checkFixture(t *testing.T, stagingRoot string, failManifest bool) (*Applier
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(execCommand),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(stagingRoot),
 		WithApplierDepth(validate.DepthCompile),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -251,7 +250,6 @@ func applyFixture(t *testing.T, stagingRoot string, failManifest bool) (*Applier
 	applier, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithExecCommand(execCommand),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(stagingRoot),
 		WithApplierDepth(validate.DepthCompile),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -274,7 +272,7 @@ func assertApplyRefused(t *testing.T, applier *Applier, pkg, overlayDir string, 
 	t.Helper()
 
 	before := hashOverlayTree(t, overlayDir)
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 
 	if err == nil {
 		t.Errorf("%s: Apply returned no error\nnothing read this candidate, so an apply that succeeds here publishes an unmeasured ebuild into an overlay that auto-commits and pushes", what)

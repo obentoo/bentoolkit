@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 )
 
@@ -49,7 +50,7 @@ func TestApply_ManifestFix_Recovers(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply returned error: %v", err)
 	}
@@ -140,7 +141,7 @@ func TestApply_ManifestFix_QAAdvisory(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply returned error: %v", err)
 	}
@@ -187,7 +188,7 @@ func TestApply_ManifestFix_StillFails(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(t.Context(), pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg)
 	if applyErr == nil {
 		t.Fatal("expected an error when the manifest still fails after a fix")
 	}
@@ -245,7 +246,7 @@ func TestApply_ManifestFix_FixerErrors(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(t.Context(), pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg)
 	if applyErr == nil || result.Success {
 		t.Fatal("expected failure when the fixer errors")
 	}
@@ -286,7 +287,7 @@ func TestApply_NoFixer_Unchanged(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(t.Context(), pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg)
 	if applyErr == nil || result.Success {
 		t.Fatal("expected the legacy manifest failure")
 	}
@@ -363,7 +364,7 @@ func TestApply_SubstitutionFailureLeavesNoOrphan(t *testing.T) {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	result, applyErr := applier.Apply(t.Context(), pkg, false)
+	result, applyErr := applier.Apply(t.Context(), pkg)
 	if applyErr == nil || result.Success {
 		t.Fatal("expected the substitution to fail on an ebuild with no commit variable")
 	}
@@ -561,48 +562,14 @@ func pkgdevFailsUntilFixed() func(ctx context.Context, name string, arg ...strin
 	}
 }
 
-// gateDistdirFrom answers WHICH DIRECTORY THIS RUN'S GATES WERE POINTED AT, and
-// "" when no gate of this run reported one (S043-R2.1, R2.4).
-//
-// # Why this observation point and not another
-//
-// It reads result.CompileDistdir, which recordCompileDistdir sets to
-// staticGateDistdir(cand) — literally the same resolver the option gate is given
-// through validate.Options.Distdir, called once per attempt so the directory
-// REPORTED and the directory the child was handed are one resolution rather than
-// two readings of a filesystem a moment apart (see buildAttempt). So a directory
-// answered here is the directory the gates of this apply searched, which is the
-// claim the tests using it make.
-//
-// The stage record beside a staged tree carries the same fact in its gate
-// reasons — it is the artefact the 2026-08-22 defect was diagnosed from — and it
-// would be the richer source. It is not reachable from this harness: newGateApplier
-// builds an applier with NO staging root, runStaticGates returns nil for an
-// unstaged candidate, and giving the harness a staging root would take the four
-// story-030 tests that share it off the path their gate exists on (the pre-flight
-// that raises ErrDistdirUnusable is runManifest's, and the staged manifest has
-// none), turning six passing environment-classification tests red for a reason
-// that has nothing to do with them.
-//
-// # The host dependency, stated rather than hidden
-//
-// CompileDistdir is populated only once a build child has actually spawned, and
-// reaching that costs a privilege tool: detectPrivilegeTool (applier.go) calls
-// exec.LookPath DIRECTLY, not through the a.lookPath seam, so it cannot be
-// injected. On a host with neither sudo nor doas the compile gate returns before
-// compileOnce and there is nothing to observe — so this SKIPS, in the same shape
-// and for the same reason TestApplierCompileLogPreserved already skips. A skip is
-// reported; a "" quietly returned would let a guard pass while observing nothing,
-// which is the failure story 043 exists to correct.
-func gateDistdirFrom(t *testing.T, res *ApplyResult) string {
-	t.Helper()
-	if !hasPrivilegeTool() {
-		t.Skip("the compile gate's distdir is only observable where sudo/doas is on PATH (detectPrivilegeTool)")
+// gateReasons joins what every gate of a check said, which is where a gate
+// names the directory it read its archive from.
+func gateReasons(res validate.EbuildResult) string {
+	reasons := make([]string, 0, len(res.Gates))
+	for _, gate := range res.Gates {
+		reasons = append(reasons, string(gate.Gate)+": "+gate.Reason)
 	}
-	if res == nil {
-		return ""
-	}
-	return res.CompileDistdir
+	return strings.Join(reasons, "\n")
 }
 
 // gatePkg is one pending bump for newGateApplier.
@@ -646,7 +613,6 @@ func newGateApplier(t *testing.T, seam func(ctx context.Context, name string, ar
 		// answered by accident — the default reads os.Stdin, and under `go test`
 		// that is a closed file whose EOF reads as "no", so a compile gate would
 		// decline for a reason no test wrote down.
-		WithConfirmFunc(func(string) bool { return true }),
 	)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
@@ -665,7 +631,7 @@ func TestEnvironmentFailureSkipsTheManifestFixer(t *testing.T) {
 		pkgdevFailsPrinting(productionManifestFailure),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err == nil || result == nil || result.Success {
 		t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
 	}
@@ -708,7 +674,7 @@ func TestEnvironmentFailureReportsCauseAsEnvironment(t *testing.T) {
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 	applier.log = warns.logger()
 
-	_, err := applier.Apply(t.Context(), pkg, false)
+	_, err := applier.Apply(t.Context(), pkg)
 	if err == nil {
 		t.Fatal("expected the apply to fail")
 	}
@@ -761,7 +727,7 @@ func TestRepairableFailureStillInvokesTheFixer(t *testing.T) {
 	pkg := "dev-games/godot"
 	applier, fixer, rec := newGateApplier(t, seam, gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil || result == nil || !result.Success {
 		t.Fatalf("expected the repaired apply to succeed: err=%v result=%+v", err, result)
 	}
@@ -819,7 +785,7 @@ func TestEnvironmentFailureContinuesTheBatchAndExitsNonZero(t *testing.T) {
 		gatePkg{failed, "4.7_rc3", "4.7"},
 		gatePkg{healthy, "1.0", "1.1"})
 
-	badResult, badErr := applier.Apply(t.Context(), failed, false)
+	badResult, badErr := applier.Apply(t.Context(), failed)
 	if badErr == nil || badResult == nil || badResult.Success {
 		t.Fatalf("the environment failure must fail the apply: err=%v result=%+v", badErr, badResult)
 	}
@@ -829,7 +795,7 @@ func TestEnvironmentFailureContinuesTheBatchAndExitsNonZero(t *testing.T) {
 		t.Error("result.Error is nil on a failed apply; the batch summary would show it as fine")
 	}
 
-	goodResult, goodErr := applier.Apply(t.Context(), healthy, false)
+	goodResult, goodErr := applier.Apply(t.Context(), healthy)
 	if goodErr != nil || goodResult == nil || !goodResult.Success {
 		t.Fatalf("the batch did not continue past the environment failure: err=%v result=%+v", goodErr, goodResult)
 	}
@@ -900,7 +866,7 @@ func TestUnwritableDistdirPreflightSkipsTheManifestFixer(t *testing.T) {
 		pkgdevFailsPrinting(productionManifestFailure),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err == nil || result == nil || result.Success {
 		t.Fatalf("expected the apply to fail: err=%v result=%+v", err, result)
 	}
@@ -948,7 +914,7 @@ func TestUncreatableDistdirSkipsTheManifestFixer(t *testing.T) {
 		pkgdevFailsPrinting(productionManifestFailure),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	_, err := applier.Apply(t.Context(), pkg, false)
+	_, err := applier.Apply(t.Context(), pkg)
 	if err == nil {
 		t.Fatal("expected the apply to fail")
 	}
@@ -1025,7 +991,7 @@ func TestPreflightRefusalStatesTheCauseWasTheEnvironment(t *testing.T) {
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 	applier.log = warns.logger()
 
-	_, err := applier.Apply(t.Context(), pkg, false)
+	_, err := applier.Apply(t.Context(), pkg)
 	if err == nil {
 		t.Fatal("expected the apply to fail")
 	}
@@ -1069,7 +1035,7 @@ func TestNonEnvironmentPreflightFailureStillReachesTheFixer(t *testing.T) {
 		pkgdevFailsPrinting(productionManifestFailure),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("expected the apply to fail: the re-run fails too")
 	}
 	if fixer.called != 1 {
@@ -1105,7 +1071,7 @@ func TestManifestFixSandboxIsMadeUnderTheHostTempRoot(t *testing.T) {
 		pkgdevFailsPrinting("some failure a fixer could plausibly repair"),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("expected the apply to fail: the re-run fails too")
 	}
 	if fixer.called != 1 {
@@ -1148,7 +1114,7 @@ func TestManifestFixSandboxFallsBackWhenTheHostCannotAnswer(t *testing.T) {
 		pkgdevFailsPrinting("some failure a fixer could plausibly repair"),
 		gatePkg{pkg, "4.7_rc3", "4.7"})
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("expected the apply to fail")
 	}
 	if fixer.called != 1 {

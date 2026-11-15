@@ -98,7 +98,6 @@ func s092ApplyFailingTwice(t *testing.T, configDir, pkg, oldV, newV, first, rech
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
 		WithApplierFixer(fx),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(host, ""),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -106,7 +105,7 @@ func s092ApplyFailingTwice(t *testing.T, configDir, pkg, oldV, newV, first, rech
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
-	_, applyErr := applier.Apply(t.Context(), pkg, false)
+	_, applyErr := applier.Apply(t.Context(), pkg)
 	if fx.called != 1 {
 		t.Fatalf("the fixer ran %d time(s), want 1: the re-check is what this test is about", fx.called)
 	}

@@ -38,19 +38,17 @@ func rpWrite(t *testing.T, overlay, rel, content string) {
 	}
 }
 
-func TestRequiresPairAppliesBothInOneRun(t *testing.T) {
-	// Both apply paths: in place, and staged — where the second wave's gate
-	// must see what the first wave's promotion published into the overlay.
-	for _, staged := range []bool{false, true} {
-		name := "in place"
-		if staged {
-			name = "staged"
-		}
-		t.Run(name, func(t *testing.T) { requiresPairRun(t, staged) })
-	}
+// TestRequiresPairLandsInTwoRounds: a bump that requires another bump of the
+// same batch is proved only once that one is published. The first round's
+// check proves dart and holds flutter, whose requirement is not yet in the
+// overlay; the apply publishes dart and leaves flutter unproven and pending.
+// The second round's check proves flutter, and its apply publishes it with
+// the pin rewritten to the dart that landed.
+func TestRequiresPairLandsInTwoRounds(t *testing.T) {
+	requiresPairRun(t)
 }
 
-func requiresPairRun(t *testing.T, staged bool) {
+func requiresPairRun(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	gentoo := t.TempDir()
@@ -109,34 +107,45 @@ func requiresPairRun(t *testing.T, staged bool) {
 		autoupdate.WithApplierDistdir(t.TempDir(), ""),
 		autoupdate.WithApplierGentooPath(gentoo),
 		autoupdate.WithApplierPackagesConfig(&registry.PackagesConfig{Packages: records}),
+		autoupdate.WithApplierStagingRoot(filepath.Join(tmp, "staging")),
+		autoupdate.WithApplierDepth(validate.DepthPatches),
 	}
-	if staged {
-		opts = append(opts,
-			autoupdate.WithApplierStagingRoot(filepath.Join(tmp, "staging")),
-			autoupdate.WithApplierDepth(validate.DepthOptions),
-			autoupdate.WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
-		)
-	}
+	opts = append(opts, cleanBuildOptions()...)
 	applier, err := autoupdate.NewApplier(overlay, configDir, opts...)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
 	}
 
-	// Concurrency 1: one worker, so only the wave order can put dart first.
-	results, failures := applier.ApplyAll(t.Context(), updates, false, 1)
-
-	if failures != 0 {
-		t.Errorf("failures = %d, want 0", failures)
+	// Round one: the check proves dart and holds flutter; the apply publishes
+	// dart and refuses flutter, which no proof stands behind.
+	for _, u := range updates {
+		applier.Validate(t.Context(), u.Package, validate.DepthNone)
 	}
-	for i, u := range updates {
-		if i >= len(results) || results[i] == nil {
-			t.Fatalf("no result for %s at index %d", u.Package, i)
+	results, failures := applier.ApplyAll(t.Context(), updates, 1)
+	if failures != 0 {
+		t.Errorf("round one: failures = %d, want 0 (an unproven bump is not a failure)", failures)
+	}
+	byPkg := map[string]*autoupdate.ApplyResult{}
+	for _, r := range results {
+		if r != nil {
+			byPkg[r.Package] = r
 		}
-		r := results[i]
-		if r.Package != u.Package || !r.Success || len(r.Waiting) != 0 {
-			t.Errorf("results[%d] = {Package:%q Success:%v Waiting:%v Error:%v}, want %s applied",
-				i, r.Package, r.Success, r.Waiting, r.Error, u.Package)
-		}
+	}
+	if r := byPkg["dev-lang/dart@stable"]; r == nil || !r.Success {
+		t.Fatalf("round one: dart@stable was not published: %+v", r)
+	}
+	if r := byPkg["dev-lang/flutter"]; r == nil || !r.Unproven {
+		t.Fatalf("round one: flutter was published or failed although its requirement was not in the overlay when it was checked: %+v", r)
+	}
+	if !pending.Has("dev-lang/flutter") {
+		t.Fatal("round one: flutter left the pending list; it must wait for the next check")
+	}
+
+	// Round two: dart is in the overlay, so the check proves flutter.
+	applier.Validate(t.Context(), "dev-lang/flutter", validate.DepthNone)
+	flutter, ferr := applier.Apply(t.Context(), "dev-lang/flutter")
+	if ferr != nil || flutter == nil || !flutter.Success {
+		t.Fatalf("round two: flutter was not published: %+v (err %v)", flutter, ferr)
 	}
 
 	if _, err := os.Stat(filepath.Join(overlay, "dev-lang/dart/dart-3.14.0.ebuild")); err != nil {

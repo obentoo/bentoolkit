@@ -75,6 +75,7 @@ func newReviveFixture(t *testing.T, withRequires bool) *reviveFixture {
 		autoupdate.WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
 			return exec.CommandContext(ctx, "true")
 		}))
+	opts = append(opts, cleanBuildOptions()...)
 	applier, err := autoupdate.NewApplier(f.overlay, f.configDir, opts...)
 	if err != nil {
 		t.Fatalf("NewApplier: %v", err)
@@ -91,8 +92,7 @@ func (f *reviveFixture) revive(t *testing.T) autoupdate.ReviveOutcome {
 		return autoupdate.NewChecker(f.overlay,
 			append(f.run.reviveCheckerOptions(f.configDir, 0, 0, config.LLMConfig{}), autoupdate.WithPendingList(f.pending))...)
 	}
-	reviver, err := autoupdate.NewReviver(f.overlay, f.applier, f.fake, newChecker,
-		autoupdate.WithReviveCompile(f.run.opts.compile))
+	reviver, err := autoupdate.NewReviver(f.overlay, f.applier, f.fake, newChecker)
 	if err != nil {
 		t.Fatalf("NewReviver: %v", err)
 	}

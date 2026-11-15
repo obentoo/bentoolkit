@@ -37,7 +37,7 @@ func (e *s090Apply) s090Record(t *testing.T) validate.StageRecord {
 func (e *s090Apply) s090ReapplyRevalidates(t *testing.T) (*ApplyResult, error) {
 	t.Helper()
 	goBefore, headBefore := e.s090VendorRuns()
-	result, err := e.applier.Apply(t.Context(), s090Pkg, false)
+	result, err := e.applier.Apply(t.Context(), s090Pkg)
 	if result == nil {
 		t.Fatalf("second Apply returned no result (err %v)", err)
 	}
@@ -79,7 +79,7 @@ func TestRetainedTreeWithUnpublishedVendorIsRevalidated(t *testing.T) {
 
 	t.Run("upload pending then apply", func(t *testing.T) {
 		e := s090ApplyFixture(t, nil, false)
-		if _, err := e.applier.Apply(t.Context(), s090Pkg, false); !errors.Is(err, ErrVendorUploadPending) {
+		if _, err := e.applier.Apply(t.Context(), s090Pkg); !errors.Is(err, ErrVendorUploadPending) {
 			t.Fatalf("first Apply error = %v, want ErrVendorUploadPending", err)
 		}
 		if got := e.s090Record(t).VendorUnpublished; got != s090VendorFile {
@@ -98,7 +98,7 @@ func TestRetainedTreeWithUnpublishedVendorIsRevalidated(t *testing.T) {
 	t.Run("upload fails then apply", func(t *testing.T) {
 		e := s090ApplyFixture(t, s090UploadCmd, false)
 		e.exec.uploadFail = true
-		if _, err := e.applier.Apply(t.Context(), s090Pkg, false); !errors.Is(err, ErrVendorUpload) {
+		if _, err := e.applier.Apply(t.Context(), s090Pkg); !errors.Is(err, ErrVendorUpload) {
 			t.Fatalf("first Apply error = %v, want ErrVendorUpload", err)
 		}
 		if got := e.s090Record(t).VendorUnpublished; got != s090VendorFile {
@@ -129,7 +129,7 @@ func TestRetainedTreeWithUnpublishedVendorIsRevalidated(t *testing.T) {
 		}
 
 		goBefore, _ := e.s090VendorRuns()
-		result, err := e.applier.Apply(t.Context(), s090Pkg, false)
+		result, err := e.applier.Apply(t.Context(), s090Pkg)
 		if err != nil || result == nil || !result.Success {
 			t.Fatalf("Apply = (%+v, %v), want the retained tree promoted", result, err)
 		}

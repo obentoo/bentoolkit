@@ -49,7 +49,6 @@ func checkUntrustedRun(t *testing.T, update PendingUpdate) (*Applier, *untrusted
 	rec := &commandRecorder{}
 	a := f.applier(t,
 		WithExecCommand(rec.build),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(stagingRoot),
 		WithApplierDepth(validate.DepthCompile),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),

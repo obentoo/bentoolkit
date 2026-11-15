@@ -244,7 +244,7 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	if err != nil {
 		return err
 	}
-	result, err := applier.Apply(applyCtx, b.Package, false)
+	result, err := applier.Apply(applyCtx, b.Package)
 	finish()
 
 	switch {

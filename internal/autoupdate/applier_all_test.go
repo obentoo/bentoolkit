@@ -70,7 +70,7 @@ func TestApplyAllConcurrentSuccess(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		results, failures = b.applier.ApplyAll(t.Context(), updates, false, concurrency)
+		results, failures = b.applier.ApplyAll(t.Context(), updates, concurrency)
 	}()
 	barrier.openOnceArrived(t, "manifest steps", concurrency)
 	waitReturned(t, "ApplyAll", done)
@@ -116,7 +116,7 @@ func TestApplyAllCountsFailures(t *testing.T) {
 	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(n, "1.0.0", "2.0.0"), failChild: true})
 	updates := b.updates
 
-	results, failures := b.runApplyAll(t, t.Context(), false, concurrency)
+	results, failures := b.runApplyAll(t, t.Context(), concurrency)
 
 	if failures != n {
 		t.Errorf("failures = %d, want %d", failures, n)
@@ -192,7 +192,7 @@ func TestApplyAllContinuesPastRejectedValue(t *testing.T) {
 				t.Fatalf("NewApplier: %v", err)
 			}
 
-			results, failures := applier.ApplyAll(t.Context(), updates, false, concurrency)
+			results, failures := applier.ApplyAll(t.Context(), updates, concurrency)
 
 			if failures != 1 {
 				t.Errorf("failures = %d, want exactly 1 (the rejected package)", failures)

@@ -126,13 +126,12 @@ func TestApplyFailureWithoutStagedTreeWritesNoBundle(t *testing.T) {
 	a, err := NewApplier(overlayDir, configDir,
 		WithApplierPendingList(pending),
 		WithApplierDistdir(t.TempDir(), ""),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithExecCommand(func(ctx context.Context, _ string, _ ...string) *exec.Cmd { return exec.CommandContext(ctx, "false") }),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := a.Apply(t.Context(), repairBundlePkg, false)
+	result, err := a.Apply(t.Context(), repairBundlePkg)
 	if err == nil || result.Success {
 		t.Fatalf("fixture: the bump did not fail")
 	}

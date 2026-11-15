@@ -88,7 +88,7 @@ func TestApplyRegeneratesMetadataCache(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("Apply: %v (success=%v)", err, result.Success)
 	}

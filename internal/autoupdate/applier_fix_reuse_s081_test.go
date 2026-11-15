@@ -352,7 +352,6 @@ printf '%s\n' 'SRC_URI is unreachable: 404 Not Found'; exit 1`
 		WithApplierFixer(fx),
 		WithApplierReporter(rec),
 		WithApplierLogger(sink.logger()),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(host, ""),
 		WithApplierDistfilesCache(cache),
@@ -372,7 +371,7 @@ printf '%s\n' 'SRC_URI is unreachable: 404 Not Found'; exit 1`
 	})
 	hostBefore, cacheBefore := hashDistdirTree(t, host), hashDistdirTree(t, cache)
 
-	_, _ = applier.Apply(t.Context(), s081Pkg, false)
+	_, _ = applier.Apply(t.Context(), s081Pkg)
 
 	if fx.called != 1 {
 		t.Fatalf("the fixer ran %d time(s), want 1; this test is about the distdir it was given", fx.called)
@@ -437,7 +436,6 @@ func s081StagedFixture(t *testing.T, seam func(ctx context.Context, name string,
 		WithApplierFixer(fx),
 		WithApplierReporter(rec),
 		WithApplierLogger(sink.logger()),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierDistdir(host, ""),
 		WithApplierDistfilesCache(cache),
 	)

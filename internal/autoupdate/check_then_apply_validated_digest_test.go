@@ -38,7 +38,6 @@ func scriptedBuildApplier(t *testing.T, run buildRun, builds *int) (a *Applier, 
 			*builds++
 			return []byte(run.output), run.err
 		})),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(filepath.Join(tmp, "staging")),
 		WithApplierDistdir(t.TempDir(), ""),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
@@ -73,7 +72,7 @@ func TestCheckRecordsValidatedDigestSoApplyReuses(t *testing.T) {
 	}
 
 	before := builds
-	result, err := a.Apply(t.Context(), pkg, false)
+	result, err := a.Apply(t.Context(), pkg)
 	if err != nil || !result.Success {
 		t.Fatalf("Apply: %v", err)
 	}

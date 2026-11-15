@@ -1,7 +1,6 @@
 package autoupdate
 
 import (
-	"bufio"
 	"bytes"
 	"cmp"
 	"context"
@@ -18,7 +17,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/cooldown"
@@ -35,7 +33,6 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
-	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
@@ -70,8 +67,6 @@ var (
 	ErrCompileFailed = errors.New("compile test failed")
 	// ErrNoPrivilegeEscalation is returned when neither sudo nor doas is available
 	ErrNoPrivilegeEscalation = errors.New("no privilege escalation tool available (sudo or doas)")
-	// ErrUserDeclined is returned when user declines the compile confirmation
-	ErrUserDeclined = errors.New("user declined compile test")
 	// ErrInvalidNewVersion is returned when the detected upstream version cannot
 	// be coerced into a well-formed Gentoo PV (e.g. it carries a tag prefix that
 	// survives normalization, or is not a version at all).
@@ -161,32 +156,6 @@ type ApplyResult struct {
 	// exactly when IsolationVerified is true. On a run skipped by
 	// --require-isolation it is the reason the compile never happened.
 	IsolationReason string
-	// CompileDistdir is the directory THIS RUN resolved for the privileged
-	// compile gate's archives — the apply's own fetch, then --distdir, then the
-	// configured one, whichever staticGateDistdir chose. It is recorded WHATEVER
-	// then happened to it, which is the point: a reader who only saw the
-	// enforced directory could not tell a run that resolved none from one whose
-	// privilege tool could not carry the one it had.
-	//
-	// It is empty when the compile did not run at all — including the run
-	// --require-isolation refused — and when this run resolved no directory of
-	// its own, which is the honest answer rather than an invented default:
-	// Portage then answers from its own configuration.
-	CompileDistdir string
-	// CompileDistdirEnforced reports whether that directory actually reached the
-	// ebuild child, and it is a separate fact because the privilege tool decides
-	// it. Measured on this host: sudo's env_reset
-	// discards an exported DISTDIR, so what carries the value is sudo's own
-	// argument form, `sudo DISTDIR=<dir> ebuild …`. `doas` has no such form —
-	// handed one it would try to execute a program named "DISTDIR=…" — so on a
-	// doas host the directory is resolved and NOT enforced.
-	//
-	// The pair therefore states three things a single field could not: nothing
-	// resolved (empty, false), resolved and enforced (dir, true), resolved but
-	// uncarriable (dir, false). The compile gate's reason is what says the third
-	// one out loud, rather than letting a PASS imply a hermeticity the run never
-	// had.
-	CompileDistdirEnforced bool
 	// CleanedOldVersion is the highest version whose ebuild --clean removed. It
 	// is the single-version view of CleanRemoved, kept because callers that
 	// print one "Removed: pkg-X.ebuild" line predate the sweep; empty when clean
@@ -408,8 +377,6 @@ type Applier struct {
 	// would be published as a claim about everyone's. Empty means "no cache to
 	// write to" and is silently skipped, which only a test can produce.
 	configDir string
-	// confirmFunc is a function to prompt for user confirmation (injectable for testing)
-	confirmFunc func(prompt string) bool
 	// execCommand is a function to create exec.Cmd bound to a context
 	// (injectable for testing). It defaults to exec.CommandContext so a
 	// cancelled context kills the spawned manifest/compile process.
@@ -535,11 +502,13 @@ type Applier struct {
 	// host that lacks a build dependency says nothing about the bump and
 	// refusing every one of them would make the feature inert on an ordinary
 	// workstation.
-	// publishOnlyProven and proofMaxAge: see WithApplierPublishOnlyProven
-	// and WithApplierProofMaxAge.
-	publishOnlyProven bool
-	proofMaxAge       time.Duration
-	requireProof      bool
+	// proofMaxAge: see WithApplierProofMaxAge.
+	proofMaxAge time.Duration
+	// validateUnproven lets an apply with no proof run the validation pipeline
+	// instead of refusing. Only this package's tests set it (through
+	// testsValidateUnproven), to drive the pipeline --repair still runs.
+	validateUnproven bool
+	requireProof     bool
 	// reviewer, when non-nil, reads the two versions' build-declaration
 	// difference and may ask for MORE validation than policy chose. Its proposal is advisory and one-way: validate.Escalate combines it
 	// with the policy floor and can only raise. Set via WithApplierBumpReviewer;
@@ -654,13 +623,6 @@ func WithApplierGentooPath(dir string) ApplierOption {
 func WithLogsDir(dir string) ApplierOption {
 	return func(a *Applier) {
 		a.logsDir = dir
-	}
-}
-
-// WithConfirmFunc sets a custom confirmation function for the applier
-func WithConfirmFunc(fn func(prompt string) bool) ApplierOption {
-	return func(a *Applier) {
-		a.confirmFunc = fn
 	}
 }
 
@@ -939,17 +901,6 @@ func WithApplierRequireProof(require bool) ApplierOption {
 	}
 }
 
-// WithApplierPublishOnlyProven makes Apply publish only a bump a retained
-// staged tree already proves (see reusableStagedTree): with no valid proof it
-// refuses with ApplyResult.Unproven instead of running the gates itself. An
-// adopted tree (`--repair`) is exempt: it is promoted on the gates that run
-// over it. `--check --llm` is where a proof is made.
-func WithApplierPublishOnlyProven(only bool) ApplierOption {
-	return func(a *Applier) {
-		a.publishOnlyProven = only
-	}
-}
-
 // WithApplierProofMaxAge makes a retained proof older than maxAge, or one that
 // records no time, not reusable. Zero means a proof never ages.
 func WithApplierProofMaxAge(maxAge time.Duration) ApplierOption {
@@ -1005,12 +956,12 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	logsDir := filepath.Join(configDir, "logs")
 
 	applier := &Applier{
-		spillSweep:  &sync.Once{},
-		overlayPath: overlayPath,
-		logsDir:     logsDir,
-		configDir:   configDir,
-		confirmFunc: defaultConfirmFunc,
-		execCommand: exec.CommandContext,
+		validateUnproven: testsValidateUnproven,
+		spillSweep:       &sync.Once{},
+		overlayPath:      overlayPath,
+		logsDir:          logsDir,
+		configDir:        configDir,
+		execCommand:      exec.CommandContext,
 		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
 		// tests so both answers are reachable without privilege.
 		isolationProbe: validate.ProbeIsolation,
@@ -1084,7 +1035,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 // The result is returned via a named value so a single deferred cleanup can
 // observe whichever error the function ultimately surfaces (result.Error is
 // kept in lockstep with the returned error on every path).
-func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *ApplyResult, _ error) {
+func (a *Applier) Apply(ctx context.Context, pkg string) (result *ApplyResult, _ error) {
 	result = &ApplyResult{
 		Package: pkg,
 	}
@@ -1119,7 +1070,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 		tui.TaskDoneWithHint(a.reporter, pkg, result.Success, applySummary(result), hint, "")
 	}()
 
-	run := &applyRun{a: a, pkg: pkg, compile: compile, result: result}
+	run := &applyRun{a: a, pkg: pkg, result: result}
 	if a.adoptedRoot != "" {
 		run.a = a.withoutAgents()
 	}
@@ -1130,7 +1081,7 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 	// snapshot to the one the check found old enough, then masks the new
 	// candidate below. A failed graduation never fails the candidate.
 	if run.update.GraduateVersion != "" && !a.graduating {
-		result.Graduated = a.applyGraduation(ctx, pkg, *run.update, compile)
+		result.Graduated = a.applyGraduation(ctx, pkg, *run.update)
 	}
 
 	// From here to promotion nothing writes into the published overlay, and
@@ -1162,10 +1113,9 @@ func (a *Applier) Apply(ctx context.Context, pkg string, compile bool) (result *
 // A phase that may end the apply returns the pair Apply returns; a nil result
 // means the apply goes on to the next phase.
 type applyRun struct {
-	a       *Applier
-	pkg     string
-	compile bool
-	result  *ApplyResult
+	a      *Applier
+	pkg    string
+	result *ApplyResult
 
 	update         *PendingUpdate
 	currentVersion string
@@ -1420,7 +1370,7 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 		if done, err := r.reuseRetainedTree(ctx); done != nil {
 			return done, err
 		}
-		if r.a.publishOnlyProven {
+		if !r.a.validateUnproven {
 			return r.refuseUnproven(), nil
 		}
 	}
@@ -1485,6 +1435,12 @@ func (r *applyRun) execute(ctx context.Context) (*ApplyResult, error) {
 
 	return r.gateAndPromote(ctx)
 }
+
+// testsValidateUnproven is the default of Applier.validateUnproven. It is
+// false in every build of the program; this package's tests set it, because
+// most of them drive the validation pipeline through Apply on a bump they
+// never proved.
+var testsValidateUnproven bool
 
 // refuseUnproven ends an apply that publishes only proven bumps when no
 // retained proof holds. Nothing is staged, fetched or written, and the
@@ -1763,40 +1719,18 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	return result, nil
 }
 
-// runDepthGates runs the build gates at the selected depth, or the compile
-// gate when --compile was asked for. A returned error is the apply's failure;
-// the reach is already recorded on result when it is returned.
+// runDepthGates runs the build gates at the selected depth. A returned error
+// is the apply's failure; the reach is already recorded on result when it is
+// returned.
 func (r *applyRun) runDepthGates(ctx context.Context) error {
-	// The build gates, at the depth selected above. They are the
-	// generalisation of the compile gate below, so the two never both run: with
-	// --compile the shipped gate keeps its prompt, its privilege and its repair
-	// path, and running the depth gates beside it would build the same tree twice.
-	if !r.compile {
-		r.stage("build gates")
-		buildGates, buildErr := r.runBuildGatesInSlot(ctx)
-		r.gates = append(r.gates, buildGates...)
-		if buildErr != nil {
-			r.gateFailed(gateForDepth(r.depth.Depth))
-			r.a.recordDepthReached(r.result, r.gates, r.depth.Depth)
-			return buildErr
-		}
-		return nil
-	}
-
-	// Run compile test if requested. It runs against cand's repository, which on
-	// the staged path is the staged tree: a gate that built out of the published
-	// overlay would be reading a candidate that is not there yet.
-	r.stage("compile")
-	logPath, err := withSlot(ctx, r.a.slots.compile, func() (string, error) {
-		return r.a.runCompile(ctx, r.cand, r.pkg, r.newVersion, r.result)
-	})
-	if err != nil {
-		r.gateFailed(compileGatePhase)
-		r.result.LogPath = logPath
+	r.stage("build gates")
+	buildGates, buildErr := r.runBuildGatesInSlot(ctx)
+	r.gates = append(r.gates, buildGates...)
+	if buildErr != nil {
+		r.gateFailed(gateForDepth(r.depth.Depth))
 		r.a.recordDepthReached(r.result, r.gates, r.depth.Depth)
-		return err
+		return buildErr
 	}
-	r.gates = append(r.gates, r.a.compileGateResult(r.cand, r.pkg, r.newVersion, r.result)...)
 	return nil
 }
 
@@ -3108,86 +3042,6 @@ func removeStagedDistdir(log *slog.Logger, distdir string) {
 	}
 }
 
-// runCompile runs a compile test with elevated privileges.
-// It prompts for user confirmation before executing.
-// Returns the log path if compilation fails.
-//
-// Before anything runs, the isolation probe measures whether this process can
-// create a network namespace, and the answer goes on the result so a pass
-// states its own fidelity. With --require-isolation and no namespace the
-// compile is skipped and the result says why — running anyway would produce
-// the meaningless green the operator asked to avoid. The prompt, the sudo/doas
-// requirement and the runAttached seam are otherwise unchanged.
-//
-// The ebuild and repository are TOLD to it (cand), not recomputed from
-// a.overlayPath: on the staged path that is the staged tree, so the build never
-// reads an unvalidated candidate out of a tree that auto-commits.
-//
-// A failure attributable to the ebuild, with a build fixer wired, goes to the
-// REPAIR path: an agent edits the staged ebuild and this same gate runs again,
-// the RE-RUN deciding. With no fixer wired a failure ends the gate as before.
-func (a *Applier) runCompile(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
-	// Measured before the prompt: asking the operator to confirm a compile that
-	// --require-isolation will refuse to run would be a question with no
-	// consequence.
-	isolated, reason := a.isolationProbe()
-	result.IsolationVerified = isolated
-	result.IsolationReason = reason
-
-	if !isolated && a.requireIsolation {
-		return "", nil
-	}
-
-	// Prompt for confirmation
-	prompt := fmt.Sprintf("Run compile test for %s-%s with elevated privileges?", pkg, version)
-	if !a.confirmFunc(prompt) {
-		return "", ErrUserDeclined
-	}
-
-	// Detect privilege escalation tool
-	privTool, err := a.detectPrivilegeTool()
-	if err != nil {
-		return "", err
-	}
-
-	// The ebuild to build, and the repository to build it from. `ebuild` discovers
-	// the repository from the path it is given and from its working directory, so
-	// cmd.Dir is what decides which tree the build reads.
-	if cand.ebuildPath == "" {
-		return "", fmt.Errorf("invalid package name format: %s", pkg)
-	}
-
-	first := a.compileOnce(ctx, cand, pkg, version, privTool)
-	// Recorded as soon as a child has actually run, and on both outcomes: the
-	// gate below has to be able to say which directory this build read and
-	// whether the privilege tool could be made to honour it. The
-	// paths above return before any build, and leave both facts unset — there is
-	// nothing to state about a compile that did not happen.
-	recordCompileDistdir(result, first)
-	if first.err == nil {
-		return "", nil
-	}
-
-	// A compile its context stopped is not a failure to repair: it
-	// says nothing about the ebuild, and the fixer is an LLM invocation the
-	// operator has just asked this run to stop. compileOnce has already kept the
-	// partial transcript, so returning here throws no evidence away.
-	if ctx.Err() != nil {
-		return first.logPath, first.err
-	}
-
-	return a.repairBuildAndRerun(ctx, cand, pkg, version, privTool, first, result)
-}
-
-// compileGatePhase is the `ebuild` phase the compile gate runs.
-//
-// It is spelled as validate.GateCompile rather than as a bare "compile" to state
-// an invariant the repair rests on: the gate NAMED to the fixer and the phase the
-// authoritative re-run actually runs are the same thing. A fixer told it must fix
-// the configure gate, followed by a re-run of a shallower phase, would produce a
-// green that proves nothing about the failure it claims to have repaired.
-const compileGatePhase = validate.GateCompile
-
 // buildAttempt is one invocation of the build child: what it printed, where its
 // log was retained on failure, and how it failed. A nil err is a passing build.
 type buildAttempt struct {
@@ -3197,386 +3051,10 @@ type buildAttempt struct {
 	// transcript is the child's captured output — the evidence the attribution
 	// gate reasons from and the log the fixer is given.
 	transcript string
-	// logPath is the retained compile log, empty unless the attempt failed or
-	// was interrupted.
-	logPath string
 	// err is the failure, already wrapped in ErrCompileFailed, or nil. A build
 	// its context stopped is not a failure: err then wraps ctx.Err() and never
 	// ErrCompileFailed.
 	err error
-	// resolvedDistdir is the directory this attempt resolved for the build's
-	// archives, and enforcedDistdir the one the privilege tool actually carried
-	// to the child: equal to it under sudo, empty under a tool with no argument
-	// form for an environment assignment (see privilegedDistdirArgs).
-	//
-	// Both are carried out of the attempt rather than re-derived by the caller
-	// so that the directory REPORTED and the directory the child was handed are
-	// the same resolution, not two runs of the same resolver a moment apart —
-	// staticGateDistdir prefers the private fetch directory only WHILE it holds
-	// something, so a second call is a second reading of the filesystem.
-	//
-	// They stay empty on the depth-driven build gates (applier_gates.go), whose
-	// child is unprivileged and gets its DISTDIR assigned inside the validate
-	// package; nothing on that path reads these.
-	resolvedDistdir string
-	enforcedDistdir string
-}
-
-// privilegedDistdirArgs decides HOW — and whether — a resolved distdir crosses
-// the privilege boundary, returning the argument that carries it and the
-// directory the child will therefore really read.
-//
-// The mechanism was measured, not assumed (2026-08-20, sudo-rs 0.2.14): with
-// env_reset in force an exported DISTDIR reaches `ebuild` not at all, while
-// sudo's own argument form, `sudo DISTDIR=<dir> ebuild …`, crosses. It beats
-// --preserve-env because the value is a LITERAL ARGUMENT this run computed, so
-// nothing crosses from the operator's shell — the same assigned-versus-
-// allow-listed distinction validate/build.go draws.
-//
-// The tool is a BRANCH for correctness: `doas` has no VAR=value form and would
-// try to execute a program named "DISTDIR=…", failing on every doas host (which
-// detectPrivilegeTool PREFERS). doas was not measured, so nothing is invented:
-// it runs as before, and the gate says the distdir was not enforced.
-//
-// EMPTY RESOLVES TO NOTHING, mirroring validate/build.go: no assignment and no
-// invented default, so Portage answers from its own configuration.
-func privilegedDistdirArgs(privTool, distdir string) (assignment []string, enforced string) {
-	if distdir == "" {
-		return nil, ""
-	}
-	switch privTool {
-	case "sudo":
-		return []string{"DISTDIR=" + distdir}, distdir
-	default:
-		return nil, ""
-	}
-}
-
-// recordCompileDistdir carries one compile attempt's distdir facts onto the
-// result, so the gate that reports this run can tell apart the three states:
-// nothing resolved, resolved and enforced, resolved and uncarriable.
-//
-// It is called for every attempt that actually SPAWNED a child, including the
-// authoritative re-run after a repair, because the last build that ran is the
-// one the verdict is about. A compile that never happened leaves both fields at
-// their zero value, which reads as "this run resolved nothing" — true, since it
-// resolved nothing it could have used.
-func recordCompileDistdir(result *ApplyResult, attempt buildAttempt) {
-	result.CompileDistdir = attempt.resolvedDistdir
-	result.CompileDistdirEnforced = attempt.enforcedDistdir != ""
-}
-
-// compileOnce spawns the build child EXACTLY ONCE and, on failure, retains its
-// log.
-//
-// It is the single place this gate's argv is spelled, so "the SAME gate is
-// re-run" is a property of the code rather than a promise: the authoritative
-// re-run after a repair calls this same function with the same candidate, and
-// cannot drift to a shallower phase where a prepare would clear a configure
-// failure.
-//
-// The privileged child needs the real TTY for the sudo/doas password prompt, so
-// its streams cannot go through a StreamCapture pipe; the default runAttached is
-// exactly cmd.CombinedOutput, keeping the retained log byte-identical.
-//
-// The distdir is resolved by staticGateDistdir, the SAME resolver the option
-// gate and the depth-driven build gates use, so the build reads the directory
-// the gate vetted rather than whatever the host's Portage names. How it crosses
-// the privilege boundary is privilegedDistdirArgs' decision.
-func (a *Applier) compileOnce(ctx context.Context, cand candidatePaths, pkg, version, privTool string) buildAttempt {
-	distdir := a.staticGateDistdir(cand)
-	assignment, enforced := privilegedDistdirArgs(privTool, distdir)
-
-	// The `portage` group is opened HERE and not at the moment either directory
-	// was created, because this is the only gate that escalates — and escalating
-	// is what makes Portage drop to uid `portage` to read them (portage_access.go
-	// carries the measurement). Doing it now also catches whatever the manifest
-	// step and the build fixer wrote in between: a repair that lands a fresh 0600
-	// ebuild moments before the re-run would otherwise reintroduce the very
-	// failure this fixes, on the second attempt only.
-	//
-	// Only what this run OWNS is touched: the staged tree, the directories
-	// leading down to it, and the private distdir this run's manifest step
-	// filled. A published overlay is not ours to re-permission, and neither is
-	// the host's own DISTDIR — which is already portage's, being where Portage
-	// keeps its archives.
-	if err := a.grantCompileAccess(cand); err != nil {
-		// No transcript, and that is the honest shape of it: no child ran, so
-		// there is nothing a build said. The attribution gate reads an empty
-		// transcript as "src_prepare never started", which is exactly right —
-		// this is the host, and no fixer will be invoked to edit an ebuild that
-		// was never the problem.
-		return buildAttempt{
-			err:             fmt.Errorf("%w: %w", ErrCompileFailed, err),
-			resolvedDistdir: distdir,
-			enforcedDistdir: enforced,
-		}
-	}
-
-	// sudo [DISTDIR=<dir>] ebuild <path> clean compile, bound to the applier's
-	// parent context so a SIGINT or deadline stops the spawned process (see
-	// procgroup.Foreground below for how). The assignment PRECEDES the command,
-	// because sudo reads the first non-assignment argument as the program to run.
-	//
-	// Built into a slice of its OWN rather than appended onto the one
-	// privilegedDistdirArgs returned: appending to a caller's slice writes into
-	// that slice's backing array whenever it has spare capacity, so the argv of
-	// this run would depend on how the assignment was allocated somewhere else.
-	// It costs one allocation and removes a class of bug entirely.
-	args := make([]string, 0, len(assignment)+4)
-	args = append(args, assignment...)
-	args = append(args, "ebuild", cand.ebuildPath, "clean", compileGatePhase)
-	cmd := a.execCommand(ctx, privTool, args...)
-	cmd.Dir = cand.repoRoot
-	// Foreground and not Group: sudo and doas ask for the
-	// password on the terminal, and a child moved into a process group of its
-	// own is a BACKGROUND group there, stopped by SIGTTIN at its first read — a
-	// compile hung on a prompt nobody can answer. In the caller's group a cancel
-	// reaches the privilege tool as SIGTERM, which sudo relays to the root
-	// `ebuild`; os/exec's SIGKILL comes procgroup.GracePeriod later, and only
-	// then, because SIGKILL is the one signal sudo cannot relay. doas relays
-	// nothing: it execs the root `ebuild` in place, so the child IS root and
-	// both signals are refused (EPERM, kept by keepStopRefusal); Wait then
-	// returns only when that build ends by itself. A terminal Ctrl+C still
-	// reaches it, since tty signals skip the permission check.
-	procgroup.Foreground(cmd)
-	stopRefused := keepStopRefusal(cmd)
-
-	// cmd.Env is deliberately left nil here, which is a MEASURED
-	// decision and not an omission. validate/build.go installs an allow-list on
-	// its child because that child inherits this process's environment; this one
-	// does not — the measurement showed sudo's env_reset discarding the inherited
-	// environment before `ebuild` ever sees it. An allow-list on the sudo PARENT
-	// would therefore filter variables the privilege tool throws away a moment
-	// later, buying nothing, while risking the password prompt itself: TERM, and
-	// DISPLAY/XAUTHORITY on a host with a graphical askpass, are in the preserved
-	// set for a reason. The surface stays exactly today's, and the one value this
-	// run needed the child to have travels as an argument instead.
-
-	output, err := a.runAttached(cmd)
-	// Foreground's WaitDelay also runs after a NORMAL exit: a compile that exited
-	// 0 while a helper it left behind still held the output pipe comes back as
-	// exec.ErrWaitDelay, and that is a success.
-	err = procgroup.Result(cmd, err)
-	attempt := buildAttempt{transcript: string(output), resolvedDistdir: distdir, enforcedDistdir: enforced}
-	if err != nil {
-		attempt.logPath = a.saveCompileLog(pkg, version, output)
-		// Checked on the context and not on err: a compile stopped by
-		// SIGTERM reports `signal: terminated`, which wraps nothing. The log above
-		// is written first and on purpose — an interrupted compile's partial
-		// transcript is evidence too.
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			pid, refused := stopRefused()
-			attempt.err = interruptedCompileError(pkg, version, privTool, ctxErr, pid, refused)
-			if refused == nil && killedAfterGrace(cmd) {
-				// The SIGTERM was delivered but not obeyed within the grace period,
-				// so os/exec killed the tool; a SIGKILL is the one signal sudo
-				// cannot relay, so the root build is not known to have stopped.
-				attempt.err = fmt.Errorf("%w; %s (process %d) was still running %s after the stop and had to be killed, which it cannot pass on, so the privileged build may still be running",
-					attempt.err, privTool, cmd.Process.Pid, procgroup.GracePeriod)
-			}
-			return attempt
-		}
-		attempt.err = fmt.Errorf("%w: %w", ErrCompileFailed, err)
-	}
-	return attempt
-}
-
-// killedAfterGrace reports whether the finished cmd was ended by SIGKILL, which
-// for a Foreground child whose context is done means os/exec's kill after
-// procgroup.GracePeriod: the stop was delivered and not obeyed in time.
-func killedAfterGrace(cmd *exec.Cmd) bool {
-	if cmd.ProcessState == nil {
-		return false
-	}
-	ws, ok := cmd.ProcessState.Sys().(syscall.WaitStatus)
-	return ok && ws.Signaled() && ws.Signal() == syscall.SIGKILL
-}
-
-// interruptedCompileError is what a privileged compile its context stopped
-// returns: it wraps ctxErr, says "interrupted", and wraps no
-// ErrCompileFailed, because an interrupt is no verdict on the ebuild.
-//
-// refused is the stop the privilege tool could not be sent — EPERM, from a tool
-// that now runs as root — and pid the process it was refused for (see
-// keepStopRefusal). The build is then not known to have stopped, and the error
-// says so and names the process, so the operator knows what to look for.
-func interruptedCompileError(pkg, version, privTool string, ctxErr error, pid int, refused error) error {
-	interrupted := fmt.Errorf("the compile of %s-%s was interrupted, so it says nothing about this ebuild: %w", pkg, version, ctxErr)
-	if refused == nil {
-		return interrupted
-	}
-	return fmt.Errorf("%w; %s (process %d) could not be asked to stop, so the privileged build may still be running: %w",
-		interrupted, privTool, pid, refused)
-}
-
-// keepStopRefusal wraps cmd.Cancel, as procgroup.Foreground configured it, so
-// that a stop the child could not be sent is kept. The returned function reads
-// it once Wait (or Run) has returned: the pid the stop was refused for and the
-// refusal, or a nil error when every stop was delivered.
-//
-// Wait's error cannot carry it: os/exec surfaces Cancel's error only when the
-// child then exits 0, a refused Process.Kill after WaitDelay REPLACES it, and a
-// child nothing can signal exits with whatever status it chose. The one moment
-// the refusal surely exists is when Cancel returns it, so it is kept there.
-//
-// os/exec calls Cancel before it hands the context's outcome to Wait, so a
-// Cancel that ran has returned before Wait does; the mutex covers a runner that
-// starts the command and reads the refusal without waiting for it.
-//
-// A child that had already exited (os.ErrProcessDone) is not a refusal: there
-// was nothing left to stop. A command with no Cancel is left without one,
-// because os/exec refuses to start a command that has a Cancel and was not
-// created by exec.CommandContext.
-func keepStopRefusal(cmd *exec.Cmd) func() (pid int, refused error) {
-	var (
-		mu      sync.Mutex
-		stopPID int
-		stopErr error
-	)
-	read := func() (int, error) {
-		mu.Lock()
-		defer mu.Unlock()
-		return stopPID, stopErr
-	}
-	cancel := cmd.Cancel
-	if cancel == nil {
-		return read
-	}
-	cmd.Cancel = func() error {
-		err := cancel()
-		if err != nil && !errors.Is(err, os.ErrProcessDone) {
-			mu.Lock()
-			// Process is non-nil: os/exec calls Cancel only after a successful Start.
-			stopPID, stopErr = cmd.Process.Pid, err
-			mu.Unlock()
-		}
-		return err
-	}
-	return read
-}
-
-// repairBuildAndRerun is what happens after the build gate has failed once: the
-// failure is attributed, and only if it is the EBUILD's does an agent get to see
-// it — after which this gate runs again and that re-run is the verdict.
-//
-// The attribution runs on FREE evidence first — the transcript already held —
-// and its verdict is reported whether or not a fixer is wired, for the reason
-// refuseFixOnEnvironmentFailure gives: it is a fact about the failure, not the
-// configuration. The two rungs that spend something (a pretend `emerge -p`
-// resolve, a probe write into PORTAGE_TMPDIR) are asked only once a fixer is
-// about to run, since they exist to be cheaper than the agent they prevent.
-// The rung order never changes; only which rungs have evidence does. So a free
-// verdict PRE-EMPTS a paid one — the saving, not a bug: a build that died in
-// unpack and lacked dependencies is reported as the phase; both are the
-// machine's, and the action (no fixer) is the same.
-//
-// FixBuild enforces the attempt bound — a bound only the caller remembers is
-// not one — and this gate makes one attempt per apply, like runManifestWithFix:
-// the agent iterates under its own --max-turns, and each extra external attempt
-// costs a FULL rebuild.
-func (a *Applier) repairBuildAndRerun(ctx context.Context, cand candidatePaths, pkg, version, privTool string, first buildAttempt, result *ApplyResult) (string, error) {
-	// The free rungs. Reported to every operator, LLM or not.
-	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, buildFaultEvidence{transcript: first.transcript}); machineErr != nil {
-		return first.logPath, machineErr
-	}
-
-	if a.buildFixer == nil {
-		return first.logPath, first.err
-	}
-
-	// The agent is only ever pointed at a STAGED tree. On the pre-staging
-	// path the candidate lives in the published overlay — the repository that
-	// auto-commits and pushes — and handing an agent Edit access there is the exact
-	// thing the staging boundary exists to prevent. FixBuild would refuse
-	// it too (ErrBuildFixScope), but refusing before anything is constructed keeps
-	// the boundary visible at the call site rather than only inside the callee.
-	if !cand.staged {
-		return first.logPath, first.err
-	}
-
-	// The paid rungs, now that the alternative is a full agent invocation.
-	paid := buildFaultEvidence{
-		transcript:  first.transcript,
-		deps:        a.buildDependencyAnswer(ctx, cand, pkg, version),
-		buildTmpdir: fixSandboxRoot(ctx),
-	}
-	if machineErr := a.refuseBuildFixOnMachineFault(pkg, version, first, paid); machineErr != nil {
-		return first.logPath, machineErr
-	}
-
-	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", compileGatePhase, pkg, version)
-	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
-		"gate", compileGatePhase, "package", pkg, "version", version)
-	a.substage(result, pkg, fixer.StageBuildFix)
-	a.reporter.Log("info", fixLine)
-
-	progress, progressDone := a.agentProgress(pkg)
-	fixRes, fixErr := withSlot(ctx, a.slots.llm, func() (fixer.BuildFixResult, error) {
-		return a.buildFixer.FixBuild(ctx, fixer.BuildFixRequest{
-			Package:    pkg,
-			Version:    version,
-			Gate:       compileGatePhase,
-			StagedDir:  cand.repoRoot,
-			EbuildPath: cand.ebuildPath,
-			BuildLog:   first.transcript,
-			// One attempt per apply; FixBuild owns the bound and this states
-			// which try it is rather than counting tries here.
-			Attempt:  1,
-			Progress: progress,
-			LogPath:  a.agentLogPath(pkg, version, fixer.StageBuildFix),
-		})
-	})
-	progressDone()
-	switch {
-	case errors.Is(fixErr, fixer.ErrBuildFixAttemptsExhausted):
-		// "We stopped on purpose" is different news from "the agent failed", and
-		// the operator acts on it differently: nothing is wrong with the machine.
-		return first.logPath, fmt.Errorf("%w (the build fixer stopped on purpose: %w)", first.err, fixErr)
-	case fixErr != nil:
-		return first.logPath, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)
-	}
-	appendRefusedTools(result, fixRes.DeniedTools)
-
-	// An empty summary is the agent reporting NO CHANGE (see BuildFixResult.Summary),
-	// and a re-run of an untouched tree can only reproduce the failure it already
-	// produced — at the price of a whole second build. So the original failure
-	// stands, unedited. The bias is deliberate: this path can only ever refuse to
-	// clear a failure, never clear one on an edit nobody confirmed.
-	summary := strings.TrimSpace(fixRes.Summary)
-	if summary == "" {
-		return first.logPath, fmt.Errorf("%w (the build fixer reported no change, so the %s gate was not re-run)", first.err, compileGatePhase)
-	}
-
-	// The authoritative re-run: bentoo's own build of the same phase, never
-	// the agent's account of what it did.
-	a.substage(result, pkg, "re-check")
-	second := a.compileOnce(ctx, cand, pkg, version, privTool)
-	// The re-run is the verdict, so its distdir facts are the ones the
-	// gate must report: this build is the one the PASS would be about.
-	recordCompileDistdir(result, second)
-	// The interrupt rule holds for the re-run as well: a re-run its context stopped is no
-	// verdict on the edit, so it is returned as the interrupt it is — never as the
-	// first failure "still" standing, which would wrap ErrCompileFailed.
-	if second.err != nil && ctx.Err() != nil {
-		return second.logPath, second.err
-	}
-	if second.err != nil {
-		return second.logPath, fmt.Errorf("%w (the build fixer edited the staged ebuild and the %s gate still failed on the re-run: %v)",
-			first.err, compileGatePhase, second.err) //nolint:errorlint // secondary error is context; wrapping it would let errors.Is match it
-	}
-
-	result.Fixed = true
-	result.FixSummary = summary
-	// Name the model that made the edit, and SAY SO when it was an alias —
-	// the same one string into both sinks that the manifest fix
-	// path uses, so the operator's log and the TUI report cannot drift apart.
-	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s",
-		pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
-	a.logger().Info("LLM build fixer repaired the staged ebuild",
-		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", summary)
-	a.reporter.Log("info", repaired)
-	return "", nil
 }
 
 // refuseBuildFixOnMachineFault decides whether a failed build is one the build
@@ -3641,53 +3119,6 @@ func (a *Applier) buildDependencyAnswer(ctx context.Context, cand candidatePaths
 		return buildDependencyAnswer{}
 	}
 	return buildDependencyAnswer{determined: true, satisfied: ok, missing: missing}
-}
-
-// detectPrivilegeTool detects whether sudo or doas is available.
-func (a *Applier) detectPrivilegeTool() (string, error) {
-	// Check for doas first (more secure, preferred on some systems)
-	if _, err := exec.LookPath("doas"); err == nil {
-		return "doas", nil
-	}
-
-	// Check for sudo
-	if _, err := exec.LookPath("sudo"); err == nil {
-		return "sudo", nil
-	}
-
-	return "", ErrNoPrivilegeEscalation
-}
-
-// saveCompileLog saves the compile output to a log file.
-// Returns the path to the log file.
-func (a *Applier) saveCompileLog(pkg, version string, output []byte) string {
-	// Create log filename with timestamp
-	timestamp := time.Now().Format("20060102-150405")
-	safePkg := strings.ReplaceAll(pkg, "/", "_")
-	logName := fmt.Sprintf("%s-%s-%s.log", safePkg, version, timestamp)
-	logPath := filepath.Join(a.logsDir, logName)
-
-	// Write log file. Compile logs use 0600 (owner-only): they may contain
-	// sensitive build details. os.WriteFile applies the mode on creation.
-	if err := os.WriteFile(logPath, output, fileutil.CacheFileMode); err != nil {
-		// If we can't write the log, return empty path
-		return ""
-	}
-
-	return logPath
-}
-
-// defaultConfirmFunc is the default confirmation function that reads from stdin.
-func defaultConfirmFunc(prompt string) bool {
-	fmt.Printf("%s [y/N]: ", prompt) //nolint:forbidigo // interactive y/N prompt, paired with the stdin read below
-	reader := bufio.NewReader(os.Stdin)
-	response, err := reader.ReadString('\n')
-	if err != nil {
-		return false
-	}
-
-	response = strings.TrimSpace(strings.ToLower(response))
-	return response == "y" || response == "yes"
 }
 
 // StagingRoot returns the directory this applier stages candidates under, empty

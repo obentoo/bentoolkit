@@ -117,18 +117,9 @@ type s060Batch struct {
 	updates  []PendingUpdate
 	reporter *recordingReporter
 	overlay  *s060Overlap
-	// prompting counts compile prompts in flight at once.
-	prompting s060Gauge
 
 	mu      sync.Mutex
-	prompts []string
 	spawned []string
-}
-
-func (b *s060Batch) confirmPrompts() []string {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return append([]string(nil), b.prompts...)
 }
 
 func (b *s060Batch) spawnNames() []string {
@@ -206,17 +197,6 @@ func newS060Batch(t *testing.T, setup s060BatchSetup) *s060Batch {
 		WithApplierPendingList(pending),
 		WithExecCommand(seam),
 		WithApplierReporter(b.reporter),
-		// Declining is what a privileged compile request looks like from here:
-		// the prompt is asked (so the request is observable) and nothing is run
-		// with elevated privileges.
-		WithConfirmFunc(func(prompt string) bool {
-			b.mu.Lock()
-			b.prompts = append(b.prompts, prompt)
-			b.mu.Unlock()
-			// Held briefly so two prompts asked at once are observed overlapping.
-			b.prompting.enter(20 * time.Millisecond)
-			return false
-		}),
 		WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
 		WithApplierDistdir(t.TempDir(), ""),
 	}
@@ -246,7 +226,7 @@ func s060Bumps(n int, from, to string) [][2]string {
 
 // runApplyAll calls ApplyAll on its own goroutine so a pool that never
 // finishes fails the test instead of hanging it.
-func (b *s060Batch) runApplyAll(t *testing.T, ctx context.Context, compile bool, concurrency int) ([]*ApplyResult, int) {
+func (b *s060Batch) runApplyAll(t *testing.T, ctx context.Context, concurrency int) ([]*ApplyResult, int) {
 	t.Helper()
 	var (
 		results  []*ApplyResult
@@ -255,7 +235,7 @@ func (b *s060Batch) runApplyAll(t *testing.T, ctx context.Context, compile bool,
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		results, failures = b.applier.ApplyAll(ctx, b.updates, compile, concurrency)
+		results, failures = b.applier.ApplyAll(ctx, b.updates, concurrency)
 	}()
 	waitReturned(t, "ApplyAll", done)
 	return results, failures
@@ -279,46 +259,14 @@ func assertOneResultPerUpdate(t *testing.T, results []*ApplyResult, updates []Pe
 	}
 }
 
-// TestS060ApplyAllCompileRunsThePoolWithOnePromptAtATime is R1.1. compile
-// no longer narrows the batch: the applies overlap, and only the privileged
-// compile step — its prompt and its sudo invocation — is taken one at a time.
-func TestS060ApplyAllCompileRunsThePoolWithOnePromptAtATime(t *testing.T) {
-	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(4, "1.0.0", "2.0.0")})
-
-	results, failures := b.runApplyAll(t, t.Context(), true, 4)
-
-	assertOneResultPerUpdate(t, results, b.updates)
-	if peak := b.overlay.maxSeen(); peak < 2 {
-		t.Errorf("peak concurrency = %d; --compile must not serialise the whole batch", peak)
-	}
-	if peak := b.prompting.maxSeen(); peak != 1 {
-		t.Errorf("%d compile prompts were asked at once; the privileged step takes one package at a time", peak)
-	}
-
-	// compile reached every Apply: each one asked to run the compile test.
-	prompts := b.confirmPrompts()
-	if len(prompts) != len(b.updates) {
-		t.Fatalf("the compile prompt was asked %d times, want %d — compile must reach every apply (R1.1)", len(prompts), len(b.updates))
-	}
-	for _, u := range b.updates {
-		if !slices.ContainsFunc(prompts, func(p string) bool { return strings.Contains(p, u.Package+"-") }) {
-			t.Errorf("no compile prompt names %s: %q", u.Package, prompts)
-		}
-	}
-	// Every compile was declined, so every apply returned an error.
-	if failures != len(b.updates) {
-		t.Errorf("failures = %d, want %d (each declined compile is an Apply error)", failures, len(b.updates))
-	}
-}
-
 // TestS060ApplyAllKeepsThePoolWhenADepthStartsABuild is R1.2. 1.28.6 → 1.29.2
 // is a series crossing, which the gate policy sends to the configure gate: a
-// depth that starts a build. The batch still runs on the pool, and because
-// compile was NOT requested, the privileged compile step is never acquired.
+// depth that starts a build. The batch still runs on the pool, and nothing is
+// run through sudo or doas.
 func TestS060ApplyAllKeepsThePoolWhenADepthStartsABuild(t *testing.T) {
 	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(3, "1.28.6", "1.29.2"), staged: true})
 
-	results, _ := b.runApplyAll(t, t.Context(), false, 3)
+	results, _ := b.runApplyAll(t, t.Context(), 3)
 
 	assertOneResultPerUpdate(t, results, b.updates)
 	if peak := b.overlay.maxSeen(); peak < 2 {
@@ -327,12 +275,9 @@ func TestS060ApplyAllKeepsThePoolWhenADepthStartsABuild(t *testing.T) {
 	if !slices.Contains(b.spawnNames(), "ebuild") {
 		t.Fatalf("fixture defect: no build was spawned for a series crossing: %v", b.spawnNames())
 	}
-	if prompts := b.confirmPrompts(); len(prompts) != 0 {
-		t.Errorf("a build-depth batch asked for the privileged compile %d time(s): %q — compile was never requested (R1.2)", len(prompts), prompts)
-	}
 	for _, name := range b.spawnNames() {
 		if name == "sudo" || name == "doas" {
-			t.Errorf("a build-depth batch spawned %q — compile was never requested (R1.2)", name)
+			t.Errorf("a build-depth batch spawned %q — nothing runs privileged (R1.2)", name)
 		}
 	}
 }
@@ -343,7 +288,7 @@ func TestS060ApplyAllKeepsThePoolWhenADepthStartsABuild(t *testing.T) {
 func TestS060ApplyAllKeepsThePoolBelowABuildDepth(t *testing.T) {
 	b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(3, "1.28.5", "1.28.6"), staged: true})
 
-	results, _ := b.runApplyAll(t, t.Context(), false, 3)
+	results, _ := b.runApplyAll(t, t.Context(), 3)
 
 	assertOneResultPerUpdate(t, results, b.updates)
 	if peak := b.overlay.maxSeen(); peak < 2 {
@@ -351,9 +296,6 @@ func TestS060ApplyAllKeepsThePoolBelowABuildDepth(t *testing.T) {
 	}
 	if slices.Contains(b.spawnNames(), "ebuild") {
 		t.Errorf("fixture defect: a patch bump spawned a build: %v", b.spawnNames())
-	}
-	if prompts := b.confirmPrompts(); len(prompts) != 0 {
-		t.Errorf("the pool asked for the privileged compile: %q", prompts)
 	}
 }
 
@@ -375,7 +317,7 @@ func TestApplyAllBoundsBuildsBySlots(t *testing.T) {
 				},
 			})
 
-			results, _ := b.runApplyAll(t, t.Context(), false, 4)
+			results, _ := b.runApplyAll(t, t.Context(), 4)
 
 			assertOneResultPerUpdate(t, results, b.updates)
 			if peak := builds.maxSeen(); peak > limit {
@@ -460,7 +402,7 @@ func TestApplyAllBoundsLLMAgentsBySlots(t *testing.T) {
 		s089aMesonArchive(t, filepath.Join(distdir, archive), "1.28.5")
 	}
 
-	results, _ := b.runApplyAll(t, t.Context(), false, 5)
+	results, _ := b.runApplyAll(t, t.Context(), 5)
 
 	assertOneResultPerUpdate(t, results, b.updates)
 	if peak := reviewer.gauge.maxSeen(); peak > limit {
@@ -507,7 +449,7 @@ func TestS060ApplyAllPoolIsBoundedByConcurrency(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		results, failures = b.applier.ApplyAll(t.Context(), b.updates, false, concurrency)
+		results, failures = b.applier.ApplyAll(t.Context(), b.updates, concurrency)
 	}()
 	barrier.openWhen(t, fmt.Sprintf("%d applies in flight, and no more after a grace period", concurrency), func() (bool, string) {
 		if barrier.arrived.Load() < concurrency {
@@ -553,7 +495,7 @@ func TestS060ApplyAllClampsConcurrency(t *testing.T) {
 		t.Run(fmt.Sprintf("concurrency %d", tt.concurrency), func(t *testing.T) {
 			b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(3, "1.0.0", "2.0.0")})
 
-			results, failures := b.runApplyAll(t, t.Context(), false, tt.concurrency)
+			results, failures := b.runApplyAll(t, t.Context(), tt.concurrency)
 
 			assertOneResultPerUpdate(t, results, b.updates)
 			if failures != 0 {
@@ -590,7 +532,7 @@ func TestS060ApplyAllCountsOnlyApplyErrorsAsFailures(t *testing.T) {
 				t.Fatalf("pending.Delete: %v", err)
 			}
 
-			results, failures := b.runApplyAll(t, t.Context(), false, concurrency)
+			results, failures := b.runApplyAll(t, t.Context(), concurrency)
 
 			assertOneResultPerUpdate(t, results, b.updates)
 			if failures != 1 {
@@ -619,19 +561,16 @@ func TestS060ApplyAllCountsOnlyApplyErrorsAsFailures(t *testing.T) {
 // spawns, which is the earliest point at least one Apply has begun and at most
 // `concurrency` can have. Every package at index >= concurrency never began:
 // it gets a failed result wrapping context.Canceled, counts as a failure, and
-// its overlay directory and pending entry are untouched. The compile row
-// covers the serial path the same way.
+// its overlay directory and pending entry are untouched.
 func TestS060ApplyAllStopsDispatchingOnCancel(t *testing.T) {
 	const n = 6
 	for _, tt := range []struct {
 		name        string
-		compile     bool
 		concurrency int
 		begun       int
 	}{
 		{name: "pool of 1", concurrency: 1, begun: 1},
 		{name: "pool of 3", concurrency: 3, begun: 3},
-		{name: "serial for compile", compile: true, concurrency: 3, begun: 1},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
@@ -642,7 +581,7 @@ func TestS060ApplyAllStopsDispatchingOnCancel(t *testing.T) {
 				onSpawn: func(context.Context) { interrupt.Do(cancel) },
 			})
 
-			results, failures := b.runApplyAll(t, ctx, tt.compile, tt.concurrency)
+			results, failures := b.runApplyAll(t, ctx, tt.concurrency)
 
 			assertOneResultPerUpdate(t, results, b.updates)
 			if len(results) != n {
@@ -687,18 +626,16 @@ func TestS060ApplyAllStopsDispatchingOnCancel(t *testing.T) {
 func TestS060ApplyAllOnADoneContextStartsNothing(t *testing.T) {
 	for _, tt := range []struct {
 		name        string
-		compile     bool
 		concurrency int
 	}{
 		{name: "pool", concurrency: 3},
-		{name: "serial", compile: true, concurrency: 3},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			b := newS060Batch(t, s060BatchSetup{bumps: s060Bumps(4, "1.0.0", "2.0.0")})
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
 
-			results, failures := b.runApplyAll(t, ctx, tt.compile, tt.concurrency)
+			results, failures := b.runApplyAll(t, ctx, tt.concurrency)
 
 			assertOneResultPerUpdate(t, results, b.updates)
 			if failures != len(b.updates) {

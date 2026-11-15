@@ -127,7 +127,6 @@ func promoteFixture(t *testing.T, opts ...ApplierOption) (a *Applier, overlayDir
 	base := []ApplierOption{
 		WithApplierPendingList(pending),
 		WithExecCommand(failingAndWatching),
-		WithConfirmFunc(func(string) bool { return true }),
 		WithApplierStagingRoot(stagingRoot),
 		WithApplierSetVersionsFunc(func(_ string, written map[string]string) error {
 			for k, v := range written {
@@ -167,7 +166,7 @@ func TestApplierPromote_FailedBumpLeavesTheOverlayByteIdentical(t *testing.T) {
 	applier, overlayDir, pkg, _, _ := promoteFixture(t)
 	before := hashOverlayTree(t, overlayDir)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("every child process failed and the apply still reported success")
@@ -186,7 +185,7 @@ func TestApplierPromote_TheOverlayIsUntouchedWhileTheGatesRun(t *testing.T) {
 	applier, overlayDir, pkg, watch, _ := promoteFixture(t)
 	before := hashOverlayTree(t, overlayDir)
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("Apply reported no error although every child failed")
 	}
 
@@ -211,7 +210,7 @@ func TestApplierPromote_TheOverlayIsUntouchedWhileTheGatesRun(t *testing.T) {
 func TestApplierPromote_FailedBumpWritesNoPin(t *testing.T) {
 	applier, _, pkg, _, pins := promoteFixture(t)
 
-	if _, err := applier.Apply(t.Context(), pkg, false); err == nil {
+	if _, err := applier.Apply(t.Context(), pkg); err == nil {
 		t.Fatal("Apply reported no error although every child failed")
 	}
 
@@ -226,7 +225,7 @@ func TestApplierPromote_FailedBumpWritesNoPin(t *testing.T) {
 func TestApplierPromote_FailedBumpRetainsAndNamesItsStagedTree(t *testing.T) {
 	applier, overlayDir, pkg, _, _ := promoteFixture(t)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.StagedPath == "" {
 		t.Fatal("a failed bump carries no StagedPath; the operator cannot inspect what was validated")
@@ -295,7 +294,7 @@ func TestApplierPromote_FailureDuringPromotionRestoresThePublishedManifest(t *te
 	manifestPath := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6", "Manifest")
 	before := hashOverlayTree(t, overlayDir)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("the apply reported success although the candidate could not be written into the overlay")
@@ -343,7 +342,7 @@ func TestApplierPromote_FailureDuringPromotionRemovesThePublishedEbuild(t *testi
 		t.Fatalf("blocking the Manifest path: %v", err)
 	}
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("the apply reported success although the Manifest could not be written")
@@ -362,7 +361,7 @@ func TestApplierPromote_FailureDuringPromotionRemovesThePublishedEbuild(t *testi
 func TestApplierRetain_FailedBumpKeepsItsTreeOnDisk(t *testing.T) {
 	applier, _, pkg, _, _ := promoteFixture(t)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success {
 		t.Fatal("every child process failed and the apply still reported success")
@@ -393,7 +392,7 @@ func TestApplierRetain_FailedBumpKeepsItsTreeOnDisk(t *testing.T) {
 func TestApplierRetain_TheStagedPathReachesTheReport(t *testing.T) {
 	applier, _, pkg, _, _ := promoteFixture(t)
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.StagedPath == "" {
 		t.Fatal("a failed bump carries no StagedPath")
@@ -412,7 +411,7 @@ func TestApplierRetain_TheStagedPathReachesTheReport(t *testing.T) {
 func TestApplierRetain_SuccessCarriesNoStagedPath(t *testing.T) {
 	applier, _, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -438,7 +437,7 @@ func TestApplierRetain_SuccessCarriesNoStagedPath(t *testing.T) {
 func TestApplierRetain_SecondFailureReplacesTheFirstTree(t *testing.T) {
 	applier, _, pkg, _, _ := promoteFixture(t)
 
-	first, _ := applier.Apply(t.Context(), pkg, false)
+	first, _ := applier.Apply(t.Context(), pkg)
 	if first.StagedPath == "" {
 		t.Fatal("the first failed bump carries no StagedPath")
 	}
@@ -453,7 +452,7 @@ func TestApplierRetain_SecondFailureReplacesTheFirstTree(t *testing.T) {
 
 	// The pending entry survives a failed apply, so the same bump can be
 	// retried; that retry is what R3.7 is about.
-	second, _ := applier.Apply(t.Context(), pkg, false)
+	second, _ := applier.Apply(t.Context(), pkg)
 	if second.StagedPath == "" {
 		t.Fatal("the second failed bump carries no StagedPath")
 	}
@@ -491,8 +490,8 @@ func TestApplierRetain_TwoFailuresStillLeaveTheOverlayUntouched(t *testing.T) {
 	applier, overlayDir, pkg, _, pins := promoteFixture(t)
 	before := hashOverlayTree(t, overlayDir)
 
-	applier.Apply(t.Context(), pkg, false)
-	applier.Apply(t.Context(), pkg, false)
+	applier.Apply(t.Context(), pkg)
+	applier.Apply(t.Context(), pkg)
 
 	if after := hashOverlayTree(t, overlayDir); after != before {
 		t.Errorf("the published overlay changed across two failed attempts: %s -> %s", before, after)
@@ -587,7 +586,7 @@ func TestApplierPromote_AMatchingProvedTreeIsPromotedWithoutRunningAGate(t *test
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -643,7 +642,7 @@ func TestApplierPromote_ARecordShowingAFailedGateIsRevalidated(t *testing.T) {
 	}
 
 	spawnsBefore := watch.spawns
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -667,7 +666,7 @@ func TestApplierPromote_ATreeWithNoRecordIsRevalidated(t *testing.T) {
 	stageCandidateFor(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir))
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -696,7 +695,7 @@ func TestApplierPromote_ATreeRecordedShallowerThanThisRunNeedsIsRevalidated(t *t
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthOptions)
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -723,7 +722,7 @@ func TestApplierPromote_ATreeRecordedDeeperThanNeededIsStillPromoted(t *testing.
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthCompile)
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -763,7 +762,7 @@ func TestApplierPromote_ARecordOfSkippedGatesIsStillPromotable(t *testing.T) {
 	}
 
 	spawnsBefore := watch.spawns
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -804,7 +803,7 @@ func TestApplierPromote_AnOlderStagedTreeThatStillMatchesIsPromoted(t *testing.T
 	}
 
 	spawnsBefore := watch.spawns
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -849,7 +848,7 @@ func TestApplierPromote_ATreeTheFixerModifiedIsStillPromotable(t *testing.T) {
 	}
 
 	spawnsBefore := watch.spawns
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -888,7 +887,7 @@ func TestApplierPromote_AChangedDistfileDigestIsNotPromoted(t *testing.T) {
 	writePublishedManifest(t, overlayDir,
 		"DIST gst-plugins-good-1.29.2.tar.xz 100 BLAKE2B "+rerolledDistfileDigest+" SHA512 "+rerolledDistfileDigest+"\n")
 
-	result, _ := applier.Apply(t.Context(), pkg, false)
+	result, _ := applier.Apply(t.Context(), pkg)
 
 	if result.Success && result.ValidationSource == "staged" {
 		t.Fatal("a retained tree was promoted although the distfile digest changed under it; every gate's answer was about " +
@@ -922,7 +921,7 @@ func TestApplierPromote_DifferentEbuildBytesTriggerRevalidation(t *testing.T) {
 		candidateBody(t, overlayDir)+"\n# an edit nobody validated\n", validate.DepthConfigure)
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -943,7 +942,7 @@ func TestApplierPromote_NoStagedTreeAtAllValidatesFirst(t *testing.T) {
 	applier, _, pkg, watch, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -963,7 +962,7 @@ func TestApplierPromote_NoStagedTreeAtAllValidatesFirst(t *testing.T) {
 func TestApplierPromote_ARecordIsWrittenBesideEveryStagedTree(t *testing.T) {
 	applier, _, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -1002,7 +1001,7 @@ func TestApplierPromote_TheReportStatesWhichPathWasTaken(t *testing.T) {
 	applier, overlayDir, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -1021,7 +1020,7 @@ func TestApplierPromote_ValidationSourceIsOneOfTwoKnownValues(t *testing.T) {
 	applier, overlayDir, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -1070,7 +1069,7 @@ func TestApplierPromote_AnInterruptedRunPublishesNothingOnTheReusePath(t *testin
 	stageProvedCandidate(t, applier.StagingRoot(), overlayDir, candidateBody(t, overlayDir), validate.DepthConfigure)
 	before := hashOverlayTree(t, overlayDir)
 
-	result, err := applier.Apply(ctx, pkg, false)
+	result, err := applier.Apply(ctx, pkg)
 
 	if !started.fired {
 		t.Fatal("Apply never reached TaskStart, so the cancel did not land inside the run; the reuse-path guard was not exercised")
@@ -1121,7 +1120,7 @@ func TestApplierPromote_AnInterruptedStaticGatePublishesNothing(t *testing.T) {
 		return cmd
 	}
 
-	result, err := applier.Apply(ctx, pkg, false)
+	result, err := applier.Apply(ctx, pkg)
 
 	if spawned == 0 {
 		t.Fatal("no child was spawned, so the cancellation never fired and this test asserted nothing")
@@ -1170,7 +1169,7 @@ func TestApplierPromote_AnInterruptedDependencyProbePublishesNothing(t *testing.
 		return inner(c, name, arg...)
 	}
 
-	result, err := applier.Apply(ctx, pkg, false)
+	result, err := applier.Apply(ctx, pkg)
 
 	if !probed {
 		t.Fatal("the dependency pre-check never spawned `emerge`, so the door under test was never reached")
@@ -1218,7 +1217,7 @@ func TestApplierPromote_AnInterruptedRunBlamesTheInterruptNotTheProofPolicy(t *t
 		return inner(c, name, arg...)
 	}
 
-	_, err := applier.Apply(ctx, pkg, false)
+	_, err := applier.Apply(ctx, pkg)
 	if err == nil {
 		t.Fatal("an interrupted run under require_proof reported no error at all")
 	}
@@ -1258,7 +1257,7 @@ func TestApplierPromote_AnInterruptedRunRecordsNoProofForTheNextRun(t *testing.T
 		return cmd
 	}
 
-	result, err := applier.Apply(ctx, pkg, false)
+	result, err := applier.Apply(ctx, pkg)
 	if err == nil {
 		t.Fatal("the interrupted apply reported no error")
 	}
@@ -1313,7 +1312,7 @@ func TestApplierPromote_ARecordTheApplierDidNotProduceIsNotALicenceToPublish(t *
 	}
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -1353,7 +1352,7 @@ func TestApplierPromote_ARecordTheApplierDidNotProduceIsNotALicenceToPublish(t *
 func TestApplierPromote_TheApplierNamesItselfAsTheProducerOfItsRecord(t *testing.T) {
 	applier, _, pkg, _, _ := promoteFixture(t, WithExecCommand(mockExecCommandSuccess))
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
@@ -1444,7 +1443,7 @@ func TestApplierPromote_ARecordNamingAProducerThisVersionDoesNotKnowIsRefusedToo
 	}
 	spawnsBefore := watch.spawns
 
-	result, err := applier.Apply(t.Context(), pkg, false)
+	result, err := applier.Apply(t.Context(), pkg)
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}

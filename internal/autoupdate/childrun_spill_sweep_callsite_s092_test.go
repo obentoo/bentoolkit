@@ -16,7 +16,7 @@ func TestChildRunSpillSweepRunsOnFirstApply(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := a.Apply(ctx, "dev-go/none", false); err == nil {
+	if _, err := a.Apply(ctx, "dev-go/none"); err == nil {
 		t.Logf("Apply on a done context returned no error")
 	}
 	if s092v2Exists(t, stale) {
@@ -24,7 +24,7 @@ func TestChildRunSpillSweepRunsOnFirstApply(t *testing.T) {
 	}
 
 	again := s092v2RealSpill(t, logs, 2*time.Hour)
-	if _, err := a.Apply(ctx, "dev-go/none", false); err == nil {
+	if _, err := a.Apply(ctx, "dev-go/none"); err == nil {
 		t.Logf("Apply on a done context returned no error")
 	}
 	if !s092v2Exists(t, again) {
