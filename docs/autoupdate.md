@@ -725,9 +725,8 @@ gates ran against, and when they answered.
 match the bump byte for byte, prove the depth the policy asks for, and be no
 older than `autoupdate.proof.max_age_days` (7 by default). Anything else is
 reported as **Unproven** and left in the pending list; `--apply` runs no gate,
-fetches nothing and regenerates no Manifest for it. `--repair` is the one
-exception: the tree it adopts is promoted on the gates that run over it.
-`--revive` proves the revived bump first, the way the check does, and then
+fetches nothing and regenerates no Manifest for it. `--repair` proves the
+tree it adopts the same way and publishes nothing either. `--revive` proves the revived bump first, the way the check does, and then
 publishes it.
 
 A bump that requires another bump of the same batch (`requires`) is proved
@@ -985,31 +984,29 @@ no lines.
 
 #### Repairing a failed bump
 
-When `--apply` fails a package after staging it, the staged tree is kept and a
-repair bundle, `.bentoo-repair.json`, is written at its root (mode 0600). The
-Apply Result then prints the next step:
-
-```text
-    Repair:  bentoo overlay autoupdate --repair dev-go/govulncheck
-```
+When `--check --llm` leaves a bump to the maintainer (HUMAN), the staged tree
+is kept and a repair bundle, `.bentoo-repair.json`, is written at its root
+(mode 0600); the next step is
+`bentoo overlay autoupdate --repair <cat/pkg>`.
 
 The bundle (schema 1) records the package, the current and candidate versions,
 the failed stage (`manifest`, `llm-fix`, `llm-build-fix`, `re-check`,
 `gate:<name>`, `adopt`, …), the failure text (passed through the same secret
 redaction as the log, last 16 KiB), the tools the unattended agent was refused,
-the staged tree, the candidate ebuild, the upstream URLs and its creation
-time. The staged sweep (`bentoo overlay staged`) keeps any tree that carries a
+the staged tree, the candidate ebuild, the upstream URLs, the claude session
+of the unattended build fixer that tried it (`fixer_session_id`), and its
+creation time. The staged sweep (`bentoo overlay staged`) keeps any tree that carries a
 bundle. After a `--repair` that did not pass, the bundle carries a
 `repaired_at` mark, and a later `--apply` or `--check` of that package does not
 restage over the tree: it refuses the package with `staged tree kept for
 repair: bentoo overlay autoupdate --repair <cat/pkg>, or delete <bundle> to
 give the repair up`, leaving the tree, its bundle and the pending entry as they
-were. A bundle without the mark, as a plain failed `--apply` writes it, is
-restaged over as before. That mark is the only part of the bundle `--apply`
+were. A bundle without the mark, as a plain failed check writes it, is restaged
+over as before. That mark is the only part of the bundle `--apply`
 and `--check` read; everything else in it is for `--repair` and for you.
 
 To give a repair up, delete the tree's `.bentoo-repair.json`. With the bundle
-gone, the next `--apply` restages the package from scratch, and the staged
+gone, the next `--check` restages the package from scratch, and the staged
 sweep treats the tree like any other.
 
 `--repair <cat/pkg>` cannot be combined with another mode and needs a terminal
@@ -1023,7 +1020,10 @@ bundle's version. It takes the overlay lock for the whole run, so a concurrent
 It prints the bundle and asks `Start an interactive claude session in <dir>?
 [y/N]`. `--yes` never answers this question; anything but `y` or `yes` exits 0
 and changes nothing. On `y`, `claude` runs in the foreground in the staged
-package directory, seeded with the bundle:
+package directory, seeded with the bundle. When the bundle names the build
+fixer's session, that session is resumed as a fork (`--resume <id>
+--fork-session`), so the conversation starts from what the fixer already read
+and tried, and the fixer's own record is left as it was:
 
 - permission mode `default`: every command, fetch and edit is asked for;
   `--dangerously-skip-permissions`, `bypassPermissions`, `acceptEdits` and
@@ -1036,18 +1036,19 @@ package directory, seeded with the bundle:
   the search provider's `api_key_env`;
 - Ctrl+C and SIGQUIT belong to the session; bentoo is not stopped by them.
 
-When the session exits, with any status, bentoo re-validates the edited tree
-— manifest, then the gates, at no less than the depth recorded for the tree,
-and at `--depth=compile` when the bundle failed at the compile gate — with no
-LLM agent, and promotes it on
-success: the bundle is removed and the pending entry is completed. A failed
-re-validation rewrites the bundle with the new stage, the failure text and the
-`repaired_at` mark, and exits 1. Two cases skip the re-validation, leave the
+When the session exits, with any status, bentoo proves the edited tree the way
+`--check` does — manifest, then the gates, at no less than the depth recorded
+for the tree, and at `--depth=compile` when the bundle failed at the compile
+gate — with no LLM agent, and publishes nothing. A READY tree gets a proof
+record and its bundle is removed; publish it with
+`bentoo overlay autoupdate --apply <cat/pkg>`, which promotes exactly the
+repaired ebuild the proof names. Any other verdict rewrites the bundle with the
+new stage, the failure text and the `repaired_at` mark, and exits 1. Two cases skip the re-validation, leave the
 tree as the session left it and mark the bundle, exit 1: bentoo received
 SIGTERM or SIGHUP during the session (run `--repair` again), or the run was
 interrupted before it.
 
-Promotion publishes only the ebuild and its Manifest. A repair that changes
+`--apply` publishes only the ebuild and its Manifest. A repair that changes
 `files/` or `metadata.xml` in the staged tree is refused, naming the first
 differing path: carry that change into the overlay by hand, then run
 `--repair` again.

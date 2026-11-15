@@ -48,6 +48,12 @@ import (
 // EbuildResult.WorstOutcome reads as "nothing was said about this bump" — never
 // as a pass.
 func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Depth) validate.EbuildResult {
+	// An adopted tree is the operator's repair, not an agent's input: no fixer
+	// or reviewer runs on it, exactly as on the apply path.
+	adopted := a.adoptedRoot != ""
+	if adopted {
+		a = a.withoutAgents()
+	}
 	update, found := a.pending.Get(pkg)
 	if !found {
 		return checkSkipped(pkg, "", fmt.Sprintf("%s is no longer in the pending list, so there was nothing to validate", pkg))
@@ -96,8 +102,11 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	}
 	// The refusal Apply makes, before anything under the staging root is
 	// removed: a repair in progress is not restaged over by a check either.
-	if _, _, err := a.repairPending(pkg, newVersion); err != nil {
-		return checkSkipped(pkg, newVersion, err.Error())
+	// An adopted tree IS that repair, so it is not refused.
+	if !adopted {
+		if _, _, err := a.repairPending(pkg, newVersion); err != nil {
+			return checkSkipped(pkg, newVersion, err.Error())
+		}
 	}
 
 	inputs, err := a.stagedInputsFor(pkg, currentVersion, update)
@@ -125,7 +134,13 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		a.reporter.TaskDone(pkg, worst != validate.OutcomeFailed, local.DepthReached, "")
 	}()
 
-	cand, err := a.prepareInStagingTree(pkg, currentVersion, newVersion, update, local)
+	var cand candidatePaths
+	if adopted {
+		cand, depth, err = a.adoptForCheck(pkg, currentVersion, newVersion, update, depth, local)
+		local.DepthRequested, local.DepthReason = depth.Depth.String(), depth.Reason
+	} else {
+		cand, err = a.prepareInStagingTree(pkg, currentVersion, newVersion, update, local)
+	}
 	if err != nil {
 		// A tree that could not be prepared withdraws the bump. Here that
 		// is one SKIPPED gate per build gate the depth covers, which is the same
@@ -168,6 +183,10 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		a.recordStagedProof(ctx, stagedRoot, pkg, newVersion, inputs, gates, depth.Depth, validatedEbuild,
 			unpublishedVendor(local.Vendor, false))
 	}()
+	// The bundle --repair works from, for a bump this check leaves to the
+	// maintainer. Registered after the record, so it runs first.
+	manifestFailed := false
+	defer func() { a.writeCheckBundle(pkg, local, cand, gates, depth.Depth, manifestFailed) }()
 
 	a.reporter.TaskStage(pkg, "manifest")
 	fetchedDistdir, err := a.runManifestWithFix(ctx, cand, pkg, newVersion, local)
@@ -188,6 +207,7 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		// Unless the failure was classified as the environment's (a timeout, an
 		// upstream 5xx, a full or unwritable distdir): then the candidate was
 		// never at fault, and the bump waits rather than asking the maintainer.
+		manifestFailed = true
 		cause, declined := validate.DeclineCandidate, candidateDeclinedGates
 		if errors.Is(err, ErrManifestEnvironment) {
 			cause, declined = validate.DeclineHost, hostDeclinedGates

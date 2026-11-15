@@ -930,6 +930,10 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 		})
 	})
 	progressDone()
+	// Recorded whatever the attempt's outcome, for the repair bundle.
+	if fixRes.SessionID != "" {
+		result.FixerSession = fixRes.SessionID
+	}
 	if fixErr != nil {
 		return nil, fmt.Errorf("%w (the LLM build fix attempt failed: %w)", first.err, fixErr)
 	}

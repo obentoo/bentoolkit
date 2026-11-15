@@ -1,8 +1,13 @@
 package fixer
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 )
 
 // TestBuildFixAllowedTools_HasNoShellAndNoWrite is D7, and it is the assertion
@@ -136,5 +141,46 @@ func TestBuildFixMaxAttempts_IsBounded(t *testing.T) {
 	if buildFixMaxAttempts > 3 {
 		t.Errorf("buildFixMaxAttempts = %d; each attempt is a full agent invocation plus an authoritative re-run of the gate",
 			buildFixMaxAttempts)
+	}
+}
+
+// TestFixBuild_RecordsTheSessionToResume: the session the CLI reports is
+// carried on the result, on success and on failure alike, so --repair can
+// resume the attempt that was already made.
+func TestFixBuild_RecordsTheSessionToResume(t *testing.T) {
+	for _, tc := range []struct {
+		name, envelope string
+		wantErr        bool
+	}{
+		{"success", `{"type":"result","is_error":false,"result":"pinned the dependency","session_id":"sess-ok"}`, false},
+		{"failure", `{"type":"result","is_error":true,"result":"gave up","session_id":"sess-failed"}`, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stubLookPathFound(t)
+			factory, _, _ := fixerSeam("printf '%s' '" + tc.envelope + "'")
+			f, err := NewClaudeCodeBuildFixer(llm.LLMConfig{Provider: "claude-code"}, WithBuildFixerExecCommand(factory))
+			if err != nil {
+				t.Fatal(err)
+			}
+			staged := t.TempDir()
+			pkgDir := filepath.Join(staged, "dev-libs", "demo")
+			if err := os.MkdirAll(pkgDir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			ebuild := filepath.Join(pkgDir, "demo-1.0.ebuild")
+			if err := os.WriteFile(ebuild, []byte("EAPI=8\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			res, err := f.FixBuild(context.Background(), BuildFixRequest{
+				Package: "dev-libs/demo", Version: "1.0", Gate: "configure",
+				StagedDir: staged, EbuildPath: ebuild, BuildLog: "configure failed",
+			})
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("err = %v, want error %v", err, tc.wantErr)
+			}
+			if want := "sess-" + map[bool]string{false: "ok", true: "failed"}[tc.wantErr]; res.SessionID != want {
+				t.Errorf("SessionID = %q, want %q", res.SessionID, want)
+			}
+		})
 	}
 }

@@ -40,11 +40,15 @@ type Bundle struct {
 	// gate:<name>.
 	Stage string `json:"failed_stage"`
 	// Failure is the failure text, already passed through Redact.
-	Failure      string    `json:"failure"`
-	RefusedTools []string  `json:"refused_tools,omitempty"`
-	StagedRoot   string    `json:"staged_root"`
-	EbuildPath   string    `json:"ebuild_path"`
-	UpstreamURLs []string  `json:"upstream_urls,omitempty"`
+	Failure      string   `json:"failure"`
+	RefusedTools []string `json:"refused_tools,omitempty"`
+	StagedRoot   string   `json:"staged_root"`
+	EbuildPath   string   `json:"ebuild_path"`
+	UpstreamURLs []string `json:"upstream_urls,omitempty"`
+	// FixerSession is the claude session id of the unattended build fixer
+	// that tried this bump, so --repair can resume it with what was already
+	// tried. Empty when no fixer ran or none was recorded.
+	FixerSession string    `json:"fixer_session_id,omitempty"`
 	Created      time.Time `json:"created"`
 	// RepairedAt marks a bundle written after a --repair session that did not
 	// pass: the staged tree holds the operator's work, so a plain --apply or

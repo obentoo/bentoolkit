@@ -33,20 +33,34 @@ func TestRepairRevalidateFailureRewritesBundleAndExits1(t *testing.T) {
 	}
 }
 
-// TestRepairRevalidateSuccessPromotesAndRemovesBundle covers R5.2, R5.3, R5.4.
-func TestRepairRevalidateSuccessPromotesAndRemovesBundle(t *testing.T) {
+// TestRepairRevalidateProvesThenApplyPublishes covers R5.2, R5.3, R5.4 as they
+// stand now that apply only publishes: a repair that passes is proven the way
+// --check proves and publishes nothing; the bundle goes, and --apply then
+// publishes exactly the operator's repaired ebuild from that proof.
+func TestRepairRevalidateProvesThenApplyPublishes(t *testing.T) {
 	auOpts := testAutoupdateOptions()
 	f := repairFixture(t, auOpts, 0)
+	published := filepath.Join(f.overlay, "dev-go", "repairdemo", "repairdemo-"+repairCand+".ebuild")
+
 	code, out := runRepair(t, auOpts, ttyDeps(true, true), "y\n")
-	if code != 0 {
-		t.Fatalf("passing re-validation exited %d, want 0:\n%s", code, out)
+	if code != 0 || !strings.Contains(out, "READY") {
+		t.Fatalf("passing re-validation exited %d, want 0 and READY:\n%s", code, out)
 	}
-	pub, err := os.ReadFile(filepath.Join(f.overlay, "dev-go", "repairdemo", "repairdemo-"+repairCand+".ebuild"))
-	if err != nil || !strings.Contains(string(pub), "# repaired") {
-		t.Fatalf("the operator's repaired ebuild was not promoted (err %v)", err)
+	if _, err := os.Stat(published); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("--repair published the candidate (stat %v); it must only prove it", err)
 	}
 	if _, err := os.Stat(f.bundlePath); !errors.Is(err, os.ErrNotExist) {
-		t.Fatalf("bundle still present after promotion (stat %v)", err)
+		t.Fatalf("bundle still present after the repair was proven (stat %v)", err)
+	}
+
+	auOpts.repair, auOpts.apply = "", repairPkg
+	code, out = runRepair(t, auOpts, ttyDeps(true, true), "")
+	if code != 0 {
+		t.Fatalf("--apply of the proven repair exited %d:\n%s", code, out)
+	}
+	pub, err := os.ReadFile(published)
+	if err != nil || !strings.Contains(string(pub), "# repaired") {
+		t.Fatalf("--apply did not publish the operator's repaired ebuild (err %v)", err)
 	}
 	pending, err := autoupdate.NewPendingList(f.configDir)
 	if err != nil {

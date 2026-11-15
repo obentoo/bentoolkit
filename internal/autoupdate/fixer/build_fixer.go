@@ -190,6 +190,10 @@ type BuildFixResult struct {
 	// DeniedTools names the tools the CLI refused during a run that nonetheless
 	// ended successfully, labelled as ManifestFixResult.DeniedTools is.
 	DeniedTools []string
+	// SessionID is the claude session the attempt ran in, for --repair to
+	// resume; empty when the CLI reported none. Set on failure too: a failed
+	// attempt is exactly the one worth resuming.
+	SessionID string
 }
 
 // BuildFixer is the optional capability an LLM provider may implement to repair a
@@ -578,6 +582,7 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 			Model:        f.model,
 			ModelIsAlias: isModelAlias(f.model),
 			Attempt:      attempt,
+			SessionID:    env.SessionID,
 		}, formatFixerError(runCtx.Err(), run.runErr, env, run.parseErr, run.stdout, run.stderr)
 	}
 
@@ -588,5 +593,6 @@ func (f *ClaudeCodeBuildFixer) FixBuild(ctx context.Context, req BuildFixRequest
 		ModelIsAlias: isModelAlias(f.model),
 		Attempt:      attempt,
 		DeniedTools:  llm.RefusedToolLabels(env.PermissionDenials),
+		SessionID:    env.SessionID,
 	}, nil
 }
