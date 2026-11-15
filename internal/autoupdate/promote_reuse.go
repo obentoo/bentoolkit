@@ -416,7 +416,7 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 		SubstitutionDigest: inputs.substitutions,
 		DistfileDigest:     inputs.distfile,
 		VendorUnpublished:  vendorUnpublished,
-		Backend:            validate.BackendHost,
+		Backend:            a.buildBackend.Name(),
 		Environment:        hostEnvironment(a.gentooPath),
 		RecordedAt:         time.Now().UTC(),
 		State:              proofState(gates, depth),

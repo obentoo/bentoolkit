@@ -995,6 +995,15 @@ func gateForDepth(d validate.Depth) string {
 	return gate
 }
 
+// backendCommand is the command a build child runs as: the argv the gate built,
+// wrapped by the build backend, through the applier's exec seam. Every child
+// whose answer is evidence about the build (the gates, the dependency probe)
+// goes through it, so the evidence comes from where the build runs.
+func (a *Applier) backendCommand(ctx context.Context, name string, arg ...string) *exec.Cmd {
+	name, arg = a.buildBackend.Wrap(name, arg)
+	return a.execCommand(ctx, name, arg...)
+}
+
 // buildDeps assembles the seams the validate package's build gates run through,
 // so no gate reaches exec.CommandContext or the real PATH on its own.
 //
@@ -1003,7 +1012,7 @@ func gateForDepth(d validate.Depth) string {
 // the one seam each call wraps for itself (see recordingRunner).
 func (a *Applier) buildDeps(runAttached func(cmd *exec.Cmd) ([]byte, error)) validate.BuildDeps {
 	return validate.BuildDeps{
-		ExecCommand:    a.execCommand,
+		ExecCommand:    a.backendCommand,
 		RunAttached:    runAttached,
 		LookPath:       a.lookPath,
 		IsolationProbe: a.isolationProbe,

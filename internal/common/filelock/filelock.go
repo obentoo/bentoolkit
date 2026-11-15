@@ -47,7 +47,19 @@ type Lock struct {
 // On timeout the error wraps ErrLocked and names path and the holder's PID.
 // Any other failure is wrapped naming path and does not wrap ErrLocked.
 func Acquire(path, purpose string) (*Lock, error) {
-	deadline := time.Now().Add(Wait)
+	return acquire(path, purpose, Wait)
+}
+
+// TryAcquire is Acquire without the wait: when a live process holds the lock it
+// returns at once, with an error wrapping ErrLocked that names the holder's
+// PID and the time it took the lock. An abandoned lock is still reaped.
+func TryAcquire(path, purpose string) (*Lock, error) {
+	return acquire(path, purpose, 0)
+}
+
+// acquire takes the lock at path, waiting up to wait for a live holder.
+func acquire(path, purpose string, wait time.Duration) (*Lock, error) {
+	deadline := time.Now().Add(wait)
 	for {
 		// 0644, not 0600: another user sharing the directory must be able to
 		// open the lock read-only to take its flock and reap it after a crash.
@@ -76,9 +88,12 @@ func Acquire(path, purpose string) (*Lock, error) {
 		}
 
 		remaining := time.Until(deadline)
+		if wait <= 0 {
+			return nil, fmt.Errorf("%w: %s is held by %s", ErrLocked, path, describeHolderSince(path))
+		}
 		if remaining <= 0 {
 			return nil, fmt.Errorf("%w: %s is held by %s and did not become free within %s",
-				ErrLocked, path, describeHolder(path), Wait)
+				ErrLocked, path, describeHolder(path), wait)
 		}
 		time.Sleep(min(remaining, Poll))
 	}
@@ -232,6 +247,36 @@ func describeHolder(path string) string {
 		return "pid " + strconv.Itoa(pid)
 	}
 	return "a process that did not identify itself in " + filepath.Base(path)
+}
+
+// describeHolderSince is describeHolder with the time the holder took the
+// lock, when the lock file records one.
+func describeHolderSince(path string) string {
+	holder := describeHolder(path)
+	if taken, ok := holderField(path, "taken="); ok {
+		return holder + ", running since " + taken
+	}
+	return holder
+}
+
+// holderField reads the value of the first line starting with key in a lock
+// file, within holderReadBound bytes.
+func holderField(path, key string) (string, bool) {
+	file, err := openLockReadOnly(path)
+	if err != nil {
+		return "", false
+	}
+	defer file.Close() //nolint:errcheck // read-only
+	raw, err := io.ReadAll(io.LimitReader(file, holderReadBound))
+	if err != nil {
+		return "", false
+	}
+	for line := range strings.Lines(string(raw)) {
+		if value, ok := strings.CutPrefix(line, key); ok && strings.HasSuffix(line, "\n") {
+			return strings.TrimSpace(value), true
+		}
+	}
+	return "", false
 }
 
 // holderReadBound caps how much of a lock file holderPID reads: the payload is

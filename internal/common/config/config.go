@@ -131,6 +131,24 @@ type AutoupdateConfig struct {
 	// Proof governs how long a proof taken by `--check --llm` lets an apply
 	// publish the bump it proved.
 	Proof ProofConfig `yaml:"proof,omitempty"`
+	// Build says where the build gates run.
+	Build BuildConfig `yaml:"build,omitempty"`
+}
+
+// BuildConfig is the autoupdate.build block.
+type BuildConfig struct {
+	// Backend is where the build gates run: "host" (the default), "vm" or
+	// "container". --build-backend overrides it for one run.
+	Backend string `yaml:"backend,omitempty"`
+}
+
+// GetBuildBackend returns autoupdate.build.backend with surrounding
+// whitespace removed, or "" when it is unset.
+func (c *AutoupdateConfig) GetBuildBackend() string {
+	if c == nil {
+		return ""
+	}
+	return strings.TrimSpace(c.Build.Backend)
 }
 
 // ProofConfig is the autoupdate.proof block.
