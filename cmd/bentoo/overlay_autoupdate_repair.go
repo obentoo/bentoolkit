@@ -67,11 +67,17 @@ func (ar *autoupdateRun) refuseRepairMisuse() error {
 // operator's yes, and then re-validates the staged tree whatever the session's
 // exit status.
 func (ar *autoupdateRun) runRepair(ctx context.Context, overlayPath, configDir string, auCfg config.AutoupdateConfig) error {
-	target, err := ar.loadRepairTarget(configDir)
+	return ar.runRepairFor(ctx, ar.opts.repair, overlayPath, configDir, auCfg)
+}
+
+// runRepairFor is runRepair for pkg: --repair's own package, or one the check
+// offers at its end.
+func (ar *autoupdateRun) runRepairFor(ctx context.Context, pkg, overlayPath, configDir string, auCfg config.AutoupdateConfig) error {
+	target, err := ar.loadRepairTarget(configDir, pkg)
 	if err != nil {
 		return err
 	}
-	pkg, b := ar.opts.repair, target.bundle
+	b := target.bundle
 	category, name, _ := strings.Cut(pkg, "/")
 	pkgDir := filepath.Join(b.StagedRoot, category, name)
 	for _, dir := range []string{overlayPath, b.StagedRoot, pkgDir} {
@@ -234,12 +240,19 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	if depth, raise := repairDepth(b, ar.validate.Depth); raise {
 		extra = append(extra, autoupdate.WithApplierDepth(depth))
 	}
+	// The live region the re-validation's builds run under.
+	checkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	live, release := ar.buildLiveReporter(checkCtx, cancel, 1, "Re-validating the repair")
+	defer release()
+	extra = append(extra, live...)
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
 		return err
 	}
-	result := applier.Validate(ctx, b.Package, validate.DepthNone)
-	if err := ctx.Err(); err != nil {
+	result := applier.Validate(checkCtx, b.Package, validate.DepthNone)
+	release()
+	if err := checkCtx.Err(); err != nil {
 		return failWith(1, fmt.Errorf("--repair %s: interrupted during the re-validation; the staged tree is kept as the session left it: %w", b.Package, err))
 	}
 
@@ -297,8 +310,7 @@ func repairDepth(b repair.Bundle, asked *validate.Depth) (validate.Depth, bool) 
 // loadRepairTarget finds the package's newest bundle and checks it against
 // its own location and the pending list. Every refusal is exit 1 and names
 // what disagrees.
-func (ar *autoupdateRun) loadRepairTarget(configDir string) (repairTarget, error) {
-	pkg := ar.opts.repair
+func (ar *autoupdateRun) loadRepairTarget(configDir, pkg string) (repairTarget, error) {
 	stagingRoot := filepath.Join(configDir, stagingDirName)
 	b, bundlePath, err := repair.FindBundle(stagingRoot, pkg)
 	if err != nil {
@@ -335,4 +347,52 @@ func (ar *autoupdateRun) loadRepairTarget(configDir string) (repairTarget, error
 			pkg, entry.NewVersion, b.Candidate, pkg))
 	}
 	return repairTarget{bundle: b, bundlePath: bundlePath}, nil
+}
+
+// offerRepairs ends an interactive `--check --llm`: each bump the check left
+// to the maintainer (HUMAN) and that has a repair bundle is offered a --repair
+// session, one at a time, in the run's order. Each is the --repair flow
+// itself: the bundle is shown and "Start an interactive claude session?" is
+// asked, so "n" skips that bump. A repair's outcome is printed and never moves
+// the check's exit code. Nothing is offered under --yes, to a run without a
+// terminal on both stdin and stdout, or without claude on PATH: an unattended
+// run never stops to ask.
+func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDir string, auCfg config.AutoupdateConfig, validated report.Run) {
+	if ar.opts.yes || !ar.deps.checkInteractive() || !ar.deps.uiIsTerminal() {
+		return
+	}
+	if _, err := ar.deps.lookPath("claude"); err != nil {
+		return
+	}
+	payload, ok := validated.Payload.(report.AutoupdateCheck)
+	if !ok {
+		return
+	}
+	stagingRoot := filepath.Join(configDir, stagingDirName)
+	var offered []string
+	for _, row := range payload.Results {
+		if row.State != report.Human {
+			continue
+		}
+		if _, _, err := repair.FindBundle(stagingRoot, row.Package); err == nil {
+			offered = append(offered, row.Package)
+		}
+	}
+	if len(offered) == 0 {
+		return
+	}
+
+	fmt.Println()
+	output.Header.Println("Repair sessions")
+	fmt.Printf("%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one.\n",
+		len(offered))
+	for i, pkg := range offered {
+		if ctx.Err() != nil {
+			return
+		}
+		fmt.Printf("\n[%d/%d] %s\n", i+1, len(offered), pkg)
+		if err := ar.runRepairFor(ctx, pkg, overlayPath, configDir, auCfg); err != nil {
+			output.Warning.Printf("  %s: %v\n", pkg, err)
+		}
+	}
 }

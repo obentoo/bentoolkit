@@ -10,6 +10,8 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/report"
+	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
 
 // This file evaluates a pending update through the gates at its resolved depth,
@@ -130,8 +132,21 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 	var gatesPassed bool
 	a.reporter.TaskStart(pkg, pkg)
 	defer func() {
-		worst := validate.EbuildResult{Gates: gates}.WorstOutcome()
-		a.reporter.TaskDone(pkg, worst != validate.OutcomeFailed, local.DepthReached, "")
+		// ✓ means what the report means by it, READY: a bump the maintainer
+		// or the environment still has to act on is not a success, whether or
+		// not a gate FAILED (a manifest failure leaves every gate SKIPPED). The
+		// row names the state. The bundle defer below runs first, so a HUMAN
+		// bump's row can name --repair, as a failed apply's row did.
+		state := proofState(gates, depth.Depth)
+		hint := ""
+		if local.RepairBundle != "" && a.outcomeHint != nil {
+			hint = a.outcomeHint(local)
+		}
+		summary := state
+		if local.DepthReached != "" {
+			summary += ", reached " + local.DepthReached
+		}
+		tui.TaskDoneWithHint(a.reporter, pkg, state == string(report.Ready), summary, hint, "")
 	}()
 
 	var cand candidatePaths
