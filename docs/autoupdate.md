@@ -837,6 +837,32 @@ and the LLM fixer is not called. The checks that read this host's Portage and
 build directory are skipped for such a build, because the environment
 installed its own dependencies and built in its own directory.
 
+#### A build budget
+
+`autoupdate.build.budget` (or `--build-budget` for one run) is a duration such
+as `45m` or `2h`. A bump whose depth would compile (`compile` or `install`) is
+taken no further than `configure` when its package averages more than the
+budget on this host, or has no build history here; the plan shows the capped
+depth and the reason per package:
+
+```text
+www-client/chromium  configure  ...; capped at configure by the 30m0s build budget: it averages 1h44m29s over 29 merge(s) here
+sys-libs/zlib        install    ...; within the 30m0s build budget: it averages 7s over 4 merge(s) here
+```
+
+The history is `qlop -a -M`, read once per run and shared by the plan and the
+run, so the depth you confirm is the depth that runs. A host where `qlop`
+cannot answer has no history, so every package counts as expensive, and the
+run says so. The budget caps `--depth` too, and is the operator's own
+instruction: a capped bump is not counted as skipped by policy.
+
+The history is this host's even when the gates run in a container or VM, so it
+is an estimate of relative cost, not of the time there. `--apply` resolves the
+depth the same way: with the budget in the config file, it asks for the depth
+the check proved; a budget given only to `--check` makes `--apply` ask for the
+uncapped depth and report the bump Unproven. Pass the same `--build-budget` to
+both, or set the key.
+
 Only one run uses the build environment at a time: a second `--check --llm`,
 `--revive` or `--repair` exits at once, naming the PID and start time of the
 run that holds `build-session.bentoo-lock` in the autoupdate state directory.

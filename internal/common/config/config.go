@@ -144,6 +144,11 @@ type BuildConfig struct {
 	Container BuildContainerConfig `yaml:"container,omitempty"`
 	// VM configures the vm backend.
 	VM BuildVMConfig `yaml:"vm,omitempty"`
+	// Budget caps how deep a bump is built: a package whose average build on
+	// this host is above it, or which has no build history, is taken no
+	// further than configure. A Go duration ("45m", "2h"); unset is no budget.
+	// --build-budget overrides it for one run.
+	Budget string `yaml:"budget,omitempty"`
 }
 
 // BuildVMConfig is the autoupdate.build.vm block.
