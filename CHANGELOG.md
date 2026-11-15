@@ -103,6 +103,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   never configures or builds. `validate.depths.revision`/`patch` still set
   it per class.
 
+- **`--compile` is removed, and `--apply` takes no `--llm`.** A build runs only
+  in `--check --llm`, unprivileged, up to `--depth=install`; the privileged
+  `sudo ebuild … compile` step and its prompt are gone from every mode. Both
+  flags now stop the command before any work and name what to run instead:
+  `--check --llm --depth=compile <package>`, then `--apply <package>`.
+  `--repair` re-validates a bundle that failed at the compile gate at
+  `--depth=compile`.
+
 - **Dependencies updated.** `chromedp/cdproto` v0.159.3 → v0.160.0 (linked
   only into the `chromedp`-tagged build); the local VM gate's CodeQL moves
   from 2.27.1 to 2.27.4. Neither carries a security fix; both were taken

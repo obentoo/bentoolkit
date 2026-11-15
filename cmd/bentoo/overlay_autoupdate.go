@@ -343,7 +343,8 @@ Examples:
 	cmd.Flags().BoolVar(&o.list, "list", false, "List pending updates")
 	cmd.Flags().StringVar(&o.apply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
 	cmd.Flags().BoolVar(&o.force, "force", false, "Ignore cache when checking")
-	cmd.Flags().BoolVar(&o.compile, "compile", false, "Run compile test after apply. This PRIVILEGED gate stops at src_compile and never runs src_install: extending it would mean a second prompt, a second privilege escalation and a second copy of the repair loop. --depth=install is the unprivileged path that goes further, and the two are mutually exclusive")
+	cmd.Flags().BoolVar(&o.compile, "compile", false, "Removed: builds run only in --check --llm, unprivileged, up to --depth=install; kept so that typing it says what to run instead")
+	_ = cmd.Flags().MarkHidden("compile")
 	// --depth is read OFF THE COMMAND rather than bound to a package variable
 	// (newValidateCmd's convention): the value is a rung of a ladder that has to
 	// be parsed and rejected by name, and a package variable would carry one
@@ -677,6 +678,14 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	// knows was skipped.
 	if ar.opts.markAutoDisabled && ar.opts.lint {
 		return failWith(1, fmt.Errorf("--mark-auto-disabled and --lint are separate modes and only one runs per invocation — run them one after the other"))
+	}
+
+	// A build runs only in `--check --llm` now, unprivileged, and `--apply`
+	// publishes what that check proved. The two flags that asked an apply to
+	// build or to call an agent are refused before any work, with the command
+	// that does it now.
+	if err := ar.opts.removedApplyFlags(ar.deps != nil && ar.deps.validatingApply); err != nil {
+		return failWith(1, err)
 	}
 
 	appCtx, err := loadAppContextNoValidation(cmd)
@@ -2531,3 +2540,19 @@ func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 const reviveLocalTreeHint = "configure a local gentoo repository in ~/.config/bentoo/config.yaml " +
 	"(repositories.gentoo.provider: local, repositories.gentoo.path: /var/db/repos/gentoo), " +
 	"or force a clone-backed provider so the package tree is available on disk"
+
+// removedApplyFlags refuses the flags that asked `--apply` (or a revive or a
+// repair) to build or to call an agent, naming the command that does it now.
+// validatingApply is the legacy seam (deps.validatingApply): an apply that
+// still validates may still be handed --llm.
+func (o *autoupdateOptions) removedApplyFlags(validatingApply bool) error {
+	if o.compile {
+		return errors.New("--compile was removed: a build runs only in the check, unprivileged — " +
+			"run: bentoo overlay autoupdate --check --llm --depth=compile <package>, then --apply <package>")
+	}
+	if o.llm && o.apply != "" && !validatingApply {
+		return errors.New("--apply publishes what a check proved and runs no agent, so it takes no --llm — " +
+			"run: bentoo overlay autoupdate --check --llm <package>, then --apply <package>")
+	}
+	return nil
+}

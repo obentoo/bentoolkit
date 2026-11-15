@@ -872,9 +872,9 @@ package directory, seeded with the bundle:
 - Ctrl+C and SIGQUIT belong to the session; bentoo is not stopped by them.
 
 When the session exits, with any status, bentoo re-validates the edited tree
-exactly as `--apply` would — manifest, then the gates, at no less than the
-depth recorded for the tree, with `--compile` when the bundle failed at the
-compile gate or `--compile` was given — with no LLM agent, and promotes it on
+— manifest, then the gates, at no less than the depth recorded for the tree,
+and at `--depth=compile` when the bundle failed at the compile gate — with no
+LLM agent, and promotes it on
 success: the bundle is removed and the pending entry is completed. A failed
 re-validation rewrites the bundle with the new stage, the failure text and the
 `repaired_at` mark, and exits 1. Two cases skip the re-validation, leave the
