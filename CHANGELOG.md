@@ -60,6 +60,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `-D` on a compiler flag line is no longer read as an option, and a failed
   package's row folds the option infos into a count.
 
+- **`--repair` proves, and `--apply` publishes the repair.** The re-validation
+  after a repair session now runs as `--check` does and records a proof
+  instead of publishing; a READY tree loses its bundle and
+  `bentoo overlay autoupdate --apply <cat/pkg>` publishes exactly the repaired
+  ebuild. With that, apply is publish-only without exception. The session
+  also resumes the unattended build fixer's own claude session, as a fork,
+  when the bundle names it (`fixer_session_id`): it starts from what the fixer
+  already tried. The repair bundle now comes from the check: a HUMAN bump
+  leaves it beside its kept staged tree, with the stage that failed and the
+  failure text.
+
 - **One build session at a time.** A run that may build takes
   `build-session.bentoo-lock` in the autoupdate state directory; a second one
   exits at once, naming the PID and start time of the run that holds it.

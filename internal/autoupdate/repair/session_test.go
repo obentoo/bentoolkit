@@ -145,3 +145,24 @@ func TestSessionArgsPromptCarriesBundleAndInstruction(t *testing.T) {
 		}
 	}
 }
+
+// TestSessionArgsResumesTheFixerSessionAsAFork: with a recorded fixer session
+// the operator's session resumes it, forked so the fixer's record is kept;
+// without one nothing is resumed.
+func TestSessionArgsResumesTheFixerSessionAsAFork(t *testing.T) {
+	spec := sessionSpec()
+	if slices.Contains(SessionArgs(spec), "--resume") {
+		t.Fatal("a bundle with no fixer session resumed one")
+	}
+	spec.Bundle.FixerSession = "ce97910e-9ac8-49a8-8635-94ec6a29db09"
+	args := SessionArgs(spec)
+	if got := flagValue(t, args, "--resume"); got != spec.Bundle.FixerSession {
+		t.Errorf("--resume %q, want the fixer's session", got)
+	}
+	if !slices.Contains(args, "--fork-session") {
+		t.Errorf("the fixer's session is resumed in place, not forked: %q", args)
+	}
+	if strings.HasPrefix(args[0], "-") {
+		t.Errorf("argv[0] = %q, want the prompt first", args[0])
+	}
+}

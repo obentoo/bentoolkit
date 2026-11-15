@@ -384,6 +384,9 @@ type ClaudeCodeEnvelope struct {
 	Errors            []string                 `json:"errors"`
 	TotalCostUSD      float64                  `json:"total_cost_usd"`
 	PermissionDenials []ClaudePermissionDenial `json:"permission_denials"`
+	// SessionID names the session the CLI recorded, which `claude --resume`
+	// opens again.
+	SessionID string `json:"session_id"`
 }
 
 // ClaudePermissionDenial is one refused tool call in the envelope.

@@ -82,9 +82,16 @@ func repairFixture(t *testing.T, auOpts *autoupdateOptions, toolExit int) *repai
 	f.toolDir = t.TempDir()
 	f.record = filepath.Join(t.TempDir(), "claude-record")
 	writeStub(t, f.toolDir, "claude", fmt.Sprintf("pwd > %q.cwd\nprintf '%%s\\0' \"$@\" > %q.argv\nexit 0\n", f.record, f.record))
-	for _, tool := range []string{"pkgdev", "pkgcheck", "emerge", "ebuild", "egencache", "portageq"} {
+	for _, tool := range []string{"pkgdev", "pkgcheck", "emerge", "egencache", "portageq"} {
 		writeStub(t, f.toolDir, tool, fmt.Sprintf("exit %d\n", toolExit))
 	}
+	// A passing build prints the phase markers a real one does: the repair is
+	// proven by the check's gates, which read them.
+	markers := ""
+	if toolExit == 0 {
+		markers = "echo '>>> Source prepared.'\necho '>>> Source configured.'\n"
+	}
+	writeStub(t, f.toolDir, "ebuild", fmt.Sprintf("%sexit %d\n", markers, toolExit))
 	t.Setenv("PATH", f.toolDir+":/usr/bin:/bin")
 	return f
 }

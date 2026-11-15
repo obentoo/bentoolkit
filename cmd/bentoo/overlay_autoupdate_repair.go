@@ -17,6 +17,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/output"
+	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 )
 
@@ -216,27 +217,20 @@ func (ar *autoupdateRun) repairStoppedBy(pkg string, sig os.Signal) error {
 		pkg, sig, pkg))
 }
 
-// revalidateRepair puts the adopted staged tree through the apply path once,
-// under the lock the run already holds; adopting the tree disables the LLM
-// agents for that run. Only a promoted
-// tree removes the bundle; a failed one has had it rewritten by the applier,
-// and the bundle carries the repair mark on every way out that did not promote.
+// revalidateRepair proves the adopted staged tree the way --check does, under
+// the lock the run already holds, and publishes nothing: a READY verdict is a
+// proof `--apply` publishes, as for any checked bump. Adopting the tree
+// disables the LLM agents for the run. A READY tree has its bundle removed by
+// the check; any other verdict keeps it, marked, and is exit 1.
 func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig, b repair.Bundle) error {
-	applyCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	extra, finish := ar.buildApplyReporter(applyCtx, cancel, 1)
-	defer finish()
-
-	// The applier marks the bundle it rewrites, but an exit before it reached
-	// the tree, the applier's construction included, rewrote nothing.
-	promoted := false
+	proved := false
 	defer func() {
-		if !promoted {
+		if !proved {
 			ar.markRepaired(b)
 		}
 	}()
 
-	extra = append(extra, autoupdate.WithAdoptedStagedTree(b.StagedRoot))
+	extra := []autoupdate.ApplierOption{autoupdate.WithAdoptedStagedTree(b.StagedRoot)}
 	if depth, raise := repairDepth(b, ar.validate.Depth); raise {
 		extra = append(extra, autoupdate.WithApplierDepth(depth))
 	}
@@ -244,24 +238,43 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	if err != nil {
 		return err
 	}
-	result, err := applier.Apply(applyCtx, b.Package)
-	finish()
+	result := applier.Validate(ctx, b.Package, validate.DepthNone)
+	if err := ctx.Err(); err != nil {
+		return failWith(1, fmt.Errorf("--repair %s: interrupted during the re-validation; the staged tree is kept as the session left it: %w", b.Package, err))
+	}
 
-	switch {
-	case err != nil:
-		ar.displayApplyResult(result)
-		return failWith(1, fmt.Errorf("--repair %s: the re-validation failed: %w", b.Package, err))
-	case result == nil || !result.Success:
-		ar.displayApplyResult(result)
-		return failWith(1, fmt.Errorf("--repair %s: the staged tree was not promoted: the package is %s", b.Package, repairOutcome(result)))
+	state := repairState(result)
+	printRepairVerdict(b.Package, state, result)
+	if state != report.Ready {
+		return failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s, not proven; the bundle is kept: run --repair %s again", b.Package, state, b.Package))
 	}
-	promoted = true
-	if err := repair.RemoveBundle(b.StagedRoot); err != nil {
-		ar.log().Warn("the staged tree was promoted but its repair bundle could not be removed",
-			"package", b.Package, "staged_root", b.StagedRoot, "err", err)
-	}
-	ar.displayApplyResult(result)
+	proved = true
 	return nil
+}
+
+// repairState is the check's verdict on a re-validated tree.
+func repairState(result validate.EbuildResult) report.State {
+	facts := validate.ReportGateFacts(result.Gates, result.DepthRequested)
+	return report.StateOf(report.Classify(false, facts), facts)
+}
+
+// printRepairVerdict shows each gate's outcome and what to do next.
+func printRepairVerdict(pkg string, state report.State, result validate.EbuildResult) {
+	fmt.Println()
+	output.Header.Println("Re-validation")
+	for _, g := range result.Gates {
+		fmt.Printf("    %-12s %s", g.Gate, g.Outcome)
+		if g.Reason != "" && g.Outcome != validate.OutcomePass {
+			fmt.Printf(": %s", g.Reason)
+		}
+		fmt.Println()
+	}
+	if state == report.Ready {
+		output.Success.Printf("\n✓ %s is READY: the repaired tree is proven.\n", pkg)
+		output.Info.Printf("Publish it with 'bentoo overlay autoupdate --apply %s'\n", pkg)
+		return
+	}
+	output.Warning.Printf("\n%s is %s.\n", pkg, state)
 }
 
 // repairNeedsCompile reports whether the re-validation must reach the compile
@@ -279,22 +292,6 @@ func repairDepth(b repair.Bundle, asked *validate.Depth) (validate.Depth, bool) 
 		return 0, false
 	}
 	return validate.DepthCompile, true
-}
-
-// repairOutcome names why an apply that returned no error did not promote.
-func repairOutcome(result *autoupdate.ApplyResult) string {
-	switch {
-	case result == nil:
-		return "in an unknown state"
-	case result.Obsolete:
-		return "obsolete and was pruned from pending"
-	case len(result.Waiting) > 0:
-		return "waiting: " + strings.Join(result.Waiting, "; ")
-	case result.Held:
-		return "held (" + result.HoldReason + ")"
-	default:
-		return "not applied"
-	}
 }
 
 // loadRepairTarget finds the package's newest bundle and checks it against

@@ -284,6 +284,9 @@ type ApplyResult struct {
 	// RepairBundle is the repair bundle written beside the kept staged tree of
 	// a failed apply. Empty when no bundle was written.
 	RepairBundle string
+	// FixerSession is the claude session id of the build fixer this run
+	// invoked, when it recorded one.
+	FixerSession string
 	// DepthRequested is how far this bump was ASKED to be validated: the depth
 	// class, tier, configuration and the operator's flags resolved to, raised by
 	// a reviewer escalation where one applied.
