@@ -16,7 +16,17 @@ import (
 // model/reporter constructors are unexported, so the driver cannot assemble the
 // pair itself.
 func New(ctx context.Context, cancel func(), out io.Writer, in io.Reader) (*Program, Reporter) {
-	p := NewProgram(ctx, cancel, newModel(), out, in)
+	return NewTitled(ctx, cancel, out, in, "")
+}
+
+// NewTitled is New with the live region's header set to title ("Validating
+// updates"); an empty title keeps "Applying updates".
+func NewTitled(ctx context.Context, cancel func(), out io.Writer, in io.Reader, title string) (*Program, Reporter) {
+	m := newModel()
+	if title != "" {
+		m.header = title
+	}
+	p := NewProgram(ctx, cancel, m, out, in)
 	return p, newTeaReporter(p)
 }
 

@@ -8,12 +8,14 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/spf13/cobra"
 )
 
@@ -135,5 +137,53 @@ func TestRunAutoupdate_SignalCancels(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("runAutoupdate did not return within 5s of SIGTERM; signal cancellation is not wired")
+	}
+}
+
+// TestRunAutoupdate_SignalCancels_CheckBuild verifies R1.1/R1.3 on the path
+// that runs builds now (PR 9b; the apply version went with the validating
+// apply in PR 3c): a SIGTERM during `--check --llm` validation cancels the
+// in-flight `pkgdev manifest` child and the validation returns promptly.
+//
+// Skipped on Windows: SIGTERM and the /bin/sh stub are not portable there.
+func TestRunAutoupdate_SignalCancels_CheckBuild(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("SIGTERM / /bin/sh stub is not portable on Windows")
+	}
+	auOpts := testAutoupdateOptions()
+	_, overlay, configDir, checked := s092CheckFixture(t, auOpts, 1)
+	toolDir := strings.SplitN(os.Getenv("PATH"), ":", 2)[0]
+	readyFile := filepath.Join(t.TempDir(), "pkgdev.ready")
+	writeStub(t, toolDir, "pkgdev", ": > '"+readyFile+"'\nexec sleep 3600\n")
+
+	auCmd := testAutoupdateCmd()
+	setProcessSignalContext(t, auCmd)
+	ctx := auCmd.Context()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		testAutoupdateRunWith(auOpts, defaultDeps()).runPendingValidation(ctx, overlay, configDir, checked, config.LLMConfig{})
+	}()
+	waitForReadyFile(t, readyFile, func() bool {
+		select {
+		case <-done:
+			return true
+		default:
+			return false
+		}
+	})
+
+	signalAt := time.Now()
+	if err := syscall.Kill(os.Getpid(), syscall.SIGTERM); err != nil {
+		t.Fatalf("sending SIGTERM to self: %v", err)
+	}
+	select {
+	case <-done:
+		if took := time.Since(signalAt); took > 2*time.Second {
+			t.Errorf("the validation returned %s after SIGTERM, want within 2s", took)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("SIGTERM did not stop the in-flight manifest child: the validation is still running")
 	}
 }

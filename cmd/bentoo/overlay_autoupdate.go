@@ -532,6 +532,13 @@ func (ar *autoupdateRun) tuiEnabledForApply() bool {
 // summary, which must print after the TUI is gone. Its only file is the log
 // file, never the overlay, so its order against the lock's release is free.
 func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.CancelFunc, total int) ([]autoupdate.ApplierOption, func()) {
+	return ar.buildLiveReporter(ctx, cancel, total, "")
+}
+
+// buildLiveReporter is buildApplyReporter with the live region's header set
+// to title, for the runs that build without applying: the check and a repair's
+// re-validation.
+func (ar *autoupdateRun) buildLiveReporter(ctx context.Context, cancel context.CancelFunc, total int, title string) ([]autoupdate.ApplierOption, func()) {
 	if !ar.tuiEnabledForApply() {
 		r := tui.NewPlainReporter(os.Stderr, time.Second)
 		r.BatchStart(total)
@@ -539,7 +546,7 @@ func (ar *autoupdateRun) buildApplyReporter(ctx context.Context, cancel context.
 	}
 
 	releaseLog := ar.holdLogUnderRegion()
-	prog, r := tui.New(ctx, cancel, os.Stdout, os.Stdin)
+	prog, r := tui.NewTitled(ctx, cancel, os.Stdout, os.Stdin, title)
 	prog.Start()
 	r.BatchStart(total)
 	extra := []autoupdate.ApplierOption{
@@ -1104,6 +1111,11 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	// state it once, from one place.
 	joined := checkReport(ar.log(), scannedWithFailures(result), validated)
 	ar.presentCheckReport(joined, planPrinted)
+
+	// The bumps left to the maintainer, offered a repair session each, after
+	// the report they appear in and before the reconciliation below, whose
+	// prompt can publish and must stay the last on screen.
+	ar.offerRepairs(ctx, overlayPath, configDir, cfg.Autoupdate, validated)
 
 	// Compare the registry against the overlay and, behind
 	// ONE confirmation, write the pins back. It runs here, at the very end of the

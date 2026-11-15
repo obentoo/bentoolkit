@@ -468,6 +468,17 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 		return nothingValidated(), true
 	}
 
+	// The live region the builds run under, as an apply's once did: the check
+	// is where the gates run now. Ctrl+C in the region cancels checkCtx, which
+	// stops the build in flight. Started BEFORE the options below, because it
+	// replaces the run's logger with one held while the region is drawn, and
+	// every option that takes ar.log() must take that one: a record written
+	// under the region tears its frame.
+	checkCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	live, release := ar.buildLiveReporter(checkCtx, cancel, len(plan.Entries), "Validating updates")
+	defer release()
+
 	opts := []autoupdate.ApplierOption{
 		autoupdate.WithApplierPackagesConfig(loadPackagesConfigForApply(ar.log(), overlayPath)),
 		applierFixerOption(ar.log(), llmCfg),
@@ -477,6 +488,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 	opts = append(opts, ar.applierVendorOptions()...)
 	opts = append(opts, ar.applierValidateOptions(configDir)...)
 	opts = append(opts, applierLLMOptions(ar.log(), ar.opts.llm, llmCfg, ar.validateCfg)...)
+	opts = append(opts, live...)
 
 	// Deliberately NOT WithApplierClean: `--clean` deletes published ebuilds, and
 	// a read-only check has no business owning that switch even by accident.
@@ -488,7 +500,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 		return nothingValidated(), true
 	}
 
-	finished := runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
+	finished := runValidationCheckLive(plan, func(entry validationPlanEntry) validate.EbuildResult {
 		// The ceiling one confirmation covered. It travels per entry so a
 		// reviewer's raise is held against what the operator approved rather than
 		// against this bump's own depth. A depth the plan could not spell
@@ -498,8 +510,8 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 		if err != nil {
 			ceiling = validate.DepthNone
 		}
-		return applier.Validate(ctx, entry.Package, ceiling)
-	})
+		return applier.Validate(checkCtx, entry.Package, ceiling)
+	}, release)
 
 	return finished, true
 }
@@ -522,6 +534,14 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 //
 // It publishes nothing, on every path — see deps.setVersionsForCheck.
 func runValidationCheck(plan validationPlan, run func(validationPlanEntry) validate.EbuildResult) report.Run {
+	return runValidationCheckLive(plan, run, nil)
+}
+
+// runValidationCheckLive is runValidationCheck under a live region: release
+// takes the region down once every entry has run, and only then are the
+// depth-escalation warnings printed, so no line is written over the frame. A
+// nil release prints them as they happen.
+func runValidationCheckLive(plan validationPlan, run func(validationPlanEntry) validate.EbuildResult, release func()) report.Run {
 	if !plan.Printed {
 		printValidationPrice(plan)
 		fmt.Println()
@@ -535,12 +555,23 @@ func runValidationCheck(plan validationPlan, run func(validationPlanEntry) valid
 	// results[i] answers plan.Entries[i]. buildReport's contract is positional,
 	// and appending exactly once per entry in plan order is what honours it.
 	results := make([]validate.EbuildResult, 0, len(plan.Entries))
+	var held []func()
 	for _, entry := range plan.Entries {
 		entry.ConfirmedDepth = confirmed.String()
 
 		result := run(entry)
-		reportDepthEscalation(entry, result, confirmed)
+		if release == nil {
+			reportDepthEscalation(entry, result, confirmed)
+		} else {
+			held = append(held, func() { reportDepthEscalation(entry, result, confirmed) })
+		}
 		results = append(results, result)
+	}
+	if release != nil {
+		release()
+		for _, print := range held {
+			print()
+		}
 	}
 
 	return buildReport(plan, results)

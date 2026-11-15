@@ -71,6 +71,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   leaves it beside its kept staged tree, with the stage that failed and the
   failure text.
 
+- **An interactive check offers the repair.** After the report of an
+  interactive `--check --llm`, each HUMAN bump with a repair bundle is offered
+  a `--repair` session, one at a time; `n` skips it. Never under `--yes` or
+  without a terminal.
+
+- **The check draws the live region its builds run under.** The check is
+  where the gates build now, so it shows the live region `--apply` used to
+  ("Validating updates"), as does a `--repair` re-validation; log records are
+  held below it, Ctrl+C stops the build in flight. A row is ✓ only for a
+  READY bump and names any other state, and a HUMAN bump's row names
+  `--repair`.
+
 - **One build session at a time.** A run that may build takes
   `build-session.bentoo-lock` in the autoupdate state directory; a second one
   exits at once, naming the PID and start time of the run that holds it.

@@ -889,6 +889,15 @@ Only one run uses the build environment at a time: a second `--check --llm`,
 `--revive` or `--repair` exits at once, naming the PID and start time of the
 run that holds `build-session.bentoo-lock` in the autoupdate state directory.
 
+#### What `--check --llm` prints while it builds
+
+On a terminal, `--check --llm` draws a live region while its gates build,
+headed "Validating updates" (a `--repair` re-validation's is "Re-validating the
+repair"). A row is ✓ only for a READY bump; any other state is ✗ and named on
+the row, and a HUMAN bump that left a repair bundle names `--repair` there.
+Ctrl+C in the region stops the build in flight. The region keeps to the
+terminal exactly as `--apply`'s does, below.
+
 #### What `--apply` prints
 
 On a terminal, `--apply` draws a live region;
@@ -988,6 +997,14 @@ When `--check --llm` leaves a bump to the maintainer (HUMAN), the staged tree
 is kept and a repair bundle, `.bentoo-repair.json`, is written at its root
 (mode 0600); the next step is
 `bentoo overlay autoupdate --repair <cat/pkg>`.
+
+An interactive check offers that step itself. After its report, and before
+the registry reconciliation, each HUMAN bump with a bundle goes through the
+`--repair` flow below, one at a time, in the run's order: the bundle is shown
+and the session question is asked, so `n` skips that bump. A repair's outcome
+is printed and never changes the check's exit code. Nothing is offered under
+`--yes`, to a run without a terminal on both stdin and stdout, or without
+`claude` on `PATH`.
 
 The bundle (schema 1) records the package, the current and candidate versions,
 the failed stage (`manifest`, `llm-fix`, `llm-build-fix`, `re-check`,
