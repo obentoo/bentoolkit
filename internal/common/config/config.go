@@ -140,6 +140,17 @@ type BuildConfig struct {
 	// Backend is where the build gates run: "host" (the default), "vm" or
 	// "container". --build-backend overrides it for one run.
 	Backend string `yaml:"backend,omitempty"`
+	// Container configures the container backend.
+	Container BuildContainerConfig `yaml:"container,omitempty"`
+}
+
+// BuildContainerConfig is the autoupdate.build.container block.
+type BuildContainerConfig struct {
+	// Image is an image already loaded in Podman or Docker; bentoolkit never
+	// pulls or imports one.
+	Image string `yaml:"image,omitempty"`
+	// Runtime is "podman" or "docker"; unset picks Podman, then Docker.
+	Runtime string `yaml:"runtime,omitempty"`
 }
 
 // GetBuildBackend returns autoupdate.build.backend with surrounding

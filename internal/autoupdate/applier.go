@@ -507,6 +507,11 @@ type Applier struct {
 	// buildBackend is where the build gates' commands run; see
 	// WithApplierBuildBackend.
 	buildBackend validate.BuildBackend
+	// envMu serialises builds in a build environment, which every package
+	// shares and which a fresh start replaces whole. A pointer, because the
+	// applier is copied (withoutAgents, a graduation) and every copy drives the
+	// same environment.
+	envMu *sync.Mutex
 	// validateUnproven lets an apply with no proof run the validation pipeline
 	// instead of refusing. Only this package's tests set it (through
 	// testsValidateUnproven), to drive the pipeline --repair still runs.
@@ -971,6 +976,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 
 	applier := &Applier{
 		buildBackend:     validate.HostBackend{},
+		envMu:            &sync.Mutex{},
 		validateUnproven: testsValidateUnproven,
 		spillSweep:       &sync.Once{},
 		overlayPath:      overlayPath,

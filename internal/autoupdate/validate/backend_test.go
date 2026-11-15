@@ -13,10 +13,11 @@ func TestNewBuildBackend(t *testing.T) {
 			t.Errorf("NewBuildBackend(%q) = %v, %v; want the host backend", name, b, err)
 		}
 	}
-	for _, name := range []string{BackendVM, BackendContainer} {
-		if _, err := NewBuildBackend(name); !errors.Is(err, ErrBackendUnavailable) {
-			t.Errorf("NewBuildBackend(%q) err = %v; want ErrBackendUnavailable, never a silent host", name, err)
-		}
+	if _, err := NewBuildBackend(BackendVM); !errors.Is(err, ErrBackendUnavailable) {
+		t.Errorf("NewBuildBackend(vm) err = %v; want ErrBackendUnavailable, never a silent host", err)
+	}
+	if _, err := NewBuildBackend(BackendContainer); !errors.Is(err, ErrBackendIsAnEnvironment) {
+		t.Errorf("NewBuildBackend(container) err = %v; want ErrBackendIsAnEnvironment", err)
 	}
 	if _, err := NewBuildBackend("kvm"); err == nil || errors.Is(err, ErrBackendUnavailable) {
 		t.Errorf("an unknown name was not refused as unknown: %v", err)

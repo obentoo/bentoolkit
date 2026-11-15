@@ -511,6 +511,10 @@ func eachManifestDistRecord(body []byte, visit func(line string, fields []string
 	}
 }
 
+// ManifestDistFilenames names the archives a Manifest body declares, each a
+// single file name; a malformed record names nothing.
+func ManifestDistFilenames(body []byte) []string { return manifestDistFilenames(body) }
+
 // manifestDistFilenames names the archives a Manifest body declares.
 //
 // A record with no second field names nothing, so it is skipped rather than
