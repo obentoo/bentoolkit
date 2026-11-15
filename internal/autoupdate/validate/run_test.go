@@ -120,14 +120,15 @@ func TestRun_AbsentDistfileNamesIt(t *testing.T) {
 }
 
 // TestRun_NonMesonBuildSystemNamesIt is R4.2. Out of scope is not the same as
-// clean, and the report has to say which one it means.
+// clean, and the report has to say which one it means. Autotools is out of
+// scope; Meson and CMake are read.
 func TestRun_NonMesonBuildSystemNamesIt(t *testing.T) {
-	const distfile = "cmakeproj-1.0.tar.gz"
+	const distfile = "acproj-1.0.tar.gz"
 	distdir := t.TempDir()
-	archive := buildTarGz(t, map[string]string{"cmakeproj-1.0/CMakeLists.txt": "project(cmakeproj)\n"})
+	archive := buildTarGz(t, map[string]string{"acproj-1.0/configure.ac": "AC_INIT([acproj], [1.0])\n"})
 	linkInto(t, archive, filepath.Join(distdir, distfile))
 
-	overlay := overlayWith(t, "dev-libs/cmakeproj", "1.0", "inherit cmake\n", distfile)
+	overlay := overlayWith(t, "dev-libs/acproj", "1.0", "inherit autotools\n", distfile)
 
 	got, err := Run(context.Background(), Options{Overlay: overlay, Distdir: distdir})
 	if err != nil {
@@ -139,8 +140,8 @@ func TestRun_NonMesonBuildSystemNamesIt(t *testing.T) {
 	if options.Outcome != OutcomeSkipped {
 		t.Fatalf("options gate outcome: got %q, want SKIPPED", options.Outcome)
 	}
-	if options.Reason == "" {
-		t.Fatal("SKIPPED with no reason")
+	if !strings.Contains(options.Reason, "autotools") {
+		t.Errorf("reason %q does not name the build system it found", options.Reason)
 	}
 }
 

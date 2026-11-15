@@ -734,6 +734,26 @@ A bump that requires another bump of the same batch (`requires`) is proved
 only once that one is published: the first check reports it as WAIT, the
 apply publishes what it waited for, and the next check proves it.
 
+#### What the option gate reads
+
+The `options` gate compares the `-DNAME=` an ebuild passes with what the
+release's own build files declare, without unpacking the archive:
+
+| Build system | Read from | A name the ebuild passes that upstream does not know | An option the ebuild does not pass |
+|---|---|---|---|
+| Meson | `meson.options` / `meson_options.txt` at each project root | **error**: Meson refuses it and the configure fails | info |
+| CMake | every `CMakeLists.txt` and `*.cmake` | **warning**: CMake ignores it, so the switch has no effect | info, for `option()` and `cmake_dependent_option()` |
+
+For CMake a name counts as known when any CMake file of the release, or a
+patch in the package's `files/`, mentions it; CMake's and `find_package()`'s
+own variables (`CMAKE_*`, `BUILD_TESTING`, `*_DIR`, ...) and names the release
+assembles at configure time (`BUILD_PLUGIN_${NAME}`) are never reported. A
+`-D` on a compiler flag line (`append-cppflags -DFOO=1`) is a preprocessor
+define, not an option. Other build systems are reported as out of scope.
+
+On the screen, a failed package folds the info findings into a count; the
+JSON report lists each one.
+
 #### Where the build gates run
 
 `autoupdate.build.backend` (or `--build-backend` for one run) says where the

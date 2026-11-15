@@ -16,8 +16,9 @@ const (
 	// the failure class issue #33 belongs to. It is the only severity that
 	// reaches the exit code.
 	SeverityError Severity = "error"
-	// SeverityWarning is an option name that cannot be resolved statically.
-	// Reported, because a name the gate could not read is a hole in its answer.
+	// SeverityWarning is an option name that cannot be resolved statically, or
+	// a CMake -D the release never mentions (CMake ignores it). Reported, never
+	// blocking.
 	SeverityWarning Severity = "warning"
 	// SeverityInfo is an option upstream declares and the ebuild never passes.
 	// Useful to know, blocks nothing.
@@ -87,10 +88,21 @@ func Compare(d Declared, p Passed, pkg, version string) []Finding {
 	declared := declaredIndex(d)
 	passed := make(map[string]bool, len(p.Project))
 
-	// Passed but undeclared — the error case.
+	// Passed but undeclared — the error case. For CMake, "declared" is any
+	// mention in the release's CMake files, and CMake's own variables are not
+	// the project's to declare (see cmakeFromArchive).
 	for _, o := range p.Project {
 		passed[o.Qualified()] = true
+		if d.System == systemCMake {
+			passed[cmakeName(o)] = true
+		}
 		if declared[o.Qualified()] {
+			continue
+		}
+		if d.System == systemCMake {
+			if !d.cmakeKnows(cmakeName(o)) {
+				findings = append(findings, cmakeUnknownFinding(o, pkg, version))
+			}
 			continue
 		}
 		findings = append(findings, Finding{
@@ -174,4 +186,32 @@ func declaredOptions(d Declared) []Option {
 // Compare having to take a path it needs for nothing else.
 func ebuildName(pkg, version string) string {
 	return path.Base(pkg) + "-" + version + ".ebuild"
+}
+
+// cmakeName is the variable a CMake -D sets. -DNAME:TYPE=value carries a type
+// after the colon, which the ebuild reader, written for Meson, read as a
+// subproject prefix.
+func cmakeName(o Option) string {
+	if o.Subproject != "" {
+		return o.Subproject
+	}
+	return o.Name
+}
+
+// cmakeUnknownFinding reports a -D the release's CMake files never mention.
+//
+// It is a warning, not the error Meson's case is: Meson refuses an unknown
+// option and the configure fails, while CMake ignores one ("Manually-specified
+// variables were not used") and the build succeeds with the switch doing
+// nothing. Measured over the overlay's 49 readable CMake packages, every such
+// name was real, and some had been dead for years (graphite2's
+// GRAPHITE2_NSEGCACHE); as an error each would have kept its package from ever
+// being proven.
+func cmakeUnknownFinding(o Option, pkg, version string) Finding {
+	return Finding{
+		Gate:     GateOptions,
+		Severity: SeverityWarning,
+		Detail: fmt.Sprintf("%s passes -D%s= but no CMake file of upstream %s mentions %s, so CMake ignores it and it has no effect (%s)",
+			pkg, o.Qualified(), version, cmakeName(o), o.Source),
+	}
 }
