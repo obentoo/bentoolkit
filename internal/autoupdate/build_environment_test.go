@@ -2,6 +2,7 @@ package autoupdate
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -21,12 +22,15 @@ type envTransport struct {
 	failDeps bool
 	// isolated is whether a namespace can be created inside the environment.
 	isolated bool
-	mu       sync.Mutex
-	starts   int
-	argv     [][]string
+	// dead makes the environment stop answering.
+	dead   bool
+	mu     sync.Mutex
+	starts int
+	argv   [][]string
 }
 
-func (e *envTransport) Name() string { return "fakeenv" }
+func (e *envTransport) Name() string     { return "fakeenv" }
+func (e *envTransport) Identity() string { return "fakeenv-image (sha256:fake)" }
 func (e *envTransport) Start(context.Context) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
@@ -38,6 +42,9 @@ func (e *envTransport) Command(ctx context.Context, argv, _ []string, _ string) 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.argv = append(e.argv, argv)
+	if e.dead {
+		return exec.CommandContext(ctx, "sh", "-c", "echo 'Failed to connect to vsock:42:22' >&2; exit 255")
+	}
 	switch argv[0] {
 	case "emerge":
 		if e.failDeps {
@@ -97,6 +104,9 @@ func TestBuildEnvironment_TheCheckBuildsInTheEnvironment(t *testing.T) {
 	}
 	if rec.Backend != "fakeenv" || !rec.FreshEnvironment {
 		t.Errorf("record backend=%q fresh=%v, want fakeenv and a fresh pass", rec.Backend, rec.FreshEnvironment)
+	}
+	if want := "fakeenv-image (sha256:fake)"; rec.Environment != want {
+		t.Errorf("record environment = %q, want the environment's own %q, not this host's tree", rec.Environment, want)
 	}
 }
 
@@ -194,5 +204,31 @@ func TestBuildEnvironment_ADistNameWithAPathShipsNothing(t *testing.T) {
 	}
 	if want := []string{filepath.Join(distdir, "probe-1.tar.gz")}; !slices.Equal(got, want) {
 		t.Errorf("shipped %v, want only %v", got, want)
+	}
+}
+
+// TestBuildEnvironment_ALostEnvironmentIsTheMachines: a build that failed in an
+// environment which no longer answers failed on the machine, whatever its
+// transcript says, so the fixer never sees it.
+func TestBuildEnvironment_ALostEnvironmentIsTheMachines(t *testing.T) {
+	transcript := ">>> Preparing source in /var/tmp/portage/x/work ...\n>>> Source prepared.\nmake: *** [all] Error 2\n"
+	env := &envTransport{}
+	session := buildenv.NewSession(env)
+	a := &Applier{buildBackend: session}
+	if err := session.Prepare(t.Context(), buildenv.PrepareRequest{StagedRoot: t.TempDir(), Atom: "=app-misc/x-1::s"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if ev := a.buildFaultEvidenceFor(t.Context(), buildAttempt{transcript: transcript}); ev.environmentLost || buildFaultVerdict(ev) != nil {
+		t.Fatalf("a live environment's failed build was blamed on the machine: %+v", ev)
+	}
+	env.dead = true
+	ev := a.buildFaultEvidenceFor(t.Context(), buildAttempt{transcript: transcript})
+	verdict := buildFaultVerdict(ev)
+	if !errors.Is(verdict, ErrBuildEnvironment) || !errors.Is(verdict, errBuildEnvironmentLost) {
+		t.Errorf("a lost environment: verdict = %v, want ErrBuildEnvironment naming the lost environment", verdict)
+	}
+	if host := (&Applier{buildBackend: validate.HostBackend{}}).buildFaultEvidenceFor(t.Context(), buildAttempt{transcript: transcript}); host.environmentLost {
+		t.Error("the host backend reported a lost environment")
 	}
 }

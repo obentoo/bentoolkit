@@ -275,11 +275,14 @@ type autoupdateValidatePolicy struct {
 	// Backend is where the build gates run: --build-backend, else
 	// autoupdate.build.backend, else the host.
 	Backend validate.BuildBackend
-	// Environment names a backend that is a separate machine ("container"),
-	// started only by a mode that builds; Backend stays the host until then.
+	// Environment names a backend that is a separate machine ("container",
+	// "vm"), started only by a mode that builds; Backend stays the host until
+	// then.
 	Environment string
 	// Container is autoupdate.build.container.
 	Container config.BuildContainerConfig
+	// VM is autoupdate.build.vm.
+	VM config.BuildVMConfig
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -1746,6 +1749,7 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		policy.Backend = backend
 	}
 	policy.Container = cfg.Autoupdate.Build.Container
+	policy.VM = cfg.Autoupdate.Build.VM
 
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
@@ -2614,12 +2618,20 @@ func (ar *autoupdateRun) takeBuildSession(configDir string) (release func(), err
 // the way out of an interrupted run. A mode that does not build keeps the host
 // backend and needs no image.
 func (ar *autoupdateRun) openBuildEnvironment(ctx context.Context) (closeEnv func(), err error) {
-	if ar.validate.Environment != validate.BackendContainer || !ar.needsBuildSession() {
+	if ar.validate.Environment == "" || !ar.needsBuildSession() {
 		return func() {}, nil
 	}
-	transport, err := buildenv.NewContainer(ctx, ar.validate.Container.Runtime, ar.validate.Container.Image, buildenv.ContainerSeams{})
+	var transport buildenv.Transport
+	switch ar.validate.Environment {
+	case validate.BackendContainer:
+		transport, err = buildenv.NewContainer(ctx, ar.validate.Container.Runtime, ar.validate.Container.Image, buildenv.ContainerSeams{})
+	case validate.BackendVM:
+		transport, err = buildenv.NewVM(ctx, ar.validate.VM.Shidashi, ar.validate.VM.ISO, buildenv.VMSeams{})
+	default:
+		err = fmt.Errorf("no environment is built for backend %q", ar.validate.Environment)
+	}
 	if err != nil {
-		return nil, fmt.Errorf("the container build backend cannot run: %w", err)
+		return nil, fmt.Errorf("the %s build backend cannot run: %w", ar.validate.Environment, err)
 	}
 	session := buildenv.NewSession(transport)
 	ar.validate.Backend = session

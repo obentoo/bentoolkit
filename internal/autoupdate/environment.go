@@ -24,6 +24,8 @@ type buildEnvironment interface {
 	Fresh(ctx context.Context) error
 	LastPassFresh() bool
 	Isolated(ctx context.Context) (bool, string)
+	Alive(ctx context.Context) bool
+	Identity() string
 }
 
 // environment is the build backend when it is a separate machine, nil on the
@@ -110,4 +112,24 @@ func (a *Applier) lockEnvironment() func() {
 	}
 	a.envMu.Lock()
 	return a.envMu.Unlock
+}
+
+// recordedEnvironment names what the gates ran against, for the proof record:
+// the environment's image or ISO, or this host's ::gentoo sync time.
+func (a *Applier) recordedEnvironment() string {
+	if env := a.environment(); env != nil {
+		return env.Identity()
+	}
+	return hostEnvironment(a.gentooPath)
+}
+
+// buildFaultEvidenceFor is the free evidence about a failed build: its
+// transcript and, when it ran in a separate environment, whether that
+// environment still answers.
+func (a *Applier) buildFaultEvidenceFor(ctx context.Context, first buildAttempt) buildFaultEvidence {
+	ev := buildFaultEvidence{transcript: first.transcript}
+	if env := a.environment(); env != nil {
+		ev.environmentLost = !env.Alive(ctx)
+	}
+	return ev
 }

@@ -34,26 +34,19 @@ func (HostBackend) Name() string { return BackendHost }
 // Wrap runs the command as it is.
 func (HostBackend) Wrap(name string, arg []string) (string, []string) { return name, arg }
 
-// ErrBackendUnavailable is returned for a backend name that is known but not
-// implemented yet.
-var ErrBackendUnavailable = errors.New("build backend not available yet")
-
 // ErrBackendIsAnEnvironment is returned for a backend that runs in a separate
 // machine: the caller builds it (buildenv), because it needs a running
 // environment this package does not start.
 var ErrBackendIsAnEnvironment = errors.New("the build backend is a separate environment")
 
-// NewBuildBackend returns the backend named name. An unknown name is an error,
-// and so is a known one that is not built yet: a build never falls back to
-// another backend without saying so.
+// NewBuildBackend returns the backend named name. An unknown name is an error:
+// a build never falls back to another backend without saying so.
 func NewBuildBackend(name string) (BuildBackend, error) {
 	switch name {
 	case "", BackendHost:
 		return HostBackend{}, nil
-	case BackendContainer:
+	case BackendContainer, BackendVM:
 		return nil, ErrBackendIsAnEnvironment
-	case BackendVM:
-		return nil, fmt.Errorf("%w: %q — use %q or %q until it is", ErrBackendUnavailable, name, BackendHost, BackendContainer)
 	}
 	return nil, fmt.Errorf("unknown build backend %q: want one of %v", name, BackendNames)
 }

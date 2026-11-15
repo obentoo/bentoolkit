@@ -1,5 +1,5 @@
 // Package buildenv runs the build gates in a disposable Gentoo environment —
-// a container today, a virtual machine later — instead of on this host.
+// a container or a virtual machine — instead of on this host.
 //
 // The environment is reached through a Transport, which only knows how to
 // start one, stop it, and build the command that runs an argv inside it. A
@@ -23,6 +23,10 @@ type Transport interface {
 	// Start brings up a fresh environment. A second Start without a Stop is an
 	// error of the caller.
 	Start(ctx context.Context) error
+	// Identity names what the running environment was started from (an image
+	// and its id, an ISO and its tree pin), for the proof record. Empty before
+	// the first Start.
+	Identity() string
 	// Command returns the command that runs argv inside the running
 	// environment, as root, in dir, with env as its whole environment. Its
 	// stdin, stdout and stderr are the caller's to set.

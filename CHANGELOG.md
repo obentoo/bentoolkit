@@ -28,7 +28,19 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   bentoo never pulls an image: a missing one stops the run before any work.
   Isolation is measured inside the container; rootless Podman gets
   `CAP_SYS_ADMIN` and `CAP_NET_ADMIN` so Portage's network sandbox works
-  there. `vm` is still reserved.
+  there.
+
+- **The build gates can run in a Shidashi VM.** `--build-backend=vm` (or
+  `autoupdate.build.backend: vm`) builds every bump in a disposable
+  `shidashi vm start --dev` VM: the ISO's pinned `::gentoo` and `::bentoo`,
+  a fresh work disk, the ISO's binhost. `autoupdate.build.vm.iso` picks the
+  ISO (unset: Shidashi's newest minimal one) and `autoupdate.build.vm.shidashi`
+  the binary. Commands run with `vm run --stream --timeout 0`, every argument
+  quoted for the guest's shell. A Shidashi without `--dev`, or no ISO, stops
+  the run before any work. For both container and VM, the stage record's
+  `environment` names what the gates ran against (the image and its id, the
+  ISO and its pin), and a failed build in an environment that no longer
+  answers is the machine's failure: WAIT, no fixer.
 
 - **One build session at a time.** A run that may build takes
   `build-session.bentoo-lock` in the autoupdate state directory; a second one
