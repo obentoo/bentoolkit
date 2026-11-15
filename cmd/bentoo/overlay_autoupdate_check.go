@@ -416,7 +416,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 		ar.log().Warn("could not read the pending list, so nothing was validated", "err", err)
 		return nothingValidated(), false
 	}
-	updates := pending.List()
+	updates := detectedThisRun(pending.List(), checked)
 	if len(updates) == 0 {
 		// Silence is right for an empty plan: printing "0 packages to evaluate"
 		// after a check that found nothing is a line about nothing.
@@ -780,3 +780,28 @@ func skipReason(result validate.EbuildResult, entry validationPlanEntry) string 
 // as the operator's own choice. Proved and errored count what they always did.
 // The reminder that a check publishes nothing moved with it, so it is still the
 // last sentence a reader sees.
+
+// detectedThisRun keeps the pending entries this run's scan vouches for: the
+// package was checked, upstream is newer, and nothing held or broke the answer.
+//
+// The pending list outlives the run that wrote it. Fed to the plan as is, it
+// carried a `failed` entry for a package removed from the overlay weeks before,
+// and the plan counted one bump more than the scan had found. An entry the scan
+// did not confirm is left on disk for the run that does; it is only kept out
+// of this plan.
+func detectedThisRun(updates []autoupdate.PendingUpdate, checked []autoupdate.CheckResult) []autoupdate.PendingUpdate {
+	confirmed := make(map[string]bool, len(checked))
+	for _, result := range checked {
+		if result.HasUpdate && result.Error == nil && result.HeldBy == "" && !result.NotComparable && !result.Orphaned {
+			confirmed[result.Package] = true
+		}
+	}
+
+	kept := make([]autoupdate.PendingUpdate, 0, len(updates))
+	for _, update := range updates {
+		if confirmed[update.Package] {
+			kept = append(kept, update)
+		}
+	}
+	return kept
+}

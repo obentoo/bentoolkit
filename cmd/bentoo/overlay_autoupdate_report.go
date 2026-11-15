@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -413,4 +414,25 @@ func countInExactlyOneColumn(tally *report.Tally, outcome report.Outcome) {
 	default:
 		tally.Inconclusive++
 	}
+}
+
+// scannedWithFailures is the scan as the report must count it: every package
+// the progress counter counted, the ones whose check failed included.
+//
+// CheckAll files a failed package under Failures, not Items, so a report built
+// from Items alone dropped it: on 2026-11-13 the counter reached 599 and the
+// report said 595 packages checked, with the four failures nowhere in it. Each
+// failure becomes a row carrying its error, which the report already states as
+// "could not be checked".
+func scannedWithFailures(result autoupdate.BatchResult[autoupdate.CheckResult]) []autoupdate.CheckResult {
+	if len(result.Failures) == 0 {
+		return result.Items
+	}
+	scanned := make([]autoupdate.CheckResult, 0, len(result.Items)+len(result.Failures))
+	scanned = append(scanned, result.Items...)
+	for name, err := range result.Failures {
+		scanned = append(scanned, autoupdate.CheckResult{Package: name, Error: err})
+	}
+	sort.Slice(scanned, func(i, j int) bool { return scanned[i].Package < scanned[j].Package })
+	return scanned
 }
