@@ -182,7 +182,29 @@ src_install() {
 			t.Fatal(err)
 		}
 	}
+	privateAsStaged(t, stagedRoot)
 	return stagedRoot, distdir
+}
+
+// privateAsStaged gives root the modes validate stages a tree with -- 0750
+// directories, 0600 files (validate.stagedDirMode, stagedFileMode) -- so the
+// probe reaches the environment as a real candidate does. Written 0644 here,
+// it hid the 2026-11-16 failure: a staged ebuild Portage could not read inside
+// the VM, as the portage user.
+func privateAsStaged(t *testing.T, root string) {
+	t.Helper()
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.IsDir() {
+			return os.Chmod(path, 0o750)
+		}
+		return os.Chmod(path, 0o600)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 }
 
 func probeTarball(t *testing.T) []byte {
