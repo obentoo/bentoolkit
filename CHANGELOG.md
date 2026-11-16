@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.43.0] - 2026-11-16
+
 ### Added
 
 - **The `vm` build backend can run its VMs on a Shidashi build worker.**
@@ -2163,7 +2165,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.42.2...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/obentoo/bentoolkit/compare/v0.42.2...v0.43.0
 [0.42.2]: https://github.com/obentoo/bentoolkit/compare/v0.42.1...v0.42.2
 [0.42.1]: https://github.com/obentoo/bentoolkit/compare/v0.42.0...v0.42.1
 [0.42.0]: https://github.com/obentoo/bentoolkit/compare/v0.41.2...v0.42.0
