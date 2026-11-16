@@ -20,8 +20,8 @@ func TestFindRevivableOrphans_ACancelledScanSaysSo(t *testing.T) {
 	c, err := NewChecker(t.TempDir(),
 		WithConfigDir(t.TempDir()),
 		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
-			"app-editors/orphan-a": {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled},
-			"app-editors/orphan-b": {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled},
+			"app-editors/orphan-a": {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled, DisabledBy: registry.DisabledByAuto},
+			"app-editors/orphan-b": {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled, DisabledBy: registry.DisabledByAuto},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)

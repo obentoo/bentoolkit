@@ -104,6 +104,7 @@ func s087d45Setup(t *testing.T, flipAfterFirst bool) s087d45World {
 		writeReviveSrcEbuild(t, filepath.Join(gentoo, pkg), name, s087d45GentooVersion)
 		reg.WriteString("[\"" + pkg + "\"]\n" +
 			"enabled = false\n" +
+			"disabled_by = \"auto\"\n" +
 			"url = \"" + srv.URL + "/" + name + "\"\n" +
 			"parser = \"regex\"\n" +
 			"pattern = 'version ([0-9.]+)'\n\n")

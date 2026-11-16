@@ -56,7 +56,7 @@ func TestFindRevivableOrphansStopsOnCancel(t *testing.T) {
 	checker, err := NewChecker(t.TempDir(),
 		WithConfigDir(t.TempDir()),
 		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
-			pkg: {Parser: "json", Path: "version", URL: upstream.URL, Enabled: boolPtr(false)},
+			pkg: {Parser: "json", Path: "version", URL: upstream.URL, Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)

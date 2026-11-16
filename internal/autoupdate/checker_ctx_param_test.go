@@ -130,7 +130,7 @@ func TestCheckerEachCallIsBoundedByItsOwnContext(t *testing.T) {
 		c, err := NewChecker(t.TempDir(),
 			WithConfigDir(t.TempDir()),
 			WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
-				orphan: {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled},
+				orphan: {URL: upstream.URL, Parser: "json", Path: "version", Enabled: &disabled, DisabledBy: registry.DisabledByAuto},
 			}}),
 			WithRateLimiter(unlimitedRateLimiter()),
 		)

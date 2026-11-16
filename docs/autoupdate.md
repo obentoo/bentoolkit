@@ -303,7 +303,12 @@ package, not just for the maintainer's sweep.
   `hold = true` (with `enabled = false`) is a *declined* package, so
   `--revive-list`, `--check --revivable` and `--revive all` never list it, and
   `--revive <pkg>` reports it skipped without seeding anything. Drop `hold` to
-  revive it on purpose.
+  revive it on purpose. A removed package is an *orphan* only when the checker
+  disabled it itself (`disabled_by = "auto"`): a record whose `disabled_by`
+  states a reason ("::gentoo caught up"), or states none, is a retirement, and
+  `--revive-list`, `--check --revivable` and `--revive all` skip it too.
+  `--revive <pkg>` still revives it, since naming the package is the decision,
+  and logs the reason it reverses.
 - **`min_age_days` is a minimum release age, not a hold.** The record is still
   fetched and compared; a candidate younger than `min_age_days` is reported
   `held` with its publication and eligibility times, and nothing is queued. It

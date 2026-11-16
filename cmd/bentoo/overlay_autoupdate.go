@@ -2484,6 +2484,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 		}
 	} else {
 		targets = []string{target}
+		ar.warnRevivingADecision(overlayPath, target)
 	}
 
 	// One shared pending list for the whole revive run. CheckPackage (which
@@ -2589,6 +2590,22 @@ func (o *autoupdateOptions) removedApplyFlags() error {
 			"run: bentoo overlay autoupdate --check --llm <package>, then --apply <package>")
 	}
 	return nil
+}
+
+// warnRevivingADecision names the reason recorded on a retirement an explicit
+// `--revive <package>` is about to reverse. Naming the package is the
+// operator's decision, so the revive proceeds; `--revive all` never picks such
+// a record (FindRevivableOrphans).
+func (ar *autoupdateRun) warnRevivingADecision(overlayPath, pkg string) {
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		return // the revive itself reports an unreadable registry
+	}
+	rec, ok := cfg.Packages[pkg]
+	if !ok || rec.IsEnabled() || rec.IsHeld() || rec.DisabledBy == registry.DisabledByAuto {
+		return
+	}
+	ar.log().Warn("revive reverses a recorded retirement", "package", pkg, "disabled_by", rec.DisabledBy)
 }
 
 // buildSessionLockName is the build session lock, in the autoupdate state

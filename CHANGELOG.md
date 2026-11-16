@@ -11,6 +11,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **`--revive all` no longer reverses a retirement.** It revived every
+  disabled, removed record whose upstream was ahead of ::gentoo, including
+  records retired on purpose with a `disabled_by` reason ("::gentoo caught
+  up"): the ::gentoo ebuild was seeded back and a new bump queued. Only a
+  record the checker disabled itself (`disabled_by = "auto"`) is an orphan now,
+  for `--revive all`, `--revive-list` and `--check --revivable` alike — the
+  same rule the batch reconciliation already followed. `--revive <package>`
+  still revives a retired record and logs the reason it reverses (#338).
+
 - **`--check --llm <package>` validates the package it names.** It used to
   print the version table and return before any gate ran, although every
   "unproven" apply result recommends exactly that command. It now plans,

@@ -25,6 +25,7 @@ func commitServer(t *testing.T, sha, date string) *httptest.Server {
 func commitTrackedOrphan(url string) registry.PackageConfig {
 	return registry.PackageConfig{
 		Enabled:       boolPtr(false),
+		DisabledBy:    registry.DisabledByAuto,
 		Track:         "commit",
 		URL:           url,
 		Parser:        "json",

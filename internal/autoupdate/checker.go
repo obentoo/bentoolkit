@@ -1338,10 +1338,12 @@ func (c *Checker) FindRevivableOrphans(ctx context.Context, prov provider.Provid
 		if cfg.IsEnabled() {
 			continue
 		}
-		// A held entry was declined on purpose: a disabled+absent record with
-		// hold = true is that decision's expected state, not an orphan. Skip it
-		// silently and before the upstream fetch, as the other expected states.
-		if cfg.IsHeld() {
+		// Only a disable the checker recorded itself is an orphan. A held entry,
+		// or one whose disabled_by names a person's reason ("::gentoo caught
+		// up"), is that decision's expected state: --revive all must not reverse
+		// it. Skipped silently and before the upstream fetch, by the predicate
+		// the batch reconciliation uses, so the two paths cannot disagree.
+		if !reconcilesAutomatically(cfg) {
 			continue
 		}
 
