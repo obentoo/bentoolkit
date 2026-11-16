@@ -9,6 +9,45 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pruning a version no longer invalidates the proof of another.** A proof
+  was bound to every DIST line of the published Manifest, so an `--apply all
+  --clean` that pruned fallback versions made the next `--apply` refuse six
+  proved bumps as "re-rolled upstream" although their archives never changed.
+  A new proof is bound to the archives the candidate uses (the staged
+  Manifest's), and is still refused when one of those is re-digested. Proofs
+  recorded by 0.42.0 keep the whole-Manifest comparison (#338).
+
+- **A bump that moves its subslot can pass the build gates.** The
+  dependency probe counted every package the pretend resolve would merge as a
+  missing build dependency, including installed consumers it only rebuilds for
+  the new subslot (dev-libs/libcbor 0.15.0 asked to "install
+  dev-libs/libfido2-1.17.0", already installed). A reinstall (`r` or `R` in
+  the merge list) no longer counts (#338).
+
+- **`--revive all` no longer reverses a retirement.** It revived every
+  disabled, removed record whose upstream was ahead of ::gentoo, including
+  records retired on purpose with a `disabled_by` reason ("::gentoo caught
+  up"): the ::gentoo ebuild was seeded back and a new bump queued. Only a
+  record the checker disabled itself (`disabled_by = "auto"`) is an orphan now,
+  for `--revive all`, `--revive-list` and `--check --revivable` alike — the
+  same rule the batch reconciliation already followed. `--revive <package>`
+  still revives a retired record and logs the reason it reverses (#338).
+
+- **`--check --llm <package>` validates the package it names.** It used to
+  print the version table and return before any gate ran, although every
+  "unproven" apply result recommends exactly that command. It now plans,
+  confirms and validates the named package as a batch check would, and offers
+  the same repair. The "distfile changed" refusal of `--apply` now names
+  `--check --llm <package>` instead of a `--check` that restages nothing
+  (#338).
+
+- **`--llm` help names the modes that take it.** The help said "With
+  --apply", the one mode that refuses the flag since 0.42.0. It now says that
+  `--check --llm` proves pending bumps in a staged tree, that `--check` and
+  `--revive` let the agent take part, and that `--apply` refuses it (#338).
+
 ## [0.42.0] - 2026-11-14
 
 ### Added

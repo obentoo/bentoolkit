@@ -293,3 +293,18 @@ func TestCompileFlag_IsRefusedWithTheCommandThatReplacesIt(t *testing.T) {
 		t.Errorf("--check --llm was refused: %v", err)
 	}
 }
+
+// TestLLMFlagHelp_NamesTheModesThatAcceptIt: the --llm help once opened with
+// "With --apply", the one mode that refuses the flag. It must name --check as
+// the mode it serves and say that --apply refuses it.
+func TestLLMFlagHelp_NamesTheModesThatAcceptIt(t *testing.T) {
+	usage := testAutoupdateCmd().Flags().Lookup("llm").Usage
+	if strings.HasPrefix(usage, "With --apply") {
+		t.Errorf("--llm help opens with the mode that refuses it: %q", usage)
+	}
+	for _, want := range []string{"With --check", "--apply only publishes", "refuses this flag"} {
+		if !strings.Contains(usage, want) {
+			t.Errorf("--llm help does not say %q: %q", want, usage)
+		}
+	}
+}

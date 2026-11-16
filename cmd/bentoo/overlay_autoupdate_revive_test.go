@@ -1,9 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
@@ -238,5 +241,41 @@ func TestRunReviveList_NoCandidates(t *testing.T) {
 	code := exitCodeFor(testAutoupdateRun(auOpts).runReviveList(context.Background(), overlay, configDir, 0, cfg, config.LLMConfig{}))
 	if code != 0 {
 		t.Fatalf("runReviveList exited with code %d, want 0", code)
+	}
+}
+
+// TestWarnRevivingADecision_NamesTheRecordedReason: an explicit
+// `--revive <package>` still runs on a retired record (#338 item 4), but says
+// which recorded reason it reverses. A record the checker disabled itself, or
+// a held one the revive refuses anyway, warns about nothing.
+func TestWarnRevivingADecision_NamesTheRecordedReason(t *testing.T) {
+	overlay := t.TempDir()
+	cfgDir := filepath.Join(overlay, ".autoupdate")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	toml := "[\"dev-libs/retired\"]\nurl = \"http://127.0.0.1:0\"\nparser = \"json\"\npath = \"version\"\n" +
+		"enabled = false\ndisabled_by = \"::gentoo caught up\"\n# END\n\n" +
+		"[\"dev-libs/orphan\"]\nurl = \"http://127.0.0.1:0\"\nparser = \"json\"\npath = \"version\"\n" +
+		"enabled = false\ndisabled_by = \"auto\"\n# END\n"
+	if err := os.WriteFile(filepath.Join(cfgDir, "packages.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		pkg  string
+		want bool
+	}{{"dev-libs/retired", true}, {"dev-libs/orphan", false}, {"dev-libs/absent", false}} {
+		var buf bytes.Buffer
+		ar := testAutoupdateRun(testAutoupdateOptions())
+		ar.lg = slog.New(slog.NewTextHandler(&buf, nil))
+		ar.warnRevivingADecision(overlay, tc.pkg)
+		got := strings.Contains(buf.String(), "reverses a recorded retirement")
+		if got != tc.want {
+			t.Errorf("%s: warned = %v, want %v; log:\n%s", tc.pkg, got, tc.want, buf.String())
+		}
+		if tc.want && !strings.Contains(buf.String(), "::gentoo caught up") {
+			t.Errorf("%s: the warning does not name the recorded reason; log:\n%s", tc.pkg, buf.String())
+		}
 	}
 }

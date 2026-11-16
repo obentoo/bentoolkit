@@ -33,7 +33,7 @@ func TestFindRevivableOrphans_HeldSkipped(t *testing.T) {
 	t.Cleanup(srv.Close)
 
 	checker := newReviveChecker(t, map[string]registry.PackageConfig{
-		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), Hold: true},
+		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto, Hold: true},
 	})
 	prov := &fakeProvider{versions: map[string][]string{pkg: {"1.5.0"}}}
 

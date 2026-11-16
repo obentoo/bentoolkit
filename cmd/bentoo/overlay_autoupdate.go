@@ -438,7 +438,7 @@ Examples:
 	cmd.Flags().StringVar(&o.distdir, "distdir", "", "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)")
 	cmd.Flags().StringVar(&o.distfilesCache, "distfiles-cache", distfiles.DefaultCache, "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)")
 	cmd.Flags().BoolVar(&o.noFetchCache, "no-fetch-cache", false, "Fetch each URL per record instead of sharing one response across records that declare it")
-	cmd.Flags().BoolVar(&o.llm, "llm", false, "With --apply: let the configured claude-code agent take part in validation. It enables BOTH capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and proceeds exactly as it would have without the flag")
+	cmd.Flags().BoolVar(&o.llm, "llm", false, "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent")
 	return cmd
 }
 
@@ -1017,23 +1017,16 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			ar.log().Info("package skipped in packages.toml", "package", pkg, "skipped", result.Skipped)
 			return nil
 		}
-		// The one package this run scanned, as the same report the
-		// batch path builds and through the same render — one element, joined
-		// with the zero validation half because nothing validates here. This
-		// path prices nothing, so no plan has been put in front of the operator
-		// and the report states its own.
-		//
-		// The return below stays: only the batch path may reconcile the
-		// registry, and moving the render past this point must not move the
-		// return with it.
-		//
-		// It validated nothing, so it planned nothing, so it left nothing
-		// unreached — which is what nothingValidated states, and what
-		// checkReport answers for an empty plan on a batch run whose plan came
-		// out empty too.
-		const noPlanWasPrinted = false
-		single := checkReport(ar.log(), []autoupdate.CheckResult{*result}, nothingValidated())
-		ar.presentCheckReport(single, noPlanWasPrinted)
+		// The one package this run scanned, rendered as the batch path renders
+		// its scan. With --llm it is validated exactly as a batch would
+		// validate it: the advice every "unproven" result prints names this
+		// command. Only the batch path reconciles the registry, so the return
+		// below must stay ahead of it.
+		checked := []autoupdate.CheckResult{*result}
+		validated, planPrinted := ar.runPendingValidation(ctx, overlayPath, configDir, checked, llmCfg)
+		single := checkReport(ar.log(), checked, validated)
+		ar.presentCheckReport(single, planPrinted)
+		ar.offerRepairs(ctx, overlayPath, configDir, cfg.Autoupdate, validated)
 		return nil
 	}
 
@@ -2491,6 +2484,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 		}
 	} else {
 		targets = []string{target}
+		ar.warnRevivingADecision(overlayPath, target)
 	}
 
 	// One shared pending list for the whole revive run. CheckPackage (which
@@ -2596,6 +2590,22 @@ func (o *autoupdateOptions) removedApplyFlags() error {
 			"run: bentoo overlay autoupdate --check --llm <package>, then --apply <package>")
 	}
 	return nil
+}
+
+// warnRevivingADecision names the reason recorded on a retirement an explicit
+// `--revive <package>` is about to reverse. Naming the package is the
+// operator's decision, so the revive proceeds; `--revive all` never picks such
+// a record (FindRevivableOrphans).
+func (ar *autoupdateRun) warnRevivingADecision(overlayPath, pkg string) {
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		return // the revive itself reports an unreadable registry
+	}
+	rec, ok := cfg.Packages[pkg]
+	if !ok || rec.IsEnabled() || rec.IsHeld() || rec.DisabledBy == registry.DisabledByAuto {
+		return
+	}
+	ar.log().Warn("revive reverses a recorded retirement", "package", pkg, "disabled_by", rec.DisabledBy)
 }
 
 // buildSessionLockName is the build session lock, in the autoupdate state

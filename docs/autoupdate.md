@@ -303,7 +303,12 @@ package, not just for the maintainer's sweep.
   `hold = true` (with `enabled = false`) is a *declined* package, so
   `--revive-list`, `--check --revivable` and `--revive all` never list it, and
   `--revive <pkg>` reports it skipped without seeding anything. Drop `hold` to
-  revive it on purpose.
+  revive it on purpose. A removed package is an *orphan* only when the checker
+  disabled it itself (`disabled_by = "auto"`): a record whose `disabled_by`
+  states a reason ("::gentoo caught up"), or states none, is a retirement, and
+  `--revive-list`, `--check --revivable` and `--revive all` skip it too.
+  `--revive <pkg>` still revives it, since naming the package is the decision,
+  and logs the reason it reverses.
 - **`min_age_days` is a minimum release age, not a hold.** The record is still
   fetched and compared; a candidate younger than `min_age_days` is reported
   `held` with its publication and eligibility times, and nothing is queued. It
@@ -723,7 +728,10 @@ gates ran against, and when they answered.
 
 `--apply` publishes only what such a record proves: the retained tree must
 match the bump byte for byte, prove the depth the policy asks for, and be no
-older than `autoupdate.proof.max_age_days` (7 by default). Anything else is
+older than `autoupdate.proof.max_age_days` (7 by default). The published
+Manifest must also record the same digests for the archives the candidate
+uses; pruning another version (`--clean`) does not invalidate a proof, a
+re-digested archive of the candidate does. Anything else is
 reported as **Unproven** and left in the pending list; `--apply` runs no gate,
 fetches nothing and regenerates no Manifest for it. `--repair` proves the
 tree it adopts the same way and publishes nothing either. `--revive` proves the revived bump first, the way the check does, and then

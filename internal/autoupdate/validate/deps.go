@@ -597,6 +597,12 @@ func blockersFrom(out string) []string {
 // Only the first field after the tag is taken: with --quiet a line may still
 // carry USE flags and a download size after the atom, and none of that is part
 // of the package's name.
+//
+// A reinstall is not an install: `r` (forced, as when the candidate changes
+// its subslot and a consumer bound with `:=` must rebuild) and `R` (same
+// version) name a package this host already holds. Counting one asked the
+// operator to install dev-libs/libfido2 while it was installed, for a gate
+// nothing on the host could ever satisfy.
 func listedPackage(line string) (string, bool) {
 	trimmed := strings.TrimSpace(line)
 	if !strings.HasPrefix(trimmed, "[") {
@@ -609,6 +615,9 @@ func listedPackage(line string) (string, bool) {
 
 	action := strings.Fields(tag)
 	if len(action) == 0 || !installActions[action[0]] {
+		return "", false
+	}
+	if strings.ContainsAny(strings.Join(action[1:], ""), "rR") {
 		return "", false
 	}
 	fields := strings.Fields(rest)

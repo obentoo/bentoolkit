@@ -73,7 +73,7 @@ func TestFindRevivableOrphans_UpstreamNewer(t *testing.T) {
 	srv := jsonVersionServer(t, "2.0.0")
 
 	checker := newReviveChecker(t, map[string]registry.PackageConfig{
-		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
+		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto},
 	})
 	prov := &fakeProvider{versions: map[string][]string{
 		pkg: {"1.4.0", "1.5.0"},
@@ -98,6 +98,33 @@ func TestFindRevivableOrphans_UpstreamNewer(t *testing.T) {
 	}
 }
 
+// TestFindRevivableOrphans_OnlyTheAutomaticOriginIsAnOrphan pins #338 item 4:
+// `--revive all` revived dev-libs/simdjson, retired with disabled_by = "::gentoo
+// reached 5.1.1 …". A disable naming a person's reason, or naming no origin at
+// all, is a decision and never a candidate; the checker's own "auto" is.
+func TestFindRevivableOrphans_OnlyTheAutomaticOriginIsAnOrphan(t *testing.T) {
+	srv := jsonVersionServer(t, "2.0.0")
+	record := func(origin string) registry.PackageConfig {
+		return registry.PackageConfig{Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), DisabledBy: origin}
+	}
+	checker := newReviveChecker(t, map[string]registry.PackageConfig{
+		"dev-libs/auto":    record(registry.DisabledByAuto),
+		"dev-libs/retired": record("::gentoo reached 1.5.0 with a byte-identical ebuild"),
+		"dev-libs/unknown": record(""),
+	})
+	prov := &fakeProvider{versions: map[string][]string{
+		"dev-libs/auto": {"1.5.0"}, "dev-libs/retired": {"1.5.0"}, "dev-libs/unknown": {"1.5.0"},
+	}}
+
+	got, err := checker.FindRevivableOrphans(t.Context(), prov)
+	if err != nil {
+		t.Fatalf("FindRevivableOrphans: %v", err)
+	}
+	if len(got) != 1 || got[0].Package != "dev-libs/auto" {
+		t.Errorf("candidates = %+v, want only dev-libs/auto", got)
+	}
+}
+
 // TestFindRevivableOrphans_PresentSkipped guards the smoke-test finding: a
 // disabled entry whose ebuild is STILL PRESENT in the overlay (e.g. a manually
 // disabled package) must NOT be reported, even when upstream is newer than
@@ -111,7 +138,7 @@ func TestFindRevivableOrphans_PresentSkipped(t *testing.T) {
 	checker, err := NewChecker(overlayDir,
 		WithConfigDir(t.TempDir()),
 		WithPackagesConfig(&registry.PackagesConfig{Packages: map[string]registry.PackageConfig{
-			pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
+			pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),
 	)
@@ -140,7 +167,7 @@ func TestFindRevivableOrphans_UpstreamNotNewer(t *testing.T) {
 	srv := jsonVersionServer(t, "1.5.0")
 
 	checker := newReviveChecker(t, map[string]registry.PackageConfig{
-		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
+		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto},
 	})
 	prov := &fakeProvider{versions: map[string][]string{
 		pkg: {"1.5.0"},
@@ -188,7 +215,7 @@ func TestFindRevivableOrphans_NotInGentoo(t *testing.T) {
 	srv := jsonVersionServer(t, "9.9.9")
 
 	checker := newReviveChecker(t, map[string]registry.PackageConfig{
-		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false)},
+		pkg: {Parser: "json", Path: "version", URL: srv.URL, Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto},
 	})
 	// Empty version map => provider returns ErrNotFound for every package.
 	prov := &fakeProvider{versions: map[string][]string{}}
@@ -222,7 +249,7 @@ func TestFindRevivableOrphans_SeriesNoMatchSkipped(t *testing.T) {
 				Parser:  "json",
 				Path:    "version",
 				URL:     "http://127.0.0.1:1/", // must never be reached
-				Enabled: boolPtr(false),
+				Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto,
 				// Odd minors only: the 1.28.7 below belongs to the even line.
 				Series: `^[0-9]+\.[0-9]*[13579]\.`,
 			},
@@ -264,7 +291,7 @@ func TestFindRevivableOrphans_SlotNoMatchSkipped(t *testing.T) {
 				Parser:  "json",
 				Path:    "version",
 				URL:     "http://127.0.0.1:1/", // must never be reached
-				Enabled: boolPtr(false),
+				Enabled: boolPtr(false), DisabledBy: registry.DisabledByAuto,
 			},
 		}}),
 		WithRateLimiter(unlimitedRateLimiter()),
