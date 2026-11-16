@@ -53,6 +53,12 @@ const (
 	// that drops an implementation the overlay requires is uninstallable on a
 	// system configured for that implementation, whatever depth it builds to.
 	GateRequiredUse = "required-use"
+	// GateFetch is the one deciding gate a binary record has. There is no
+	// source to unpack, patch or build, so the question a check can answer is
+	// narrower: did the candidate's archives download, digest into a Manifest
+	// and cover every SRC_URI file? A PASS here is the proof an apply reuses
+	// for a prebuilt package; without it a binary bump could never be proved.
+	GateFetch = "fetch"
 )
 
 // Finding is one thing the gate has to say about an ebuild.

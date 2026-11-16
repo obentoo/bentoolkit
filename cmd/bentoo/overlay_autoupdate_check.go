@@ -60,7 +60,7 @@ type validationPlanEntry struct {
 	// Reason names the input that decided the depth, and quotes an override's
 	// stated justification where one exists.
 	Reason string
-	// Skipped marks an entry no gate will run for — a binary record, or a
+	// Skipped marks an entry no gate will run for — depth none on a source record, or a
 	// package policy lowered below what its class earns. It is carried as a
 	// field rather than derived at print time because the reason has to
 	// travel with it: such a package is counted as skipped, not validated.
@@ -178,6 +178,11 @@ func planValidation(
 			FlagDepth:    flagDepth,
 		})
 
+		// A binary record at depth none is still validated: its fetch gate
+		// downloads and digests the archives (Applier.fetchGates). Only a
+		// depth-none answer for anything else runs no gate at all.
+		fetchOnly := decision.Depth == validate.DepthNone && tierOf(update) == "bin"
+
 		reason := decision.Reason
 		if note != "" {
 			reason = note + "; " + reason
@@ -190,15 +195,16 @@ func planValidation(
 			Class:   class.String(),
 			Depth:   decision.Depth.String(),
 			Reason:  reason,
-			Skipped: decision.Depth == validate.DepthNone || decision.SkippedByPolicy,
+			Skipped: (decision.Depth == validate.DepthNone && !fetchOnly) || decision.SkippedByPolicy,
 			depth:   decision.Depth,
 		}
 
 		plan.Entries = append(plan.Entries, entry)
 		plan.DepthDistribution[entry.Depth]++
-		if entry.depth > validate.DepthNone {
-			// Every depth above `none` reads the new archive, so this package
-			// needs its distfile on disk before a gate can say anything.
+		if entry.depth > validate.DepthNone || fetchOnly {
+			// Every depth above `none` reads the new archive, and a binary
+			// record's fetch gate downloads it, so this package needs its
+			// distfile on disk before a gate can say anything.
 			plan.DistfilesToFetch++
 		}
 	}
@@ -314,7 +320,7 @@ func printValidationPrice(plan validationPlan) {
 	// nowhere else on screen, and it is the one that decides the answer on a
 	// metered connection; it travels into the report as well
 	// (report.AutoupdateCheck.DistfilesToFetch) so the export carries it too.
-	output.Info.Printf("  Distfiles: up to %d to fetch — one per package validated above depth none; anything already in DISTDIR is not fetched again.\n",
+	output.Info.Printf("  Distfiles: up to %d to fetch — one per package validated above depth none or by a binary record's fetch gate; anything already in DISTDIR is not fetched again.\n",
 		plan.DistfilesToFetch)
 	output.Info.Printf("  Depth distribution (of %d package(s)): %s\n", len(plan.Entries), depthDistributionLine(plan))
 }

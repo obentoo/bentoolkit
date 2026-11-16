@@ -122,6 +122,12 @@ func TestResolveDepth_BinaryRecordIsNoneWhicheverWayTheTypeWasResolved(t *testin
 			if got.Reason == "" || !strings.Contains(strings.ToLower(got.Reason), "bin") {
 				t.Errorf("reason %q does not say the record is binary", got.Reason)
 			}
+			// none is what policy asks of a prebuilt blob, not a lowering below
+			// it: a binary bump reported as skipped by policy is never proved,
+			// and the apply that publishes only proven bumps refuses it forever.
+			if got.SkippedByPolicy {
+				t.Errorf("a binary record is reported as skipped by policy (%s); its fetch gate still runs", got.Reason)
+			}
 		})
 	}
 }

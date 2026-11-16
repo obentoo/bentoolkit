@@ -99,7 +99,11 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		// saying so is better than reporting a clean run of zero gates.
 		return checkSkipped(pkg, newVersion, "this run has no staging root, so there is nowhere to validate the candidate without writing it into the published overlay")
 	}
-	if depth.Depth == validate.DepthNone {
+	// A binary record at depth none still has one thing to prove: that its
+	// archives fetch and digest. Every other depth-none answer (an operator's
+	// --depth=none on a source package) runs no gate at all, as before.
+	fetchOnly := depth.Depth == validate.DepthNone && a.resolvedPackageType(pkg, currentVersion) == "bin"
+	if depth.Depth == validate.DepthNone && !fetchOnly {
 		return checkSkipped(pkg, newVersion, depth.Reason)
 	}
 	// The refusal Apply makes, before anything under the staging root is
@@ -237,6 +241,12 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 		return checkResult(pkg, newVersion, local, depth, gates)
 	}
 
+	if fetchOnly {
+		gates = a.fetchGates(ctx, cand, pkg, newVersion)
+		gatesPassed, _ = validate.PromotionDecision(gates, nil)
+		return checkResult(pkg, newVersion, local, depth, gates)
+	}
+
 	gates = a.runStaticGates(ctx, cand, pkg, newVersion)
 
 	depth = a.reviewBump(ctx, cand, pkg, currentVersion, newVersion, depth, &gates)
@@ -341,4 +351,30 @@ func checkSkipped(pkg, version, reason string) validate.EbuildResult {
 			Reason:  reason,
 		}},
 	}
+}
+
+// fetchGates is what a check proves about a binary record: the manifest step
+// above already fetched and digested its archives, so the fetch gate asks only
+// whether that Manifest covers every SRC_URI file, and the required-use gate
+// (when the overlay declares a target policy) reads the candidate's text as it
+// does for any package. The option gate is left out on purpose: it reads build
+// declarations from a source archive, and a .deb or an AppImage has none, so it
+// could only ever report SKIPPED — a non-answer that would make the bump read
+// as unmeasured.
+func (a *Applier) fetchGates(ctx context.Context, cand candidatePaths, pkg, version string) []validate.GateResult {
+	fetch := validate.GateResult{
+		Gate:    validate.GateFetch,
+		Outcome: validate.OutcomePass,
+		Reason:  fmt.Sprintf("binary record: the manifest step fetched and digested every archive of %s-%s, and the coverage check found no SRC_URI file without a DIST line", pkg, version),
+	}
+	if err := a.checkManifestCoverage(ctx, cand.pkgDir, pkg, version); err != nil {
+		fetch.Outcome = validate.OutcomeFailed
+		fetch.Reason = fmt.Sprintf("the Manifest of %s-%s does not cover its SRC_URI: %v", pkg, version, err)
+		fetch.Findings = []validate.Finding{{Gate: validate.GateFetch, Severity: validate.SeverityError, Detail: err.Error()}}
+	}
+	gates := []validate.GateResult{fetch}
+	if res, ok := a.requiredUseGate(cand, pkg, version); ok {
+		gates = append(gates, res)
+	}
+	return gates
 }

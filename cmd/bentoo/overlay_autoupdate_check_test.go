@@ -268,35 +268,37 @@ func TestCheckRun_PublishesNothingOnAnyPath(t *testing.T) {
 // number the operator reads and acts on, so a package counted twice — or in two
 // columns — is worse than no tally at all.
 func TestCheckRun_TallyCountsEachOutcomeExactlyOnce(t *testing.T) {
-	plan := buildValidationPlan(checkPlanUpdates(), checkPlanPolicy())
+	// A binary record is validated by its fetch gate, so the column a
+	// package lands in for being skipped is a source package an override
+	// lowered to none: dev-libs/held.
+	updates := append(checkPlanUpdates(),
+		autoupdate.PendingUpdate{Package: "dev-libs/held", CurrentVersion: "2.0.0", NewVersion: "2.0.1"})
+	policy := checkPlanPolicy()
+	policy.Overrides["dev-libs/held"] = validate.DepthOverride{Depth: validate.DepthNone, Reason: "fixture: held back"}
+	plan := buildValidationPlan(updates, policy)
 
-	outcomes := map[string]validate.Outcome{
-		"media-plugins/gst-plugins-qt6": validate.OutcomeFailed,
-		"dev-libs/quiet":                validate.OutcomePass,
-		"app-editors/vscode-bin":        validate.OutcomeSkipped,
+	gates := map[string]validate.GateResult{
+		"media-plugins/gst-plugins-qt6": {Gate: validate.GateOptions, Outcome: validate.OutcomeFailed, Reason: "fixture",
+			Findings: []validate.Finding{{Gate: validate.GateOptions, Severity: validate.SeverityError, Detail: "-Daalib= is undeclared upstream"}}},
+		"dev-libs/quiet":         {Gate: validate.GateOptions, Outcome: validate.OutcomePass, Reason: "fixture"},
+		"app-editors/vscode-bin": {Gate: validate.GateFetch, Outcome: validate.OutcomePass, Reason: "fixture"},
+		"dev-libs/held":          {Gate: validate.GateOptions, Outcome: validate.OutcomeSkipped, Reason: "fixture"},
 	}
 
 	var tally report.Tally
 	_ = captureStdout(t, func() {
 		checked := checkPayload(discardLog(), runValidationCheck(plan, func(entry validationPlanEntry) validate.EbuildResult {
-			outcome := outcomes[entry.Package]
-			res := validate.EbuildResult{
+			return validate.EbuildResult{
 				Package: entry.Package,
 				Version: entry.Version,
-				Gates:   []validate.GateResult{{Gate: validate.GateOptions, Outcome: outcome, Reason: "fixture"}},
+				Gates:   []validate.GateResult{gates[entry.Package]},
 			}
-			if outcome == validate.OutcomeFailed {
-				res.Gates[0].Findings = []validate.Finding{{
-					Gate: validate.GateOptions, Severity: validate.SeverityError, Detail: "-Daalib= is undeclared upstream",
-				}}
-			}
-			return res
 		}))
 		tally = checked.Tally
 	})
 
-	if tally.Proved != 1 {
-		t.Errorf("Proved = %d, want 1", tally.Proved)
+	if tally.Proved != 2 {
+		t.Errorf("Proved = %d, want 2 (dev-libs/quiet, and vscode-bin by its fetch gate)", tally.Proved)
 	}
 	if tally.Errored != 1 {
 		t.Errorf("Errored = %d, want 1", tally.Errored)
@@ -1297,5 +1299,28 @@ func TestOrphanDisableIsAnnounced(t *testing.T) {
 	quiet := captureStdout(t, func() { testAutoupdateRun(auOpts).presentCheckReport(finishedRun(clean), noPlanPrinted) })
 	if strings.Contains(quiet, "packages.toml") {
 		t.Errorf("a run that disabled nothing announced a registry write — the notice must not become unconditional noise (R5.4)\n%s", quiet)
+	}
+}
+
+// TestCheckPlan_BinaryRecordIsValidatedByItsFetchGate: a binary record resolves
+// to depth none, and the plan used to mark it [not validated], which reported
+// it EXCLUDED whatever its gates said and left the apply with no proof to reuse.
+// It is now planned as validated, and its archive counts as one to fetch.
+func TestCheckPlan_BinaryRecordIsValidatedByItsFetchGate(t *testing.T) {
+	plan := planValidation(checkPlanUpdates(), checkPlanPolicy(), nil, nil)
+	sources := 0
+	for _, e := range plan.Entries {
+		if e.Package == "app-editors/vscode-bin" {
+			if e.Depth != "none" || e.Skipped {
+				t.Errorf("vscode-bin planned at %s, skipped=%v; want none and validated", e.Depth, e.Skipped)
+			}
+			continue
+		}
+		if e.depth > validate.DepthNone {
+			sources++
+		}
+	}
+	if plan.DistfilesToFetch != sources+1 {
+		t.Errorf("DistfilesToFetch = %d, want %d: the binary record's fetch gate downloads its archive", plan.DistfilesToFetch, sources+1)
 	}
 }

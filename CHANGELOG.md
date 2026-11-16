@@ -9,6 +9,25 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A binary record can be proved, so it can be applied again.** Policy sends
+  a prebuilt package (`RESTRICT=bindist`, a `-bin` record) to depth none, and a
+  check at depth none returned before staging anything: the plan said
+  `[not validated]`, the result said EXCLUDED, and since 0.42.0 the apply that
+  publishes only proven bumps refused every such bump with "no staged tree was
+  retained" — recommending a `--check --llm` that could never retain one. A
+  check now stages the candidate, runs the manifest step and reports a new
+  `fetch` gate (the archives downloaded, digested and cover `SRC_URI`), plus
+  `required-use` when the overlay declares targets. That record is the proof
+  the apply reuses. `--depth=none` on a source package still runs no gate.
+
+- **The option gate no longer calls a `.deb` unreadable.** It handed `.deb`,
+  `.rpm` and AppImage archives to `tar -t`, and reported tar's "does not look
+  like a tar archive" as an archive that could not be read. Those formats are
+  now recognised by name and reported as a build system that cannot be
+  determined, without running tar.
+
 ## [0.42.1] - 2026-11-16
 
 ### Fixed

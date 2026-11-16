@@ -67,6 +67,10 @@ var mesonOptionFiles = []string{"meson.options", "meson_options.txt"}
 // a false subproject is nil: nothing compares against a namespace the ebuild
 // never addresses.
 func OptionsFromArchive(ctx context.Context, archive string) (Declared, error) {
+	if kind := binaryArchiveKind(archive); kind != "" {
+		return Declared{}, fmt.Errorf("%s: %w (a %s is a prebuilt package, not a source tree tar can list)",
+			archive, ErrBuildSystemUndetermined, kind)
+	}
 	members, err := listArchiveMembers(ctx, archive)
 	if err != nil {
 		return Declared{}, err
@@ -268,6 +272,9 @@ func markedSystem(members []string) string {
 // shallowest marker file names, or "undetermined". It lists the archive and
 // never unpacks it.
 func ArchiveBuildSystem(ctx context.Context, archive string) (string, error) {
+	if binaryArchiveKind(archive) != "" {
+		return "undetermined", nil
+	}
 	members, err := listArchiveMembers(ctx, archive)
 	if err != nil {
 		return "", fmt.Errorf("reading the build system of %s: %w", archive, err)
@@ -321,4 +328,30 @@ func hasMember(members []string, name string) bool {
 		}
 	}
 	return false
+}
+
+// binaryPackageSuffixes are the archive formats a binary record ships that
+// `tar -t` cannot list: a .deb is an ar(1) container, an .rpm a cpio payload
+// behind a lead, an AppImage an ELF with a squashfs appended. Handing one to
+// tar produces "This does not look like a tar archive", which the gate used to
+// report as an unreadable archive, i.e. a broken candidate.
+var binaryPackageSuffixes = []struct{ suffix, kind string }{
+	{".deb", ".deb package"},
+	{".rpm", ".rpm package"},
+	{".appimage", "AppImage"},
+	{".snap", "snap"},
+	{".flatpak", "flatpak bundle"},
+	{".whl", "Python wheel"},
+}
+
+// binaryArchiveKind names the prebuilt-package format of archive, or "" when
+// its name says nothing tar could not read.
+func binaryArchiveKind(archive string) string {
+	lower := strings.ToLower(archive)
+	for _, b := range binaryPackageSuffixes {
+		if strings.HasSuffix(lower, b.suffix) {
+			return b.kind
+		}
+	}
+	return ""
 }

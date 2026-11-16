@@ -173,9 +173,13 @@ func ResolveDepth(req DepthRequest) DepthDecision {
 
 	// 2. A binary record is validated at depth none: there is no source
 	// to unpack, patch, configure or compile, so no build gate can run.
+	// It also moves the yardstick: none is what policy asks of a prebuilt
+	// blob, not a lowering below it, so the bump is NOT skipped by policy. Its
+	// one gate (GateFetch) still runs, and an override that lowers nothing
+	// further cannot exist below none.
 	if req.ResolvedType == typeBinary {
-		depth = DepthNone
-		reason = fmt.Sprintf("binary record (resolved type %q): there is nothing to build from source, so no build gate can run", typeBinary)
+		depth, policyDepth = DepthNone, DepthNone
+		reason = fmt.Sprintf("binary record (resolved type %q): there is nothing to build from source, so only the fetch gate runs", typeBinary)
 	}
 
 	// 3. Configuration overrides the class default and the tier, carrying its

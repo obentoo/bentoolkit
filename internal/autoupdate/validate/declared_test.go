@@ -170,3 +170,19 @@ func TestOptionsFromArchive_RecordsItsSources(t *testing.T) {
 		}
 	}
 }
+
+// TestOptionsFromArchive_BinaryPackageIsUndeterminedNotUnreadable: a .deb is an
+// ar(1) container tar cannot list. Handing it to tar reported "the upstream
+// archive could not be read", i.e. a broken candidate, for every .deb-based
+// binary record; it is a prebuilt package with no build system to read.
+func TestOptionsFromArchive_BinaryPackageIsUndeterminedNotUnreadable(t *testing.T) {
+	for _, name := range []string{"cc-switch-bin-4.0.33-amd64.deb", "x-1.0.x86_64.rpm", "App-1.0.AppImage"} {
+		_, err := OptionsFromArchive(t.Context(), "/nonexistent/"+name)
+		if !errors.Is(err, ErrBuildSystemUndetermined) {
+			t.Errorf("%s: err = %v, want ErrBuildSystemUndetermined without running tar", name, err)
+		}
+		if got, err := ArchiveBuildSystem(t.Context(), "/nonexistent/"+name); err != nil || got != "undetermined" {
+			t.Errorf("%s: ArchiveBuildSystem = %q, %v; want undetermined, nil", name, got, err)
+		}
+	}
+}
