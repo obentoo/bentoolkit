@@ -22,10 +22,19 @@ import (
 // "unknown", never as a literal.
 func ExpandVersionRefs(value, body, pvr string) (string, bool) {
 	pv := stripRevisionSuffix(pvr)
+	// A ver_cut range PV does not have yields "" — ver_cut itself would
+	// print nothing — and pasting that "" into the value would turn an
+	// unknown into a wrong literal ("3/$(ver_cut 9)" -> "3/"). It is recorded
+	// and the whole value reported unresolved instead.
+	cutFailed := false
 	expandDirect := func(v string) string {
 		v = strings.NewReplacer("${PVR}", pvr, "${PV}", pv).Replace(v)
 		return verCutCallRe.ReplaceAllStringFunc(v, func(call string) string {
-			return VerCut(pv, verCutCallRe.FindStringSubmatch(call)[1])
+			cut := VerCut(pv, verCutCallRe.FindStringSubmatch(call)[1])
+			if cut == "" {
+				cutFailed = true
+			}
+			return cut
 		})
 	}
 
@@ -44,7 +53,7 @@ func ExpandVersionRefs(value, body, pvr string) (string, bool) {
 		// direct expansion stays unresolved and fails the check below.
 		return expandDirect(assigned)
 	})
-	if value == "" || strings.ContainsAny(value, "$`") {
+	if cutFailed || value == "" || strings.ContainsAny(value, "$`") {
 		return "", false
 	}
 	return value, true
@@ -54,18 +63,19 @@ func ExpandVersionRefs(value, body, pvr string) (string, bool) {
 // variable references and are left for the unresolved check.
 var varRefRe = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)`)
 
-// topLevelAssignment returns the value of the first `NAME=value` assignment
-// that starts at column 0 — the ebuild's global scope, where Portage
-// evaluates it while sourcing — with its quotes removed. An unquoted
-// $(command) is taken whole: `PYVER=$(ver_cut 1-2)` has a space inside. An
-// indented assignment lives inside a function or a conditional and is ignored.
+// topLevelAssignment returns the value of the last `NAME=value` assignment
+// that starts at column 0, with its quotes removed. Column 0 is the ebuild's
+// global scope, which Portage evaluates while sourcing; an indented assignment
+// lives inside a function or a conditional and is ignored. The LAST one wins
+// because bash leaves the later global assignment in effect. An unquoted
+// $(command) is taken whole: `PYVER=$(ver_cut 1-2)` has a space inside.
 func topLevelAssignment(body, name string) (string, bool) {
 	re := regexp.MustCompile(`(?m)^` + regexp.QuoteMeta(name) + `=("[^"\n]*"|'[^'\n]*'|\$\([^)\n]*\)|[^\s#]*)`)
-	m := re.FindStringSubmatch(body)
-	if m == nil {
+	all := re.FindAllStringSubmatch(body, -1)
+	if len(all) == 0 {
 		return "", false
 	}
-	return strings.Trim(m[1], `"'`), true
+	return strings.Trim(all[len(all)-1][1], `"'`), true
 }
 
 var verCutCallRe = regexp.MustCompile(`\$\(ver_cut ([0-9]+(?:-[0-9]*)?)\)`)

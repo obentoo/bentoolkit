@@ -19,6 +19,12 @@ func TestExpandVersionRefs(t *testing.T) {
 		{"eclass variable", "${LLVM_MAJOR}", "inherit llvm\n", "23.1", "", false},
 		{"other command substitution", "$(get_version_component_range 1)", "", "1.0", "", false},
 		{"empty", "", "", "1.0", "", false},
+		// A ver_cut range the version lacks is unknown, not "": pasting the
+		// empty cut in would report the wrong slot "3/".
+		{"impossible ver_cut", "3/$(ver_cut 9)", "", "5.0.1", "", false},
+		{"impossible ver_cut through a variable", "${V}", "V=$(ver_cut 4)\n", "1.2", "", false},
+		// bash leaves the later global assignment in effect.
+		{"last global assignment wins", "${V}", "V=1\nV=2\n", "1.0", "2", true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
