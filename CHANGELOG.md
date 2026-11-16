@@ -22,6 +22,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `required-use` when the overlay declares targets. That record is the proof
   the apply reuses. `--depth=none` on a source package still runs no gate.
 
+- **A dependency on a `-bin` package no longer makes a package binary.** The
+  tier detection looked for `-bin-` anywhere in the ebuild, so a source
+  package with a `.tar.xz` and a `-bin` dependency atom was read as prebuilt:
+  `app-emulation/qemu` (via `edk2-bin`, `seabios-bin`), blender, firefox,
+  thunderbird and librewolf. With the fetch gate above that would have proved
+  them by a download instead of a build. The evidence now has to be in
+  `SRC_URI`. Over ::bentoo this reclassifies 10 ebuilds; the three real `-bin`
+  among them (bentoo-kernel-bin, librewolf-bin, rust-bin) move to the source
+  path the other `-bin` records already take, which runs more gates, not fewer.
+
 - **The option gate no longer calls a `.deb` unreadable.** It handed `.deb`,
   `.rpm` and AppImage archives to `tar -t`, and reported tar's "does not look
   like a tar archive" as an archive that could not be read. Those formats are

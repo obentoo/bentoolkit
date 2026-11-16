@@ -384,12 +384,16 @@ func DetectBinaryPackage(content []byte) bool {
 		".deb", ".rpm", ".AppImage", ".tar.gz", ".tar.xz", ".zip",
 		"linux64", "linux-x64", "linux-amd64",
 	}
+	// The -bin evidence has to come from SRC_URI itself. Read anywhere in the
+	// ebuild it matched dependency atoms: app-emulation/qemu depends on
+	// sys-firmware/edk2-bin-${EDK2_OVMF_VERSION} and ships a .tar.xz, so it
+	// was classified as a prebuilt blob, validated at depth none, and a check
+	// would have "proved" it by downloading the tarball without compiling it.
+	srcIsBin := strings.Contains(srcURI, "PN}-bin") || strings.Contains(srcURI, "-bin-") ||
+		strings.Contains(srcURI, "-bin.") || strings.Contains(srcURI, "-bin_")
 	for _, pattern := range binaryPatterns {
-		if strings.Contains(srcURI, pattern) {
-			// Check if it's explicitly a binary package (has -bin suffix in name)
-			if strings.Contains(contentStr, "PN}-bin") || strings.Contains(contentStr, "-bin-") {
-				return true
-			}
+		if srcIsBin && strings.Contains(srcURI, pattern) {
+			return true
 		}
 	}
 
