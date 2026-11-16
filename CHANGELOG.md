@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A build on the `vm` or `container` backend no longer dies sourcing the
+  ebuild.** The staged tree is private on this host (0750 directories, 0600
+  files) and was shipped into the environment as it is, owned by the uid that
+  staged it, while Portage reads an ebuild as the `portage` user: every build
+  died before `src_prepare` ("Permission denied"), and the gate reported the
+  environment as the failure. What is shipped is now owned by root and
+  readable inside (0755 directories and executables, 0644 files); the tree on
+  this host keeps its private modes.
+
 ## [0.42.2] - 2026-11-16
 
 ### Fixed
