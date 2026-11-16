@@ -14,11 +14,13 @@ import (
 // prints one JSON line (exit 3 with no ISO), `vm run` hands the guest's shell
 // its arguments joined by spaces and exits with the command's code (255 once
 // the VM is gone), `vm stop` powers it off. The guest is this host.
+// From 0.4.0 its help also offers `--worker`, and a start relayed to a worker
+// adds "worker" to the JSON line; withDev false is a Shidashi older than both.
 func fakeShidashi(t *testing.T, withDev bool) (bin, state string) {
 	t.Helper()
 	dir := t.TempDir()
 	state = filepath.Join(dir, "state")
-	help := "--dev  A VM ready to build ebuilds"
+	help := "--dev  A VM ready to build ebuilds  --worker NAME  On a paired worker"
 	if !withDev {
 		help = "--uefi  Boot with OVMF"
 	}
@@ -33,7 +35,12 @@ start)
 	[ -n "$FAKE_SHIDASHI_NO_ISO" ] && { echo 'error: no minimal ISO' >&2; exit 3; }
 	echo "starting" >&2
 	echo running > "$state"
-	echo '{"name": "x", "cid": 42, "iso": "/isos/bentoo-2026.11.12-minimal-systemd-v3.iso", "pin": "p20261101.28ad071a", "ready": true}'
+	worker=$SHIDASHI_DEV_WORKER
+	while [ $# -gt 0 ]; do [ "$1" = --worker ] && worker=$2; shift; done
+	echo "$worker" > "$state.worker"
+	extra=
+	[ -n "$worker" ] && extra=', "worker": "'"$worker"'"'
+	echo '{"name": "x", "cid": 42, "iso": "/isos/bentoo-2026.11.12-minimal-systemd-v3.iso", "pin": "p20261101.28ad071a", "ready": true'"$extra"'}'
 	;;
 run)
 	while [ "$1" != -- ]; do shift; done
@@ -56,7 +63,7 @@ esac
 func startedVM(t *testing.T) (*VM, string) {
 	t.Helper()
 	bin, state := fakeShidashi(t, true)
-	v, err := NewVM(t.Context(), bin, "", VMSeams{})
+	v, err := NewVM(t.Context(), bin, "", "", VMSeams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +119,7 @@ func TestVM_StartNamesWhatItBooted(t *testing.T) {
 // is not there, are both the missing image of this backend.
 func TestVM_NoISOToBootIsErrNoISO(t *testing.T) {
 	bin, _ := fakeShidashi(t, true)
-	v, err := NewVM(t.Context(), bin, "", VMSeams{})
+	v, err := NewVM(t.Context(), bin, "", "", VMSeams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +127,7 @@ func TestVM_NoISOToBootIsErrNoISO(t *testing.T) {
 	if err := v.Start(t.Context()); !errors.Is(err, ErrNoISO) {
 		t.Errorf("start with no ISO: err = %v, want ErrNoISO", err)
 	}
-	if _, err := NewVM(t.Context(), bin, filepath.Join(t.TempDir(), "absent.iso"), VMSeams{}); !errors.Is(err, ErrNoISO) {
+	if _, err := NewVM(t.Context(), bin, filepath.Join(t.TempDir(), "absent.iso"), "", VMSeams{}); !errors.Is(err, ErrNoISO) {
 		t.Errorf("an absent configured ISO: err = %v, want ErrNoISO", err)
 	}
 }
@@ -129,10 +136,10 @@ func TestVM_NoISOToBootIsErrNoISO(t *testing.T) {
 // build VM; that is said before anything boots.
 func TestVM_AShidashiWithoutDevIsRefused(t *testing.T) {
 	bin, _ := fakeShidashi(t, false)
-	if _, err := NewVM(t.Context(), bin, "", VMSeams{}); err == nil || !strings.Contains(err.Error(), "update Shidashi") {
+	if _, err := NewVM(t.Context(), bin, "", "", VMSeams{}); err == nil || !strings.Contains(err.Error(), "update Shidashi") {
 		t.Errorf("err = %v, want a refusal asking to update Shidashi", err)
 	}
-	if _, err := NewVM(t.Context(), filepath.Join(t.TempDir(), "shidashi"), "", VMSeams{}); err == nil {
+	if _, err := NewVM(t.Context(), filepath.Join(t.TempDir(), "shidashi"), "", "", VMSeams{}); err == nil {
 		t.Error("an absent shidashi was accepted")
 	}
 }
@@ -141,7 +148,7 @@ func TestVM_AShidashiWithoutDevIsRefused(t *testing.T) {
 // one would, so the session asks the VM itself.
 func TestVM_ADeadVMIsNotAlive(t *testing.T) {
 	bin, state := fakeShidashi(t, true)
-	v, err := NewVM(t.Context(), bin, "", VMSeams{})
+	v, err := NewVM(t.Context(), bin, "", "", VMSeams{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,5 +181,57 @@ func TestShellQuote(t *testing.T) {
 		if got := shellQuote(in); got != want {
 			t.Errorf("shellQuote(%q) = %s, want %s", in, got, want)
 		}
+	}
+}
+
+// TestVM_AConfiguredWorkerIsWhereTheVMRuns: autoupdate.build.vm.worker reaches
+// Shidashi as --worker, and the proof record names the worker the VM ran on.
+func TestVM_AConfiguredWorkerIsWhereTheVMRuns(t *testing.T) {
+	t.Setenv("SHIDASHI_DEV_WORKER", "")
+	bin, state := fakeShidashi(t, true)
+	v, err := NewVM(t.Context(), bin, "", " bentoo-lab ", VMSeams{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(state + ".worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(got)) != "bentoo-lab" {
+		t.Errorf("shidashi was asked for worker %q, want bentoo-lab", strings.TrimSpace(string(got)))
+	}
+	if want := "bentoo-2026.11.12-minimal-systemd-v3.iso (p20261101.28ad071a) on worker bentoo-lab"; v.Identity() != want {
+		t.Errorf("identity = %q, want %q", v.Identity(), want)
+	}
+}
+
+// TestVM_AWorkerChosenByShidashiIsRecordedToo: with no worker configured,
+// SHIDASHI_DEV_WORKER may still send the VM to one; the record says so.
+func TestVM_AWorkerChosenByShidashiIsRecordedToo(t *testing.T) {
+	t.Setenv("SHIDASHI_DEV_WORKER", "bentoo-lab")
+	v, _ := startedVM(t)
+	if !strings.HasSuffix(v.Identity(), " on worker bentoo-lab") {
+		t.Errorf("identity = %q, want it to name the worker", v.Identity())
+	}
+}
+
+// TestVM_AWorkerNeedsAShidashiThatRelays: a Shidashi older than 0.4.0 has
+// `vm start --dev` but not --worker; that is said before anything boots,
+// instead of a VM booting on this host against the configuration.
+func TestVM_AWorkerNeedsAShidashiThatRelays(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "shidashi")
+	script := "#!/bin/sh\necho '--dev  A VM ready to build ebuilds'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewVM(t.Context(), bin, "", "", VMSeams{}); err != nil {
+		t.Errorf("no worker configured: err = %v, want none", err)
+	}
+	if _, err := NewVM(t.Context(), bin, "", "bentoo-lab", VMSeams{}); err == nil || !strings.Contains(err.Error(), "0.4.0") {
+		t.Errorf("err = %v, want a refusal asking for Shidashi 0.4.0", err)
 	}
 }

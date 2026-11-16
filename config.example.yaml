@@ -140,10 +140,13 @@ autoupdate:
   #     runtime: podman
   #   # The vm backend: a Shidashi build VM (`shidashi vm start --dev`). iso
   #   # unset boots Shidashi's newest minimal ISO; shidashi unset is the one
-  #   # on PATH, which must have `vm start --dev`.
+  #   # on PATH, which must have `vm start --dev`. worker runs the VM on that
+  #   # paired Shidashi build worker (Shidashi 0.4.0 or newer); unset, this
+  #   # host, or the worker SHIDASHI_DEV_WORKER names.
   #   vm:
   #     iso: /var/tmp/shidashi-isos/bentoo-2026.11.12-minimal-systemd-v3.iso
   #     shidashi: /usr/bin/shidashi
+  #     worker: bentoo-lab
   #   # Cap the depth of expensive builds: a package averaging more than this on
   #   # this host (qlop), or with no history, stops at configure. Unset: no cap.
   #   budget: 45m

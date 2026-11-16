@@ -42,19 +42,24 @@ func TestContainerIntegration_TheBuildGatesRunInARealContainer(t *testing.T) {
 }
 
 // TestVMIntegration_TheBuildGatesRunInARealVM drives the real VM transport
-// through realEnvironmentBuild; BENTOO_TEST_SHIDASHI_ISO picks the ISO.
+// through realEnvironmentBuild; BENTOO_TEST_SHIDASHI_ISO picks the ISO and
+// BENTOO_TEST_SHIDASHI_WORKER a paired build worker to run the VM on.
 func TestVMIntegration_TheBuildGatesRunInARealVM(t *testing.T) {
 	shidashi := os.Getenv(shidashiEnv)
 	if shidashi == "" {
 		t.Skipf("%s is not set: no shidashi to run the vm backend against", shidashiEnv)
 	}
-	transport, err := buildenv.NewVM(t.Context(), shidashi, os.Getenv("BENTOO_TEST_SHIDASHI_ISO"), buildenv.VMSeams{})
+	worker := os.Getenv("BENTOO_TEST_SHIDASHI_WORKER")
+	transport, err := buildenv.NewVM(t.Context(), shidashi, os.Getenv("BENTOO_TEST_SHIDASHI_ISO"), worker, buildenv.VMSeams{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	realEnvironmentBuild(t, transport)
 	if !strings.Contains(transport.Identity(), ".iso") {
 		t.Errorf("identity %q does not name the ISO the VM booted", transport.Identity())
+	}
+	if worker != "" && !strings.HasSuffix(transport.Identity(), " on worker "+worker) {
+		t.Errorf("identity %q does not name the worker %s the VM ran on", transport.Identity(), worker)
 	}
 }
 

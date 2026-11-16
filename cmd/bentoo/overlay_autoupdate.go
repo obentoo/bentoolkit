@@ -2669,7 +2669,7 @@ func (ar *autoupdateRun) openBuildEnvironment(ctx context.Context) (closeEnv fun
 	case validate.BackendContainer:
 		transport, err = buildenv.NewContainer(ctx, ar.validate.Container.Runtime, ar.validate.Container.Image, buildenv.ContainerSeams{})
 	case validate.BackendVM:
-		transport, err = buildenv.NewVM(ctx, ar.validate.VM.Shidashi, ar.validate.VM.ISO, buildenv.VMSeams{})
+		transport, err = buildenv.NewVM(ctx, ar.validate.VM.Shidashi, ar.validate.VM.ISO, ar.validate.VM.Worker, buildenv.VMSeams{})
 	default:
 		err = fmt.Errorf("no environment is built for backend %q", ar.validate.Environment)
 	}
