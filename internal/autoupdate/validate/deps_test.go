@@ -341,3 +341,19 @@ func TestDependenciesSatisfied_SuffixedKeyFallbackRecomputesTheWriterName(t *tes
 			"Stage never wrote", spec, want)
 	}
 }
+
+// TestUnsatisfiedFrom_AReinstallIsNotMissing pins #338 item 5: libcbor 0.15.0
+// moves its subslot, so the pretend resolve rebuilds the installed
+// dev-libs/libfido2 bound with `:=`. A reinstall (`r`, `R`) names a package the
+// host already holds; only a real install (`N` here) is missing.
+func TestUnsatisfiedFrom_AReinstallIsNotMissing(t *testing.T) {
+	out := "[ebuild     U  ] dev-libs/libcbor-0.15.0::bentoo-staged [0.14.1::bentoo]\n" +
+		"[ebuild  rR    ] dev-libs/libfido2-1.17.0::gentoo\n" +
+		"[ebuild   R    ] app-misc/same-1.0::gentoo\n" +
+		"[ebuild  N     ] dev-libs/really-missing-2.0::gentoo\n"
+
+	got := unsatisfiedFrom(out, "dev-libs/libcbor")
+	if len(got) != 1 || got[0] != "dev-libs/really-missing-2.0::gentoo" {
+		t.Errorf("unsatisfied = %v, want only dev-libs/really-missing-2.0::gentoo", got)
+	}
+}

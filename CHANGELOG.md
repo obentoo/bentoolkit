@@ -11,6 +11,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **A bump that moves its subslot can pass the build gates.** The
+  dependency probe counted every package the pretend resolve would merge as a
+  missing build dependency, including installed consumers it only rebuilds for
+  the new subslot (dev-libs/libcbor 0.15.0 asked to "install
+  dev-libs/libfido2-1.17.0", already installed). A reinstall (`r` or `R` in
+  the merge list) no longer counts (#338).
+
 - **`--revive all` no longer reverses a retirement.** It revived every
   disabled, removed record whose upstream was ahead of ::gentoo, including
   records retired on purpose with a `disabled_by` reason ("::gentoo caught
