@@ -473,7 +473,7 @@ Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 | `llm_prompt` | Instruction used to extract the version via an LLM. Consumed by `bentoo overlay analyze`, and by `bentoo overlay autoupdate --check` when an `llm.provider` is configured (the LLM is tried after the primary/fallback parsers). When no provider is configured, `--check` logs a Warn and skips LLM extraction. |
 | `headers` | Custom HTTP headers. `${VAR}` is expanded only for allow-listed auth headers and allow-listed variables, and each credential is sent only to the hosts it is bound to (a mismatch fails that package's check) — see [Headers and environment variables](behaviour.md#headers-and-environment-variables). Example: `Authorization = "Bearer ${BENTOO_MY_TOKEN}"` |
 | `timeout` | Per-operation budget (seconds) for **this** package — the total time spent fetching its version across all retry attempts. Use it for a reliably slow host so it gets extra retry headroom without slowing the whole batch. Absent/`0` uses the global budget derived from `autoupdate.http_timeout`. See [Timeouts](behaviour.md#timeouts). |
-| `type` | `"bin"` for a binary package (manifest-only testing), `"source"` for a source-built one. Only to **override** the auto-detection, which already reads the ebuild (`RESTRICT="bindist"`, a `-bin` suffix, a binary `SRC_URI`). Replaces the retired `binary` key; `--lint --fix` migrates a record still carrying it. |
+| `type` | `"bin"` for a binary package (validated by the `fetch` gate only), `"source"` for a source-built one. Only to **override** the auto-detection, which already reads the ebuild: `RESTRICT="bindist"`, or a `SRC_URI` that names a `-bin` archive (`${PN}-bin`, `-bin-`) of a binary format. A `-bin` dependency atom elsewhere in the ebuild is not evidence. Replaces the retired `binary` key; `--lint --fix` migrates a record still carrying it. |
 | `series` | Regex restricting the entry to one release line — which ebuild counts as current, and which upstream candidates are eligible. For a package whose parallel ebuilds share a SLOT; see [Several release lines](#several-release-lines-of-one-package-series). |
 | `suffix` | Gentoo pre-release suffix (`_alpha`, `_beta`, `_pre`, `_rc`, `_p`, each optionally numbered) appended to the detected version — see [Pre-release channels](#pre-release-channels-suffix). |
 | `suffix_when` | Regex gating `suffix`: the suffix is appended only to a version matching it. Omit when the probed URL *is* the pre-release channel. |
@@ -722,6 +722,14 @@ Each planned bump ends in one of four states, shown in the STATE column of
 | HUMAN | a gate failed, the candidate itself could not be read, or nothing recorded whose fault it was | look at the ebuild or the registry entry |
 | EXCLUDED | the policy asked for no gate (`depth = none`) | nothing was proven; raise the depth to validate it |
 
+A binary record (`type = "bin"`, resolved or declared) is validated at depth
+`none` and is not EXCLUDED: there is nothing to build, so its one deciding
+gate is `fetch`. The check stages the candidate, runs the manifest step
+(download and digest every archive) and passes `fetch` when the Manifest
+covers every `SRC_URI` file; `required-use` runs too when the overlay declares
+targets. That record is the proof `--apply` reuses. `depth = none` on a source
+record, by override or by `--depth=none`, still runs no gate and is EXCLUDED.
+
 The same state is written into the `.bentoo-stage-record.json` beside the
 retained staged tree, with the backend (`host`), the `::gentoo` sync time the
 gates ran against, and when they answered.
@@ -756,7 +764,9 @@ patch in the package's `files/`, mentions it; CMake's and `find_package()`'s
 own variables (`CMAKE_*`, `BUILD_TESTING`, `*_DIR`, ...) and names the release
 assembles at configure time (`BUILD_PLUGIN_${NAME}`) are never reported. A
 `-D` on a compiler flag line (`append-cppflags -DFOO=1`) is a preprocessor
-define, not an option. Other build systems are reported as out of scope.
+define, not an option. Other build systems are reported as out of scope, and
+so is a prebuilt archive (`.deb`, `.rpm`, AppImage), which is recognised by
+name rather than handed to `tar`.
 
 On the screen, a failed package folds the info findings into a count; the
 JSON report lists each one.
