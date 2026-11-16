@@ -161,11 +161,16 @@ func PkgDirFor(overlayPath, pkg string) string {
 var slotAssignRegex = regexp.MustCompile(`(?m)^SLOT=(?:"([^"]*)"|'([^']*)'|([^\s#]+))`)
 
 // readEbuildSlot returns the slot an ebuild declares, without its subslot: the
-// SLOT="4.1/0" of a webkit-gtk 4.1 ebuild yields "4.1". It returns "" when the
-// file is unreadable or declares no SLOT, which callers treat as "does not match
-// any requested slot" — a slot filter must never widen its selection because a
-// file could not be read.
-func readEbuildSlot(path string) string {
+// SLOT="4.1/0" of a webkit-gtk 4.1 ebuild yields "4.1". version is the
+// ebuild's version from its filename (revision included); it resolves the
+// references ebuild.ExpandVersionRefs knows, so dev-lang/python's
+// SLOT="${PYVER}" with PYVER=$(ver_cut 1-2) yields "3.15" for 3.15.2_p1-r1.
+//
+// It returns "" when the file is unreadable, declares no SLOT, or declares one
+// that cannot be resolved without running bash (an eclass variable), which
+// callers treat as "does not match any requested slot" — a slot filter must
+// never widen its selection because a file could not be read or expanded.
+func readEbuildSlot(path, version string) string {
 	content, err := os.ReadFile(path) //nolint:gosec // path is built from the overlay dir listing
 	if err != nil {
 		return ""
@@ -180,6 +185,10 @@ func readEbuildSlot(path string) string {
 			value = string(group)
 			break
 		}
+	}
+	value, ok := ebuild.ExpandVersionRefs(value, string(content), version)
+	if !ok {
+		return ""
 	}
 	// Drop the subslot: Portage's dependency syntax names ":4.1", not ":4.1/0".
 	if i := strings.IndexByte(value, '/'); i >= 0 {
@@ -316,7 +325,7 @@ func lineCandidates(entries []os.DirEntry, pkgDir, category, pkgName, slot strin
 			continue
 		}
 		path := filepath.Join(pkgDir, name)
-		if slot != "" && readEbuildSlot(path) != slot {
+		if slot != "" && readEbuildSlot(path, eb.Version) != slot {
 			continue
 		}
 		out = append(out, ebuildCandidate{Version: eb.Version, Path: path})

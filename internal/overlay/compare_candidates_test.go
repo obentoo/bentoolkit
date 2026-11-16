@@ -46,6 +46,7 @@ func TestMainSlot(t *testing.T) {
 		{"SLOT=\"0.16/4\"\n", "0.16.2-r1", "0.16", "4", true},
 		{"SLOT=\"${PV}\"\n", "1.2-r3", "1.2", "", true},
 		{"SLOT=\"${LLVM_MAJOR}/${LLVM_SOABI}\"\n", "23.1.5", "", "", false},
+		{"PYVER=$(ver_cut 1-2)\nSLOT=\"${PYVER}\"\n", "3.15.2_p1-r1", "3.15", "", true},
 		{"EAPI=8\n", "16.2.1", "", "", false}, // gcc: SLOT comes from toolchain.eclass
 	}
 	for _, c := range cases {
@@ -53,15 +54,6 @@ func TestMainSlot(t *testing.T) {
 		if main != c.main || sub != c.sub || ok != c.ok {
 			t.Errorf("mainSlot(%q, %q) = (%q, %q, %v), want (%q, %q, %v)",
 				c.body, c.version, main, sub, ok, c.main, c.sub, c.ok)
-		}
-	}
-}
-
-func TestVerCut(t *testing.T) {
-	cases := map[string]string{"1": "5", "1-2": "5.0", "2-": "0.1_p2", "1-9": "5.0.1_p2", "9": ""}
-	for spec, want := range cases {
-		if got := verCut("5.0.1_p2", spec); got != want {
-			t.Errorf("verCut(5.0.1_p2, %q) = %q, want %q", spec, got, want)
 		}
 	}
 }

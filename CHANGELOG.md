@@ -19,6 +19,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   environment as the failure. What is shipped is now owned by root and
   readable inside (0755 directories and executables, 0644 files); the tree on
   this host keeps its private modes.
+- **A `:slot` entry finds an ebuild whose SLOT is built from its version.**
+  `dev-lang/python` declares `SLOT="${PYVER}"` with `PYVER=$(ver_cut 1-2)`;
+  the slot was read as that literal text, so `dev-lang/python:3.15` matched
+  nothing and the registry reconciliation listed it under "Entries whose
+  directory holds no ebuild". `${PV}`, `${PVR}`, `$(ver_cut …)` and one level
+  of a top-level variable built from them are now resolved; a slot that needs
+  an eclass variable still matches nothing rather than its literal text.
+  `overlay compare` shares the same resolution.
 
 ## [0.42.2] - 2026-11-16
 

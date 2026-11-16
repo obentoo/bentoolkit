@@ -83,6 +83,14 @@ func TestReadEbuildSlot(t *testing.T) {
 		// A SLOT mentioned mid-line (a dependency atom, a here-doc) is not an
 		// assignment and must not be picked up.
 		{"not an assignment", "RDEPEND=\"net-libs/webkit-gtk:4.1\"\n", ""},
+		// dev-lang/python: the slot is a variable the ebuild builds from its
+		// own version. Read literally it was "${PYVER}", which matched no
+		// ":3.15" key and reported the package as holding no ebuild.
+		{"variable indirection (python)", "PYVER=$(ver_cut 1-2)\nSLOT=\"${PYVER}\"\n", "3.15"},
+		{"version reference", "SLOT=\"$(ver_cut 1)/${PV}\"\n", "3"},
+		// An eclass variable cannot be resolved without bash: no slot, never
+		// the literal text.
+		{"eclass variable", "SLOT=\"${LLVM_MAJOR}/${LLVM_SOABI}\"\n", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -90,17 +98,42 @@ func TestReadEbuildSlot(t *testing.T) {
 			if err := os.WriteFile(path, []byte(tt.content), 0o600); err != nil {
 				t.Fatalf("write: %v", err)
 			}
-			if got := readEbuildSlot(path); got != tt.want {
+			if got := readEbuildSlot(path, "3.15.2_p1-r1"); got != tt.want {
 				t.Errorf("readEbuildSlot() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 
 	t.Run("unreadable file yields no slot", func(t *testing.T) {
-		if got := readEbuildSlot(filepath.Join(t.TempDir(), "absent.ebuild")); got != "" {
+		if got := readEbuildSlot(filepath.Join(t.TempDir(), "absent.ebuild"), "1.0"); got != "" {
 			t.Errorf("readEbuildSlot(missing) = %q, want %q", got, "")
 		}
 	})
+}
+
+// TestSelectCurrentEbuildSlotFromVariable pins the dev-lang/python:3.15 case
+// end to end: a ":slot" key resolves to an ebuild whose SLOT is a variable
+// assigned from $(ver_cut ...), instead of failing with ErrSlotNotFound.
+func TestSelectCurrentEbuildSlotFromVariable(t *testing.T) {
+	overlay := t.TempDir()
+	dir := filepath.Join(overlay, "dev-lang", "python")
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	body := "EAPI=8\nPYVER=$(ver_cut 1-2)\nSLOT=\"${PYVER}\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "python-3.15.2_p1-r1.ebuild"), []byte(body), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	got, err := SelectCurrentEbuild(nil, overlay, "dev-lang/python:3.15", "")
+	if err != nil {
+		t.Fatalf("SelectCurrentEbuild: %v", err)
+	}
+	if got.Version != "3.15.2_p1-r1" {
+		t.Errorf("SelectCurrentEbuild version = %q, want %q", got.Version, "3.15.2_p1-r1")
+	}
+	if _, err := SelectCurrentEbuild(nil, overlay, "dev-lang/python:3.14", ""); !errors.Is(err, ErrSlotNotFound) {
+		t.Errorf("SelectCurrentEbuild(:3.14) err = %v, want %v", err, ErrSlotNotFound)
+	}
 }
 
 func TestSelectCurrentEbuildMissingPackage(t *testing.T) {

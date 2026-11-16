@@ -152,64 +152,22 @@ func ebuildMainSlot(pkgDir, pkg, version string) (string, bool) {
 }
 
 // mainSlot resolves an ebuild's SLOT into main slot and sub-slot, expanding
-// only what needs no bash: ${PV}, ${PVR} and $(ver_cut ...). Anything else — a
-// variable an eclass sets (gcc's ${GCCMAJOR}, llvm's ${LLVM_MAJOR}), a SLOT the
-// ebuild never assigns — is unresolved, and an unresolved slot narrows nothing.
+// only what needs no bash (see ebuild.ExpandVersionRefs): ${PV}, ${PVR},
+// $(ver_cut ...) and one level of indirection through a top-level variable
+// built from them. Anything else — a variable an eclass sets (gcc's
+// ${GCCMAJOR}, llvm's ${LLVM_MAJOR}), a SLOT the ebuild never assigns — is
+// unresolved, and an unresolved slot narrows nothing.
 func mainSlot(body, version string) (main, sub string, ok bool) {
 	m := slotRe.FindStringSubmatch(body)
 	if m == nil {
 		return "", "", false
 	}
-	pv := stripRevision(version)
-	value := strings.Trim(m[1], `"'`)
-	value = strings.NewReplacer("${PVR}", version, "${PV}", pv).Replace(value)
-	value = verCutRe.ReplaceAllStringFunc(value, func(call string) string {
-		return verCut(pv, verCutRe.FindStringSubmatch(call)[1])
-	})
-	if value == "" || strings.ContainsAny(value, "$`") {
+	value, ok := ebuild.ExpandVersionRefs(strings.Trim(m[1], `"'`), body, version)
+	if !ok {
 		return "", "", false
 	}
 	main, sub, _ = strings.Cut(value, "/")
 	return main, sub, true
-}
-
-var verCutRe = regexp.MustCompile(`\$\(ver_cut ([0-9]+(?:-[0-9]*)?)\)`)
-
-// verComponentRe is ver_cut's notion of a component: a run of digits or a run
-// of letters; everything else separates.
-var verComponentRe = regexp.MustCompile(`[0-9]+|[A-Za-z]+`)
-
-// verCut implements ver_cut for the "N", "N-M" and "N-" ranges: the substring
-// of pv from the start of component N to the end of component M.
-func verCut(pv, spec string) string {
-	comps := verComponentRe.FindAllStringIndex(pv, -1)
-	if len(comps) == 0 {
-		return ""
-	}
-	from, to := spec, spec
-	if a, b, found := strings.Cut(spec, "-"); found {
-		from, to = a, b
-	}
-	start, err := strconv.Atoi(from)
-	if err != nil || start < 1 {
-		return ""
-	}
-	end := len(comps)
-	if to != "" {
-		if end, err = strconv.Atoi(to); err != nil {
-			return ""
-		}
-	}
-	if start > len(comps) {
-		return ""
-	}
-	if end > len(comps) {
-		end = len(comps)
-	}
-	if end < start {
-		return ""
-	}
-	return pv[comps[start-1][0]:comps[end-1][1]]
 }
 
 // stripRevision turns "1.2-r3" into "1.2", the ${PV} of the ebuild.
