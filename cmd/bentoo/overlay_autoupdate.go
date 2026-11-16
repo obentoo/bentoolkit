@@ -1017,23 +1017,16 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			ar.log().Info("package skipped in packages.toml", "package", pkg, "skipped", result.Skipped)
 			return nil
 		}
-		// The one package this run scanned, as the same report the
-		// batch path builds and through the same render — one element, joined
-		// with the zero validation half because nothing validates here. This
-		// path prices nothing, so no plan has been put in front of the operator
-		// and the report states its own.
-		//
-		// The return below stays: only the batch path may reconcile the
-		// registry, and moving the render past this point must not move the
-		// return with it.
-		//
-		// It validated nothing, so it planned nothing, so it left nothing
-		// unreached — which is what nothingValidated states, and what
-		// checkReport answers for an empty plan on a batch run whose plan came
-		// out empty too.
-		const noPlanWasPrinted = false
-		single := checkReport(ar.log(), []autoupdate.CheckResult{*result}, nothingValidated())
-		ar.presentCheckReport(single, noPlanWasPrinted)
+		// The one package this run scanned, rendered as the batch path renders
+		// its scan. With --llm it is validated exactly as a batch would
+		// validate it: the advice every "unproven" result prints names this
+		// command. Only the batch path reconciles the registry, so the return
+		// below must stay ahead of it.
+		checked := []autoupdate.CheckResult{*result}
+		validated, planPrinted := ar.runPendingValidation(ctx, overlayPath, configDir, checked, llmCfg)
+		single := checkReport(ar.log(), checked, validated)
+		ar.presentCheckReport(single, planPrinted)
+		ar.offerRepairs(ctx, overlayPath, configDir, cfg.Autoupdate, validated)
 		return nil
 	}
 
