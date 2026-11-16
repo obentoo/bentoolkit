@@ -9,6 +9,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--llm` help names the modes that take it.** The help said "With
+  --apply", the one mode that refuses the flag since 0.42.0. It now says that
+  `--check --llm` proves pending bumps in a staged tree, that `--check` and
+  `--revive` let the agent take part, and that `--apply` refuses it (#338).
+
 ## [0.42.0] - 2026-11-14
 
 ### Added
