@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **The `vm` build backend can run its VMs on a Shidashi build worker.**
+  `autoupdate.build.vm.worker: <name>` passes `--worker` to
+  `shidashi vm start --dev` (Shidashi 0.4.0 or newer), which boots the VM on
+  that paired worker and relays every build command there, so a bump's proof
+  no longer loads this host. A Shidashi that cannot relay is refused before
+  any work, instead of booting the VM here against the configuration. The
+  proof record names the worker (`… on worker bentoo-lab`), also when
+  `SHIDASHI_DEV_WORKER` chose it.
+
 ### Fixed
 
 - **A build on the `vm` or `container` backend no longer dies sourcing the

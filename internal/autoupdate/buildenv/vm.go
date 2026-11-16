@@ -43,10 +43,12 @@ func (s VMSeams) command() func(ctx context.Context, name string, arg ...string)
 
 // VM is the virtual-machine transport: one disposable Shidashi build VM per
 // Start (`shidashi vm start --dev`, which boots on a fresh work disk), reached
-// with `shidashi vm run`.
+// with `shidashi vm run`. With a worker, Shidashi boots it on that paired build
+// worker and relays every `vm run` and `vm stop` there over ssh.
 type VM struct {
 	shidashi string
 	iso      string
+	worker   string
 	seams    VMSeams
 	name     string
 	identity string
@@ -56,8 +58,10 @@ type VM struct {
 var vmSeq atomic.Int64
 
 // NewVM resolves the shidashi binary and checks that it can start a build VM.
-// iso is optional: unset, Shidashi boots its newest minimal ISO.
-func NewVM(ctx context.Context, shidashi, iso string, seams VMSeams) (*VM, error) {
+// iso is optional: unset, Shidashi boots its newest minimal ISO. worker is
+// optional: unset, the VM runs where Shidashi decides (this host, or the worker
+// SHIDASHI_DEV_WORKER names); set, it runs on that paired worker.
+func NewVM(ctx context.Context, shidashi, iso, worker string, seams VMSeams) (*VM, error) {
 	if strings.TrimSpace(shidashi) == "" {
 		shidashi = "shidashi"
 	}
@@ -82,13 +86,18 @@ func NewVM(ctx context.Context, shidashi, iso string, seams VMSeams) (*VM, error
 	if !strings.Contains(out.String(), "--dev") {
 		return nil, fmt.Errorf("%s has no `vm start --dev`, the build VM the vm backend needs: update Shidashi", resolved)
 	}
-	return &VM{shidashi: resolved, iso: iso, seams: seams}, nil
+	worker = strings.TrimSpace(worker)
+	if worker != "" && !strings.Contains(out.String(), "--worker") {
+		return nil, fmt.Errorf("%s has no `vm start --worker`, which autoupdate.build.vm.worker needs: update Shidashi to 0.4.0 or newer", resolved)
+	}
+	return &VM{shidashi: resolved, iso: iso, worker: worker, seams: seams}, nil
 }
 
 // Name is "vm".
 func (v *VM) Name() string { return "vm" }
 
-// Identity names the ISO the VM booted and the tree pin it carries.
+// Identity names the ISO the VM booted, the tree pin it carries and, when it
+// ran on a build worker, that worker.
 func (v *VM) Identity() string { return v.identity }
 
 // vmStarted is the JSON line `vm start --dev` prints.
@@ -97,6 +106,9 @@ type vmStarted struct {
 	ISO   string `json:"iso"`
 	Pin   string `json:"pin"`
 	Ready bool   `json:"ready"`
+	// Worker is set when Shidashi ran the VM on a paired build worker, whether
+	// --worker or SHIDASHI_DEV_WORKER chose it.
+	Worker string `json:"worker"`
 }
 
 // Start boots a new build VM and waits until it answers.
@@ -105,6 +117,9 @@ func (v *VM) Start(ctx context.Context) error {
 	args := []string{"vm", "start", "--dev", "--name", v.name}
 	if v.iso != "" {
 		args = append(args, "--iso", v.iso)
+	}
+	if v.worker != "" {
+		args = append(args, "--worker", v.worker)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd := v.seams.command()(ctx, v.shidashi, args...)
@@ -127,6 +142,9 @@ func (v *VM) Start(ctx context.Context) error {
 	v.identity = filepath.Base(started.ISO)
 	if started.Pin != "" {
 		v.identity += " (" + started.Pin + ")"
+	}
+	if started.Worker != "" {
+		v.identity += " on worker " + started.Worker
 	}
 	return nil
 }

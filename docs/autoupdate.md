@@ -850,6 +850,7 @@ autoupdate:
     vm:
       iso: /var/tmp/shidashi-isos/bentoo-2026.11.12-minimal-systemd-v3.iso  # optional
       shidashi: /usr/bin/shidashi                                           # optional
+      worker: bentoo-lab                                                    # optional
 ```
 
 Each build VM is `shidashi vm start --dev`: the ISO's own pinned `::gentoo`
@@ -861,8 +862,18 @@ commands run with `shidashi vm run --stream --timeout 0`: no time limit, the
 output passed through as it is written. The build runs as root in the guest,
 where Portage's sandbox works, so its passes are isolated.
 
-A Shidashi without `vm start --dev`, an `iso` that is not a file, or no ISO
-at all stops every mode that builds before any work.
+`worker` runs every build VM on that paired Shidashi build worker
+(`shidashi vm start --dev --worker`, Shidashi 0.4.0 or newer): Shidashi boots
+it there and relays each `vm run` and `vm stop` over ssh, so the builds load
+the worker, not this host. `iso` is still a file on this host: Shidashi
+sends it to the worker with rsync, and again only when it changed. With no
+`worker`, the VM runs on this host, or on the worker `SHIDASHI_DEV_WORKER`
+names. Either way the proof record ends with `on worker <name>` when the VM
+ran on one.
+
+A Shidashi without `vm start --dev`, a `worker` with a Shidashi that cannot
+relay to one, an `iso` that is not a file, or no ISO at all stops every mode
+that builds before any work.
 
 ##### What the proof records, and a lost environment
 

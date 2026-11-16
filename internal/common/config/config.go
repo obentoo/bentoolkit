@@ -158,6 +158,10 @@ type BuildVMConfig struct {
 	ISO string `yaml:"iso,omitempty"`
 	// Shidashi is the shidashi binary; unset, the one on PATH.
 	Shidashi string `yaml:"shidashi,omitempty"`
+	// Worker is the paired Shidashi build worker the VM runs on
+	// (`vm start --dev --worker`); unset, Shidashi decides: this host, or the
+	// worker SHIDASHI_DEV_WORKER names.
+	Worker string `yaml:"worker,omitempty"`
 }
 
 // BuildContainerConfig is the autoupdate.build.container block.
