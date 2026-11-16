@@ -144,6 +144,14 @@ type StageRecord struct {
 	// about a source tree that is no longer the one being published.
 	DistfileDigest string `json:"distfile_digest,omitempty"`
 
+	// CandidateDistfileDigest narrows DistfileDigest to the archives the
+	// candidate itself uses: the published DIST entries whose filename the
+	// staged Manifest names. Pruning another version leaves it unchanged, so it
+	// moves only when one of the candidate's own archives is re-digested. Nil on
+	// a record written before the field existed, which keeps the whole-Manifest
+	// comparison; "" is a real value (no archive of the candidate is published).
+	CandidateDistfileDigest *string `json:"candidate_distfile_digest,omitempty"`
+
 	// VendorUnpublished names the vendor tarball the proved run generated but did
 	// not publish, empty when it generated none or published the one it did. The
 	// tree's Manifest digests that tarball, so promoting the tree as it stands
@@ -188,6 +196,7 @@ type stageRecordWire struct {
 	ValidatedDigest    string       `json:"validated_digest,omitempty"`
 	SubstitutionDigest string       `json:"substitution_digest,omitempty"`
 	DistfileDigest     string       `json:"distfile_digest,omitempty"`
+	CandidateDistfile  *string      `json:"candidate_distfile_digest,omitempty"`
 	VendorUnpublished  string       `json:"vendor_unpublished,omitempty"`
 	Backend            string       `json:"backend,omitempty"`
 	Environment        string       `json:"environment,omitempty"`
@@ -237,6 +246,7 @@ func WriteStageRecord(stagedRoot string, rec StageRecord) error {
 		ValidatedDigest:    rec.ValidatedDigest,
 		SubstitutionDigest: rec.SubstitutionDigest,
 		DistfileDigest:     rec.DistfileDigest,
+		CandidateDistfile:  rec.CandidateDistfileDigest,
 		VendorUnpublished:  rec.VendorUnpublished,
 		Backend:            rec.Backend,
 		Environment:        rec.Environment,
@@ -310,21 +320,22 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 	}
 
 	return StageRecord{
-		Package:            wire.Package,
-		Version:            wire.Version,
-		ProducedBy:         producer,
-		Depth:              depth,
-		Gates:              wire.Gates,
-		EbuildDigest:       wire.EbuildDigest,
-		ValidatedDigest:    wire.ValidatedDigest,
-		SubstitutionDigest: wire.SubstitutionDigest,
-		DistfileDigest:     wire.DistfileDigest,
-		VendorUnpublished:  wire.VendorUnpublished,
-		Backend:            wire.Backend,
-		Environment:        wire.Environment,
-		RecordedAt:         wire.RecordedAt,
-		State:              wire.State,
-		FreshEnvironment:   wire.FreshEnvironment,
+		Package:                 wire.Package,
+		Version:                 wire.Version,
+		ProducedBy:              producer,
+		Depth:                   depth,
+		Gates:                   wire.Gates,
+		EbuildDigest:            wire.EbuildDigest,
+		ValidatedDigest:         wire.ValidatedDigest,
+		SubstitutionDigest:      wire.SubstitutionDigest,
+		DistfileDigest:          wire.DistfileDigest,
+		CandidateDistfileDigest: wire.CandidateDistfile,
+		VendorUnpublished:       wire.VendorUnpublished,
+		Backend:                 wire.Backend,
+		Environment:             wire.Environment,
+		RecordedAt:              wire.RecordedAt,
+		State:                   wire.State,
+		FreshEnvironment:        wire.FreshEnvironment,
 	}, nil
 }
 

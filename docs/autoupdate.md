@@ -728,7 +728,10 @@ gates ran against, and when they answered.
 
 `--apply` publishes only what such a record proves: the retained tree must
 match the bump byte for byte, prove the depth the policy asks for, and be no
-older than `autoupdate.proof.max_age_days` (7 by default). Anything else is
+older than `autoupdate.proof.max_age_days` (7 by default). The published
+Manifest must also record the same digests for the archives the candidate
+uses; pruning another version (`--clean`) does not invalidate a proof, a
+re-digested archive of the candidate does. Anything else is
 reported as **Unproven** and left in the pending list; `--apply` runs no gate,
 fetches nothing and regenerates no Manifest for it. `--repair` proves the
 tree it adopts the same way and publishes nothing either. `--revive` proves the revived bump first, the way the check does, and then

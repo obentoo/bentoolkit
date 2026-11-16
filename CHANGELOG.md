@@ -11,6 +11,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **Pruning a version no longer invalidates the proof of another.** A proof
+  was bound to every DIST line of the published Manifest, so an `--apply all
+  --clean` that pruned fallback versions made the next `--apply` refuse six
+  proved bumps as "re-rolled upstream" although their archives never changed.
+  A new proof is bound to the archives the candidate uses (the staged
+  Manifest's), and is still refused when one of those is re-digested. Proofs
+  recorded by 0.42.0 keep the whole-Manifest comparison (#338).
+
 - **A bump that moves its subslot can pass the build gates.** The
   dependency probe counted every package the pretend resolve would merge as a
   missing build dependency, including installed consumers it only rebuilds for

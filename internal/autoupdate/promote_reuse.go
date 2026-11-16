@@ -71,6 +71,10 @@ type stagedInputs struct {
 	// distfile is the digest the published package Manifest records for this
 	// package's distfiles.
 	distfile string
+	// publishedManifest is the Manifest distfile was read from. The candidate's
+	// share of it is digested later, once a staged Manifest names the archives
+	// the candidate uses (candidateDistfileDigest).
+	publishedManifest string
 }
 
 // stagedInputsFor digests the inputs of one bump, reading only the published
@@ -93,15 +97,17 @@ func (a *Applier) stagedInputsFor(pkg, currentVersion string, update *PendingUpd
 		return stagedInputs{}, fmt.Errorf("reading the source ebuild %s of %s to digest what would be staged: %w", srcPath, pkg, err)
 	}
 
-	distfile, err := publishedDistfileDigest(filepath.Join(filepath.Dir(srcPath), "Manifest"))
+	published := filepath.Join(filepath.Dir(srcPath), "Manifest")
+	distfile, err := publishedDistfileDigest(published)
 	if err != nil {
 		return stagedInputs{}, fmt.Errorf("digesting the distfiles of %s: %w", pkg, err)
 	}
 
 	return stagedInputs{
-		ebuild:        validate.DigestBytes(body),
-		substitutions: substitutionDigest(a.configs[pkg], update),
-		distfile:      distfile,
+		ebuild:            validate.DigestBytes(body),
+		substitutions:     substitutionDigest(a.configs[pkg], update),
+		distfile:          distfile,
+		publishedManifest: published,
 	}, nil
 }
 
@@ -156,31 +162,99 @@ func substitutionDigest(cfg registry.PackageConfig, update *PendingUpdate) strin
 // FIRST hash it names (`DIST <file> <size> BLAKE2B <hash> …`): pkgdev writes
 // them in a fixed order and the first is present in every Manifest here.
 func publishedDistfileDigest(manifestPath string) (string, error) {
-	body, err := os.ReadFile(manifestPath) //nolint:gosec // the path is the Manifest of the package directory being applied
+	entries, err := manifestDistEntries(manifestPath)
+	if err != nil {
+		return "", err
+	}
+	return joinDistDigests(entries, nil), nil
+}
+
+// candidateDistfileDigest is publishedDistfileDigest restricted to the archives
+// the staged Manifest names, which are the candidate's own: a staged tree holds
+// the candidate and no other version. The archives of versions the bump does
+// not touch therefore cannot move it — pruning them used to read as an
+// upstream re-roll of the candidate (#338).
+func candidateDistfileDigest(publishedManifest, stagedManifest string) (string, error) {
+	staged, err := manifestDistEntries(stagedManifest)
+	if err != nil {
+		return "", fmt.Errorf("reading the archives the candidate uses: %w", err)
+	}
+	names := make(map[string]bool, len(staged))
+	for _, e := range staged {
+		names[e.name] = true
+	}
+	published, err := manifestDistEntries(publishedManifest)
+	if err != nil {
+		return "", err
+	}
+	return joinDistDigests(published, names), nil
+}
+
+// comparedDistfileDigests returns the distfile digest the record was proved
+// against and the one the published overlay gives now, in the same scope: the
+// candidate's own archives when the record carries that digest, the whole
+// Manifest for a record written before it did.
+func comparedDistfileDigests(record validate.StageRecord, inputs stagedInputs, cand candidatePaths) (validatedAs, now string, err error) {
+	if record.CandidateDistfileDigest == nil {
+		return record.DistfileDigest, inputs.distfile, nil
+	}
+	now, err = candidateDistfileDigest(inputs.publishedManifest, filepath.Join(cand.pkgDir, "Manifest"))
+	return *record.CandidateDistfileDigest, now, err
+}
+
+// recordedCandidateDistfile is the candidate-scoped digest a new record
+// carries, nil when the retained tree cannot say which archives the candidate
+// uses; the next run then compares the whole Manifest, as before the field.
+func (a *Applier) recordedCandidateDistfile(root, pkg, version string, inputs stagedInputs) *string {
+	cand, err := stagedCandidate(root, pkg, version)
+	if err == nil {
+		var digest string
+		if digest, err = candidateDistfileDigest(inputs.publishedManifest, filepath.Join(cand.pkgDir, "Manifest")); err == nil {
+			return &digest
+		}
+	}
+	a.logger().Warn("the archives the candidate uses could not be digested; its record keeps the whole-Manifest distfile digest",
+		"package", pkg, "version", version, "root", root, "err", err)
+	return nil
+}
+
+// distEntry is one DIST line reduced to its filename and its first hash.
+type distEntry struct{ name, digest string }
+
+// manifestDistEntries reads the DIST lines of a Manifest. No Manifest yields
+// none, a fact two runs can agree on.
+func manifestDistEntries(manifestPath string) ([]distEntry, error) {
+	body, err := os.ReadFile(manifestPath) //nolint:gosec // the path is a package Manifest of the overlay or of its staged tree
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		return "", nil
+		return nil, nil
 	case err != nil:
-		return "", fmt.Errorf("reading the published Manifest %s: %w", manifestPath, err)
+		return nil, fmt.Errorf("reading the Manifest %s: %w", manifestPath, err)
 	}
 
-	type entry struct{ name, digest string }
-	var entries []entry
+	var entries []distEntry
 	for line := range strings.Lines(string(body)) {
 		fields := strings.Fields(line)
 		// DIST <filename> <size> <HASHNAME> <hash> [<HASHNAME> <hash> …]
 		if len(fields) < 5 || fields[0] != "DIST" {
 			continue
 		}
-		entries = append(entries, entry{name: fields[1], digest: fields[4]})
+		entries = append(entries, distEntry{name: fields[1], digest: fields[4]})
 	}
-	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
+	return entries, nil
+}
 
+// joinDistDigests joins the digests of the entries in filename order, keeping
+// only the names in keep when keep is not nil.
+func joinDistDigests(entries []distEntry, keep map[string]bool) string {
+	sort.Slice(entries, func(i, j int) bool { return entries[i].name < entries[j].name })
 	digests := make([]string, 0, len(entries))
 	for _, e := range entries {
-		digests = append(digests, e.digest)
+		if keep == nil || keep[e.name] {
+			digests = append(digests, e.digest)
+		}
 	}
-	return strings.Join(digests, ","), nil
+	return strings.Join(digests, ",")
 }
 
 // stagedReuse is the answer to "may this apply promote the tree that is already
@@ -310,7 +384,11 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 		return stagedReuse{root: root, reason: "vendor tarball generated but not published; re-validating"}
 	}
 
-	if record.DistfileDigest != inputs.distfile {
+	validatedAs, nowRecords, err := comparedDistfileDigests(record, inputs, cand)
+	if err != nil {
+		return stagedReuse{root: root, reason: fmt.Sprintf("the distfiles the retained tree was proved against could not be compared (%v), so the gates run in this run", err)}
+	}
+	if validatedAs != nowRecords {
 		return stagedReuse{
 			root:   root,
 			cand:   cand,
@@ -318,7 +396,7 @@ func (a *Applier) reusableStagedTree(pkg, newVersion string, inputs stagedInputs
 			err: fmt.Errorf("not promoted: the distfile of %s-%s was validated as %s and the published Manifest now records %s; "+
 				"an archive re-rolled upstream under the same name is a different source tree, and every gate's answer was about the old one. "+
 				"Re-run `overlay autoupdate --check --llm %s` to restage and re-prove it against the archive on disk now",
-				pkg, newVersion, record.DistfileDigest, inputs.distfile, pkg),
+				pkg, newVersion, validatedAs, nowRecords, pkg),
 		}
 	}
 
@@ -406,21 +484,22 @@ func (a *Applier) recordStagedProof(ctx context.Context, root, pkg, version stri
 	// in the output saying why. The named constant rather than a literal is that
 	// spelling being fixed in one place.
 	err := validate.WriteStageRecord(root, validate.StageRecord{
-		Package:            pkg,
-		Version:            version,
-		ProducedBy:         validate.ProducedByApplier,
-		Depth:              depth,
-		Gates:              gates,
-		EbuildDigest:       inputs.ebuild,
-		ValidatedDigest:    a.validatedDigest(validatedEbuild, pkg, version),
-		SubstitutionDigest: inputs.substitutions,
-		DistfileDigest:     inputs.distfile,
-		VendorUnpublished:  vendorUnpublished,
-		Backend:            a.buildBackend.Name(),
-		Environment:        a.recordedEnvironment(),
-		RecordedAt:         time.Now().UTC(),
-		State:              proofState(gates, depth),
-		FreshEnvironment:   a.lastPassFresh(),
+		Package:                 pkg,
+		Version:                 version,
+		ProducedBy:              validate.ProducedByApplier,
+		Depth:                   depth,
+		Gates:                   gates,
+		EbuildDigest:            inputs.ebuild,
+		ValidatedDigest:         a.validatedDigest(validatedEbuild, pkg, version),
+		SubstitutionDigest:      inputs.substitutions,
+		DistfileDigest:          inputs.distfile,
+		CandidateDistfileDigest: a.recordedCandidateDistfile(root, pkg, version, inputs),
+		VendorUnpublished:       vendorUnpublished,
+		Backend:                 a.buildBackend.Name(),
+		Environment:             a.recordedEnvironment(),
+		RecordedAt:              time.Now().UTC(),
+		State:                   proofState(gates, depth),
+		FreshEnvironment:        a.lastPassFresh(),
 	})
 	if err != nil {
 		a.logger().Warn("could not record what the gates said beside the retained tree "+
