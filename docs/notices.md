@@ -46,6 +46,30 @@ bentoo notice revise 2026-09-28-foo-cve --severity warning
   `updated` to now, keeping the ID and the publication date. `--severity`,
   `--title`, `--summary` and `--affects` replace those fields. When neither the
   text nor a field changed, nothing is written.
+- **Translations.** `--translation <lang>=<file>` (repeatable, on `new` and
+  `revise`) also writes the news item as `<id>.<lang>.txt` next to
+  `<id>.en.txt`, for `eselect news` to show in the reader's language. The
+  file is a `Title:` line (at most 50 characters), optional
+  `Translator: Name <email>` lines, a blank line, then the text:
+
+  ```text
+  Title: Estouro de heap no foo 1.2
+  Translator: Maria Souza <maria@example.org>
+
+  Um arquivo malicioso estoura um buffer de heap na libfoo...
+  ```
+
+  Every other header (`Author`, `Posted`, `Revision`, `Display-If-Installed`)
+  is copied from the English item, and the text is wrapped at 72 columns, a
+  Chinese or Japanese character counting two. `<lang>` is written as
+  `eselect news` looks it up from `$LANG` — `es`, `pt_BR`, `ru`, `zh_CN`, the
+  languages of `po/LINGUAS` — not as a BCP 47 tag: a `pt-BR` file would never
+  be shown. A `revise` bumps the `Revision` of every language together; a
+  translation not given keeps its title and text, with a warning when the
+  English changed, so update it in the same revision. Only the English item
+  is authoritative (GLEP 42), and only it feeds the site. bentoo does not
+  translate: a translation is the maintainer's to write or review, offline
+  and before publishing.
 - **No git operation.** Both commands print every path they wrote and the
   `git add`/`git commit` to run in each repository; review, commit and push
   are yours.

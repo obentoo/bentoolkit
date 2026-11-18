@@ -102,8 +102,9 @@ packages.toml ─► check ─► pending.json ─► apply
 
 ### Notices and the tray
 
-`bentoo notice` writes one notice twice: a GLEP 42 news item in the overlay,
-and a YAML file for the website, which publishes a JSON Feed. `bentoo-tray`
+`bentoo notice` writes one notice twice: a GLEP 42 news item in the overlay
+(English, plus any translations the maintainer supplies), and a YAML file for
+the website, which publishes a JSON Feed. `bentoo-tray`
 reads that feed (and Portage's own news, offline), matches it against the
 installed packages, and announces what applies. Its tray icon is a
 StatusNotifierItem implemented directly on D-Bus (`internal/desktop/sni`), so

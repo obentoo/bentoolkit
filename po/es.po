@@ -357,6 +357,10 @@ msgid "Read the body from this file instead of opening an editor"
 msgstr "Leer el cuerpo de este archivo en lugar de abrir un editor"
 
 #: cmd/bentoo/notice.go
+msgid "Also write the news item in <lang> from a file: \"Title: ...\", optional \"Translator: Name <email>\" lines, a blank line, then the text (repeatable; <lang> as in $LANG, e.g. es, pt_BR, ru, zh_CN)"
+msgstr "Escribir también el elemento de noticias en <lang> desde un archivo: \"Title: ...\", líneas \"Translator: Name <email>\" opcionales, una línea en blanco y luego el texto (se puede repetir; <lang> como en $LANG, p. ej. es, pt_BR, ru, zh_CN)"
+
+#: cmd/bentoo/notice.go
 msgid "Wrote %s"
 msgstr "Se ha escrito %s"
 
