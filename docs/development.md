@@ -188,8 +188,11 @@ cause helps nobody. Do not wrap `fmt.Errorf`, `errors.New` or log messages in
   The language comes from `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`, as in
   any gettext program; a `C` locale or an English one prints English.
 - **Installing.** `make install` installs each catalog as
-  `$(LOCALEDIR)/<lang>/LC_MESSAGES/bentoolkit.mo` (default
-  `$(PREFIX)/share/locale`) and builds the binary to read from there. A
+  `$(LOCALEDIR)/<lang>/LC_MESSAGES/bentoolkit.mo` for `bentoo` and again as
+  `bentoo-tray.mo` for the tray (default `$(PREFIX)/share/locale`), and builds
+  the binaries to read from there. The two names let a distribution package
+  `bentoo` and `bentoo-tray` separately: one catalog file cannot belong to two
+  packages. A
   package that builds with plain `go build` gets `/usr/share/locale`, or sets
   `-X github.com/obentoo/bentoolkit/internal/common/i18n.LocaleDir=...`.
   Gentoo installs only the languages enabled in `L10N`.

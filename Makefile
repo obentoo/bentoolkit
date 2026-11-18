@@ -34,6 +34,9 @@ SYSTEMD_USER_DIR := $(PREFIX)/lib/systemd/user
 # installed under LOCALEDIR, the directory the binaries are built to read.
 I18N_PKG := $(MODULE)/internal/common/i18n
 I18N_DOMAIN := bentoolkit
+# bentoo-tray reads the same catalog under its own name, so the two binaries
+# can be packaged separately without both owning one file.
+TRAY_I18N_DOMAIN := bentoo-tray
 PO_DIR := po
 LINGUAS := $(shell cat $(PO_DIR)/LINGUAS 2>/dev/null)
 LOCALEDIR ?= $(PREFIX)/share/locale
@@ -116,6 +119,7 @@ install: build locale
 	done
 	@set -eu; for lang in $(LINGUAS); do \
 		install -Dm644 "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo"; \
+		install -Dm644 "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(TRAY_I18N_DOMAIN).mo"; \
 	done
 
 # Uninstall from system
@@ -128,7 +132,7 @@ uninstall:
 		rm -f "$(DESTDIR)$(ICONS_DIR)/$$variant.svg"; \
 	done
 	@set -eu; for lang in $(LINGUAS); do \
-		rm -f "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo"; \
+		rm -f "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(TRAY_I18N_DOMAIN).mo"; \
 	done
 
 # Install the example config into the user's config dir.
@@ -384,6 +388,7 @@ locale:
 	@set -eu; for lang in $(LINGUAS); do \
 		mkdir -p "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES"; \
 		$(MSGFMT) --check -o "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(PO_DIR)/$$lang.po"; \
+		cp "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(TRAY_I18N_DOMAIN).mo"; \
 	done
 
 # Regenerate po/bentoolkit.pot from the source and merge it into every .po:
