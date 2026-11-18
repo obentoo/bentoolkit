@@ -55,6 +55,9 @@ type Input struct {
 	Type, Severity, Name, Title, Summary, Published, Author string
 	Affects                                                 []string
 	Body                                                    string
+	// Translations are the translated news items to write next to the
+	// English one; may be empty.
+	Translations []Translation
 }
 
 // Range is one version bound of an affects entry: an operator from <, <=, =,
@@ -77,8 +80,11 @@ type Notice struct {
 	// Published and Updated are UTC. A new notice has both at midnight of
 	// its publication date; a revision moves Updated only.
 	Published, Updated time.Time
-	// Revision is the news item's Revision header: 1 for a new notice.
+	// Revision is the news item's Revision header: 1 for a new notice. Every
+	// translation carries the same one.
 	Revision int
+	// Translations are the item's other languages, ordered by language.
+	Translations []Translation
 }
 
 // New validates in and returns the notice it describes, with Revision 1 and
@@ -119,6 +125,11 @@ func New(in Input, now time.Time) (Notice, error) {
 	if (in.Type == "security" || in.Type == "release") && len(affects) == 0 {
 		return Notice{}, fmt.Errorf("--type %s: %w", in.Type, ErrAffectsRequired)
 	}
+	if err := validateTranslations(in.Translations); err != nil {
+		return Notice{}, err
+	}
+	translations := slices.Clone(in.Translations)
+	sortTranslations(translations)
 
 	return Notice{
 		ID:        published.Format(dateLayout) + "-" + in.Name,
@@ -132,6 +143,8 @@ func New(in Input, now time.Time) (Notice, error) {
 		Published: published,
 		Updated:   published,
 		Revision:  1,
+
+		Translations: translations,
 	}, nil
 }
 
