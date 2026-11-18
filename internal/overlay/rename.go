@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // Errors for rename operations
@@ -276,41 +277,41 @@ func FormatRenamePreview(result *RenameResult, isGlobalSearch bool) string {
 	var sb strings.Builder
 
 	if isGlobalSearch {
-		sb.WriteString("⚠ Global search across all categories\n\n")
+		sb.WriteString(i18n.T("⚠ Global search across all categories\n\n"))
 	}
 
-	fmt.Fprintf(&sb, "Found %d ebuild(s) to rename:\n\n", len(result.Matches))
+	fmt.Fprintf(&sb, i18n.T("Found %d ebuild(s) to rename:\n\n"), len(result.Matches))
 
 	for _, match := range result.Matches {
 		fmt.Fprintf(&sb, "  %s/%s:\n", match.Category, match.Package)
 		fmt.Fprintf(&sb, "    %s → %s\n", match.OldFilename, match.NewFilename)
 		if match.HasRevision {
-			sb.WriteString("    (revision suffix will be stripped)\n")
+			sb.WriteString(i18n.T("    (revision suffix will be stripped)\n"))
 		}
 	}
 
 	if len(result.VersionFiles) > 0 {
-		fmt.Fprintf(&sb, "\n⚠ Warning: %d version-specific file(s) detected:\n", len(result.VersionFiles))
+		fmt.Fprintf(&sb, i18n.T("\n⚠ Warning: %d version-specific file(s) detected:\n"), len(result.VersionFiles))
 		for _, vf := range result.VersionFiles {
 			fmt.Fprintf(&sb, "  %s/%s/files/%s\n", vf.Category, vf.Package, vf.Filename)
 		}
-		sb.WriteString("\nThese files will NOT be renamed automatically.\n")
+		sb.WriteString(i18n.T("\nThese files will NOT be renamed automatically.\n"))
 	}
 
 	if len(result.Conflicts) > 0 {
-		fmt.Fprintf(&sb, "\n⚠ Warning: %d target file(s) already exist:\n", len(result.Conflicts))
+		fmt.Fprintf(&sb, i18n.T("\n⚠ Warning: %d target file(s) already exist:\n"), len(result.Conflicts))
 		for _, c := range result.Conflicts {
 			fmt.Fprintf(&sb, "  %s\n", c.Existing)
 		}
-		sb.WriteString("\nUse --force to overwrite.\n")
+		sb.WriteString(i18n.T("\nUse --force to overwrite.\n"))
 	}
 
 	if len(result.Collisions) > 0 {
-		fmt.Fprintf(&sb, "\n⚠ Error: %d target file(s) would receive more than one ebuild:\n", len(result.Collisions))
+		fmt.Fprintf(&sb, i18n.T("\n⚠ Error: %d target file(s) would receive more than one ebuild:\n"), len(result.Collisions))
 		for _, c := range result.Collisions {
 			fmt.Fprintf(&sb, "  %s\n", c.describe())
 		}
-		sb.WriteString("\nThe rename is refused: one source would overwrite the other. --force does not override this.\n")
+		sb.WriteString(i18n.T("\nThe rename is refused: one source would overwrite the other. --force does not override this.\n"))
 	}
 
 	return sb.String()
@@ -446,7 +447,7 @@ func FormatRenameResult(result *RenameResult, dryRun bool) string {
 	var sb strings.Builder
 
 	if len(result.Matches) == 0 {
-		return "No matching ebuilds found"
+		return i18n.T("No matching ebuilds found")
 	}
 
 	if dryRun {
@@ -456,14 +457,14 @@ func FormatRenameResult(result *RenameResult, dryRun bool) string {
 	}
 
 	if len(result.VersionFiles) > 0 {
-		fmt.Fprintf(&sb, "\nWarning: %d version-specific file(s) detected:\n", len(result.VersionFiles))
+		fmt.Fprintf(&sb, i18n.T("\nWarning: %d version-specific file(s) detected:\n"), len(result.VersionFiles))
 		for _, vf := range result.VersionFiles {
 			fmt.Fprintf(&sb, "  %s/%s/files/%s\n", vf.Category, vf.Package, vf.Filename)
 		}
 	}
 
 	if len(result.Conflicts) > 0 {
-		fmt.Fprintf(&sb, "\nConflicts: %d target file(s) already exist:\n", len(result.Conflicts))
+		fmt.Fprintf(&sb, i18n.T("\nConflicts: %d target file(s) already exist:\n"), len(result.Conflicts))
 		for _, c := range result.Conflicts {
 			fmt.Fprintf(&sb, "  %s\n", c.Existing)
 		}
@@ -475,12 +476,12 @@ func FormatRenameResult(result *RenameResult, dryRun bool) string {
 // writeRenamePlan writes the dry-run section of FormatRenameResult: every
 // match with the rename it would perform.
 func writeRenamePlan(sb *strings.Builder, matches []RenameMatch) {
-	fmt.Fprintf(sb, "Dry run: %d ebuild(s) would be renamed\n\n", len(matches))
+	fmt.Fprintf(sb, i18n.T("Dry run: %d ebuild(s) would be renamed\n\n"), len(matches))
 	for _, match := range matches {
 		fmt.Fprintf(sb, "  %s/%s:\n", match.Category, match.Package)
 		fmt.Fprintf(sb, "    %s → %s\n", match.OldFilename, match.NewFilename)
 		if match.HasRevision {
-			sb.WriteString("    (revision suffix will be stripped)\n")
+			sb.WriteString(i18n.T("    (revision suffix will be stripped)\n"))
 		}
 	}
 }
@@ -489,14 +490,14 @@ func writeRenamePlan(sb *strings.Builder, matches []RenameMatch) {
 // renamed: what was renamed, what failed, and the Manifest updates.
 func writeRenameOutcome(sb *strings.Builder, result *RenameResult) {
 	if len(result.Renamed) > 0 {
-		fmt.Fprintf(sb, "Renamed %d ebuild(s):\n\n", len(result.Renamed))
+		fmt.Fprintf(sb, i18n.T("Renamed %d ebuild(s):\n\n"), len(result.Renamed))
 		for _, match := range result.Renamed {
 			fmt.Fprintf(sb, "  %s/%s: %s → %s\n", match.Category, match.Package, match.OldFilename, match.NewFilename)
 		}
 	}
 
 	if len(result.Failed) > 0 {
-		fmt.Fprintf(sb, "\nFailed %d ebuild(s):\n", len(result.Failed))
+		fmt.Fprintf(sb, i18n.T("\nFailed %d ebuild(s):\n"), len(result.Failed))
 		for _, fail := range result.Failed {
 			fmt.Fprintf(sb, "  %s/%s: %s\n", fail.Match.Category, fail.Match.Package, fail.Message)
 		}
@@ -522,11 +523,11 @@ func writeRenameManifestUpdates(sb *strings.Builder, updates []ManifestUpdate) {
 	}
 
 	if successCount > 0 {
-		fmt.Fprintf(sb, "\nManifest updated for %d package(s)\n", successCount)
+		fmt.Fprintf(sb, i18n.T("\nManifest updated for %d package(s)\n"), successCount)
 	}
 
 	if failCount > 0 {
-		fmt.Fprintf(sb, "\nManifest update failed for %d package(s):\n", failCount)
+		fmt.Fprintf(sb, i18n.T("\nManifest update failed for %d package(s):\n"), failCount)
 		for _, u := range updates {
 			if !u.Success {
 				fmt.Fprintf(sb, "  %s/%s: %s\n", u.Category, u.Package, u.Error)

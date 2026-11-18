@@ -165,7 +165,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 	// rung, so the operator is not sent to the source for five short words.
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
-		_, _ = fmt.Fprintf(diag, "  reading --depth: %v\n", err)
+		_, _ = fmt.Fprintf(diag, i18n.T("  reading --depth: %v\n"), err)
 		return exitWith(1)
 	}
 	depth, err := validate.ParseDepth(spelled)
@@ -179,7 +179,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 		selector = rest[0]
 	}
 	if !validSelector(selector) {
-		_, _ = fmt.Fprintf(diag, "  %q is not a category or a category/package\n", selector)
+		_, _ = fmt.Fprintf(diag, i18n.T("  %q is not a category or a category/package\n"), selector)
 		return exitWith(2)
 	}
 
@@ -215,7 +215,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 	if depth > validate.DepthOptions {
 		stagingRoot, err = autoupdateStagingRoot()
 		if err != nil {
-			_, _ = fmt.Fprintf(diag, "  --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
+			_, _ = fmt.Fprintf(diag, i18n.T("  --depth=%s builds, and a staged tree to build in could not be placed: %v\n"), depth, err)
 			return exitWith(1)
 		}
 		// A build gate that FAILED says so on its own, but the reason
@@ -228,7 +228,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 		if configDir, cerr := autoupdateConfigDir(); cerr == nil {
 			logDir = filepath.Join(configDir, "logs")
 		} else {
-			_, _ = fmt.Fprintf(diag, "  build logs will not be retained: %v\n", cerr)
+			_, _ = fmt.Fprintf(diag, i18n.T("  build logs will not be retained: %v\n"), cerr)
 		}
 		// This composition lives here and nowhere else: validate
 		// only accepts what a caller supplies, autoupdate owns Manifest
@@ -281,7 +281,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 			// the diagnostic text.
 			return exitWith(130)
 		}
-		_, _ = fmt.Fprintf(diag, "  validating %s: %v\n", overlayLabel(overlayPath), err)
+		_, _ = fmt.Fprintf(diag, i18n.T("  validating %s: %v\n"), overlayLabel(overlayPath), err)
 		return exitWith(2)
 	}
 
@@ -370,7 +370,7 @@ func validSelector(selector string) bool {
 // overlayLabel names the overlay in a diagnostic, including when there is none.
 func overlayLabel(path string) string {
 	if path == "" {
-		return "the overlay (no path could be resolved from the config)"
+		return i18n.T("the overlay (no path could be resolved from the config)")
 	}
 	return path
 }
@@ -398,11 +398,11 @@ const infoCountLabel = "info:"
 // nothing they can act on.
 func renderValidateText(report validate.Report) {
 	if report.UnmatchedSelector != "" {
-		output.Error.Fprintf(os.Stderr, "  nothing in the overlay matches %q\n", report.UnmatchedSelector)
+		output.Error.Fprintf(os.Stderr, i18n.T("  nothing in the overlay matches %q\n"), report.UnmatchedSelector)
 		return
 	}
 
-	output.Header.Printf("Validating %s\n\n", overlayLabel(report.Overlay))
+	output.Header.Printf(i18n.T("Validating %s\n\n"), overlayLabel(report.Overlay))
 
 	// validateLine is one ebuild's block, established before any of it is
 	// printed.
@@ -512,23 +512,23 @@ func renderValidateText(report validate.Report) {
 			fmt.Println(f.Detail)
 		}
 		if line.infos > 0 {
-			output.Dim.Printf("      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n",
+			output.Dim.Printf(i18n.T("      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"),
 				padColumn(infoCountLabel, severityWidth), line.infos)
 		}
 		// The evidence, printed even on a PASS. A pass whose sources are not
 		// shown cannot be told apart from a pass that found no source to read,
 		// which is the complaint this whole command answers.
 		if len(line.result.Sources) > 0 {
-			output.Dim.Printf("      read: %s\n", strings.Join(line.result.Sources, ", "))
+			output.Dim.Printf(i18n.T("      read: %s\n"), strings.Join(line.result.Sources, ", "))
 		}
 	}
 
-	fmt.Printf("\n%d ebuilds: %d failed, %d passed, %d skipped\n",
+	fmt.Printf(i18n.T("\n%d ebuilds: %d failed, %d passed, %d skipped\n"),
 		len(report.Results), failed, passed, skipped)
 
 	if qaFindings > 0 {
-		output.Dim.Println("pkgcheck findings are all reported at info: its JsonStream records carry no level,\n" +
-			"and inferring one from the message text would be a guess. They never affect the exit code.")
+		output.Dim.Println(i18n.T("pkgcheck findings are all reported at info: its JsonStream records carry no level,\n" +
+			"and inferring one from the message text would be a guess. They never affect the exit code."))
 	}
 }
 

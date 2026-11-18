@@ -103,7 +103,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 
 	// No matches found
 	if len(previewResult.Matches) == 0 {
-		uiInfo("No matching ebuilds found")
+		uiInfo(i18n.T("No matching ebuilds found"))
 		return nil
 	}
 
@@ -128,20 +128,20 @@ func runRename(cmd *cobra.Command, args []string) error {
 	if isGlobalSearch && !opts.Force {
 		needsConfirmation = true
 		if opts.SkipPrompt {
-			uiWarn("Global search requires confirmation. Use --force to skip.")
+			uiWarn(i18n.T("Global search requires confirmation. Use --force to skip."))
 		}
 	}
 
 	// Dry-run mode: don't execute
 	if opts.DryRun {
-		uiInfo("Dry-run mode - no changes made")
+		uiInfo(i18n.T("Dry-run mode - no changes made"))
 		return nil
 	}
 
 	// Prompt for confirmation if needed
 	if needsConfirmation {
 		if !promptConfirmation() {
-			uiInfo("Operation cancelled")
+			uiInfo(i18n.T("Operation cancelled"))
 			return nil
 		}
 	}
@@ -163,7 +163,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 // promptConfirmation asks the user to confirm the operation.
 // Returns true if user confirms, false otherwise.
 func promptConfirmation() bool {
-	fmt.Print("Proceed with rename? [y/N]: ")
+	fmt.Print(i18n.T("Proceed with rename? [y/N]: "))
 
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')

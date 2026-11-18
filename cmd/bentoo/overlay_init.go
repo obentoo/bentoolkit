@@ -32,11 +32,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 	// Check if config already exists
 	existingPath, _ := config.FindConfigPath()
 	if _, err := os.Stat(existingPath); err == nil {
-		uiWarn(fmt.Sprintf("Config already exists at: %s", existingPath))
-		fmt.Print("Overwrite? [y/N]: ")
+		uiWarn(fmt.Sprintf(i18n.T("Config already exists at: %s"), existingPath))
+		fmt.Print(i18n.T("Overwrite? [y/N]: "))
 		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) != "y" {
-			uiInfo("Aborted.")
+			uiInfo(i18n.T("Aborted."))
 			return nil
 		}
 	}
@@ -45,11 +45,11 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Get overlay path
 	fmt.Println()
-	uiInfo("Bentoo Overlay Configuration")
+	uiInfo(i18n.T("Bentoo Overlay Configuration"))
 	fmt.Println()
 
 	defaultOverlayPath := "/var/db/repos/bentoo"
-	fmt.Printf("Overlay path [%s]: ", defaultOverlayPath)
+	fmt.Printf(i18n.T("Overlay path [%s]: "), defaultOverlayPath)
 	overlayPath, _ := reader.ReadString('\n')
 	overlayPath = strings.TrimSpace(overlayPath)
 	if overlayPath == "" {
@@ -64,22 +64,22 @@ func runInit(cmd *cobra.Command, args []string) error {
 
 	// Validate path exists
 	if _, err := os.Stat(overlayPath); os.IsNotExist(err) {
-		uiWarn(fmt.Sprintf("Path does not exist: %s", overlayPath))
-		fmt.Print("Create it? [y/N]: ")
+		uiWarn(fmt.Sprintf(i18n.T("Path does not exist: %s"), overlayPath))
+		fmt.Print(i18n.T("Create it? [y/N]: "))
 		input, _ := reader.ReadString('\n')
 		if strings.ToLower(strings.TrimSpace(input)) == "y" {
 			if err := os.MkdirAll(overlayPath, 0o750); err != nil {
 				log.Error("Failed to create directory", "path", overlayPath, "err", err)
 				return exitWith(1)
 			}
-			uiInfo(fmt.Sprintf("Created directory: %s", overlayPath))
+			uiInfo(fmt.Sprintf(i18n.T("Created directory: %s"), overlayPath))
 		}
 	}
 
 	cfg.Overlay.Path = overlayPath
 
 	// Get remote name
-	fmt.Print("Git remote name [origin]: ")
+	fmt.Print(i18n.T("Git remote name [origin]: "))
 	remote, _ := reader.ReadString('\n')
 	remote = strings.TrimSpace(remote)
 	if remote == "" {
@@ -91,21 +91,21 @@ func runInit(cmd *cobra.Command, args []string) error {
 	user, email, err := cfg.GetGitUser()
 	if err != nil {
 		fmt.Println()
-		uiWarn("Git user not configured in ~/.gitconfig")
-		uiInfo("You can configure it in bentoo or run:")
-		uiInfo("  git config --global user.name \"Your Name\"")
-		uiInfo("  git config --global user.email \"your@email.com\"")
+		uiWarn(i18n.T("Git user not configured in ~/.gitconfig"))
+		uiInfo(i18n.T("You can configure it in bentoo or run:"))
+		uiInfo(i18n.T("  git config --global user.name \"Your Name\""))
+		uiInfo(i18n.T("  git config --global user.email \"your@email.com\""))
 		fmt.Println()
 
-		fmt.Print("Git user name: ")
+		fmt.Print(i18n.T("Git user name: "))
 		user, _ = reader.ReadString('\n')
 		cfg.Git.User = strings.TrimSpace(user)
 
-		fmt.Print("Git email: ")
+		fmt.Print(i18n.T("Git email: "))
 		email, _ = reader.ReadString('\n')
 		cfg.Git.Email = strings.TrimSpace(email)
 	} else {
-		uiInfo(fmt.Sprintf("Using git config: %s <%s>", user, email))
+		uiInfo(fmt.Sprintf(i18n.T("Using git config: %s <%s>"), user, email))
 	}
 
 	// Save config
@@ -116,12 +116,12 @@ func runInit(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Println()
-	uiInfo(fmt.Sprintf("Configuration saved to: %s", configPath))
+	uiInfo(fmt.Sprintf(i18n.T("Configuration saved to: %s"), configPath))
 	fmt.Println()
-	uiInfo("You can now use:")
-	uiInfo("  bentoo overlay status  - View pending changes")
-	uiInfo("  bentoo overlay add     - Stage changes")
-	uiInfo("  bentoo overlay commit  - Commit with auto-generated message")
-	uiInfo("  bentoo overlay push    - Push to remote")
+	uiInfo(i18n.T("You can now use:"))
+	uiInfo(i18n.T("  bentoo overlay status  - View pending changes"))
+	uiInfo(i18n.T("  bentoo overlay add     - Stage changes"))
+	uiInfo(i18n.T("  bentoo overlay commit  - Commit with auto-generated message"))
+	uiInfo(i18n.T("  bentoo overlay push    - Push to remote"))
 	return nil
 }

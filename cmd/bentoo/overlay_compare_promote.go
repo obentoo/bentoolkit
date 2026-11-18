@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/realign"
 )
@@ -64,25 +65,25 @@ func realignProofCarriesEvidence(proof realign.Proof) bool {
 // human before the overlay publishes itself.
 func offerRealignPublish(c realignCandidate, proof realign.Proof, overlayRoot string, d *deps) {
 	if !realignProofCarriesEvidence(proof) {
-		output.Warning.Printf("    not offered for publication: every gate was SKIPPED, so nothing was proved about it — a proof of nothing is not evidence to publish on.\n")
+		output.Warning.Println(i18n.T("    not offered for publication: every gate was SKIPPED, so nothing was proved about it — a proof of nothing is not evidence to publish on."))
 		return
 	}
 	if !d.realignPublishIsInteractive() {
-		output.Info.Printf("    publishable — re-run in an interactive terminal to be asked; nothing is published without the maintainer's yes.\n")
+		output.Info.Println(i18n.T("    publishable — re-run in an interactive terminal to be asked; nothing is published without the maintainer's yes."))
 		return
 	}
-	if !d.confirmRealignPublish(fmt.Sprintf("Publish %s — replace the published ebuild with the proved ::gentoo bytes?", c.name)) {
-		output.Warning.Printf("    declined: nothing was written, and the published overlay is byte-identical.\n")
+	if !d.confirmRealignPublish(fmt.Sprintf(i18n.T("Publish %s — replace the published ebuild with the proved ::gentoo bytes?"), c.name)) {
+		output.Warning.Println(i18n.T("    declined: nothing was written, and the published overlay is byte-identical."))
 		return
 	}
 
 	if err := d.realignPromote(c.proposal, proof, true, overlayRoot); err != nil {
 		if errors.Is(err, realign.ErrNotPromoted) {
-			output.Warning.Printf("    refused: %v\n", err)
+			output.Warning.Printf(i18n.T("    refused: %v\n"), err)
 			return
 		}
-		output.Error.Fprintf(os.Stderr, "    the write failed after every authority said yes — %v — the package directory needs a human before the overlay publishes itself.\n", err)
+		output.Error.Fprintf(os.Stderr, i18n.T("    the write failed after every authority said yes — %v — the package directory needs a human before the overlay publishes itself.\n"), err)
 		return
 	}
-	output.Success.Printf("    published: the overlay now carries the exact bytes the gates read; it commits and pushes on its own.\n")
+	output.Success.Println(i18n.T("    published: the overlay now carries the exact bytes the gates read; it commits and pushes on its own."))
 }

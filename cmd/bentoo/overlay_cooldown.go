@@ -72,7 +72,7 @@ func newCooldownStatusCmd(d *deps) *cobra.Command {
 				return failWith(1, err)
 			}
 			if block == nil {
-				fmt.Println("cooldown disabled for this overlay")
+				fmt.Println(i18n.T("cooldown disabled for this overlay"))
 				return nil
 			}
 			rows := cooldownStatusRows(ctx, log, block, pkgdbRoot)
@@ -132,7 +132,7 @@ func printCooldownJSON(rows []cooldownStatusRow) error {
 
 func printCooldownTable(rows []cooldownStatusRow) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "PACKAGE\tVERSION\tSINCE\tELIGIBLE\tGROUP\tORIGIN\tINSTALLED"); err != nil {
+	if _, err := fmt.Fprintln(w, i18n.T("PACKAGE\tVERSION\tSINCE\tELIGIBLE\tGROUP\tORIGIN\tINSTALLED")); err != nil {
 		return err
 	}
 	for _, r := range rows {
@@ -201,7 +201,7 @@ func newCooldownAddCmd() *cobra.Command {
 					Group: recordCooldownGroup(log, overlayPath, pkg),
 				}
 				if !block.Add(e) {
-					fmt.Printf("%s is already under cooldown\n", e.Atom())
+					fmt.Printf(i18n.T("%s is already under cooldown\n"), e.Atom())
 					return nil
 				}
 				if err := block.Save(overlayPath); err != nil {
@@ -209,7 +209,7 @@ func newCooldownAddCmd() *cobra.Command {
 				}
 				eligible := block.Eligible(pkg).UTC().Format(time.RFC3339)
 				log.Info("cooldown: entry added", "package", pkg, "version", version, "origin", e.Origin, "eligible", eligible)
-				fmt.Printf("masked  %s (eligible %s)\n", e.Atom(), eligible)
+				fmt.Printf(i18n.T("masked  %s (eligible %s)\n"), e.Atom(), eligible)
 				return nil
 			})
 		},
@@ -278,11 +278,11 @@ func newCooldownSweepCmd(d *deps) *cobra.Command {
 
 func printCooldownLifts(lifts []cooldown.Lift) {
 	if len(lifts) == 0 {
-		fmt.Println("nothing to lift")
+		fmt.Println(i18n.T("nothing to lift"))
 		return
 	}
 	for _, l := range lifts {
-		fmt.Printf("lifted  %s (%s)\n", l.Atom(), l.Reason)
+		fmt.Printf(i18n.T("lifted  %s (%s)\n"), l.Atom(), l.Reason)
 	}
 }
 

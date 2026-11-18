@@ -8,6 +8,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/obentoo/bentoolkit/internal/realign"
@@ -126,13 +127,13 @@ func realignPlanLines(plan realignPlan) []string {
 	lines := make([]string, 0, len(plan.Atoms)+3)
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf(
-		"Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay.",
+		i18n.T("Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."),
 		len(plan.Atoms), plan.Depth))
 	for _, atom := range plan.Atoms {
 		lines = append(lines, "  "+atom)
 	}
 	lines = append(lines,
-		"  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing.")
+		i18n.T("  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing."))
 	return lines
 }
 
@@ -168,18 +169,18 @@ func printRealignPlan(plan realignPlan) {
 // prompt and never the plan.
 func confirmRealignPlan(plan realignPlan, d *deps) bool {
 	if compareYes {
-		output.Warning.Printf("  --yes given: proving %d realignment(s) without a prompt.\n", len(plan.Atoms))
+		output.Warning.Printf(i18n.T("  --yes given: proving %d realignment(s) without a prompt.\n"), len(plan.Atoms))
 		return true
 	}
 	if !d.registryPromptIsInteractive() {
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing was built.")
-		output.Info.Printf("  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n", len(plan.Atoms))
+		output.Warning.Println(i18n.T("  Not an interactive terminal and --yes was not given: nothing was built."))
+		output.Info.Printf(i18n.T("  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"), len(plan.Atoms))
 		return false
 	}
 
 	fmt.Println()
-	output.Warning.Printf("  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n", plan.Depth)
-	return d.confirmRealignPlan(fmt.Sprintf("Prove %d realignment(s) at depth %s?", len(plan.Atoms), plan.Depth))
+	output.Warning.Printf(i18n.T("  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n"), plan.Depth)
+	return d.confirmRealignPlan(fmt.Sprintf(i18n.T("Prove %d realignment(s) at depth %s?"), len(plan.Atoms), plan.Depth))
 }
 
 // realignCandidate is one package this run would prove, with the proposal that
@@ -252,7 +253,7 @@ func realignCandidates(report *overlay.CompareReport) (candidates []realignCandi
 		body, err := os.ReadFile(r.Baseline.Path)
 		if err != nil {
 			dropped = append(dropped, fmt.Sprintf(
-				"  %s: not in the plan — its ::gentoo baseline %s could not be read now, although the review read it: %v",
+				i18n.T("  %s: not in the plan — its ::gentoo baseline %s could not be read now, although the review read it: %v"),
 				name, r.Baseline.Path, err))
 			continue
 		}
@@ -293,7 +294,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	// it would have switched the gates off in silence.
 	depth, err := validate.ParseDepth(compareDepth)
 	if err != nil {
-		output.Error.Fprintf(os.Stderr, "\n  Nothing was proved — --depth: %v\n", err)
+		output.Error.Fprintf(os.Stderr, i18n.T("\n  Nothing was proved — --depth: %v\n"), err)
 		return
 	}
 
@@ -308,7 +309,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	// anybody is asked to agree to builds that could not happen.
 	stagingRoot, err := autoupdateStagingRoot()
 	if err != nil {
-		output.Error.Fprintf(os.Stderr, "\n  Nothing was proved — --depth=%s builds, and a staged tree to build in could not be placed: %v\n", depth, err)
+		output.Error.Fprintf(os.Stderr, i18n.T("\n  Nothing was proved — --depth=%s builds, and a staged tree to build in could not be placed: %v\n"), depth, err)
 		return
 	}
 
@@ -322,7 +323,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 		// overlay whose every divergence is declared, and one whose baselines are
 		// all at other versions, are both healthy answers, and neither is a failure
 		// to look.
-		output.Info.Println("\n  Nothing to prove: no package has an undeclared divergence from a ::gentoo baseline at our own version. A baseline at another version is never proposed — adopting it would change which version we ship, which is a bump and not a realignment.")
+		output.Info.Println(i18n.T("\n  Nothing to prove: no package has an undeclared divergence from a ::gentoo baseline at our own version. A baseline at another version is never proposed — adopting it would change which version we ship, which is a bump and not a realignment."))
 		return
 	}
 
@@ -363,7 +364,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 	if configDir, cerr := autoupdateConfigDir(); cerr == nil {
 		logDir = filepath.Join(configDir, "logs")
 	} else {
-		output.Warning.Printf("\n  Build logs will not be retained: %v\n", cerr)
+		output.Warning.Printf(i18n.T("\n  Build logs will not be retained: %v\n"), cerr)
 	}
 
 	plan := realignPlan{Atoms: realignPlanAtoms(candidates), Depth: depth.String()}
@@ -444,16 +445,16 @@ func realignPlanAtoms(candidates []realignCandidate) []string {
 // says so, because "proved" left alone reads as "done".
 func printRealignProof(name string, proof realign.Proof, err error) {
 	if err != nil {
-		output.Error.Printf("  %s: not proved — %v\n", name, err)
+		output.Error.Printf(i18n.T("  %s: not proved — %v\n"), name, err)
 		return
 	}
 
 	if len(proof.Gates) == 0 {
-		output.Warning.Printf("  %s: staged in %s, and no gate read it — there is nothing to publish it on.\n", name, proof.StagedRoot)
+		output.Warning.Printf(i18n.T("  %s: staged in %s, and no gate read it — there is nothing to publish it on.\n"), name, proof.StagedRoot)
 		return
 	}
 
-	output.Info.Printf("  %s: staged in %s\n", name, proof.StagedRoot)
+	output.Info.Printf(i18n.T("  %s: staged in %s\n"), name, proof.StagedRoot)
 	for _, gate := range proof.Gates {
 		line := fmt.Sprintf("    %-10s %s", gate.Gate, gate.Outcome)
 		if gate.Reason != "" {
@@ -470,8 +471,8 @@ func printRealignProof(name string, proof realign.Proof, err error) {
 	}
 
 	if proof.Passed {
-		output.Success.Printf("    every gate passed or skipped — that is permission to ASK, not the answer; publishing still needs a maintainer.\n")
+		output.Success.Println(i18n.T("    every gate passed or skipped — that is permission to ASK, not the answer; publishing still needs a maintainer."))
 		return
 	}
-	output.Warning.Printf("    the realignment does not pass as it stands, and nothing was published.\n")
+	output.Warning.Println(i18n.T("    the realignment does not pass as it stands, and nothing was published."))
 }

@@ -100,7 +100,7 @@ func runTargets(cmd *cobra.Command, _ []string) error {
 // formatTargetFindings renders one block per package, plain text.
 func formatTargetFindings(findings []targets.Finding) string {
 	if len(findings) == 0 {
-		return "Every package offers the required implementations.\n"
+		return i18n.T("Every package offers the required implementations.\n")
 	}
 	var b strings.Builder
 	for _, f := range findings {
@@ -109,12 +109,12 @@ func formatTargetFindings(findings []targets.Finding) string {
 			fmt.Fprintf(&b, "    %s\n", g)
 		}
 		if f.Unreadable != "" {
-			fmt.Fprintf(&b, "    offer unreadable: %s\n", f.Unreadable)
+			fmt.Fprintf(&b, i18n.T("    offer unreadable: %s\n"), f.Unreadable)
 		}
 		if f.OverlayVersion != "" {
-			fmt.Fprintf(&b, "    overtaken: the overlay holds %s; bump its mirror to %s\n", f.OverlayVersion, f.Version)
+			fmt.Fprintf(&b, i18n.T("    overtaken: the overlay holds %s; bump its mirror to %s\n"), f.OverlayVersion, f.Version)
 		}
 	}
-	fmt.Fprintf(&b, "%d package(s) lack a required implementation.\n", len(findings))
+	fmt.Fprintf(&b, i18n.T("%d package(s) lack a required implementation.\n"), len(findings))
 	return b.String()
 }

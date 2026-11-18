@@ -65,7 +65,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		uiInfo("Changes committed successfully.")
+		uiInfo(i18n.T("Changes committed successfully."))
 		return nil
 	}
 
@@ -90,7 +90,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(stagedEntries) == 0 {
-		uiWarn("No staged changes to commit.")
+		uiWarn(i18n.T("No staged changes to commit."))
 		return nil
 	}
 
@@ -102,9 +102,9 @@ func runCommit(cmd *cobra.Command, args []string) error {
 
 	// Dry-run mode: just show what would be committed
 	if commitDryRun {
-		uiInfo("Dry-run mode - would commit with message:")
+		uiInfo(i18n.T("Dry-run mode - would commit with message:"))
 		fmt.Printf("  %s\n\n", output.Sprint(output.Info, generatedMessage))
-		uiInfo("Staged files:")
+		uiInfo(i18n.T("Staged files:"))
 		for _, e := range stagedEntries {
 			fmt.Printf("  %s %s\n", output.FormatStatus(overlay.StatusLabel(e.Status)), e.FilePath)
 		}
@@ -112,7 +112,7 @@ func runCommit(cmd *cobra.Command, args []string) error {
 	}
 
 	// Show preview and prompt
-	uiInfo("Generated commit message:")
+	uiInfo(i18n.T("Generated commit message:"))
 	fmt.Printf("  %s\n\n", output.Sprint(output.Info, generatedMessage))
 
 	// Skip confirmation if -y flag is set
@@ -121,11 +121,11 @@ func runCommit(cmd *cobra.Command, args []string) error {
 			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		uiInfo("Changes committed successfully.")
+		uiInfo(i18n.T("Changes committed successfully."))
 		return nil
 	}
 
-	fmt.Print("Proceed? [y]es / [e]dit / [c]ancel: ")
+	fmt.Print(i18n.T("Proceed? [y]es / [e]dit / [c]ancel: "))
 
 	// One Ctrl+C at the prompt ends the command (func yieldSignalsToPrompt);
 	// the git calls after it are cancellable again.
@@ -147,11 +147,11 @@ func runCommit(cmd *cobra.Command, args []string) error {
 			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		uiInfo("Changes committed successfully.")
+		uiInfo(i18n.T("Changes committed successfully."))
 
 	case "e", "edit":
 		// Allow user to enter custom message
-		fmt.Print("Enter commit message: ")
+		fmt.Print(i18n.T("Enter commit message: "))
 		restoreSignals = yieldSignalsToPrompt(cmd)
 		customMessage, err := reader.ReadString('\n')
 		restoreSignals()
@@ -161,17 +161,17 @@ func runCommit(cmd *cobra.Command, args []string) error {
 		}
 		customMessage = strings.TrimSpace(customMessage)
 		if customMessage == "" {
-			uiWarn("Commit cancelled (empty message).")
+			uiWarn(i18n.T("Commit cancelled (empty message)."))
 			return exitWith(1)
 		}
 		if err := commitOverlay(cmd, cfg, customMessage); err != nil {
 			log.Error("committing: failed", "err", err)
 			return exitWith(1)
 		}
-		uiInfo("Changes committed successfully.")
+		uiInfo(i18n.T("Changes committed successfully."))
 
 	case "c", "cancel":
-		uiInfo("Commit cancelled.")
+		uiInfo(i18n.T("Commit cancelled."))
 		return exitWith(1)
 
 	default:

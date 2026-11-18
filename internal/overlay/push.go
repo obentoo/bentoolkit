@@ -7,6 +7,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/git"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 var (
@@ -55,7 +56,7 @@ func PushWithExecutor(ctx context.Context, executor git.GitExecutor) (*PushResul
 			strings.Contains(errStr, "up to date") {
 			return &PushResult{
 				UpToDate: true,
-				Message:  "Everything is up-to-date. Nothing to push.",
+				Message:  i18n.T("Everything is up-to-date. Nothing to push."),
 			}, nil
 		}
 		return nil, err
@@ -63,6 +64,6 @@ func PushWithExecutor(ctx context.Context, executor git.GitExecutor) (*PushResul
 
 	return &PushResult{
 		UpToDate: false,
-		Message:  "Changes pushed successfully.",
+		Message:  i18n.T("Changes pushed successfully."),
 	}, nil
 }

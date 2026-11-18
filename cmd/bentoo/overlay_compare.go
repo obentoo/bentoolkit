@@ -277,7 +277,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		return nil
 	}
 
-	uiInfo(fmt.Sprintf("Found %s packages in Bentoo overlay",
+	uiInfo(fmt.Sprintf(i18n.T("Found %s packages in Bentoo overlay"),
 		output.Sprint(output.Info, fmt.Sprintf("%d", len(scanResult.Packages)))))
 
 	reportCompareScanErrors(log, scanResult.Errors)
@@ -622,23 +622,23 @@ func checkCompareGitHubRateLimit(ctx context.Context, log *slog.Logger, prov pro
 				resetAt := resetTime.Format("15:04:05")
 				log.Error("GitHub API rate limit exceeded", "resets_at", resetAt)
 				uiInfo("")
-				uiInfo("Options:")
-				uiInfo("  1. Use --clone to download the repository:")
+				uiInfo(i18n.T("Options:"))
+				uiInfo(i18n.T("  1. Use --clone to download the repository:"))
 				uiInfo(fmt.Sprintf("     bentoo overlay compare %s --clone", repoName))
 				uiInfo("")
-				uiInfo("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
+				uiInfo(i18n.T("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:"))
 				uiInfo("     repositories:")
 				uiInfo("       gentoo:")
 				uiInfo("         provider: local")
 				uiInfo("         path: /var/db/repos/gentoo")
 				uiInfo("")
-				uiInfo(fmt.Sprintf("  3. Wait until %s for rate limit reset", resetAt))
+				uiInfo(fmt.Sprintf(i18n.T("  3. Wait until %s for rate limit reset"), resetAt))
 				return exitWith(1)
 			case remaining < 10:
 				log.Warn("GitHub API rate limit low",
 					"remaining", remaining, "resets_at", resetTime.Format("15:04:05"))
 				if !compareClone {
-					uiInfo("Tip: Use --clone flag to avoid rate limits")
+					uiInfo(i18n.T("Tip: Use --clone flag to avoid rate limits"))
 				}
 			case verbose:
 				log.Debug("GitHub API rate limit", "remaining", remaining)
@@ -666,7 +666,7 @@ func printCompareProgress(done, total uint64) {
 	if total > 0 {
 		percent = (done * 100) / total
 	}
-	fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
+	fmt.Printf(i18n.T("\r  Checking: [%3d%%] %d/%d"), percent, done, total)
 }
 
 // compareFailure logs a failed comparison and returns exit status 1. An
@@ -680,7 +680,7 @@ func compareFailure(log *slog.Logger, err error, repoName string) error {
 	// Check if it's a rate limit error and suggest --clone
 	if strings.Contains(err.Error(), "rate limit") && !compareClone {
 		log.Error("GitHub API rate limit exceeded.")
-		uiInfo("Try using --clone flag to download the repository instead:")
+		uiInfo(i18n.T("Try using --clone flag to download the repository instead:"))
 		uiInfo(fmt.Sprintf("  bentoo overlay compare %s --clone", repoName))
 		return exitWith(1)
 	}

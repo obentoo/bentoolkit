@@ -40,7 +40,7 @@ func runPush(cmd *cobra.Command, args []string) error {
 			log.Error("push dry-run: failed", "err", err)
 			return exitWith(1)
 		}
-		uiInfo("Dry-run mode - would push:")
+		uiInfo(i18n.T("Dry-run mode - would push:"))
 		uiInfo(result)
 		return nil
 	}

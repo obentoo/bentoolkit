@@ -76,11 +76,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 				log.Error("conflicting file", "file", conflict)
 			}
 			if mode == overlay.PullRebase {
-				uiInfo("Resolve conflicts manually, then run 'git add' and 'git rebase --continue'")
-				uiInfo("Or abort the rebase with 'git rebase --abort'")
+				uiInfo(i18n.T("Resolve conflicts manually, then run 'git add' and 'git rebase --continue'"))
+				uiInfo(i18n.T("Or abort the rebase with 'git rebase --abort'"))
 			} else {
-				uiInfo("Resolve conflicts manually, then run 'git add' and 'git commit'")
-				uiInfo("Or abort the merge with 'git merge --abort'")
+				uiInfo(i18n.T("Resolve conflicts manually, then run 'git add' and 'git commit'"))
+				uiInfo(i18n.T("Or abort the merge with 'git merge --abort'"))
 			}
 		}
 		return exitWith(1)

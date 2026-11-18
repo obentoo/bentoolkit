@@ -13,6 +13,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -517,8 +518,8 @@ func realignCandidateSection(results []overlay.CompareResult) string {
 	if body.Len() == 0 {
 		return ""
 	}
-	return output.Sprintf(output.Info,
-		"\nCandidate declarations — one per undeclared axis, for a maintainer to accept or edit. Nothing here was written to any file.\n") +
+	return output.Sprint(output.Info,
+		i18n.T("\nCandidate declarations — one per undeclared axis, for a maintainer to accept or edit. Nothing here was written to any file.\n")) +
 		body.String()
 }
 

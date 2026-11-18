@@ -146,7 +146,7 @@ func runAnalyze(cmd *cobra.Command, args []string) error {
 // exit status (func exitWith). ctx is the analysis context; release ends it,
 // and runs before the confirmation prompt.
 func runAnalyzeSingle(ctx context.Context, log *slog.Logger, analyzer *autoupdate.Analyzer, pkg string, opts autoupdate.AnalyzeOptions, release func()) error {
-	output.Info.Printf("Analyzing %s...\n", pkg)
+	output.Info.Printf(i18n.T("Analyzing %s...\n"), pkg)
 
 	result, err := analyzer.Analyze(ctx, pkg, opts)
 	if err != nil {
@@ -165,10 +165,10 @@ func runAnalyzeSingle(ctx context.Context, log *slog.Logger, analyzer *autoupdat
 	if result.SuggestedSchema != nil {
 		if !result.Validated {
 			// Warn about version mismatch
-			output.Warning.Println("\nWarning: Extracted version does not match ebuild version")
-			output.Warning.Printf("  Extracted: %s\n", result.ExtractedVersion)
-			output.Warning.Printf("  Ebuild:    %s\n", result.EbuildVersion)
-			if !confirmAfterRelease(release, "Save schema anyway?") {
+			output.Warning.Println(i18n.T("\nWarning: Extracted version does not match ebuild version"))
+			output.Warning.Printf(i18n.T("  Extracted: %s\n"), result.ExtractedVersion)
+			output.Warning.Printf(i18n.T("  Ebuild:    %s\n"), result.EbuildVersion)
+			if !confirmAfterRelease(release, i18n.T("Save schema anyway?")) {
 				log.Info("Schema not saved")
 				return nil
 			}
@@ -178,7 +178,7 @@ func runAnalyzeSingle(ctx context.Context, log *slog.Logger, analyzer *autoupdat
 			log.Error("failed to save schema", "err", err)
 			return exitWith(1)
 		}
-		output.Success.Println("\n✓ Schema saved to packages.toml")
+		output.Success.Println(i18n.T("\n✓ Schema saved to packages.toml"))
 	}
 	return nil
 }
@@ -188,7 +188,7 @@ func runAnalyzeSingle(ctx context.Context, log *slog.Logger, analyzer *autoupdat
 // partial, 2 total failure. ctx is the analysis context; release ends it, and
 // runs before the confirmation prompt.
 func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.Analyzer, opts autoupdate.AnalyzeOptions, release func()) error {
-	output.Info.Println("Analyzing all packages without schema...")
+	output.Info.Println(i18n.T("Analyzing all packages without schema..."))
 
 	// AnalyzeAll never returns a fatal error: enumeration and per-package
 	// failures are all captured in the BatchResult.
@@ -202,7 +202,7 @@ func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.A
 	}
 
 	if len(result.Items) == 0 && !result.HasFailures() {
-		output.Success.Println("All packages already have schemas configured")
+		output.Success.Println(i18n.T("All packages already have schemas configured"))
 		return exitWith(result.ExitCode())
 	}
 
@@ -222,13 +222,13 @@ func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.A
 	}
 
 	if successful == 0 {
-		output.Warning.Println("No schemas were generated successfully")
+		output.Warning.Println(i18n.T("No schemas were generated successfully"))
 		return exitWith(result.ExitCode())
 	}
 
 	// Ask for confirmation to save all successful schemas
-	output.Info.Printf("\n%d schema(s) ready to save\n", successful)
-	if !confirmAfterRelease(release, "Save all successful schemas?") {
+	output.Info.Printf(i18n.T("\n%d schema(s) ready to save\n"), successful)
+	if !confirmAfterRelease(release, i18n.T("Save all successful schemas?")) {
 		log.Info("Schemas not saved")
 		return exitWith(result.ExitCode())
 	}
@@ -238,14 +238,14 @@ func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.A
 	for _, r := range result.Items {
 		if r.SuggestedSchema != nil && r.Error == nil {
 			if err := analyzer.SaveSchema(r.Package, r.SuggestedSchema); err != nil {
-				output.Error.Fprintf(os.Stderr, "Failed to save schema for %s: %v\n", r.Package, err)
+				output.Error.Fprintf(os.Stderr, i18n.T("Failed to save schema for %s: %v\n"), r.Package, err)
 			} else {
 				saved++
 			}
 		}
 	}
 
-	output.Success.Printf("\n✓ Saved %d schema(s) to packages.toml\n", saved)
+	output.Success.Printf(i18n.T("\n✓ Saved %d schema(s) to packages.toml\n"), saved)
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	return exitWith(result.ExitCode())
@@ -254,24 +254,24 @@ func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.A
 // displayAnalyzeResult formats and displays a single analysis result
 func displayAnalyzeResult(result *autoupdate.AnalyzeResult) {
 	fmt.Println()
-	output.Header.Println("Analysis Result")
+	output.Header.Println(i18n.T("Analysis Result"))
 	fmt.Println()
 
 	output.Package.Printf("  %s\n", result.Package)
 
 	if result.Error != nil {
-		output.Error.Printf("    Error: %v\n", result.Error)
+		output.Error.Printf(i18n.T("    Error: %v\n"), result.Error)
 		return
 	}
 
 	if result.SuggestedSchema == nil {
-		output.Warning.Println("    No schema generated")
+		output.Warning.Println(i18n.T("    No schema generated"))
 		return
 	}
 
 	// Display schema details
 	fmt.Println()
-	output.Header.Println("Suggested Schema")
+	output.Header.Println(i18n.T("Suggested Schema"))
 	fmt.Println()
 
 	displaySchema(result.Package, result.SuggestedSchema)
@@ -279,21 +279,21 @@ func displayAnalyzeResult(result *autoupdate.AnalyzeResult) {
 	// Display validation status
 	fmt.Println()
 	if result.Validated {
-		output.Success.Printf("  ✓ Validated: extracted version %s matches ebuild\n", result.ExtractedVersion)
+		output.Success.Printf(i18n.T("  ✓ Validated: extracted version %s matches ebuild\n"), result.ExtractedVersion)
 	} else if result.ExtractedVersion != "" {
-		output.Warning.Printf("  ⚠ Version mismatch: extracted %s, ebuild %s\n",
+		output.Warning.Printf(i18n.T("  ⚠ Version mismatch: extracted %s, ebuild %s\n"),
 			result.ExtractedVersion, result.EbuildVersion)
 	}
 
 	if result.FromCache {
-		output.Dim.Println("  (from cache)")
+		output.Dim.Println(i18n.T("  (from cache)"))
 	}
 }
 
 // displayBatchResults formats and displays batch analysis results
 func displayBatchResults(results []autoupdate.AnalyzeResult) {
 	fmt.Println()
-	output.Header.Println("Batch Analysis Results")
+	output.Header.Println(i18n.T("Batch Analysis Results"))
 	fmt.Println()
 
 	var successful, failed, skipped int
@@ -305,21 +305,21 @@ func displayBatchResults(results []autoupdate.AnalyzeResult) {
 			output.Error.Printf("  ✗ %s: %v\n", r.Package, r.Error)
 		case r.SuggestedSchema == nil:
 			skipped++
-			output.Dim.Printf("  - %s: no schema generated\n", r.Package)
+			output.Dim.Printf(i18n.T("  - %s: no schema generated\n"), r.Package)
 		default:
 			successful++
 			validStatus := ""
 			if r.Validated {
-				validStatus = output.Sprintf(output.Success, " (validated)")
+				validStatus = output.Sprint(output.Success, i18n.T(" (validated)"))
 			} else {
-				validStatus = output.Sprintf(output.Warning, " (unvalidated)")
+				validStatus = output.Sprint(output.Warning, i18n.T(" (unvalidated)"))
 			}
-			output.Success.Printf("  ✓ %s: %s parser%s\n", r.Package, r.SuggestedSchema.Parser, validStatus)
+			output.Success.Printf(i18n.T("  ✓ %s: %s parser%s\n"), r.Package, r.SuggestedSchema.Parser, validStatus)
 		}
 	}
 
 	fmt.Println()
-	output.Info.Printf("Summary: %d successful, %d failed, %d skipped\n", successful, failed, skipped)
+	output.Info.Printf(i18n.T("Summary: %d successful, %d failed, %d skipped\n"), successful, failed, skipped)
 }
 
 // displaySchema prints the record `overlay analyze` suggests for a package, in
@@ -399,7 +399,7 @@ func confirmAfterRelease(release func(), prompt string) bool {
 // confirmAction prompts the user for confirmation
 func confirmAction(prompt string) bool {
 	reader := bufio.NewReader(os.Stdin)
-	fmt.Printf("%s [y/N]: ", prompt)
+	fmt.Printf(i18n.T("%s [y/N]: "), prompt)
 	response, err := reader.ReadString('\n')
 	if err != nil {
 		return false
