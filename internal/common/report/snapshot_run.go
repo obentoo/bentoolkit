@@ -3,6 +3,8 @@ package report
 import (
 	"fmt"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // SnapshotRun is everything one `snapshot run` established: the subvolumes it
@@ -147,18 +149,19 @@ type SnapshotStep struct {
 // A FAILED step is always listed: it is the reason an operator reads a snapshot
 // report at all.
 func (r SnapshotRun) Sections(opts SectionOptions) []Section {
-	return []Section{snapshotSection(r, opts.ShowAll)}
+	return []Section{snapshotSection(r, opts)}
 }
 
 // snapshotSection is the block: the subvolumes the run covered, the counts, the
 // rows they were taken over, and the sentences saying what was left out and why.
-func snapshotSection(r SnapshotRun, listEvery bool) Section {
+func snapshotSection(r SnapshotRun, opts SectionOptions) Section {
+	listEvery := opts.ShowAll
 	// Which subvolume the run operated on is stated BEFORE anything else and on
 	// every path out of this function, including the two that return no rows,
 	// because the answer must not depend on --all: a run in which every step
 	// succeeded lists no row by default, and the subvolume would otherwise
 	// vanish from the report of the run that went perfectly.
-	s := Section{Title: "Snapshot Run", Lead: []string{snapshotScope(r)}}
+	s := Section{Title: opts.t(i18n.N("Snapshot Run")), Lead: []string{snapshotScope(r, opts)}}
 
 	// A run with no step still produces a report, and says so in a sentence
 	// rather than as an empty table — a report is what an operator gets INSTEAD
@@ -169,34 +172,34 @@ func snapshotSection(r SnapshotRun, listEvery bool) Section {
 	// counts: a payload carrying "2 succeeded, 1 failed" and no rows must not
 	// announce that nothing was counted.
 	if r.Ok+r.Failed == 0 && len(r.Steps) == 0 {
-		s.Lead = append(s.Lead, "No step has an outcome to report, so nothing is counted as succeeded or as failed.")
+		s.Lead = append(s.Lead, opts.t(i18n.N("No step has an outcome to report, so nothing is counted as succeeded or as failed.")))
 		return s
 	}
 
-	s.Lead = append(s.Lead, snapshotTally(r))
+	s.Lead = append(s.Lead, snapshotTally(r, opts))
 
 	// Counts without the rows they were taken over. The counts are still
 	// stated, because they are what the run established; what is missing is the
 	// per-step detail, and a report states what it omitted rather than
 	// omitting it silently.
 	if len(r.Steps) == 0 {
-		s.Notes = []string{"No per-step row reached this report, so the counts above are stated without the list they were taken over."}
+		s.Notes = []string{opts.t(i18n.N("No per-step row reached this report, so the counts above are stated without the list they were taken over."))}
 		return s
 	}
 
-	s.Rows.Headers = []string{"SUBVOLUME", "STEP", "STATE"}
+	s.Rows.Headers = []string{opts.t(i18n.N("SUBVOLUME")), opts.t(i18n.N("STEP")), opts.t(i18n.N("STATE"))}
 	for _, step := range r.Steps {
 		if step.Success && !listEvery {
 			// Counted in the note below, not listed here.
 			continue
 		}
 		s.Rows.Rows = append(s.Rows.Rows, Row{
-			Cells:  []string{step.Subvolume, snapshotStepLabel(step), snapshotState(step)},
+			Cells:  []string{step.Subvolume, snapshotStepLabel(step), snapshotState(step, opts)},
 			Detail: snapshotDetail(step),
 		})
 	}
 
-	s.Notes = snapshotNotes(r, listEvery)
+	s.Notes = snapshotNotes(r, opts)
 
 	return s
 }
@@ -219,11 +222,11 @@ func snapshotSection(r SnapshotRun, listEvery bool) Section {
 // reachable, and what it must not do is print a sentence that trails off into
 // nothing — a reader meeting "The run operated on 0 subvolume(s): ." would be
 // looking at a bug rather than at an answer.
-func snapshotScope(r SnapshotRun) string {
+func snapshotScope(r SnapshotRun, opts SectionOptions) string {
 	if len(r.Subvolumes) == 0 {
-		return "The run was given no subvolume to operate on, so no step below is attributed to one."
+		return opts.t(i18n.N("The run was given no subvolume to operate on, so no step below is attributed to one."))
 	}
-	return fmt.Sprintf("The run operated on %d subvolume(s): %s.",
+	return fmt.Sprintf(opts.t(i18n.N("The run operated on %d subvolume(s): %s.")),
 		len(r.Subvolumes), strings.Join(r.Subvolumes, ", "))
 }
 
@@ -232,8 +235,8 @@ func snapshotScope(r SnapshotRun) string {
 // The total is Ok+Failed rather than len(Steps) for the reason the guard above
 // gives — the counts are what the run established, and a total taken over a
 // different field could disagree with the two numbers it introduces.
-func snapshotTally(r SnapshotRun) string {
-	return fmt.Sprintf("%d step(s) ran: %d succeeded, %d failed.", r.Ok+r.Failed, r.Ok, r.Failed)
+func snapshotTally(r SnapshotRun, opts SectionOptions) string {
+	return fmt.Sprintf(opts.t(i18n.N("%d step(s) ran: %d succeeded, %d failed.")), r.Ok+r.Failed, r.Ok, r.Failed)
 }
 
 // snapshotStepLabel is the word the STEP column prints: the stage, and the ship
@@ -257,11 +260,11 @@ func snapshotStepLabel(step SnapshotStep) string {
 // snapshotState is the word the STATE column prints. Only the WORDING is
 // decided here; which of the two applies was decided by the run, and Success is
 // the one field that says it.
-func snapshotState(step SnapshotStep) string {
+func snapshotState(step SnapshotStep, opts SectionOptions) string {
 	if step.Success {
-		return "succeeded"
+		return opts.t(i18n.N("succeeded"))
 	}
-	return "failed"
+	return opts.t(i18n.N("failed"))
 }
 
 // snapshotDetail is why a failed step failed: the producer's sentence, whole.
@@ -290,7 +293,8 @@ func snapshotDetail(step SnapshotStep) string {
 }
 
 // snapshotNotes is what the table left out, and why.
-func snapshotNotes(r SnapshotRun, listEvery bool) []string {
+func snapshotNotes(r SnapshotRun, opts SectionOptions) []string {
+	listEvery := opts.ShowAll
 	var notes []string
 
 	// Conditional on there having BEEN a success: a run in which every step
@@ -302,9 +306,9 @@ func snapshotNotes(r SnapshotRun, listEvery bool) []string {
 			// reason the check's own up-to-date note is: a count never depends
 			// on which rows were listed, so the sentence keeps its shape in
 			// both directions and only its tail changes.
-			notes = append(notes, fmt.Sprintf("%d step(s) succeeded and are listed above.", r.Ok))
+			notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d step(s) succeeded and are listed above.")), r.Ok))
 		} else {
-			notes = append(notes, fmt.Sprintf("%d step(s) succeeded and are not listed; pass --all to list them.", r.Ok))
+			notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d step(s) succeeded and are not listed; pass --all to list them.")), r.Ok))
 		}
 	}
 
@@ -315,5 +319,5 @@ func snapshotNotes(r SnapshotRun, listEvery bool) []string {
 	// report that differs between two runs of the same shape, and this report
 	// is read to find out WHAT happened.
 	return append(notes,
-		"How long each step took is not carried here: the run's own result file keeps the timings, and 'snapshot status' is what reads them back.")
+		opts.t(i18n.N("How long each step took is not carried here: the run's own result file keeps the timings, and 'snapshot status' is what reads them back.")))
 }

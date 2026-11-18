@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -127,7 +128,7 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 	// admit it is partial.
 	dump := blocks
 	if interrupted.Load() {
-		dump = append([]report.Section{interruptNotice}, blocks...)
+		dump = append([]report.Section{interruptNotice()}, blocks...)
 	}
 
 	return errors.Join(err, Plain(os.Stdout, dump, opts))
@@ -150,14 +151,19 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 // do it — the coupling that taking sections instead of a report removed.
 // Whoever builds the sections states the count, in its own vocabulary, in its
 // own leading section; this states only what happened at the terminal.
-var interruptNotice = report.Section{
-	Title: "Run Interrupted",
-	Lead: []string{
-		"This report is incomplete: the run was interrupted before its report was read out.",
-	},
-	Notes: []string{
-		"The sections below cover only what the run had reached; anything it never got to is counted in no column.",
-	},
+//
+// It is built when it is shown, in the reader's language: the dump goes to the
+// terminal, never to an export.
+func interruptNotice() report.Section {
+	return report.Section{
+		Title: i18n.T("Run Interrupted"),
+		Lead: []string{
+			i18n.T("This report is incomplete: the run was interrupted before its report was read out."),
+		},
+		Notes: []string{
+			i18n.T("The sections below cover only what the run had reached; anything it never got to is counted in no column."),
+		},
+	}
 }
 
 // restoreTerminal puts the alternate screen away and the cursor back.
@@ -328,7 +334,7 @@ func (m fullscreenModel) rowBudget() int {
 // cannot scroll rather than leave it, and the dump on exit is only useful to
 // someone who knows it happens.
 func (m fullscreenModel) hint(cells int) string {
-	line := strings.Repeat(" ", indent) + "q/esc quit · ctrl+c interrupt · the whole report prints on exit"
+	line := strings.Repeat(" ", indent) + i18n.T("q/esc quit · ctrl+c interrupt · the whole report prints on exit")
 	return shortenTo(decorate(m.paint.detail, line), cells)
 }
 
@@ -404,12 +410,12 @@ func (p pane) fit(budget, cells int) []string {
 func (p pane) omission(shown int) string {
 	lines := len(p.lines) - shown
 
-	sentence := fmt.Sprintf("… %d more line(s) not shown", lines)
+	sentence := fmt.Sprintf(i18n.T("… %d more line(s) not shown — press q for the whole report"), lines)
 	if hidden := p.sectionsBelow(shown); hidden > 0 {
-		sentence = fmt.Sprintf("… %d more line(s) and %d whole section(s) not shown", lines, hidden)
+		sentence = fmt.Sprintf(i18n.T("… %d more line(s) and %d whole section(s) not shown — press q for the whole report"), lines, hidden)
 	}
 
-	return decorate(p.paint.header, strings.Repeat(" ", indent)+sentence+" — press q for the whole report")
+	return decorate(p.paint.header, strings.Repeat(" ", indent)+sentence)
 }
 
 // sectionsBelow is how many sections begin at or after the cut — the ones the
@@ -437,7 +443,7 @@ func sectionLines(s report.Section, st style) []string {
 		// may not return an error anyway. Putting the failure on the screen
 		// beats discarding it and rendering an empty section that looks like a
 		// run with nothing in it.
-		return []string{"this section could not be rendered: " + err.Error()}
+		return []string{fmt.Sprintf(i18n.T("this section could not be rendered: %v"), err)}
 	}
 
 	return strings.Split(strings.TrimSuffix(buf.String(), "\n"), "\n")

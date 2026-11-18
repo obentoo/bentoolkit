@@ -30,6 +30,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/parse"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
@@ -294,25 +295,25 @@ func (p validationPlan) building() int {
 // actually produced rather than typed into a format string.
 func printValidationPrice(plan validationPlan) {
 	fmt.Println()
-	output.Header.Println("Validation Plan")
+	output.Header.Println(i18n.T("Validation Plan"))
 	fmt.Println()
 
 	if len(plan.Entries) == 0 {
-		output.Info.Println("  No pending update to validate.")
+		output.Info.Println("  " + i18n.T("No pending update to validate."))
 		return
 	}
 
-	output.Info.Printf("  %d package(s) to evaluate, deepest depth %s.\n\n", len(plan.Entries), plan.deepest())
+	output.Info.Printf("  "+i18n.T("%d package(s) to evaluate, deepest depth %s.")+"\n\n", len(plan.Entries), plan.deepest())
 
 	for _, entry := range plan.Entries {
-		tag := ""
+		line := i18n.T("%s %s → %s at depth %s")
 		if entry.Skipped {
 			// A package that will not be validated has to say so on its own
 			// line: the operator reads a shorter list of results as progress
 			// unless the plan already told them it would be shorter.
-			tag = " [not validated]"
+			line = i18n.T("%s %s → %s at depth %s [not validated]")
 		}
-		fmt.Printf("  %s %s → %s at depth %s%s\n", entry.Package, entry.From, entry.Version, entry.Depth, tag)
+		fmt.Printf("  "+line+"\n", entry.Package, entry.From, entry.Version, entry.Depth)
 	}
 	fmt.Println()
 
@@ -320,9 +321,9 @@ func printValidationPrice(plan validationPlan) {
 	// nowhere else on screen, and it is the one that decides the answer on a
 	// metered connection; it travels into the report as well
 	// (report.AutoupdateCheck.DistfilesToFetch) so the export carries it too.
-	output.Info.Printf("  Distfiles: up to %d to fetch — one per package validated above depth none or by a binary record's fetch gate; anything already in DISTDIR is not fetched again.\n",
+	output.Info.Printf("  "+i18n.T("Distfiles: up to %d to fetch — one per package validated above depth none or by a binary record's fetch gate; anything already in DISTDIR is not fetched again.")+"\n",
 		plan.DistfilesToFetch)
-	output.Info.Printf("  Depth distribution (of %d package(s)): %s\n", len(plan.Entries), depthDistributionLine(plan))
+	output.Info.Printf("  "+i18n.T("Depth distribution (of %d package(s)): %s")+"\n", len(plan.Entries), depthDistributionLine(plan))
 }
 
 // depthDistributionLine renders the distribution along the ladder, shallowest
@@ -355,7 +356,7 @@ func depthDistributionLine(plan validationPlan) string {
 	})
 
 	if len(names) == 0 {
-		return "(nothing planned)"
+		return i18n.T("(nothing planned)")
 	}
 	parts := make([]string, 0, len(names))
 	for _, name := range names {
@@ -387,26 +388,26 @@ func (ar *autoupdateRun) confirmValidationRun(plan validationPlan) bool {
 	deepest := plan.deepest()
 
 	if ar.opts.yes {
-		output.Warning.Printf("  --yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s.\n",
+		output.Warning.Printf("  "+i18n.T("--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s.")+"\n",
 			len(plan.Entries), builds, deepest)
-		output.Warning.Printf("  Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published.\n",
+		output.Warning.Printf("  "+i18n.T("Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published.")+"\n",
 			plan.DistfilesToFetch)
 		return true
 	}
 
 	if !ar.deps.registryPromptIsInteractive() {
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: no gate ran and nothing was validated.")
-		output.Info.Printf("  Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s).\n",
+		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: no gate ran and nothing was validated."))
+		output.Info.Printf("  "+i18n.T("Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s).")+"\n",
 			len(plan.Entries), builds, deepest, plan.DistfilesToFetch)
 		return false
 	}
 
 	fmt.Println()
-	output.Warning.Printf("  %d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours.\n",
+	output.Warning.Printf("  "+i18n.T("%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours.")+"\n",
 		builds, plan.DistfilesToFetch)
-	output.Info.Println("  Nothing is published either way — a check writes no ebuild and no version pin.")
+	output.Info.Println("  " + i18n.T("Nothing is published either way — a check writes no ebuild and no version pin."))
 	return ar.deps.confirmSweep(fmt.Sprintf(
-		"Evaluate %d package(s), %d of them up to depth %s?", len(plan.Entries), builds, deepest))
+		i18n.T("Evaluate %d package(s), %d of them up to depth %s?"), len(plan.Entries), builds, deepest))
 }
 
 // runPendingValidation puts every bump a check recorded as pending through the
@@ -482,7 +483,7 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 	// under the region tears its frame.
 	checkCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	live, release := ar.buildLiveReporter(checkCtx, cancel, len(plan.Entries), "Validating updates")
+	live, release := ar.buildLiveReporter(checkCtx, cancel, len(plan.Entries), i18n.T("Validating updates"))
 	defer release()
 
 	opts := []autoupdate.ApplierOption{
@@ -667,7 +668,7 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// what the run FOUND, not about whether the terminal accepted the
 		// table, and that failure has already been reported on its own line.
 		if scanFoundPendingUpdate(r.Scanned) {
-			output.Info.Println("Use 'bentoo overlay autoupdate --list' to see pending updates")
+			output.Info.Println(i18n.T("Use 'bentoo overlay autoupdate --list' to see pending updates"))
 		}
 
 		// The registry was WRITTEN, and that is not something the report can
@@ -685,7 +686,7 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// overlay_autoupdate.go and returns before reaching here, so the two
 		// cannot both fire.
 		if orphans := scanDisabledOrphans(r.Scanned); orphans > 0 {
-			output.Warning.Printf("%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)\n", orphans)
+			output.Warning.Printf(i18n.T("%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)")+"\n", orphans)
 		}
 	}
 
@@ -722,8 +723,11 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 // terminal was told, so both formats ask for everyScannedPackage. A knob that
 // shortens an export is a knob an export can be shortened by, and a function
 // with no parameter cannot be handed one in a hurry.
+//
+// English is set for the same reason: the file is a shared artifact, read by
+// somebody whose language is not this terminal's, so it is never translated.
 func exportContent() report.SectionOptions {
-	return report.SectionOptions{ShowAll: everyScannedPackage, SkipPlan: keepThePlan}
+	return report.SectionOptions{ShowAll: everyScannedPackage, SkipPlan: keepThePlan, English: true}
 }
 
 // scanDisabledOrphans counts the packages this run auto-disabled: an entry
@@ -785,9 +789,9 @@ func reportDepthEscalation(entry validationPlanEntry, result validate.EbuildResu
 	if err != nil || actual <= confirmed {
 		return
 	}
-	output.Warning.Printf("  %s: the reviewer raised this bump to %s, past the %s this run's plan confirmed.\n",
+	output.Warning.Printf("  "+i18n.T("%s: the reviewer raised this bump to %s, past the %s this run's plan confirmed.")+"\n",
 		entry.Package, actual, confirmed)
-	output.Info.Printf("      A raise past the confirmed depth is held at %s rather than spent unasked; re-run with --yes to approve the deeper gates for the whole run.\n",
+	output.Info.Printf("      "+i18n.T("A raise past the confirmed depth is held at %s rather than spent unasked; re-run with --yes to approve the deeper gates for the whole run.")+"\n",
 		confirmed)
 }
 

@@ -3,6 +3,8 @@ package report
 import (
 	"fmt"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // ManifestRun is everything one `overlay manifest` run established: the targets
@@ -108,13 +110,14 @@ type ManifestTarget struct {
 // operator is reading the report. A preview lists every target and never reads
 // ShowAll: on a dry run the names ARE the finding.
 func (r ManifestRun) Sections(opts SectionOptions) []Section {
-	return []Section{manifestSection(r, opts.ShowAll)}
+	return []Section{manifestSection(r, opts)}
 }
 
 // manifestSection is the block: the counts, the rows they were taken over, and
 // the sentences saying what was left out of the rows and why.
-func manifestSection(r ManifestRun, listEvery bool) Section {
-	s := Section{Title: "Manifest Regeneration"}
+func manifestSection(r ManifestRun, opts SectionOptions) Section {
+	listEvery := opts.ShowAll
+	s := Section{Title: opts.t(i18n.N("Manifest Regeneration"))}
 
 	// A run with no row still produces a report, and says so in a sentence
 	// rather than as an empty table: a report is what an operator gets INSTEAD
@@ -131,7 +134,7 @@ func manifestSection(r ManifestRun, listEvery bool) Section {
 	// the counts. Judged from the rows, a payload carrying "3 regenerated, 1
 	// failed" and no rows would be told it did nothing.
 	if r.Ok+r.Failed == 0 && len(r.Targets) == 0 {
-		s.Lead = []string{"No target has an outcome to report, so nothing is counted as regenerated or as failed."}
+		s.Lead = []string{opts.t(i18n.N("No target has an outcome to report, so nothing is counted as regenerated or as failed."))}
 		return s
 	}
 
@@ -140,32 +143,32 @@ func manifestSection(r ManifestRun, listEvery bool) Section {
 	// per-target detail, and a report states what it omitted rather than
 	// omitting it silently.
 	if len(r.Targets) == 0 {
-		s.Lead = []string{fmt.Sprintf("%d target(s) processed: %d regenerated, %d failed.",
+		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d target(s) processed: %d regenerated, %d failed.")),
 			r.Ok+r.Failed, r.Ok, r.Failed)}
-		s.Notes = []string{"No per-target row reached this report, so the counts above are stated without the list they were taken over."}
+		s.Notes = []string{opts.t(i18n.N("No per-target row reached this report, so the counts above are stated without the list they were taken over."))}
 		return s
 	}
 
 	if r.DryRun {
-		return manifestPreview(s, r)
+		return manifestPreview(s, r, opts)
 	}
 
-	s.Lead = []string{fmt.Sprintf("%d target(s) processed: %d regenerated, %d failed.",
+	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d target(s) processed: %d regenerated, %d failed.")),
 		r.Ok+r.Failed, r.Ok, r.Failed)}
 
-	s.Rows.Headers = []string{"PACKAGE", "STATE"}
+	s.Rows.Headers = []string{opts.t(i18n.N("PACKAGE")), opts.t(i18n.N("STATE"))}
 	for _, target := range r.Targets {
 		if target.Success && !listEvery {
 			// Counted in the note below, not listed here.
 			continue
 		}
 		s.Rows.Rows = append(s.Rows.Rows, Row{
-			Cells:  []string{target.Package, manifestState(target)},
-			Detail: manifestDetail(target),
+			Cells:  []string{target.Package, manifestState(target, opts)},
+			Detail: manifestDetail(target, opts),
 		})
 	}
 
-	s.Notes = manifestNotes(r, listEvery)
+	s.Notes = manifestNotes(r, opts)
 
 	return s
 }
@@ -188,16 +191,16 @@ func manifestSection(r ManifestRun, listEvery bool) Section {
 // is what makes both readings correct at the same time, and it states the
 // omission: this run deliberately established nothing about any
 // of the rows it is showing.
-func manifestPreview(s Section, r ManifestRun) Section {
-	s.Lead = []string{fmt.Sprintf("Dry run: %d target(s) would have their Manifest regenerated.", len(r.Targets))}
+func manifestPreview(s Section, r ManifestRun, opts SectionOptions) Section {
+	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("Dry run: %d target(s) would have their Manifest regenerated.")), len(r.Targets))}
 
-	s.Rows.Headers = []string{"PACKAGE"}
+	s.Rows.Headers = []string{opts.t(i18n.N("PACKAGE"))}
 	for _, target := range r.Targets {
 		s.Rows.Rows = append(s.Rows.Rows, Row{Cells: []string{target.Package}})
 	}
 
 	s.Notes = []string{
-		"Nothing ran: no command was invoked and no Manifest was written, so no target above is counted as regenerated or as failed.",
+		opts.t(i18n.N("Nothing ran: no command was invoked and no Manifest was written, so no target above is counted as regenerated or as failed.")),
 	}
 
 	return s
@@ -209,7 +212,8 @@ func manifestPreview(s Section, r ManifestRun) Section {
 // are about the successful targets: a run in which everything failed listed
 // every one of its rows and kept every one of their diagnostics, so it has
 // nothing to apologise for and gets no note at all.
-func manifestNotes(r ManifestRun, listEvery bool) []string {
+func manifestNotes(r ManifestRun, opts SectionOptions) []string {
+	listEvery := opts.ShowAll
 	if r.Ok == 0 {
 		return nil
 	}
@@ -220,23 +224,23 @@ func manifestNotes(r ManifestRun, listEvery bool) []string {
 		// reason the check's own up-to-date note is: a count never depends on
 		// which rows were listed, so the sentence is the same shape in
 		// both directions and only its tail changes.
-		notes = append(notes, fmt.Sprintf("%d target(s) were regenerated and are listed above.", r.Ok))
+		notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d target(s) were regenerated and are listed above.")), r.Ok))
 	} else {
-		notes = append(notes, fmt.Sprintf("%d target(s) were regenerated and are not listed; pass --all to list them.", r.Ok))
+		notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d target(s) were regenerated and are not listed; pass --all to list them.")), r.Ok))
 	}
 
 	return append(notes,
-		"What a target that succeeded printed is not kept: it was shown while the run was live, and holding a verbatim copy of every worker's output would grow with the overlay. A target that failed carries its own, in full.")
+		opts.t(i18n.N("What a target that succeeded printed is not kept: it was shown while the run was live, and holding a verbatim copy of every worker's output would grow with the overlay. A target that failed carries its own, in full.")))
 }
 
 // manifestState is the word the STATE column prints. Only the wording is decided
 // here; which of the two applies was decided by the run, and Success is the one
 // field that says it.
-func manifestState(target ManifestTarget) string {
+func manifestState(target ManifestTarget, opts SectionOptions) string {
 	if target.Success {
-		return "regenerated"
+		return opts.t(i18n.N("regenerated"))
 	}
-	return "failed"
+	return opts.t(i18n.N("failed"))
 }
 
 // manifestDetail is why a failed target failed: the producer's sentence, and
@@ -252,7 +256,7 @@ func manifestState(target ManifestTarget) string {
 // verbatim bytes stay on ManifestTarget.Output for the JSON export, so nothing
 // is lost. This matches the check's failureDetail; fitting a long sentence to a
 // line budget is a renderer's decision, and the terminal renderers wrap it.
-func manifestDetail(target ManifestTarget) string {
+func manifestDetail(target ManifestTarget, opts SectionOptions) string {
 	if target.Success {
 		return ""
 	}
@@ -266,7 +270,7 @@ func manifestDetail(target ManifestTarget) string {
 	// child's own. A reader meeting them run together would have no way to tell
 	// where one ended.
 	if printed := foldToOneLine(target.Output); printed != "" {
-		parts = append(parts, "output: "+printed)
+		parts = append(parts, fmt.Sprintf(opts.t(i18n.N("output: %s")), printed))
 	}
 
 	return strings.Join(parts, "; ")

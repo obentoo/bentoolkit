@@ -11,6 +11,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/cooldown"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -107,29 +108,29 @@ func displayCooldownSummary(run cooldownRun, results []*autoupdate.ApplyResult) 
 			retired = append(retired, "="+cooldownAtomOf(r.Package)+"-"+v)
 		}
 		if g := r.Graduated; g != nil && g.Success {
-			graduated = append(graduated, fmt.Sprintf("=%s-%s (from %s)", cooldownAtomOf(g.Package), g.NewVersion, g.OldVersion))
+			graduated = append(graduated, fmt.Sprintf(i18n.T("=%s-%s (from %s)"), cooldownAtomOf(g.Package), g.NewVersion, g.OldVersion))
 		}
 		if r.CooldownSkipped != "" && r.Success {
 			skipped = append(skipped, fmt.Sprintf("=%s-%s (%s)", cooldownAtomOf(r.Package), r.NewVersion, r.CooldownSkipped))
 		}
 	}
 	fmt.Println()
-	output.Header.Printf("Cooldown: %d added, %d replaced, %d graduated, %d lifted, %d unmasked\n",
+	output.Header.Printf(i18n.T("Cooldown: %d added, %d replaced, %d graduated, %d lifted, %d unmasked")+"\n",
 		len(added), len(retired), len(graduated), len(run.lifts), len(skipped))
 	for _, e := range added {
-		fmt.Printf("  masked    %s (since %s)\n", e.Atom(), e.Since.UTC().Format(time.RFC3339))
+		fmt.Printf("  "+i18n.T("masked    %s (since %s)")+"\n", e.Atom(), e.Since.UTC().Format(time.RFC3339))
 	}
 	for _, a := range retired {
-		fmt.Printf("  replaced  %s\n", a)
+		fmt.Printf("  "+i18n.T("replaced  %s")+"\n", a)
 	}
 	for _, g := range graduated {
-		fmt.Printf("  graduated %s\n", g)
+		fmt.Printf("  "+i18n.T("graduated %s")+"\n", g)
 	}
 	for _, s := range skipped {
-		fmt.Printf("  unmasked  %s\n", s)
+		fmt.Printf("  "+i18n.T("unmasked  %s")+"\n", s)
 	}
 	for _, l := range run.lifts {
-		fmt.Printf("  lifted    %s (%s)\n", l.Atom(), l.Reason)
+		fmt.Printf("  "+i18n.T("lifted    %s (%s)")+"\n", l.Atom(), l.Reason)
 	}
 }
 
@@ -173,10 +174,10 @@ func (ar *autoupdateRun) enableCooldownFlag(overlayPath string) error {
 	switch outcome {
 	case cooldown.EnableCreated:
 		ar.log().Info("cooldown: enabled for the overlay", "days", days, "file", cooldown.MaskRel)
-		output.Info.Printf("Cooldown enabled: every promoted version stays masked in %s for %d days\n", cooldown.MaskRel, days)
+		output.Info.Printf(i18n.T("Cooldown enabled: every promoted version stays masked in %s for %d days")+"\n", cooldown.MaskRel, days)
 	case cooldown.EnableRetuned:
 		ar.log().Info("cooldown: delay changed", "from", prev, "to", days, "file", cooldown.MaskRel)
-		output.Info.Printf("Cooldown delay changed from %d to %d days\n", prev, days)
+		output.Info.Printf(i18n.T("Cooldown delay changed from %d to %d days")+"\n", prev, days)
 	default:
 		ar.log().Debug("cooldown: already enabled with the requested delay", "days", days)
 	}

@@ -630,7 +630,7 @@ func applyRepairHint(result *autoupdate.ApplyResult) string {
 	if result == nil || result.Success || result.RepairBundle == "" {
 		return ""
 	}
-	return "(repair: bentoo overlay autoupdate --repair " + result.Package + ")"
+	return fmt.Sprintf(i18n.T("(repair: bentoo overlay autoupdate --repair %s)"), result.Package)
 }
 
 // runAutoupdate is the RunE of `overlay autoupdate`: o holds the flags of the
@@ -981,7 +981,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			if total > 0 {
 				percent = (done * 100) / total
 			}
-			fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
+			fmt.Printf("\r  "+i18n.T("Checking: [%3d%%] %d/%d"), percent, done, total)
 		}))
 	}
 
@@ -1259,7 +1259,7 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 		// Every divergence is report-only (an unclaimed ebuild, an entry whose
 		// directory is empty). There is no batch, so there is nothing to confirm:
 		// asking "write 0 pins?" would train the operator to say yes.
-		output.Info.Println("  Nothing to write: no entry's pin disagrees with the overlay.")
+		output.Info.Println("  " + i18n.T("Nothing to write: no entry's pin disagrees with the overlay."))
 		return
 	}
 
@@ -1276,11 +1276,11 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 		// Reported, never swallowed — but not fatal: the check itself succeeded
 		// and its exit code says so. The next run proposes the same batch again.
 		ar.log().Error("reconcile: failed to write version pins to packages.toml", "pins", len(pins), "err", err)
-		output.Error.Fprintf(os.Stderr, "  The registry was NOT updated: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  "+i18n.T("The registry was NOT updated: %v")+"\n", err)
 		return
 	}
-	output.Success.Printf("  Wrote %d version pin(s) to packages.toml.\n", len(pins))
-	output.Info.Println("  Review the diff before it is published: 'bentoo overlay diff'")
+	output.Success.Printf("  "+i18n.T("Wrote %d version pin(s) to packages.toml.")+"\n", len(pins))
+	output.Info.Println("  " + i18n.T("Review the diff before it is published: 'bentoo overlay diff'"))
 }
 
 // displayDivergences prints the three classes grouped, then the batch summary
@@ -1292,9 +1292,9 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 // and a truncated list hides exactly the line that is wrong.
 func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	fmt.Println()
-	output.Header.Println("Registry Reconciliation")
+	output.Header.Println(i18n.T("Registry Reconciliation"))
 	fmt.Println()
-	output.Info.Printf("  The registry and the overlay disagree on %d point(s).\n\n", len(divs))
+	output.Info.Printf("  "+i18n.T("The registry and the overlay disagree on %d point(s).")+"\n\n", len(divs))
 
 	// Counted up front, in their own loop, so the summary below cannot depend on
 	// which groups happened to be printed or in what order.
@@ -1342,7 +1342,7 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 		// two columns and not part of either.
 		width := render.ColumnWidth(keys)
 
-		fmt.Printf("  %s (%d):\n", heading, len(members))
+		fmt.Printf("  "+i18n.T("%s (%d):")+"\n", heading, len(members))
 		for _, d := range members {
 			fmt.Printf("    %s\n", line(d, padColumn(d.Key, width)))
 		}
@@ -1350,27 +1350,27 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 		return len(members)
 	}
 
-	_ = printGroup(autoupdate.StalePin, "Pins to write", func(d autoupdate.Divergence, key string) string {
+	_ = printGroup(autoupdate.StalePin, i18n.T("Pins to write"), func(d autoupdate.Divergence, key string) string {
 		if d.Pin == "" {
-			return fmt.Sprintf("%s (no pin) → %s", key, d.Disk)
+			return fmt.Sprintf(i18n.T("%s (no pin) → %s"), key, d.Disk)
 		}
 		return fmt.Sprintf("%s %s → %s", key, d.Pin, d.Disk)
 	})
-	unclaimed := printGroup(autoupdate.UnclaimedEbuild, "Ebuilds no entry keeps — NOT written", func(d autoupdate.Divergence, key string) string {
+	unclaimed := printGroup(autoupdate.UnclaimedEbuild, i18n.T("Ebuilds no entry keeps — NOT written"), func(d autoupdate.Divergence, key string) string {
 		return fmt.Sprintf("%s %s", key, d.Disk)
 	})
 	if unclaimed > 0 {
 		// Naming the command that acts on the finding closes the loop: an
 		// unclaimed ebuild is removed by a standalone sweep, which also reaches
 		// a package already at its upstream version.
-		output.Info.Println("  Remove them with: bentoo overlay autoupdate --clean")
+		output.Info.Println("  " + i18n.T("Remove them with: bentoo overlay autoupdate --clean"))
 		fmt.Println()
 	}
-	_ = printGroup(autoupdate.NoEbuild, "Entries whose directory holds no ebuild — NOT written", func(d autoupdate.Divergence, key string) string {
+	_ = printGroup(autoupdate.NoEbuild, i18n.T("Entries whose directory holds no ebuild — NOT written"), func(d autoupdate.Divergence, key string) string {
 		if d.Pin == "" {
-			return fmt.Sprintf("%s (no pin)", key)
+			return fmt.Sprintf(i18n.T("%s (no pin)"), key)
 		}
-		return fmt.Sprintf("%s pins %s", key, d.Pin)
+		return fmt.Sprintf(i18n.T("%s pins %s"), key, d.Pin)
 	})
 
 	if writable == 0 {
@@ -1381,16 +1381,15 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	// the operator needs to read it. On the first run these are ~316 entries
 	// gaining a pin they never had; on later runs the same number means
 	// something very different, so the two are counted apart.
-	output.Warning.Printf("  About to write %d version pin(s) into packages.toml", writable)
 	switch {
 	case corrected == 0:
-		output.Warning.Printf(" — all %d pinned for the FIRST time.\n", firstTime)
+		output.Warning.Printf("  "+i18n.T("About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time.")+"\n", writable, firstTime)
 	case firstTime == 0:
-		output.Warning.Printf(" — %d stale pin(s) corrected.\n", corrected)
+		output.Warning.Printf("  "+i18n.T("About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected.")+"\n", writable, corrected)
 	default:
-		output.Warning.Printf(" — %d pinned for the FIRST time, %d stale pin(s) corrected.\n", firstTime, corrected)
+		output.Warning.Printf("  "+i18n.T("About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected.")+"\n", writable, firstTime, corrected)
 	}
-	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
+	output.Warning.Println("  " + i18n.T("packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."))
 }
 
 // confirmRegistryWrite is the write gate. It reports whether the
@@ -1401,19 +1400,19 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on
 		// this path, so it works from a pipe, a cron job or a CI step.
-		output.Warning.Printf("  --yes given: writing %d version pin(s) without a prompt.\n", writable)
+		output.Warning.Printf("  "+i18n.T("--yes given: writing %d version pin(s) without a prompt.")+"\n", writable)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
 		// The divergences above ARE the report; this run writes nothing.
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
-		output.Info.Printf("  Re-run with --yes to write these %d version pin(s) unattended.\n", writable)
+		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing written."))
+		output.Info.Printf("  "+i18n.T("Re-run with --yes to write these %d version pin(s) unattended.")+"\n", writable)
 		return false
 	}
 	// ONE question covering every divergence above, not one per entry.
 	fmt.Println()
 	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
-		"Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)", writable, len(divs)))
+		i18n.T("Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"), writable, len(divs)))
 }
 
 // reportRevivableOrphans is the --check --revivable add-on: it resolves the
@@ -1490,7 +1489,7 @@ func (ar *autoupdateRun) runLint(overlayPath string) error {
 	}
 
 	if len(issues) == 0 {
-		output.Success.Println("packages.toml: record model OK")
+		output.Success.Println(i18n.T("packages.toml: record model OK"))
 		return nil
 	}
 	return failWith(1, fmt.Errorf("packages.toml: %d issue(s)", len(issues)))
@@ -1552,7 +1551,7 @@ func displayPendingUpdates(log *slog.Logger, updates []autoupdate.PendingUpdate)
 	}
 
 	fmt.Println()
-	output.Header.Println("Pending Updates")
+	output.Header.Println(i18n.T("Pending Updates"))
 	fmt.Println()
 
 	for _, u := range updates {
@@ -1560,18 +1559,18 @@ func displayPendingUpdates(log *slog.Logger, updates []autoupdate.PendingUpdate)
 		statusStr := output.Sprintf(statusColor, "[%s]", displayPendingField(string(u.Status)))
 
 		output.Package.Printf("  %s\n", displayPendingField(u.Package))
-		fmt.Printf("    Version: %s → %s\n", displayPendingField(u.CurrentVersion), displayPendingField(u.NewVersion))
-		fmt.Printf("    Status:  %s\n", statusStr)
+		fmt.Printf("    "+i18n.T("Version: %s → %s")+"\n", displayPendingField(u.CurrentVersion), displayPendingField(u.NewVersion))
+		fmt.Printf("    "+i18n.T("Status:  %s")+"\n", statusStr)
 		if u.Error != "" {
-			output.Error.Printf("    Error:   %s\n", displayPendingField(u.Error))
+			output.Error.Printf("    "+i18n.T("Error:   %s")+"\n", displayPendingField(u.Error))
 		}
-		fmt.Printf("    Detected: %s\n", u.DetectedAt.Format("2006-01-02 15:04:05"))
+		fmt.Printf("    "+i18n.T("Detected: %s")+"\n", u.DetectedAt.Format("2006-01-02 15:04:05"))
 		fmt.Println()
 	}
 
-	output.Info.Printf("Total: %d pending update(s)\n", len(updates))
-	output.Info.Println("Use 'bentoo overlay autoupdate --apply <package>' to apply an update")
-	output.Info.Println("Or 'bentoo overlay autoupdate --apply all' to apply every pending update")
+	output.Info.Printf(i18n.T("Total: %d pending update(s)")+"\n", len(updates))
+	output.Info.Println(i18n.T("Use 'bentoo overlay autoupdate --apply <package>' to apply an update"))
+	output.Info.Println(i18n.T("Or 'bentoo overlay autoupdate --apply all' to apply every pending update"))
 }
 
 // getStatusColor returns the appropriate color for an update status
@@ -2059,25 +2058,25 @@ func (ar *autoupdateRun) displayApplyAllResults(results []*autoupdate.ApplyResul
 	}
 
 	fmt.Println()
-	output.Header.Println("Apply All Summary")
-	output.Success.Printf("  Applied:  %d\n", applied)
+	output.Header.Println(i18n.T("Apply All Summary"))
+	output.Success.Printf("  "+i18n.T("Applied:  %d")+"\n", applied)
 	if obsolete > 0 {
-		output.Warning.Printf("  Obsolete: %d (pruned from pending)\n", obsolete)
+		output.Warning.Printf("  "+i18n.T("Obsolete: %d (pruned from pending)")+"\n", obsolete)
 	}
 	if held > 0 {
-		output.Warning.Printf("  Held:     %d (hold = true; kept in pending)\n", held)
+		output.Warning.Printf("  "+i18n.T("Held:     %d (hold = true; kept in pending)")+"\n", held)
 	}
 	if waiting > 0 {
-		output.Warning.Printf("  Waiting:  %d (required version not available yet; kept in pending)\n", waiting)
+		output.Warning.Printf("  "+i18n.T("Waiting:  %d (required version not available yet; kept in pending)")+"\n", waiting)
 	}
 	if unproven > 0 {
-		output.Warning.Printf("  Unproven: %d (no valid proof; run --check --llm, kept in pending)\n", unproven)
+		output.Warning.Printf("  "+i18n.T("Unproven: %d (no valid proof; run --check --llm, kept in pending)")+"\n", unproven)
 	}
 	if failures > 0 {
-		output.Error.Printf("  Failed:   %d\n", failures)
+		output.Error.Printf("  "+i18n.T("Failed:   %d")+"\n", failures)
 	}
 	if applied > 0 {
-		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+		output.Info.Println(i18n.T("Don't forget to commit the changes with 'bentoo overlay commit'"))
 	}
 }
 
@@ -2093,37 +2092,37 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 	}
 
 	fmt.Println()
-	output.Header.Println("Apply Result")
+	output.Header.Println(i18n.T("Apply Result"))
 	fmt.Println()
 
 	output.Package.Printf("  %s\n", result.Package)
-	fmt.Printf("    Version: %s → %s\n", result.OldVersion, result.NewVersion)
+	fmt.Printf("    "+i18n.T("Version: %s → %s")+"\n", result.OldVersion, result.NewVersion)
 
 	if result.Obsolete {
-		output.Warning.Println("    Status:  Obsolete (pruned from pending)")
+		output.Warning.Println("    " + i18n.T("Status:  Obsolete (pruned from pending)"))
 		if result.ObsoleteReason != "" {
-			output.Info.Printf("    Reason:  %s\n", result.ObsoleteReason)
+			output.Info.Printf("    "+i18n.T("Reason:  %s")+"\n", result.ObsoleteReason)
 		}
 		return
 	}
 
 	if result.Unproven {
-		output.Warning.Println("    Status:  Unproven (not published; kept in pending)")
-		output.Info.Printf("    Reason:  %s\n", result.UnprovenReason)
+		output.Warning.Println("    " + i18n.T("Status:  Unproven (not published; kept in pending)"))
+		output.Info.Printf("    "+i18n.T("Reason:  %s")+"\n", result.UnprovenReason)
 		return
 	}
 
 	if len(result.Waiting) > 0 {
-		output.Warning.Println("    Status:  Waiting (kept in pending)")
+		output.Warning.Println("    " + i18n.T("Status:  Waiting (kept in pending)"))
 		for _, w := range result.Waiting {
-			output.Info.Printf("    Waiting: %s\n", w)
+			output.Info.Printf("    "+i18n.T("Waiting: %s")+"\n", w)
 		}
 		return
 	}
 
 	if result.Held {
-		output.Warning.Printf("    Status:  Held (%s; kept in pending)\n", result.HoldReason)
-		output.Info.Printf("    Reason:  bumped by hand — drop %q in packages.toml to automate it\n", result.HoldReason)
+		output.Warning.Printf("    "+i18n.T("Status:  Held (%s; kept in pending)")+"\n", result.HoldReason)
+		output.Info.Printf("    "+i18n.T("Reason:  bumped by hand — drop %q in packages.toml to automate it")+"\n", result.HoldReason)
 		return
 	}
 
@@ -2132,11 +2131,11 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 	} else if action, ok := autoupdate.VendorUploadAction(result.Error); ok {
 		// Not a failure of the bump: the tarball it needs exists and was
 		// digested, and only its publication is owed by the operator.
-		output.Warning.Println("    Status:  Upload pending")
-		output.Warning.Printf("    Action:  %s\n", action)
-		output.Info.Println("             (then re-run --apply: the served tarball is fetched, not regenerated)")
+		output.Warning.Println("    " + i18n.T("Status:  Upload pending"))
+		output.Warning.Printf("    "+i18n.T("Action:  %s")+"\n", action)
+		output.Info.Println("             " + i18n.T("(then re-run --apply: the served tarball is fetched, not regenerated)"))
 		if result.StagedPath != "" {
-			output.Info.Printf("    Staged:  %s\n", result.StagedPath)
+			output.Info.Printf("    "+i18n.T("Staged:  %s")+"\n", result.StagedPath)
 		}
 	} else {
 		displayApplyFailure(result)
@@ -2145,12 +2144,12 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 
 // displayApplySuccess prints the details of a bump that was applied.
 func (ar *autoupdateRun) displayApplySuccess(result *autoupdate.ApplyResult) {
-	output.Success.Println("    Status:  Success")
+	output.Success.Println("    " + i18n.T("Status:  Success"))
 	if result.Fixed {
-		output.Warning.Printf("    Fixed:   manifest repaired by LLM — %s\n", result.FixSummary)
+		output.Warning.Printf("    "+i18n.T("Fixed:   manifest repaired by LLM — %s")+"\n", result.FixSummary)
 	}
 	if result.QASummary != "" {
-		output.Warning.Printf("    QA:      pkgcheck findings after the fix — review before committing:\n%s\n", result.QASummary)
+		output.Warning.Printf("    "+i18n.T("QA:      pkgcheck findings after the fix — review before committing:")+"\n%s\n", result.QASummary)
 	}
 	displayCleanReport(result)
 	if result.CleanWarning != "" {
@@ -2159,32 +2158,32 @@ func (ar *autoupdateRun) displayApplySuccess(result *autoupdate.ApplyResult) {
 		// entry, which Apply stores in CleanWarning. ApplyResult carries no
 		// sweepPlan and therefore no Blocked field, so this IS the line —
 		// printing a second one would repeat the same entry name twice.
-		output.Warning.Printf("    Clean:   %s\n", result.CleanWarning)
+		output.Warning.Printf("    "+i18n.T("Clean:   %s")+"\n", result.CleanWarning)
 	}
 	if result.RegistryWarning != "" {
 		// Its own label, deliberately not "Clean:". The pin is written on
 		// every successful apply while the sweep runs only under --clean, so
 		// filing a registry failure under the clean step would blame a step
 		// that may not even have run.
-		output.Warning.Printf("    Registry: %s\n", result.RegistryWarning)
+		output.Warning.Printf("    "+i18n.T("Registry: %s")+"\n", result.RegistryWarning)
 	}
 	if result.MetadataCacheWarning != "" {
-		output.Warning.Printf("    Cache:   %s\n", result.MetadataCacheWarning)
+		output.Warning.Printf("    "+i18n.T("Cache:   %s")+"\n", result.MetadataCacheWarning)
 	}
-	output.Success.Println("\n✓ Update applied successfully")
-	output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+	output.Success.Println("\n" + i18n.T("✓ Update applied successfully"))
+	output.Info.Println(i18n.T("Don't forget to commit the changes with 'bentoo overlay commit'"))
 }
 
 // displayApplyFailure prints the error, log, staged tree and repair hint of a
 // bump that failed.
 func displayApplyFailure(result *autoupdate.ApplyResult) {
-	output.Error.Println("    Status:  Failed")
+	output.Error.Println("    " + i18n.T("Status:  Failed"))
 	if result.Error != nil {
-		output.Error.Printf("    Error:   %v\n", result.Error)
+		output.Error.Printf("    "+i18n.T("Error:   %v")+"\n", result.Error)
 		displayChildRuns(result.Error)
 	}
 	if result.LogPath != "" {
-		output.Info.Printf("    Log:     %s\n", result.LogPath)
+		output.Info.Printf("    "+i18n.T("Log:     %s")+"\n", result.LogPath)
 	}
 	if result.StagedPath != "" {
 		// The operator's end of staged-tree retention: the bump was
@@ -2196,11 +2195,11 @@ func displayApplyFailure(result *autoupdate.ApplyResult) {
 		// Failure branch only, and that is not merely where it happens to sit: a
 		// promoted bump clears StagedPath precisely so no success ever points at
 		// a tree whose bytes are already in the overlay.
-		output.Info.Printf("    Staged:  %s\n", result.StagedPath)
-		output.Info.Println("             (the tree the gates read — inspect it, or re-run a gate there by hand)")
+		output.Info.Printf("    "+i18n.T("Staged:  %s")+"\n", result.StagedPath)
+		output.Info.Println("             " + i18n.T("(the tree the gates read — inspect it, or re-run a gate there by hand)"))
 	}
 	if result.RepairBundle != "" {
-		output.Info.Printf("    Repair:  bentoo overlay autoupdate --repair %s\n", result.Package)
+		output.Info.Printf("    "+i18n.T("Repair:  bentoo overlay autoupdate --repair %s")+"\n", result.Package)
 	}
 }
 
@@ -2229,11 +2228,11 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 		for _, v := range result.CleanRemoved {
 			names = append(names, fmt.Sprintf("%s-%s.ebuild", pkgName, v))
 		}
-		fmt.Printf("    Removed: %s (%d ebuilds)\n", strings.Join(names, ", "), len(names))
+		fmt.Printf("    "+i18n.T("Removed: %s (%d ebuilds)")+"\n", strings.Join(names, ", "), len(names))
 	case result.CleanedOldVersion != "":
 		// The single-removal case keeps its original wording verbatim: it is by
 		// far the common one and nothing about it changed.
-		fmt.Printf("    Removed: %s-%s.ebuild (old version)\n", pkgName, result.CleanedOldVersion)
+		fmt.Printf("    "+i18n.T("Removed: %s-%s.ebuild (old version)")+"\n", pkgName, result.CleanedOldVersion)
 	}
 
 	if len(result.CleanKept) == 0 {
@@ -2253,12 +2252,12 @@ func displayCleanReport(result *autoupdate.ApplyResult) {
 		// two files; order them by text so the report is total and stable.
 		return kept[i] < kept[j]
 	})
-	fmt.Println("    Kept:")
+	fmt.Println("    " + i18n.T("Kept:"))
 	for _, v := range kept {
 		if key := result.CleanKept[v]; key != "" {
-			fmt.Printf("      %s-%s.ebuild — claimed by %s\n", pkgName, v, key)
+			fmt.Printf("      "+i18n.T("%s-%s.ebuild — claimed by %s")+"\n", pkgName, v, key)
 		} else {
-			fmt.Printf("      %s-%s.ebuild — kept by rule (live ebuild, or the last release standing)\n", pkgName, v)
+			fmt.Printf("      "+i18n.T("%s-%s.ebuild — kept by rule (live ebuild, or the last release standing)")+"\n", pkgName, v)
 		}
 	}
 }
@@ -2391,24 +2390,26 @@ func (ar *autoupdateRun) runReviveList(ctx context.Context, overlayPath, configD
 // revive" note instead of an empty table.
 func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 	if len(candidates) == 0 {
-		output.Success.Println("Nothing to revive — no orphaned package has an upstream newer than ::gentoo")
+		output.Success.Println(i18n.T("Nothing to revive — no orphaned package has an upstream newer than ::gentoo"))
 		return
 	}
 
 	fmt.Println()
-	output.Header.Println("Revivable Orphans")
+	output.Header.Println(i18n.T("Revivable Orphans"))
 	fmt.Println()
 
+	// The headings are padded in display cells, not truncated by bytes: a
+	// translated heading may be wider in bytes than on screen.
 	output.Dim.Printf("  %s %s %s\n",
-		truncatePkgName("PACKAGE", 40), truncatePkgName("GENTOO", 16), "UPSTREAM")
+		padColumn(i18n.T("PACKAGE"), 40), padColumn(i18n.T("GENTOO"), 16), i18n.T("UPSTREAM"))
 	for _, c := range candidates {
 		output.Package.Printf("  %s ", truncatePkgName(c.Package, 40))
 		fmt.Printf("%s %s\n", truncatePkgName(c.GentooVersion, 16), c.UpstreamVersion)
 	}
 
 	fmt.Println()
-	output.Info.Printf("Found %d revivable orphan(s)\n", len(candidates))
-	output.Info.Println("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate")
+	output.Info.Printf(i18n.T("Found %d revivable orphan(s)")+"\n", len(candidates))
+	output.Info.Println(i18n.T("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate"))
 }
 
 // reviveApplierOptions is the option set the --revive Applier is built with.
@@ -2477,7 +2478,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 			ar.log().Warn("revive scan completed with soft errors", "err", ferr)
 		}
 		if len(candidates) == 0 {
-			output.Success.Println("Nothing to revive — no orphaned package has an upstream newer than ::gentoo")
+			output.Success.Println(i18n.T("Nothing to revive — no orphaned package has an upstream newer than ::gentoo"))
 			return nil
 		}
 		for _, c := range candidates {
@@ -2522,7 +2523,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 
 	outcomes := make([]autoupdate.ReviveOutcome, 0, len(targets))
 	for _, pkg := range targets {
-		output.Info.Printf("Reviving %s...\n", pkg)
+		output.Info.Printf(i18n.T("Reviving %s...")+"\n", pkg)
 		outcomes = append(outcomes, reviver.Revive(ctx, pkg))
 	}
 
@@ -2538,7 +2539,7 @@ func (ar *autoupdateRun) runRevive(ctx context.Context, overlayPath, configDir, 
 // caller can set the exit code.
 func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 	fmt.Println()
-	output.Header.Println("Revive Summary")
+	output.Header.Println(i18n.T("Revive Summary"))
 	fmt.Println()
 
 	var revived, skipped, failed int
@@ -2559,15 +2560,15 @@ func displayReviveSummary(outcomes []autoupdate.ReviveOutcome) int {
 	}
 
 	fmt.Println()
-	output.Success.Printf("  Revived: %d\n", revived)
+	output.Success.Printf("  "+i18n.T("Revived: %d")+"\n", revived)
 	if skipped > 0 {
-		output.Warning.Printf("  Skipped: %d\n", skipped)
+		output.Warning.Printf("  "+i18n.T("Skipped: %d")+"\n", skipped)
 	}
 	if failed > 0 {
-		output.Error.Printf("  Failed:  %d\n", failed)
+		output.Error.Printf("  "+i18n.T("Failed:  %d")+"\n", failed)
 	}
 	if revived > 0 {
-		output.Info.Println("Don't forget to commit the changes with 'bentoo overlay commit'")
+		output.Info.Println(i18n.T("Don't forget to commit the changes with 'bentoo overlay commit'"))
 	}
 
 	return failed
@@ -2703,7 +2704,7 @@ func readBuildHistory(ctx context.Context) map[string]validate.BuildEstimate {
 	defer cancel()
 	out, err := exec.CommandContext(ctx, "qlop", "-a", "-M").Output()
 	if err != nil {
-		output.Warning.Printf("  The build budget has no history to read (qlop -a -M: %v); every package counts as expensive.\n", err)
+		output.Warning.Printf("  "+i18n.T("The build budget has no history to read (qlop -a -M: %v); every package counts as expensive.")+"\n", err)
 		return map[string]validate.BuildEstimate{}
 	}
 	return validate.ParseBuildHistory(out)

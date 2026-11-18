@@ -3,6 +3,8 @@ package report
 import (
 	"fmt"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // Sections is the autoupdate check's report as structure: what it says, in
@@ -25,7 +27,7 @@ import (
 // labelled by Run.Sections before it delegates here, because "the run reached
 // the end of its plan" is true of any batch, not of this payload.
 func (r AutoupdateCheck) Sections(opts SectionOptions) []Section {
-	blocks := []Section{versionCheckSection(r, opts.ShowAll)}
+	blocks := []Section{versionCheckSectionIn(r, opts)}
 
 	// A run that planned nothing has nothing to say about a plan, its results
 	// or its tally, and says so by omitting all three rather than by stating
@@ -40,12 +42,12 @@ func (r AutoupdateCheck) Sections(opts SectionOptions) []Section {
 	}
 
 	if !opts.SkipPlan {
-		blocks = append(blocks, validationPlanSection(r))
+		blocks = append(blocks, validationPlanSection(r, opts))
 	}
 
 	return append(blocks,
-		validationResultsSection(r),
-		validationSummarySection(r),
+		validationResultsSection(r, opts),
+		validationSummarySection(r, opts),
 	)
 }
 
@@ -58,24 +60,37 @@ func (r AutoupdateCheck) Sections(opts SectionOptions) []Section {
 // listEvery is the screen's --all and the export's only setting: an export
 // lists every package it looked at whatever the terminal was asked for.
 func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
-	s := Section{Title: "Version Check Results"}
+	return versionCheckSectionIn(r, SectionOptions{ShowAll: listEvery})
+}
+
+// versionCheckSectionIn is versionCheckSection said in the language opts
+// selects; opts.ShowAll is its listEvery.
+func versionCheckSectionIn(r AutoupdateCheck, opts SectionOptions) Section {
+	listEvery := opts.ShowAll
+	s := Section{Title: opts.t(i18n.N("Version Check Results"))}
 
 	if len(r.Scanned) == 0 {
-		s.Lead = []string{"No package is configured for autoupdate."}
+		s.Lead = []string{opts.t(i18n.N("No package is configured for autoupdate."))}
 		return s
 	}
 
 	found := scanCounts(r.Scanned)
-	s.Lead = []string{fmt.Sprintf("%d package(s) checked, %d with a pending update.", len(r.Scanned), found[conditionUpdate])}
+	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) checked, %d with a pending update.")), len(r.Scanned), found[conditionUpdate])}
 
-	s.Rows.Headers = []string{"PACKAGE", "TYPE", "CURRENT", "CANDIDATE", "STATE"}
+	s.Rows.Headers = []string{
+		opts.t(i18n.N("PACKAGE")),
+		opts.t(i18n.N("TYPE")),
+		opts.t(i18n.N("CURRENT")),
+		opts.t(i18n.N("CANDIDATE")),
+		opts.t(i18n.N("STATE")),
+	}
 	for _, scanned := range r.Scanned {
 		if conditionOf(scanned) == conditionUpToDate && !listEvery {
 			// Counted below, not listed here.
 			continue
 		}
-		state, detail := scanState(scanned)
-		detail = withRequirementLines(detail, scanned.Requirements)
+		state, detail := scanState(scanned, opts)
+		detail = withRequirementLines(detail, scanned.Requirements, opts)
 		s.Rows.Rows = append(s.Rows.Rows, Row{
 			Cells:  []string{scanned.Package, scanned.Type, scanned.CurrentVersion, scanned.CandidateVersion, state},
 			Detail: detail,
@@ -87,23 +102,23 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 			// The list is IN ADDITION TO the count, never instead of it.
 			// A reader who scrolled past the rows still gets the number, and the
 			// two goldens differ in both places rather than only in one.
-			s.Notes = append(s.Notes, fmt.Sprintf("%d package(s) are up to date and are listed above.", found[conditionUpToDate]))
+			s.Notes = append(s.Notes, fmt.Sprintf(opts.t(i18n.N("%d package(s) are up to date and are listed above.")), found[conditionUpToDate]))
 		} else {
-			s.Notes = append(s.Notes, fmt.Sprintf("%d package(s) are up to date and are not listed; pass --all to list them.", found[conditionUpToDate]))
+			s.Notes = append(s.Notes, fmt.Sprintf(opts.t(i18n.N("%d package(s) are up to date and are not listed; pass --all to list them.")), found[conditionUpToDate]))
 		}
 	}
 	for _, stated := range []struct {
 		when condition
 		text string
 	}{
-		{conditionOrphaned, "%d package(s) have no ebuild in the overlay."},
-		{conditionManualPromotion, "%d package(s) left their series upstream and need a manual promotion."},
-		{conditionFailed, "%d package(s) could not be checked."},
-		{conditionNotComparable, "%d package(s) reported a version that could not be ordered against the current one."},
-		{conditionHeld, "%d package(s) have an update held by min_age_days."},
+		{conditionOrphaned, i18n.N("%d package(s) have no ebuild in the overlay.")},
+		{conditionManualPromotion, i18n.N("%d package(s) left their series upstream and need a manual promotion.")},
+		{conditionFailed, i18n.N("%d package(s) could not be checked.")},
+		{conditionNotComparable, i18n.N("%d package(s) reported a version that could not be ordered against the current one.")},
+		{conditionHeld, i18n.N("%d package(s) have an update held by min_age_days.")},
 	} {
 		if found[stated.when] > 0 {
-			s.Notes = append(s.Notes, fmt.Sprintf(stated.text, found[stated.when]))
+			s.Notes = append(s.Notes, fmt.Sprintf(opts.t(stated.text), found[stated.when]))
 		}
 	}
 
@@ -116,7 +131,7 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 	// It is stated whichever way listEvery went, because it is a count and a
 	// count never depends on the listing — the same rule the up-to-date
 	// note above follows, and the reason every golden gains this line.
-	s.Notes = append(s.Notes, tierNote(tierCounts(r.Scanned)))
+	s.Notes = append(s.Notes, tierNote(tierCounts(r.Scanned), opts))
 
 	return s
 }
@@ -128,11 +143,11 @@ func versionCheckSection(r AutoupdateCheck, listEvery bool) Section {
 // is the ONE place the reason of a package whose result merely repeats it is
 // stated at all — validationResultsSection prints no second copy — so a reason
 // dropped here would be gone.
-func validationPlanSection(r AutoupdateCheck) Section {
-	s := Section{Title: "Validation Plan"}
+func validationPlanSection(r AutoupdateCheck, opts SectionOptions) Section {
+	s := Section{Title: opts.t(i18n.N("Validation Plan"))}
 
 	if len(r.Plan) == 0 {
-		s.Lead = []string{"No pending update to validate."}
+		s.Lead = []string{opts.t(i18n.N("No pending update to validate."))}
 		return s
 	}
 
@@ -142,20 +157,25 @@ func validationPlanSection(r AutoupdateCheck) Section {
 			excluded++
 		}
 	}
-	lead := fmt.Sprintf("%d package(s) to evaluate", len(r.Plan))
+	lead := fmt.Sprintf(opts.t(i18n.N("%d package(s) to evaluate.")), len(r.Plan))
 	if excluded > 0 {
-		lead += fmt.Sprintf(", %d of them excluded by policy", excluded)
+		lead = fmt.Sprintf(opts.t(i18n.N("%d package(s) to evaluate, %d of them excluded by policy.")), len(r.Plan), excluded)
 	}
-	s.Lead = []string{lead + "."}
+	s.Lead = []string{lead}
 
-	s.Rows.Headers = []string{"PACKAGE", "BUMP", "CLASS", "DEPTH"}
+	s.Rows.Headers = []string{
+		opts.t(i18n.N("PACKAGE")),
+		opts.t(i18n.N("BUMP")),
+		opts.t(i18n.N("CLASS")),
+		opts.t(i18n.N("DEPTH")),
+	}
 	for _, entry := range r.Plan {
 		depth := entry.Depth
 		if entry.Skipped {
 			// A package no gate will run for says so on its own row. An operator
 			// reads a shorter result list as progress unless the plan already
 			// told them it would be shorter.
-			depth += " [not validated]"
+			depth = fmt.Sprintf(opts.t(i18n.N("%s [not validated]")), depth)
 		}
 		s.Rows.Rows = append(s.Rows.Rows, Row{
 			Cells:  []string{entry.Package, bump(entry.CurrentVersion, entry.CandidateVersion), entry.Class, depth},
@@ -180,15 +200,20 @@ func validationPlanSection(r AutoupdateCheck) Section {
 // derivation that could disagree with the model. Which reason to print is
 // settled here so every syntax inherits it; nothing is removed from the report,
 // so an export with no width budget still carries the full reason.
-func validationResultsSection(r AutoupdateCheck) Section {
-	s := Section{Title: "Validation Results"}
+func validationResultsSection(r AutoupdateCheck, opts SectionOptions) Section {
+	s := Section{Title: opts.t(i18n.N("Validation Results"))}
 
 	if len(r.Results) == 0 {
-		s.Lead = []string{"No package was evaluated."}
+		s.Lead = []string{opts.t(i18n.N("No package was evaluated."))}
 		return s
 	}
 
-	s.Rows.Headers = []string{"PACKAGE", "CANDIDATE", "DEPTH", "STATE"}
+	s.Rows.Headers = []string{
+		opts.t(i18n.N("PACKAGE")),
+		opts.t(i18n.N("CANDIDATE")),
+		opts.t(i18n.N("DEPTH")),
+		opts.t(i18n.N("STATE")),
+	}
 	for _, result := range r.Results {
 		s.Rows.Rows = append(s.Rows.Rows, Row{
 			Cells:  []string{result.Package, result.CandidateVersion, result.Depth, string(result.State)},
@@ -226,19 +251,19 @@ func resultDetail(result ValidationRow) string {
 // landed in a column: for a complete run it equals len(Plan) (Reconciles() says
 // so), and for a run stopped part way it is the honest smaller number, which
 // leaves the incomplete-run label (Run.Complete, Run.NotEvaluated) to say why.
-func validationSummarySection(r AutoupdateCheck) Section {
+func validationSummarySection(r AutoupdateCheck, opts SectionOptions) Section {
 	counted := r.Tally
 
 	return Section{
-		Title: "Validation Summary",
+		Title: opts.t(i18n.N("Validation Summary")),
 		Lead: []string{
-			fmt.Sprintf("%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped.",
+			fmt.Sprintf(opts.t(i18n.N("%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped.")),
 				counted.Total(), counted.Proved, counted.Errored, counted.Inconclusive, counted.Skipped),
-			fmt.Sprintf("Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded.",
+			fmt.Sprintf(opts.t(i18n.N("Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded.")),
 				r.States.Ready, r.States.Wait, r.States.Human, r.States.Excluded),
 		},
 		Notes: []string{
-			"Nothing was published: a check writes no ebuild and no version pin.",
+			opts.t(i18n.N("Nothing was published: a check writes no ebuild and no version pin.")),
 		},
 	}
 }
@@ -384,12 +409,12 @@ func tierCounts(scanned []PackageResult) tierTally {
 // nobody resolved those packages, so putting them in either column — or quietly
 // defaulting them to source, as the producer's own fallback does — would state
 // a fact the scan never established.
-func tierNote(counted tierTally) string {
-	note := fmt.Sprintf("Checked %d source, %d bin", counted.source, counted.bin)
+func tierNote(counted tierTally, opts SectionOptions) string {
 	if counted.unresolved > 0 {
-		note += fmt.Sprintf("; %d package(s) resolved to neither tier", counted.unresolved)
+		return fmt.Sprintf(opts.t(i18n.N("Checked %d source, %d bin; %d package(s) resolved to neither tier.")),
+			counted.source, counted.bin, counted.unresolved)
 	}
-	return note + "."
+	return fmt.Sprintf(opts.t(i18n.N("Checked %d source, %d bin.")), counted.source, counted.bin)
 }
 
 // scanState names a package's condition for the STATE column and returns the
@@ -397,31 +422,31 @@ func tierNote(counted tierTally) string {
 //
 // Only the words are decided here; which condition applies was decided once, by
 // conditionOf.
-func scanState(result PackageResult) (state, detail string) {
+func scanState(result PackageResult, opts SectionOptions) (state, detail string) {
 	switch conditionOf(result) {
 	case conditionOrphaned:
-		return "orphaned", "no ebuild in the overlay: the version columns say nothing about this package"
+		return opts.t(i18n.N("orphaned")), opts.t(i18n.N("no ebuild in the overlay: the version columns say nothing about this package"))
 	case conditionManualPromotion:
-		return "manual promotion", result.ManualPromotion
+		return opts.t(i18n.N("manual promotion")), result.ManualPromotion
 	case conditionFailed:
-		return "error", result.Error
+		return opts.t(i18n.N("error")), result.Error
 	case conditionNotComparable:
-		return "not comparable" + cacheTag(result),
-			fmt.Sprintf("%q could not be ordered against the current %s; check the parser configuration",
+		return cacheTag(result, opts.t(i18n.N("not comparable")), opts),
+			fmt.Sprintf(opts.t(i18n.N("%q could not be ordered against the current %s; check the parser configuration")),
 				result.CandidateVersion, result.CurrentVersion)
 	case conditionHeld:
-		return "held" + cacheTag(result), result.Held
+		return cacheTag(result, opts.t(i18n.N("held")), opts), result.Held
 	case conditionUpdate:
-		return "update" + cacheTag(result), ""
+		return cacheTag(result, opts.t(i18n.N("update")), opts), ""
 	default:
-		return "up to date" + cacheTag(result), ""
+		return cacheTag(result, opts.t(i18n.N("up to date")), opts), ""
 	}
 }
 
 // withRequirementLines appends one line per requirement to a row's detail,
 // worded by its state, so a bump waiting on another package says so under its
 // own row before anyone tries to apply it.
-func withRequirementLines(detail string, reqs []Requirement) string {
+func withRequirementLines(detail string, reqs []Requirement, opts SectionOptions) string {
 	lines := make([]string, 0, len(reqs)+1)
 	if detail != "" {
 		lines = append(lines, detail)
@@ -429,25 +454,25 @@ func withRequirementLines(detail string, reqs []Requirement) string {
 	for _, r := range reqs {
 		switch r.State {
 		case "missing":
-			lines = append(lines, fmt.Sprintf("waits for %s-%s (not detected)", r.Package, r.Version))
+			lines = append(lines, fmt.Sprintf(opts.t(i18n.N("waits for %s-%s (not detected)")), r.Package, r.Version))
 		default:
-			lines = append(lines, fmt.Sprintf("requires %s-%s (%s)", r.Package, r.Version, r.State))
+			lines = append(lines, fmt.Sprintf(opts.t(i18n.N("requires %s-%s (%s)")), r.Package, r.Version, r.State))
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-// cacheTag marks an answer that came from cache rather than from upstream, which
-// is why a run may not reflect a bump made minutes ago.
+// cacheTag marks state as an answer that came from cache rather than from
+// upstream, which is why a run may not reflect a bump made minutes ago.
 //
-// It is appended to whichever condition applies instead of being a condition of
+// It qualifies whichever condition applies instead of being a condition of
 // its own, because FromCache is orthogonal to the four: it qualifies where the
 // answer came from, not what the answer was.
-func cacheTag(result PackageResult) string {
+func cacheTag(result PackageResult, state string, opts SectionOptions) string {
 	if result.FromCache {
-		return " (cached)"
+		return fmt.Sprintf(opts.t(i18n.N("%s (cached)")), state)
 	}
-	return ""
+	return state
 }
 
 // bump is the two ends of a version change in one cell. Both ends travel

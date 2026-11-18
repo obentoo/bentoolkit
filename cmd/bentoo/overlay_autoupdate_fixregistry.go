@@ -18,6 +18,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/llm"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // promptRegistryFixes drives the interactive per-package LLM registry-fix loop.
@@ -56,7 +57,9 @@ func promptRegistryFixes(ctx context.Context, overlayPath string, registryFixer 
 loop:
 	for _, pkg := range pkgs {
 		if !applyAll {
-			fmt.Printf("Fix registry for %s with LLM? [y/N/a/q] ", pkg)
+			// The answers stay y, n, a and q in every language; only the question
+			// is translated.
+			fmt.Printf(i18n.T("Fix registry for %s with LLM? [y/N/a/q]")+" ", pkg)
 			answer := readAnswer(reader)
 			switch answer {
 			case "q":
@@ -76,7 +79,7 @@ loop:
 		a := autoupdate.AttemptRegistryFix(ctx, overlayPath, pkg, failures[pkg], registryFixer, newChecker)
 		switch a.Status {
 		case autoupdate.RegistryFixSkipped:
-			fmt.Printf("  skipping %s: %s: %v\n", pkg, registryFixStageLine(a.Stage), a.Err)
+			fmt.Printf("  "+i18n.T("skipping %s: %s: %v")+"\n", pkg, registryFixStageLine(a.Stage), a.Err)
 			skipped++
 
 		case autoupdate.RegistryFixReverted:
@@ -90,10 +93,10 @@ loop:
 			// Name the model that made the edit; FormatModelUsed says "model
 			// alias ..." when the configured model was an alias, because an
 			// alias resolves to a different model over time.
-			fmt.Printf("✔ %s fixed using %s: %s (resolved upstream %s)\n",
+			fmt.Printf(i18n.T("✔ %s fixed using %s: %s (resolved upstream %s)")+"\n",
 				pkg, fixer.FormatModelUsed(a.Result.Model), a.Result.Summary, a.Recheck.UpstreamVersion)
 			if a.Recheck.NotComparable {
-				fmt.Printf("  warning: %s extracted version %q is not orderable against the current version; the parser may need more work\n", pkg, a.Recheck.UpstreamVersion)
+				fmt.Printf("  "+i18n.T("warning: %s extracted version %q is not orderable against the current version; the parser may need more work")+"\n", pkg, a.Recheck.UpstreamVersion)
 			}
 			fixed++
 
@@ -102,9 +105,9 @@ loop:
 			// operator may choose to KEEP is exactly the one an audit will come
 			// back to. It also names the tools the agent was refused, the
 			// likeliest reason its fix fell short, never their input.
-			fmt.Printf("  %s still failing after fix using %s: %s%s\n  error: %v\n",
+			fmt.Printf("  "+i18n.T("%s still failing after fix using %s: %s%s\n  error: %v")+"\n",
 				pkg, fixer.FormatModelUsed(a.Result.Model), a.Result.Summary, llm.RefusedToolsNote(a.Result.DeniedTools), a.RecheckErr)
-			fmt.Print("Keep the edit anyway? [y/N] ")
+			fmt.Print(i18n.T("Keep the edit anyway? [y/N]") + " ")
 			if readAnswer(reader) == "y" {
 				// User chose to keep a still-failing edit.
 				fixed++
@@ -116,7 +119,7 @@ loop:
 		}
 	}
 
-	fmt.Printf("fixed %d · reverted %d · skipped %d\n", fixed, reverted, skipped)
+	fmt.Printf(i18n.T("fixed %d · reverted %d · skipped %d")+"\n", fixed, reverted, skipped)
 }
 
 // registryFixStageLine is the wording each stopped stage has always printed
@@ -124,15 +127,15 @@ loop:
 func registryFixStageLine(stage autoupdate.RegistryFixStage) string {
 	switch stage {
 	case autoupdate.RegistryFixStageSnapshot:
-		return "could not snapshot packages.toml"
+		return i18n.T("could not snapshot packages.toml")
 	case autoupdate.RegistryFixStageLoad:
-		return "could not load packages.toml"
+		return i18n.T("could not load packages.toml")
 	case autoupdate.RegistryFixStageFixer:
-		return "registry fix failed"
+		return i18n.T("registry fix failed")
 	case autoupdate.RegistryFixStageChecker:
-		return "could not build checker for re-check"
+		return i18n.T("could not build checker for re-check")
 	default:
-		return fmt.Sprintf("registry fix stage %d", int(stage))
+		return fmt.Sprintf(i18n.T("registry fix stage %d"), int(stage))
 	}
 }
 
@@ -153,6 +156,6 @@ func readAnswer(reader *bufio.Reader) string {
 // gives the user the information to recover manually.
 func warnIfNotRestored(pkg string, err error) {
 	if err != nil {
-		fmt.Printf("  warning: could not restore packages.toml for %s: %v\n", pkg, err)
+		fmt.Printf("  "+i18n.T("warning: could not restore packages.toml for %s: %v")+"\n", pkg, err)
 	}
 }

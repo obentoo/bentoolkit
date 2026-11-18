@@ -16,6 +16,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 )
@@ -909,7 +910,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 	}
 
 	gate := gateForDepth(req.Depth)
-	fixLine := fmt.Sprintf("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild", gate, pkg, version)
+	fixLine := fmt.Sprintf(i18n.T("the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild"), gate, pkg, version)
 	a.logger().Info("gate failed; invoking the LLM build fixer to repair the staged ebuild",
 		"gate", gate, "package", pkg, "version", version)
 	a.substage(result, pkg, fixer.StageBuildFix)
@@ -971,7 +972,7 @@ func (a *Applier) repairBuildGatesAndRerun(ctx context.Context, cand candidatePa
 
 	result.Fixed = true
 	result.FixSummary = summary
-	repaired := fmt.Sprintf("LLM build fixer repaired %s-%s using %s: %s", pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
+	repaired := fmt.Sprintf(i18n.T("LLM build fixer repaired %s-%s using %s: %s"), pkg, version, fixer.FormatModelUsed(fixRes.Model), summary)
 	a.logger().Info("LLM build fixer repaired the staged ebuild",
 		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", summary)
 	a.reporter.Log("info", repaired)

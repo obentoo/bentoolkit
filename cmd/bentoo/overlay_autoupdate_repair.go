@@ -16,6 +16,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/repair"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -95,7 +96,7 @@ func (ar *autoupdateRun) runRepairFor(ctx context.Context, pkg, overlayPath, con
 	}
 	printRepairBundle(target)
 	if !ar.confirmRepairSession(ctx, pkgDir) {
-		output.Info.Println("No session started; the bundle and the staged tree are unchanged.")
+		output.Info.Println(i18n.T("No session started; the bundle and the staged tree are unchanged."))
 		return nil
 	}
 
@@ -152,18 +153,18 @@ func repairSecretEnvNames(environ []string, auCfg config.AutoupdateConfig) []str
 // printRepairBundle shows what the session is about to work on.
 func printRepairBundle(target repairTarget) {
 	b := target.bundle
-	refused := "none"
+	refused := i18n.T("none")
 	if len(b.RefusedTools) > 0 {
 		refused = strings.Join(b.RefusedTools, ", ")
 	}
 	fmt.Println()
-	output.Header.Println("Repair")
+	output.Header.Println(i18n.T("Repair"))
 	output.Package.Printf("  %s\n", b.Package)
-	fmt.Printf("    Version:       %s → %s\n", b.CurrentVersion, b.Candidate)
-	fmt.Printf("    Failed stage:  %s\n", b.Stage)
-	fmt.Printf("    Refused tools: %s\n", refused)
-	fmt.Printf("    Staged tree:   %s\n", b.StagedRoot)
-	fmt.Printf("    Bundle:        %s\n", target.bundlePath)
+	fmt.Printf("    "+i18n.T("Version:       %s → %s")+"\n", b.CurrentVersion, b.Candidate)
+	fmt.Printf("    "+i18n.T("Failed stage:  %s")+"\n", b.Stage)
+	fmt.Printf("    "+i18n.T("Refused tools: %s")+"\n", refused)
+	fmt.Printf("    "+i18n.T("Staged tree:   %s")+"\n", b.StagedRoot)
+	fmt.Printf("    "+i18n.T("Bundle:        %s")+"\n", target.bundlePath)
 	fmt.Println()
 }
 
@@ -173,7 +174,7 @@ func printRepairBundle(target repairTarget) {
 func (ar *autoupdateRun) confirmRepairSession(ctx context.Context, pkgDir string) bool {
 	restore := yieldContextSignalsToPrompt(ctx)
 	defer restore()
-	return ar.deps.confirmRepair(fmt.Sprintf("Start an interactive claude session in %s?", pkgDir))
+	return ar.deps.confirmRepair(fmt.Sprintf(i18n.T("Start an interactive claude session in %s?"), pkgDir))
 }
 
 // runRepairSession runs claude in the foreground on the process's own
@@ -274,7 +275,7 @@ func repairState(result validate.EbuildResult) report.State {
 // printRepairVerdict shows each gate's outcome and what to do next.
 func printRepairVerdict(pkg string, state report.State, result validate.EbuildResult) {
 	fmt.Println()
-	output.Header.Println("Re-validation")
+	output.Header.Println(i18n.T("Re-validation"))
 	for _, g := range result.Gates {
 		fmt.Printf("    %-12s %s", g.Gate, g.Outcome)
 		if g.Reason != "" && g.Outcome != validate.OutcomePass {
@@ -283,11 +284,11 @@ func printRepairVerdict(pkg string, state report.State, result validate.EbuildRe
 		fmt.Println()
 	}
 	if state == report.Ready {
-		output.Success.Printf("\n✓ %s is READY: the repaired tree is proven.\n", pkg)
-		output.Info.Printf("Publish it with 'bentoo overlay autoupdate --apply %s'\n", pkg)
+		output.Success.Printf("\n"+i18n.T("✓ %s is READY: the repaired tree is proven.")+"\n", pkg)
+		output.Info.Printf(i18n.T("Publish it with 'bentoo overlay autoupdate --apply %s'")+"\n", pkg)
 		return
 	}
-	output.Warning.Printf("\n%s is %s.\n", pkg, state)
+	output.Warning.Printf("\n"+i18n.T("%s is %s.")+"\n", pkg, state)
 }
 
 // repairNeedsCompile reports whether the re-validation must reach the compile
@@ -383,8 +384,8 @@ func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDi
 	}
 
 	fmt.Println()
-	output.Header.Println("Repair sessions")
-	fmt.Printf("%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one.\n",
+	output.Header.Println(i18n.T("Repair sessions"))
+	fmt.Printf(i18n.T("%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one.")+"\n",
 		len(offered))
 	for i, pkg := range offered {
 		if ctx.Err() != nil {

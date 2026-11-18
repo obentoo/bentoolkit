@@ -17,6 +17,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/procgroup"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
@@ -729,7 +730,7 @@ func (e *manifestRunError) Unwrap() error {
 // went, in a directory that holds thousands of files.
 func (s *sweeper) reportQuarantined(pkg, distdir string, moved []string) {
 	for _, name := range moved {
-		msg := fmt.Sprintf("quarantined an unverifiable distfile before manifesting %s: %s (in %s)", pkg, name, distdir)
+		msg := fmt.Sprintf(i18n.T("quarantined an unverifiable distfile before manifesting %s: %s (in %s)"), pkg, name, distdir)
 		s.log.Warn("quarantined an unverifiable distfile before manifesting",
 			"package", pkg, "distfile", name, "distdir", distdir)
 		s.reporter.Log("warn", msg)
@@ -747,7 +748,7 @@ func (s *sweeper) reportPrepopulated(pkg, cacheDir string, reused int) {
 	if reused <= 0 {
 		return
 	}
-	msg := fmt.Sprintf("reused %d distfile(s) from %s while manifesting %s", reused, cacheDir, pkg)
+	msg := fmt.Sprintf(i18n.T("reused %d distfile(s) from %s while manifesting %s"), reused, cacheDir, pkg)
 	s.log.Info("reused distfile(s) from the cache while manifesting",
 		"count", reused, "cache_dir", cacheDir, "package", pkg)
 	s.reporter.Log("info", msg)
@@ -767,13 +768,13 @@ func (s *sweeper) reportPrepopulated(pkg, cacheDir string, reused int) {
 func (s *sweeper) cleanupFailedFetch(pkg, distdir string, scope distfiles.FetchScope) {
 	removed, err := scope.CleanupFailedFetch()
 	for _, name := range removed {
-		msg := fmt.Sprintf("removed the incomplete distfile %s the failed manifest step for %s left in %s", name, pkg, distdir)
+		msg := fmt.Sprintf(i18n.T("removed the incomplete distfile %s the failed manifest step for %s left in %s"), name, pkg, distdir)
 		s.log.Warn("removed the incomplete distfile the failed manifest step left",
 			"distfile", name, "package", pkg, "distdir", distdir)
 		s.reporter.Log("warn", msg)
 	}
 	if err != nil {
-		msg := fmt.Sprintf("could not remove every distfile the failed manifest step for %s left in %s: %v", pkg, distdir, err)
+		msg := fmt.Sprintf(i18n.T("could not remove every distfile the failed manifest step for %s left in %s: %v"), pkg, distdir, err)
 		s.log.Warn("could not remove every distfile the failed manifest step left",
 			"package", pkg, "distdir", distdir, "err", err)
 		s.reporter.Log("warn", msg)
