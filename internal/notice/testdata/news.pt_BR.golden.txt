@@ -1,0 +1,19 @@
+Title: Estouro de heap no foo 1.2
+Author: Jane Doe <jane@example.org>
+Translator: João Silva <joao@example.org>
+Posted: 2026-10-02
+Revision: 1
+News-Item-Format: 2.0
+Display-If-Installed: dev-libs/foo:1
+Display-If-Installed: <dev-libs/foo-0.9.8:0
+Display-If-Installed: app-misc/foo-tools
+
+Um arquivo malicioso estoura um buffer de heap na libfoo quando é
+descompactado, o que permite a um atacante executar código como o
+usuário que faz a extração.
+
+O que fazer
+===========
+
+    Atualize para dev-libs/foo-1.2.3 ou posterior e recompile todos os
+    pacotes ligados a ela.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -30,18 +32,26 @@ var (
 type Changes struct {
 	Severity, Title, Summary string
 	Affects                  []string
+	// Translations add a language or replace one's title, translators and
+	// text; the languages not given keep theirs.
+	Translations []Translation
 }
 
 func (c Changes) given() bool {
-	return c.Severity != "" || c.Title != "" || c.Summary != "" || c.Affects != nil
+	return c.Severity != "" || c.Title != "" || c.Summary != "" || c.Affects != nil ||
+		len(c.Translations) > 0
 }
 
 // Revise opens the text of notice id in edit, applies changes, and rewrites
-// the news item in overlay and — when sitePath is not empty — the site file,
-// each replaced atomically. The news item's Revision goes up by one and
-// the site file's updated becomes now in UTC; Posted, published and the ID
-// stay. Nothing is written when the text comes back unchanged and no
-// field was given, or when any check fails.
+// the news item in overlay — the English file and every translation — and,
+// when sitePath is not empty, the site file, each replaced atomically. The
+// news item's Revision goes up by one in every language and the site file's
+// updated becomes now in UTC; Posted, published and the ID stay. A
+// translation not given in changes keeps its title and text but takes the
+// English headers, with a warning when the English title or text changed.
+// Nothing is written when the text comes back unchanged and no field was
+// given, or when any check fails; when a write fails, the files already
+// replaced are restored.
 func Revise(ctx context.Context, id string, changes Changes, overlay, sitePath string,
 	edit BodyEditor, now time.Time,
 ) (Result, error) {
@@ -61,6 +71,10 @@ func Revise(ctx context.Context, id string, changes Changes, overlay, sitePath s
 		return Result{}, fmt.Errorf("news item %s: %w", newsPath, err)
 	}
 	cur.ID = id
+	cur.Translations, err = readTranslations(filepath.Dir(newsPath), id)
+	if err != nil {
+		return Result{}, err
+	}
 
 	var siteFile string
 	var siteData []byte
@@ -100,35 +114,122 @@ func Revise(ctx context.Context, id string, changes Changes, overlay, sitePath s
 	}
 	next.Revision = cur.Revision + 1
 	next.Updated = now.UTC().Truncate(time.Second)
+	if next.Body != trimBlankLines(cur.Body) || next.Title != cur.Title {
+		for _, lang := range staleTranslations(cur.Translations, changes.Translations) {
+			warnings = append(warnings, fmt.Sprintf(
+				"translation %s keeps its old title and text; update it with --translation %s=<file>", lang, lang))
+		}
+	}
 
 	news, renderWarnings := RenderNews(next)
 	res := Result{Warnings: append(warnings, renderWarnings...)}
+	var writes []pendingWrite
 	if siteFile != "" {
 		yamlDoc, err := RenderSiteYAML(next)
 		if err != nil {
 			return Result{}, err
 		}
 		// The site file first: if it cannot be replaced, nothing changed.
-		if err := fileutil.WriteFileAtomic(siteFile, yamlDoc, 0o644); err != nil {
-			return Result{}, fmt.Errorf("replacing site notice %s: %w", siteFile, err)
-		}
+		writes = append(writes, pendingWrite{siteFile, yamlDoc, siteData, "site notice"})
 		res.YAML = yamlDoc
 	}
-	if err := fileutil.WriteFileAtomic(newsPath, []byte(news), 0o644); err != nil {
-		writeErr := fmt.Errorf("replacing news item %s: %w", newsPath, err)
-		if siteFile == "" {
-			return Result{}, writeErr
-		}
-		if rbErr := fileutil.WriteFileAtomic(siteFile, siteData, 0o644); rbErr != nil {
-			return Result{}, errors.Join(writeErr, fmt.Errorf("restoring site notice %s failed: %w", siteFile, rbErr))
-		}
-		return Result{}, errors.Join(writeErr, fmt.Errorf("rolled back: restored site notice %s", siteFile))
+	writes = append(writes, pendingWrite{newsPath, []byte(news), newsData, "news item"})
+	translated, err := translationWrites(next, cur.Translations, overlay)
+	if err != nil {
+		return Result{}, err
 	}
+	writes = append(writes, translated...)
 	res.Paths = []string{newsPath}
+	for _, w := range translated {
+		res.Paths = append(res.Paths, w.path)
+	}
+	if err := writeAll(writes); err != nil {
+		return Result{}, err
+	}
 	if siteFile != "" {
 		res.Paths = append(res.Paths, siteFile)
 	}
 	return res, nil
+}
+
+// translationWrites renders every translation of next, with the content of
+// each one cur already had, to restore on a rollback.
+func translationWrites(next Notice, cur []Translation, overlay string) ([]pendingWrite, error) {
+	out := make([]pendingWrite, 0, len(next.Translations))
+	for _, t := range next.Translations {
+		path := TranslationPath(overlay, next.ID, t.Lang)
+		var old []byte
+		if slices.ContainsFunc(cur, func(c Translation) bool { return c.Lang == t.Lang }) {
+			var err error
+			if old, err = os.ReadFile(path); err != nil { //nolint:gosec // G304: a file readTranslations listed in the item's directory
+				return nil, fmt.Errorf("reading translated news item %s: %w", path, err)
+			}
+		}
+		out = append(out, pendingWrite{path, []byte(RenderTranslation(next, t)), old, "translated news item"})
+	}
+	return out, nil
+}
+
+// pendingWrite is one file Revise replaces: its new content, and the old one
+// to restore — nil for a file that did not exist.
+type pendingWrite struct {
+	path     string
+	data     []byte
+	old      []byte
+	whatFile string
+}
+
+// writeAll replaces every file in order. When one fails, the files already
+// written get their old content back (or are removed, when new), so the
+// item is never left with languages at different revisions.
+func writeAll(writes []pendingWrite) error {
+	for i, w := range writes {
+		err := fileutil.WriteFileAtomic(w.path, w.data, 0o644)
+		if err == nil {
+			continue
+		}
+		errs := []error{fmt.Errorf("replacing %s %s: %w", w.whatFile, w.path, err)}
+		for _, done := range slices.Backward(writes[:i]) {
+			if done.old == nil {
+				if rmErr := os.Remove(done.path); rmErr != nil {
+					errs = append(errs, fmt.Errorf("removing %s %s failed: %w", done.whatFile, done.path, rmErr))
+					continue
+				}
+			} else if rbErr := fileutil.WriteFileAtomic(done.path, done.old, 0o644); rbErr != nil {
+				errs = append(errs, fmt.Errorf("restoring %s %s failed: %w", done.whatFile, done.path, rbErr))
+				continue
+			}
+			errs = append(errs, fmt.Errorf("rolled back: restored %s %s", done.whatFile, done.path))
+		}
+		return errors.Join(errs...)
+	}
+	return nil
+}
+
+// mergeTranslations returns cur with every given translation added or put in
+// place of the one in its language, ordered by language.
+func mergeTranslations(cur, given []Translation) []Translation {
+	out := slices.Clone(cur)
+	for _, g := range given {
+		if i := slices.IndexFunc(out, func(t Translation) bool { return t.Lang == g.Lang }); i >= 0 {
+			out[i] = g
+		} else {
+			out = append(out, g)
+		}
+	}
+	sortTranslations(out)
+	return out
+}
+
+// staleTranslations lists the languages of cur that given does not replace.
+func staleTranslations(cur, given []Translation) []string {
+	var out []string
+	for _, t := range cur {
+		if !slices.ContainsFunc(given, func(g Translation) bool { return g.Lang == t.Lang }) {
+			out = append(out, t.Lang)
+		}
+	}
+	return out
 }
 
 // applyChanges returns cur with every given field replaced, each validated as
@@ -161,6 +262,10 @@ func applyChanges(cur Notice, c Changes, hasSite bool) (Notice, []string, error)
 		}
 		next.Affects = affects
 	}
+	if err := validateTranslations(c.Translations); err != nil {
+		return Notice{}, nil, err
+	}
+	next.Translations = mergeTranslations(cur.Translations, c.Translations)
 	if !hasSite && (c.Severity != "" || c.Summary != "") {
 		warnings = append(warnings,
 			"--severity and --summary live in the site file only, and no notice.site_path is configured")

@@ -20,6 +20,21 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--delete-registry`; `--keep-registry` still leaves the file untouched, and
   the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
 
+## [0.45.0] - 2026-11-18
+
+### Added
+
+- **Translated news items.** `bentoo notice new` and `bentoo notice revise`
+  take `--translation <lang>=<file>` (repeatable) and write the GLEP 42 news
+  item in that language as `metadata/news/<id>/<id>.<lang>.txt`, which
+  `eselect news` shows to readers whose `LANG` matches (`es`, `pt_BR`, `ru`,
+  `zh_CN`, ...). A translation copies every English header but `Title`, may
+  add `Translator` lines, and is wrapped at 72 columns with CJK characters
+  counted as two. A `revise` bumps the `Revision` of every language together,
+  restores every file if one cannot be written, and warns when a translation
+  kept its text while the English changed. The site feed is unchanged: it
+  stays English. See [docs/notices.md](docs/notices.md).
+
 ## [0.44.1] - 2026-11-18
 
 ### Fixed
@@ -2209,7 +2224,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.44.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/obentoo/bentoolkit/compare/v0.44.1...v0.45.0
 [0.44.1]: https://github.com/obentoo/bentoolkit/compare/v0.44.0...v0.44.1
 [0.44.0]: https://github.com/obentoo/bentoolkit/compare/v0.43.0...v0.44.0
 [0.43.0]: https://github.com/obentoo/bentoolkit/compare/v0.42.2...v0.43.0

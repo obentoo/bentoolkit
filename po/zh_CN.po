@@ -356,6 +356,10 @@ msgid "Read the body from this file instead of opening an editor"
 msgstr "从该文件读取正文，而非打开编辑器"
 
 #: cmd/bentoo/notice.go
+msgid "Also write the news item in <lang> from a file: \"Title: ...\", optional \"Translator: Name <email>\" lines, a blank line, then the text (repeatable; <lang> as in $LANG, e.g. es, pt_BR, ru, zh_CN)"
+msgstr "同时从文件写入 <lang> 语言的新闻条目：\"Title: ...\"、可选的 \"Translator: Name <email>\" 行、一个空行，然后是正文（可重复；<lang> 与 $LANG 相同，例如 es、pt_BR、ru、zh_CN）"
+
+#: cmd/bentoo/notice.go
 msgid "Wrote %s"
 msgstr "已写入 %s"
 
