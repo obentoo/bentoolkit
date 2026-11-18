@@ -27,7 +27,8 @@ var idRe = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}-[a-z0-9+_-]{1,20}$`)
 
 // Result is what a publish or a revision wrote.
 type Result struct {
-	// Paths lists every file written, the news item first.
+	// Paths lists every file written: the English news item first, then its
+	// translations by language, then the site file.
 	Paths []string
 	// YAML is the site document, for the command to print when no
 	// notice.site_path is configured.
@@ -89,6 +90,11 @@ func Publish(ctx context.Context, n Notice, overlay, sitePath string) (Result, e
 		}
 	}
 
+	// Each language becomes a path under newsDir: check them all first.
+	if err := validateTranslations(n.Translations); err != nil {
+		return Result{}, err
+	}
+
 	news, warnings := RenderNews(n)
 	yamlDoc, err := RenderSiteYAML(n)
 	if err != nil {
@@ -102,6 +108,13 @@ func Publish(ctx context.Context, n Notice, overlay, sitePath string) (Result, e
 		return Result{}, errors.Join(fmt.Errorf("writing news item %s: %w", newsPath, err), removeNewsDir(newsDir))
 	}
 	res := Result{Paths: []string{newsPath}, YAML: yamlDoc, Warnings: warnings}
+	for _, t := range n.Translations {
+		path := TranslationPath(overlay, n.ID, t.Lang)
+		if err := fileutil.PublishNewFile(path, []byte(RenderTranslation(n, t)), 0o644); err != nil {
+			return Result{}, errors.Join(fmt.Errorf("writing translated news item %s: %w", path, err), removeNewsDir(newsDir))
+		}
+		res.Paths = append(res.Paths, path)
+	}
 	if siteFile == "" {
 		return res, nil
 	}
@@ -137,7 +150,7 @@ func createNewsDir(dir string) error {
 }
 
 // removeNewsDir removes the item directory this publish created, with the
-// file in it.
+// files in it.
 func removeNewsDir(dir string) error {
 	if err := os.RemoveAll(dir); err != nil {
 		return fmt.Errorf("removing %s: %w", dir, err)

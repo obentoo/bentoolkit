@@ -36,8 +36,9 @@ commit and push each repository yourself.`),
 // command's RunE: a named handler, as every other command has, so the handler
 // is not an inline closure of the tree's constructor.
 type noticeNewOptions struct {
-	in       notice.Input
-	bodyFile string
+	in           notice.Input
+	bodyFile     string
+	translations []string
 }
 
 func (o *noticeNewOptions) run(cmd *cobra.Command, _ []string) error {
@@ -45,7 +46,12 @@ func (o *noticeNewOptions) run(cmd *cobra.Command, _ []string) error {
 	// the files, and the usage block would bury the one line that names the
 	// flag to fix.
 	cmd.SilenceUsage = true
-	return runNoticeNew(cmd, o.in, o.bodyFile)
+	in := o.in
+	var err error
+	if in.Translations, err = readNoticeTranslations(o.translations); err != nil {
+		return err
+	}
+	return runNoticeNew(cmd, in, o.bodyFile)
 }
 
 func newNoticeNewCmd() *cobra.Command {
@@ -75,7 +81,28 @@ being one of <, <=, =, >=, > followed by a version, for example
 	f.StringVar(&o.in.Published, "published", "", i18n.N("Publication date, YYYY-MM-DD (default: today in UTC)"))
 	f.StringVar(&o.in.Author, "author", "", i18n.N("Author, \"Name <email>\" (default: the configured git user)"))
 	f.StringVar(&o.bodyFile, "body-file", "", i18n.N("Read the body from this file instead of opening an editor"))
+	addNoticeTranslationFlag(cmd, &o.translations)
 	return cmd
+}
+
+// addNoticeTranslationFlag adds --translation, shared by new and revise.
+func addNoticeTranslationFlag(cmd *cobra.Command, dst *[]string) {
+	cmd.Flags().StringArrayVar(dst, "translation", nil, i18n.N(
+		"Also write the news item in <lang> from a file: \"Title: ...\", optional \"Translator: Name <email>\" lines, a blank line, then the text (repeatable; <lang> as in $LANG, e.g. es, pt_BR, ru, zh_CN)"))
+}
+
+// readNoticeTranslations reads every --translation <lang>=<file>, so a bad
+// file is refused before the editor opens.
+func readNoticeTranslations(specs []string) ([]notice.Translation, error) {
+	out := make([]notice.Translation, 0, len(specs))
+	for _, spec := range specs {
+		t, err := notice.ReadTranslationFile(spec)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, nil
 }
 
 func runNoticeNew(cmd *cobra.Command, in notice.Input, bodyFile string) error {
@@ -123,8 +150,9 @@ func runNoticeNew(cmd *cobra.Command, in notice.Input, bodyFile string) error {
 // noticeReviseOptions holds the flags of `notice revise`; its run method is
 // the command's RunE, named for the reason given at noticeNewOptions.
 type noticeReviseOptions struct {
-	changes  notice.Changes
-	bodyFile string
+	changes      notice.Changes
+	bodyFile     string
+	translations []string
 }
 
 func (o *noticeReviseOptions) run(cmd *cobra.Command, args []string) error {
@@ -132,6 +160,10 @@ func (o *noticeReviseOptions) run(cmd *cobra.Command, args []string) error {
 	changes := o.changes
 	if !cmd.Flags().Changed("affects") {
 		changes.Affects = nil
+	}
+	var err error
+	if changes.Translations, err = readNoticeTranslations(o.translations); err != nil {
+		return err
 	}
 	return runNoticeRevise(cmd, args[0], changes, o.bodyFile)
 }
@@ -155,6 +187,7 @@ the ID and the publication date stay.`),
 	f.StringVar(&o.changes.Summary, "summary", "", i18n.N("New one-line summary, at most 300 characters"))
 	f.StringArrayVar(&o.changes.Affects, "affects", nil, i18n.N("Replace the affected packages (repeatable; same syntax as notice new)"))
 	f.StringVar(&o.bodyFile, "body-file", "", i18n.N("Take the new text from this file instead of opening an editor"))
+	addNoticeTranslationFlag(cmd, &o.translations)
 	return cmd
 }
 

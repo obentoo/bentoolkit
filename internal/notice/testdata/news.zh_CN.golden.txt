@@ -1,0 +1,12 @@
+Title: foo 1.2 堆溢出
+Author: Jane Doe <jane@example.org>
+Posted: 2026-10-02
+Revision: 1
+News-Item-Format: 2.0
+Display-If-Installed: dev-libs/foo:1
+Display-If-Installed: <dev-libs/foo-0.9.8:0
+Display-If-Installed: app-misc/foo-tools
+
+精心构造的归档文件在解压时会使 libfoo 中的堆缓冲区溢出，攻击者可借此以执
+行解压操作的用户身份运行代码。请立即升级到 dev-libs/foo-1.2.3 或更高版
+本，然后重新构建所有链接到它的软件包。
