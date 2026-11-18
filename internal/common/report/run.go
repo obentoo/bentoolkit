@@ -195,7 +195,7 @@ func incompleteSection(notEvaluated int, opts SectionOptions) Section {
 	return Section{
 		Title: opts.t(i18n.N("Run Incomplete")),
 		Lead: []string{
-			fmt.Sprintf(opts.t(i18n.N("This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer.")),
+			fmt.Sprintf(opts.count(i18n.NPlural("This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer.", "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."), notEvaluated),
 				notEvaluated),
 		},
 		Notes: []string{
@@ -218,7 +218,7 @@ func interruptedSection(notEvaluated int, opts SectionOptions) Section {
 	return Section{
 		Title: opts.t(i18n.N("Run Interrupted")),
 		Lead: []string{
-			fmt.Sprintf(opts.t(i18n.N("This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated.")),
+			fmt.Sprintf(opts.count(i18n.NPlural("This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated.", "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."), notEvaluated),
 				notEvaluated),
 		},
 		Notes: []string{
@@ -295,13 +295,26 @@ func (o SectionOptions) t(msgid string) string {
 	return i18n.T(msgid)
 }
 
-// agree translates the form of a sentence that agrees with n: one when n is 1,
-// many otherwise. Both are literals marked with i18n.N at the call site; a
-// whole sentence per form gives a translator the grammar of their own language
-// instead of an English verb to slot in.
+// agree picks the form of a sentence that agrees with n: in English one when
+// n is 1, many otherwise. one is marked at the call site with
+// i18n.NPlural(one, many), so a translation supplies every form its language
+// needs (Russian has three) as whole sentences.
 func (o SectionOptions) agree(n int, one, many string) string {
-	if n == 1 {
-		return o.t(one)
+	if o.English {
+		if n == 1 {
+			return one
+		}
+		return many
 	}
-	return o.t(many)
+	return i18n.TPlural(one, many, n)
+}
+
+// count translates a format whose English reads the same for every count
+// ("%d package(s) checked.") but whose translation agrees with n. msgid is
+// marked at the call site with i18n.NPlural(msgid, msgid).
+func (o SectionOptions) count(msgid string, n int) string {
+	if o.English {
+		return msgid
+	}
+	return i18n.TCount(msgid, n)
 }

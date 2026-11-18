@@ -520,12 +520,12 @@ func (f frame) fold(budget int) []string {
 	tails := trimTails(f.tasks, n, budget)
 
 	rows := append(make([]string, 0, n), f.head...)
-	rows = appendFolded(rows, f.history, history, i18n.T("%d earlier package(s) finished"))
+	rows = appendFolded(rows, f.history, history, i18n.NPlural("%d earlier package(s) finished", "%d earlier package(s) finished"))
 	for i, t := range f.tasks {
 		rows = append(rows, t.row...)
 		rows = append(rows, t.tail[tails[i]:]...)
 	}
-	rows = appendFolded(rows, f.logs, logs, i18n.T("%d earlier log line(s)"))
+	rows = appendFolded(rows, f.logs, logs, i18n.NPlural("%d earlier log line(s)", "%d earlier log line(s)"))
 	return append(rows, f.trailer...)
 }
 
@@ -568,11 +568,12 @@ func trimTails(tasks []taskBlock, n, budget int) []int {
 }
 
 // appendFolded appends the entries kept after the dropped oldest ones, behind
-// one `… <count>` line when any entry was dropped; count is a translated format
-// with one %d for the number dropped.
+// one `… <count>` line when any entry was dropped; count is a format with one
+// %d for the number dropped, marked with i18n.NPlural so its translation can
+// agree with that number.
 func appendFolded(rows []string, entries [][]string, dropped int, count string) []string {
 	if dropped > 0 {
-		rows = append(rows, styleTail.Render(ellipsis+" "+fmt.Sprintf(count, dropped)))
+		rows = append(rows, styleTail.Render(ellipsis+" "+fmt.Sprintf(i18n.TCount(count, dropped), dropped)))
 	}
 	for _, e := range entries[dropped:] {
 		rows = append(rows, e...)

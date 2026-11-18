@@ -227,7 +227,7 @@ func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.A
 	}
 
 	// Ask for confirmation to save all successful schemas
-	output.Info.Printf(i18n.T("\n%d schema(s) ready to save\n"), successful)
+	output.Info.Printf(i18n.TCount("\n%d schema(s) ready to save\n", successful), successful)
 	if !confirmAfterRelease(release, i18n.T("Save all successful schemas?")) {
 		log.Info("Schemas not saved")
 		return exitWith(result.ExitCode())
@@ -245,7 +245,7 @@ func runAnalyzeAll(ctx context.Context, log *slog.Logger, analyzer *autoupdate.A
 		}
 	}
 
-	output.Success.Printf(i18n.T("\n✓ Saved %d schema(s) to packages.toml\n"), saved)
+	output.Success.Printf(i18n.TCount("\n✓ Saved %d schema(s) to packages.toml\n", saved), saved)
 
 	// Exit with the contract-defined code: 0 all-ok, 1 partial, 2 total fail.
 	return exitWith(result.ExitCode())

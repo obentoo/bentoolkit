@@ -18,7 +18,8 @@ msgstr "%s 输出："
 
 #: cmd/bentoo/apply_result_childrun.go
 msgid "… %d earlier line(s) omitted"
-msgstr "… 省略了前 %d 行"
+msgid_plural "… %d earlier line(s) omitted"
+msgstr[0] "… 前 %d 行已省略"
 
 #: cmd/bentoo/apply_result_childrun.go
 msgid "(no output)"
@@ -550,7 +551,10 @@ msgstr "未成功生成任何架构"
 msgid ""
 "\n"
 "%d schema(s) ready to save\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"%d schema(s) ready to save\n"
+msgstr[0] ""
 "\n"
 "%d 个架构已准备好保存\n"
 
@@ -566,9 +570,12 @@ msgstr "保存 %s 的架构失败：%v\n"
 msgid ""
 "\n"
 "✓ Saved %d schema(s) to packages.toml\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"✓ 已将 %d 个架构保存到 packages.toml\n"
+"✓ Saved %d schema(s) to packages.toml\n"
+msgstr[0] ""
+"\n"
+"✓ 已将 %d 个模式保存到 packages.toml\n"
 
 #: cmd/bentoo/overlay_analyze.go
 msgid "Analysis Result"
@@ -872,7 +879,8 @@ msgstr "注册表未更新：%v"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Wrote %d version pin(s) to packages.toml."
-msgstr "已将 %d 个版本锁定写入 packages.toml。"
+msgid_plural "Wrote %d version pin(s) to packages.toml."
+msgstr[0] "已将 %d 个版本锁定写入 packages.toml。"
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Review the diff before it is published: 'bentoo overlay diff'"
@@ -884,7 +892,8 @@ msgstr "仓库协调"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "The registry and the overlay disagree on %d point(s)."
-msgstr "注册表和 overlay 在 %d 个点上存在分歧。"
+msgid_plural "The registry and the overlay disagree on %d point(s)."
+msgstr[0] "注册表和 overlay 在 %d 个方面存在分歧。"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "%s (%d):"
@@ -920,15 +929,18 @@ msgstr "%s 锁定 %s"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
-msgstr "即将向 packages.toml 写入 %d 个版本锁定 — 所有 %d 个锁定均为首次锁定。"
+msgid_plural "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
+msgstr[0] "即将向 packages.toml 写入 %d 个版本锁定 — 所有 %d 个版本均为首次锁定。"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
-msgstr "即将向 packages.toml 写入 %d 个版本锁定 — 已更正 %d 个过时锁定。"
+msgid_plural "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
+msgstr[0] "即将向 packages.toml 写入 %d 个版本锁定 — 已更正 %d 个过时锁定。"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
-msgstr "即将将 %d 个版本锁定写入 packages.toml — %d 个首次锁定，%d 个过时锁定已更正。"
+msgid_plural "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
+msgstr[0] "即将向 packages.toml 中写入 %d 个版本锁定 — %d 个首次锁定，%d 个过时锁定已更正。"
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
@@ -936,7 +948,8 @@ msgstr "packages.toml 已发布：此 overlay 会自动提交和推送，因此�
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "--yes given: writing %d version pin(s) without a prompt."
-msgstr "已指定 --yes：在不提示的情况下写入 %d 个版本锁定。"
+msgid_plural "--yes given: writing %d version pin(s) without a prompt."
+msgstr[0] "已指定 --yes：在不提示的情况下写入 %d 个版本锁定。"
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Not an interactive terminal and --yes was not given: nothing written."
@@ -944,11 +957,13 @@ msgstr "这不是一个交互式终端，且未提供 --yes：未写入任何内
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Re-run with --yes to write these %d version pin(s) unattended."
-msgstr "使用 --yes 重新运行，以便在无人干预的情况下写入这 %d 个版本锁定。"
+msgid_plural "Re-run with --yes to write these %d version pin(s) unattended."
+msgstr[0] "使用 --yes 选项重新运行，以便在无人干预的情况下写入这 %d 个版本锁定。"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
-msgstr "是否将 %d 个版本锁定写入 packages.toml？（已审核 %d 个差异）"
+msgid_plural "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
+msgstr[0] "是否将 %d 个版本锁定写入 packages.toml？（已审核 %d 个差异）"
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "packages.toml: record model OK"
@@ -976,7 +991,8 @@ msgstr "已检测到：%s"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Total: %d pending update(s)"
-msgstr "总计：%d 个待处理更新"
+msgid_plural "Total: %d pending update(s)"
+msgstr[0] "总计：%d 个待更新项"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Use 'bentoo overlay autoupdate --apply <package>' to apply an update"
@@ -1156,7 +1172,8 @@ msgstr "UPSTREAM"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Found %d revivable orphan(s)"
-msgstr "找到 %d 个可恢复的孤立包"
+msgid_plural "Found %d revivable orphan(s)"
+msgstr[0] "找到 %d 个可恢复的孤立包"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate"
@@ -1196,7 +1213,8 @@ msgstr "没有待验证的更新。"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) to evaluate, deepest depth %s."
-msgstr "有 %d 个包需要评估，最深深度为 %s。"
+msgid_plural "%d package(s) to evaluate, deepest depth %s."
+msgstr[0] "有 %d 个包需要评估，最深深度为 %s。"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%s %s → %s at depth %s"
@@ -1212,7 +1230,8 @@ msgstr "分发文件：最多可获取 %d 个 — 每个软件包一个，在深
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Depth distribution (of %d package(s)): %s"
-msgstr "深度分布（%d 个软件包）：%s"
+msgid_plural "Depth distribution (of %d package(s)): %s"
+msgstr[0] "深度分布（%d 个包）：%s"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "(nothing planned)"
@@ -1220,11 +1239,13 @@ msgstr "（未计划任何内容）"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
-msgstr "已指定 --yes：正在不带提示地评估 %d 个软件包 — 其中 %d 个运行构建门禁，最多 %s。"
+msgid_plural "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
+msgstr[0] "已指定 --yes：正在不经提示评估 %d 个软件包 — 其中 %d 个会运行构建门禁，最多至 %s。"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
-msgstr "最多将获取 %d 个 distfile，最深层的门禁可能需要数小时。不会发布任何内容。"
+msgid_plural "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
+msgstr[0] "最多会获取 %d 个 distfile，最深层的门禁可能需要数小时。不会发布任何内容。"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Not an interactive terminal and --yes was not given: no gate ran and nothing was validated."
@@ -1232,11 +1253,13 @@ msgstr "这不是一个交互式终端，且未提供 --yes：未运行任何关
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
-msgstr "使用 --yes 选项重新运行，以无人值守的方式评估这 %d 个软件包 — 其中 %d 个最多可评估至 %s，最多将获取 %d 个 distfile。"
+msgid_plural "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
+msgstr[0] "使用 --yes 选项重新运行，以无人值守的方式评估这 %d 个软件包 — 其中 %d 个最多可达 %s，最多将获取 %d 个 distfile。"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
-msgstr "%d 个软件包运行了高于 `options` 的关卡，该关卡会解包并构建：此操作最多会获取 %d 个 distfile，可能需要数小时。"
+msgid_plural "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
+msgstr[0] "%d 个软件包运行位于 `options` 之上的门禁，该门禁会解包并构建：此操作最多会获取 %d 个 distfile，可能需要数小时。"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Nothing is published either way — a check writes no ebuild and no version pin."
@@ -1244,7 +1267,8 @@ msgstr "无论哪种方式，都不会发布任何内容 — 检查不会写入 
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Evaluate %d package(s), %d of them up to depth %s?"
-msgstr "是否评估 %d 个软件包，其中 %d 个评估至深度 %s？"
+msgid_plural "Evaluate %d package(s), %d of them up to depth %s?"
+msgstr[0] "是否评估 %d 个软件包，其中 %d 个评估至深度 %s？"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Validating updates"
@@ -1256,7 +1280,8 @@ msgstr "使用“bentoo overlay autoupdate --list”查看待处理的更新"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
-msgstr "%d 个软件包没有 ebuild，并且在 packages.toml 中被禁用（enabled = false）"
+msgid_plural "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
+msgstr[0] "%d 个包没有 ebuild，且在 packages.toml 中被禁用（enabled = false）"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%s: the reviewer raised this bump to %s, past the %s this run's plan confirmed."
@@ -1376,7 +1401,8 @@ msgstr "注册表未修复：%v"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Repaired packages.toml: %d change(s) written."
-msgstr "已修复 packages.toml：已写入 %d 项更改。"
+msgid_plural "Repaired packages.toml: %d change(s) written."
+msgstr[0] "已修复 packages.toml：已写入 %d 项更改。"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
@@ -1384,27 +1410,33 @@ msgstr "在发布前进行审核：“bentoo overlay diff”"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "%d finding(s) still need a human — --fix does not guess at them:"
-msgstr "仍有 %d 项发现需要人工处理 — --fix 不会对其进行猜测："
+msgid_plural "%d finding(s) still need a human — --fix does not guess at them:"
+msgstr[0] "%d 个发现仍需要人工处理 — --fix 不会对其进行猜测："
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
-msgstr "无需修复：上述 %d 个发现没有机械式修复方法 — --fix 不会对其进行猜测。"
+msgid_plural "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
+msgstr[0] "无需修复：上述 %d 个发现没有机械式修复方法 — --fix 不会对其进行猜测。"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "--yes given: writing %d repair(s) without a prompt."
-msgstr "已指定 --yes：不经提示写入 %d 项修复。"
+msgid_plural "--yes given: writing %d repair(s) without a prompt."
+msgstr[0] "已指定 --yes：不经提示写入 %d 项修复。"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Re-run with --yes to write these %d repair(s) unattended."
-msgstr "使用 --yes 选项重新运行，即可在无人干预的情况下写入这 %d 项修复。"
+msgid_plural "Re-run with --yes to write these %d repair(s) unattended."
+msgstr[0] "使用 --yes 选项重新运行，即可在无人干预的情况下写入这 %d 项修复。"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
-msgstr "是否将 %d 项修复写入 packages.toml？（上面的差异是全部更改）"
+msgid_plural "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
+msgstr[0] "是否将 %d 项修复写入 packages.toml？（上面的差异是全部变更）"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "About to rewrite packages.toml with %d repair(s):"
-msgstr "即将使用 %d 项修复重写 packages.toml："
+msgid_plural "About to rewrite packages.toml with %d repair(s):"
+msgstr[0] "即将使用 %d 项修复重写 packages.toml："
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Registry Migration — record the automatic disable origin"
@@ -1424,15 +1456,18 @@ msgstr "packages.toml 未被修改：%v"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Stamped %d entry(ies) with disabled_by = \"auto\":"
-msgstr "已为 %d 个条目添加标记 disabled_by = \"auto\"："
+msgid_plural "Stamped %d entry(ies) with disabled_by = \"auto\":"
+msgstr[0] "已为 %d 个条目添加标记 disabled_by = \"auto\"："
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
-msgstr "%d 个（共 %d 个）计划条目未加盖标记：它们的启用赋值位置不在编辑器可以重写的地方。"
+msgid_plural "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
+msgstr[0] "在 %d 个计划条目中，有 %d 个未加盖标记：它们的 enabled 赋值位置不在编辑器可以重写的地方。"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
-msgstr "%d 个条目将被标记为 disabled_by = \"auto\" — 这是检查器自己的记录，现在可以自由进行核对："
+msgid_plural "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
+msgstr[0] "%d 个条目将被标记为 disabled_by = \"auto\" — 这是检查器自己的记录，现在可以自由对账："
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:"
@@ -1448,15 +1483,18 @@ msgstr "%d 个被搁置 — 搁置已将它们排除在外，如果对其中一�
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "--yes given: stamping %d entry(ies) without a prompt."
-msgstr "已指定 --yes：不经提示即可标记 %d 个条目。"
+msgid_plural "--yes given: stamping %d entry(ies) without a prompt."
+msgstr[0] "已提供 --yes：不经提示，对 %d 个条目进行标记。"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Re-run with --yes to stamp these %d entry(ies) unattended."
-msgstr "使用 --yes 选项重新运行，以便在无人干预的情况下标记这 %d 个条目。"
+msgid_plural "Re-run with --yes to stamp these %d entry(ies) unattended."
+msgstr[0] "使用 --yes 选项重新运行，即可在无人干预的情况下为这 %d 个条目打上标记。"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
-msgstr "是否对 %d 个条目加盖 disabled_by = \"auto\" 标记？（%d 个条目已排除，上述计划是全部变更）"
+msgid_plural "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
+msgstr[0] "是否为 %d 个条目加上 disabled_by = \"auto\" 标记？（%d 个已排除，上述计划是全部变更）"
 
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "No session started; the bundle and the staged tree are unchanged."
@@ -1516,7 +1554,8 @@ msgstr "修复会话"
 
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgstr "%d 个 bump 需要您处理：每个 bump 都会提供一次交互式修复会话，一次处理一个。回答 n 以跳过一个。"
+msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+msgstr[0] "%d 个升级需要您处理：每个升级都会提供一次交互式修复会话，一次处理一个。回答 n 以跳过一个。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
@@ -1536,7 +1575,8 @@ msgstr "没有包目录包含任何未被条目声明的 ebuild。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "To remove (%d ebuild(s) in %d director(ies)):"
-msgstr "要移除（%d 个 ebuild，位于 %d 个目录中）："
+msgid_plural "To remove (%d ebuild(s) in %d director(ies)):"
+msgstr[0] "要移除（%d 个目录中的 %d 个 ebuild）："
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "keeps %s"
@@ -1584,7 +1624,8 @@ msgstr "%s — 由规则保留（实时 ebuild 或最新版本）"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "--yes given: removing %d ebuild(s) without a prompt."
-msgstr "已指定 --yes：不经提示移除 %d 个 ebuild。"
+msgid_plural "--yes given: removing %d ebuild(s) without a prompt."
+msgstr[0] "已指定 --yes：不经提示移除 %d 个 ebuild。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Not an interactive terminal and --yes was not given: nothing removed."
@@ -1592,7 +1633,8 @@ msgstr "不是交互式终端，且未提供 --yes：未删除任何内容。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Re-run with --yes to remove these %d ebuild(s) unattended."
-msgstr "使用 --yes 选项重新运行，以在无人干预的情况下删除这些 %d 个 ebuild。"
+msgid_plural "Re-run with --yes to remove these %d ebuild(s) unattended."
+msgstr[0] "使用 --yes 选项重新运行，即可在无人干预的情况下移除这 %d 个 ebuild。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "These ebuilds are deleted from the overlay, which auto-commits and publishes."
@@ -1600,7 +1642,8 @@ msgstr "这些 ebuild 将从 overlay 中删除，overlay 会自动提交并发�
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Remove %d ebuild(s) from %d director(ies)?"
-msgstr "是否从 %d 个目录中移除 %d 个 ebuild？"
+msgid_plural "Remove %d ebuild(s) from %d director(ies)?"
+msgstr[0] "是否从 %d 个目录中移除 %d 个 ebuild？"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Sweep Result"
@@ -1612,15 +1655,18 @@ msgstr "已移除：%s"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Swept %d director(ies), removed %d ebuild(s)."
-msgstr "已清理 %d 个目录，删除了 %d 个 ebuild。"
+msgid_plural "Swept %d director(ies), removed %d ebuild(s)."
+msgstr[0] "已扫描 %d 个目录，删除了 %d 个 ebuild。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "%d director(ies) blocked — see the plan above for the entry to fix."
-msgstr "%d 个目录被阻止 — 请参阅上方的计划，了解要修复的条目。"
+msgid_plural "%d director(ies) blocked — see the plan above for the entry to fix."
+msgstr[0] "%d 个目录被阻止 — 请参阅上文计划，了解要修复的条目。"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "%d director(ies) failed — nothing else was affected."
-msgstr "%d 个目录失败 — 其他内容未受影响。"
+msgid_plural "%d director(ies) failed — nothing else was affected."
+msgstr[0] "%d 个目录失败 — 其他内容未受影响。"
 
 #: cmd/bentoo/overlay_commit.go
 msgid "Commit staged changes with auto-generated message"
@@ -1866,7 +1912,8 @@ msgstr "不妨改用 --clone 标志来下载代码仓库："
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
-msgstr "重组计划：将 %d 个软件包构建到深度 %s，每个软件包都位于 overlay 之外的分阶段树中。"
+msgid_plural "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
+msgstr[0] "重新对齐计划：将 %d 个软件包构建到深度 %s，每个软件包都位于 overlay 之外的分阶段树中。"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing."
@@ -1874,7 +1921,8 @@ msgstr "  每个都是 ::gentoo 自己在我们版本下的 ebuild。构建可�
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  --yes given: proving %d realignment(s) without a prompt.\n"
-msgstr "  已指定 --yes：在不提示的情况下验证 %d 项重排。\n"
+msgid_plural "  --yes given: proving %d realignment(s) without a prompt.\n"
+msgstr[0] "  已提供 --yes：在不提示的情况下验证 %d 次重排。\n"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Not an interactive terminal and --yes was not given: nothing was built."
@@ -1882,7 +1930,8 @@ msgstr "  这不是一个交互式终端，并且未提供 --yes：未构建任�
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
-msgstr "  使用 --yes 重新运行，以在无人干预的情况下验证这 %d 项重排。无论哪种方式，都不会发布任何内容。\n"
+msgid_plural "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
+msgstr[0] "  使用 --yes 选项重新运行，以在无人干预的情况下验证这 %d 次重排。无论哪种方式，都不会发布任何内容。\n"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n"
@@ -1890,7 +1939,8 @@ msgstr "  每个包都在 overlay 之外暂存，并构建到深度 %s。这会�
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "Prove %d realignment(s) at depth %s?"
-msgstr "是否在深度 %[2]s 处验证 %[1]d 项重排？"
+msgid_plural "Prove %d realignment(s) at depth %s?"
+msgstr[0] "是否在深度 %[2]s 处证明 %[1]d 次重排？"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  %s: not in the plan — its ::gentoo baseline %s could not be read now, although the review read it: %v"
@@ -2324,7 +2374,8 @@ msgstr "下载前会先查询只读的 distfiles 缓存（“ ”表示禁用）
 
 #: cmd/bentoo/overlay_manifest.go
 msgid "Regenerating Manifest for %d package(s)"
-msgstr "正在为 %d 个包重新生成清单"
+msgid_plural "Regenerating Manifest for %d package(s)"
+msgstr[0] "正在为 %d 个包重新生成清单"
 
 #: cmd/bentoo/overlay_manifest.go
 msgid "%d ok, %d failed"
@@ -2460,7 +2511,8 @@ msgstr "  无法扫描位于 %s 的 overlay：%v\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
-msgstr "  %d 个路径无法扫描；下方可能缺少的软件包可能只是尚未被看到。\n"
+msgid_plural "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
+msgstr[0] "  有 %d 条路径无法扫描；下方可能缺少的某个包可能只是尚未被看到。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all."
@@ -2476,11 +2528,13 @@ msgstr "  正在比较软件包：%v\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
-msgstr "  未移除任何内容：这是一项计划。使用 --apply 选项重新运行，以执行 %d 项删除操作。\n"
+msgid_plural "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
+msgstr[0] "  未移除任何内容：这是一项计划。使用 --apply 选项重新运行，以执行 %d 项移除操作。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
-msgstr "  已指定 --keep-registry：.autoupdate/packages.toml 未被修改，并且仍保留 %d 个已移除软件包的条目。\n"
+msgid_plural "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
+msgstr[0] "  指定了 --keep-registry：.autoupdate/packages.toml 未被修改，其中仍保留着 %d 个已移除软件包的条目。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Review the diff before it is published: 'bentoo overlay diff'"
@@ -2492,11 +2546,13 @@ msgstr "  %s/%s原计划可移除，但位于拒绝组中；没有确认涵盖�
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
-msgstr "  已指定 --yes：正在移除 %d 个 ::gentoo 已提供的软件包，无需提示。\n"
+msgid_plural "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
+msgstr[0] "  已指定 --yes：正在移除 %d 个 ::gentoo 已提供的软件包，无需提示。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
-msgstr "  这不是一个交互式终端，并且未指定 --yes：%d 个计划的删除操作未执行。\n"
+msgid_plural "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
+msgstr[0] "  这不是交互式终端，且未指定 --yes：%d 项计划的移除操作未执行。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Re-run with --yes to carry them out unattended."
@@ -2508,11 +2564,13 @@ msgstr "  这些软件包目录将从 overlay 中删除，overlay 会在几分�
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Remove %d package(s) ::gentoo already provides?"
-msgstr "是否删除 ::gentoo 已提供的 %d 个软件包？"
+msgid_plural "Remove %d package(s) ::gentoo already provides?"
+msgstr[0] "是否移除 ::gentoo 已提供的 %d 个软件包？"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
-msgstr "  这不是一个交互式终端：%d 个存在差异的软件包未被删除。\n"
+msgid_plural "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
+msgstr[0] "  这不是一个交互式终端：%d 个存在差异的软件包未被移除。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --yes does not answer this one. It exists so a scripted run can proceed unattended, and discarding local work is not a decision a script may take on its own: somebody has to read what is being thrown away."
@@ -2530,21 +2588,27 @@ msgstr "  以下软件包包含不在 ::gentoo 中的工作。删除它们会将
 msgid ""
 "\n"
 "  Discarding local work in %d package(s):\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"  正在放弃 %d 个包中的本地工作：\n"
+"  Discarding local work in %d package(s):\n"
+msgstr[0] ""
+"\n"
+"  正在放弃 %d 个软件包中的本地工作：\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      loses %d version(s) (%s) and %d file(s)\n"
-msgstr "      将丢失 %d 个版本（%s）和 %d 个文件\n"
+msgid_plural "      loses %d version(s) (%s) and %d file(s)\n"
+msgstr[0] "      丢失 %d 个版本 (%s) 和 %d 个文件\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      loses %d file(s)\n"
-msgstr "      将丢失 %d 个文件\n"
+msgid_plural "      loses %d file(s)\n"
+msgstr[0] "      丢失 %d 个文件\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Discard that work and remove these %d package(s)?"
-msgstr "  是否放弃该工作并移除这 %d 个包？"
+msgid_plural "  Discard that work and remove these %d package(s)?"
+msgstr[0] "  是否要放弃该工作并移除这 %d 个包？"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Prune Result"
@@ -2552,7 +2616,8 @@ msgstr "清理结果"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %s removed (%d file(s))\n"
-msgstr "  %s 已移除（%d 个文件）\n"
+msgid_plural "  %s removed (%d file(s))\n"
+msgstr[0] "  %s 已移除（%d 个文件）\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %s NOT removed: %v\n"
@@ -2560,23 +2625,28 @@ msgstr "  %s 未被移除：%v\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Removed %d package director(ies) from the overlay.\n"
-msgstr "  已从 overlay 中移除 %d 个软件包目录。\n"
+msgid_plural "  Removed %d package director(ies) from the overlay.\n"
+msgstr[0] "  已从 overlay 中移除 %d 个包目录。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
-msgstr "  %d 项删除操作失败，并已在上方列出；这些软件包仍位于 overlay 中，包括注册表项等所有内容。\n"
+msgid_plural "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
+msgstr[0] "  %d 个删除操作失败，并已在上文列出；这些软件包仍位于 overlay 中，包括注册表项等所有内容。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
-msgstr "  %d 个计划的删除操作在提示时被拒绝，并保持原样。\n"
+msgid_plural "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
+msgstr[0] "  %d 项计划的移除操作在提示时被拒绝，并完全保持原样。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
-msgstr "  %d 项计划的移除操作未得到确认，因此未执行 — 请参阅上文所述原因。由于这些原因，本次运行以非零状态退出。\n"
+msgid_plural "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
+msgstr[0] "  %d 项计划的移除操作未得到确认，因此未执行 — 原因请见上文。由于这些原因，本次运行以非零状态退出。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
-msgstr "  未移除任何内容：没有确认涵盖 %d 项计划的移除操作 — 请参阅上文所述原因。\n"
+msgid_plural "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
+msgstr[0] "  未移除任何内容：%d 项计划移除均未获得确认 — 请参阅上文所述原因。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: the confirmation was declined. The overlay and .autoupdate/packages.toml are exactly as they were."
@@ -2592,7 +2662,8 @@ msgstr "  软件包目录已不存在，但注册表仍列出这些目录；请�
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
-msgstr "  已删除 %d 个已移除软件包的 .autoupdate/packages.toml 条目。\n"
+msgid_plural "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
+msgstr[0] "  已删除 %d 个已移除软件包的 .autoupdate/packages.toml 条目。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Identical to ::gentoo — our copy holds nothing of ours"
@@ -2628,7 +2699,8 @@ msgstr "      registry: 没有条目跟踪此软件包"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry: %d entr(ies) kept by --keep-registry: %s\n"
-msgstr "      registry: %d 条条目由 --keep-registry 保留： %s\n"
+msgid_plural "      registry: %d entr(ies) kept by --keep-registry: %s\n"
+msgstr[0] "      registry: --keep-registry 保留了 %d 个条目：%s\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry entries (%d):\n"
@@ -2640,7 +2712,8 @@ msgstr "  已拒绝 — 此命令上没有标志可移除这些项（%d）：\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
-msgstr "  没有符合条件可供移除的项目：%d 个软件包已检查，但其中没有一个可以移除。\n"
+msgid_plural "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
+msgstr[0] "  没有符合移除条件的项：已检查 %d 个软件包，其中没有一个可以移除。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d of them diverge from ::gentoo; --include-patched would consider them, discarding that work.\n"
@@ -2648,7 +2721,8 @@ msgstr "  其中 %d 个与 ::gentoo 不同；--include-patched 会考虑它们�
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
-msgstr "  未检查任何内容：%s 提供方未公开本地 ::gentoo 树，因此无法比较范围内的 %d 个软件包。\n"
+msgid_plural "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
+msgstr[0] "  未检查任何内容：%s 提供方未公开本地 ::gentoo 树，因此无法比较范围内的 %d 个软件包。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Every package is refused: no local ::gentoo tree; re-run with --clone or a local provider."
@@ -2664,7 +2738,8 @@ msgstr "  在 ~/.config/bentoo/config.yaml 中将 bentoo 指向磁盘上的 ::ge
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
-msgstr "  未检查任何内容：无法读取自动更新注册表，因此范围内 %d 个软件包中均无已知差异状态。\n"
+msgid_plural "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
+msgstr[0] "  未检查任何内容：无法读取自动更新注册表，因此范围内的 %d 个包均无已知的差异状态。\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Every package is refused: %v.\n"
@@ -2964,7 +3039,8 @@ msgstr "  无需删除任何内容：此根目录下没有任何已暂存的内�
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  --yes given: removing %d staged tree(s) without a prompt.\n"
-msgstr "  已指定 --yes：不经提示移除 %d 个已暂存的树。\n"
+msgid_plural "  --yes given: removing %d staged tree(s) without a prompt.\n"
+msgstr[0] "  已提供 --yes：不经提示移除 %d 个暂存树。\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Not an interactive terminal and --yes was not given: nothing removed."
@@ -2972,7 +3048,8 @@ msgstr "  这不是一个交互式终端，且未提供 --yes：未删除任何�
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
-msgstr "  使用 --yes 选项重新运行，以在无人干预的情况下移除这 %d 个已暂存的树。\n"
+msgid_plural "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
+msgstr[0] "  使用 --yes 选项重新运行，以在无人干预的情况下移除这 %d 个已暂存的树。\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  These directories are deleted from disk. Nothing in the overlay is read, written or removed."
@@ -2980,7 +3057,8 @@ msgstr "  这些目录已从磁盘中删除。overlay 中的内容均未被读�
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Remove %d staged tree(s) from %s?"
-msgstr "是否从 %[2]s 中移除 %[1]d 个已暂存的树？"
+msgid_plural "Remove %d staged tree(s) from %s?"
+msgstr[0] "是否从 %[2]s 中移除 %[1]d 个已暂存的树？"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Staged Tree Clean Result"
@@ -3000,11 +3078,13 @@ msgstr "      原因：%s\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
-msgstr "  已移除计划中指定的 %d 个树（共 %d 个）— 上面列出了仍保留的 %d 个树，并附有每个树保留的原因。\n"
+msgid_plural "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
+msgstr[0] "  已移除计划中指定的 %d 个树中的 %d 个 — 仍存在的 %d 个树已在上文列出，并附有每个树未被移除的原因。\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Removed %d of the %d tree(s) the plan named.\n"
-msgstr "  已移除计划中指定的 %[2]d 个树中的 %[1]d 个。\n"
+msgid_plural "  Removed %d of the %d tree(s) the plan named.\n"
+msgstr[0] "  已移除计划中指定的 %d 个树中的 %d 个。\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Staged Tree Clean"
@@ -3086,7 +3166,8 @@ msgstr "    已被超越：overlay 包含 %s；将其镜像提升至 %s\n"
 
 #: cmd/bentoo/overlay_targets.go
 msgid "%d package(s) lack a required implementation.\n"
-msgstr "%d 个包缺少必需的实现。\n"
+msgid_plural "%d package(s) lack a required implementation.\n"
+msgstr[0] "%d 个包缺少必需的实现。\n"
 
 #: cmd/bentoo/overlay_validate.go
 msgid "Check that each ebuild still matches the source it points at"
@@ -3238,7 +3319,8 @@ msgstr ""
 
 #: cmd/bentoo/overlay_validate.go
 msgid "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
-msgstr "      %s %d 个选项由上游声明，但此 ebuild 未通过 — 请参阅 --json\n"
+msgid_plural "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
+msgstr[0] "      %s 上游声明了 %d 个选项，但此 ebuild 未通过 — 请参阅 --json\n"
 
 #: cmd/bentoo/overlay_validate.go
 msgid "      read: %s\n"
@@ -3632,7 +3714,8 @@ msgstr "::gentoo 也随附 %s，且其副本有所不同 — 更新时将我们�
 
 #: internal/autoupdate/applier.go
 msgid "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
-msgstr "重复使用 %d 个已下载和 %d 个已缓存的 distfile，用于 %s-%s 的修复"
+msgid_plural "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
+msgstr[0] "正在为 %[3]s-%[4]s 修复重用 %[1]d 个已下载的 distfile 和 %[2]d 个已缓存的 distfile"
 
 #: internal/autoupdate/applier.go
 msgid "manifest failed for %s-%s; invoking LLM fixer to repair the ebuild"
@@ -3664,7 +3747,8 @@ msgstr "在生成 %s 的清单之前，已将无法验证的 distfile 隔离：%
 
 #: internal/autoupdate/sweep.go
 msgid "reused %d distfile(s) from %s while manifesting %s"
-msgstr "在生成 %[3]s 的清单时，重复使用了来自 %[2]s 的 %[1]d 个 distfile"
+msgid_plural "reused %d distfile(s) from %s while manifesting %s"
+msgstr[0] "在生成 %[3]s 清单时，重复使用了来自 %[2]s 的 %[1]d 个 distfile"
 
 #: internal/autoupdate/sweep.go
 msgid "removed the incomplete distfile %s the failed manifest step for %s left in %s"
@@ -3684,7 +3768,8 @@ msgstr "未将任何软件包配置为自动更新。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) checked, %d with a pending update."
-msgstr "已检查 %d 个软件包，其中 %d 个有待处理的更新。"
+msgid_plural "%d package(s) checked, %d with a pending update."
+msgstr[0] "已检查 %d 个软件包，其中 %d 个有待更新。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "TYPE"
@@ -3704,39 +3789,48 @@ msgstr "状态"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) are up to date and are listed above."
-msgstr "%d 个软件包已是最新版本，并已在上方列出。"
+msgid_plural "%d package(s) are up to date and are listed above."
+msgstr[0] "%d 个软件包已是最新版本，并已在上方列出。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) are up to date and are not listed; pass --all to list them."
-msgstr "%d 个软件包已是最新版本，但未列出；请使用 --all 参数以列出这些软件包。"
+msgid_plural "%d package(s) are up to date and are not listed; pass --all to list them."
+msgstr[0] "%d 个软件包已是最新版本，但未列出；请使用 --all 参数以列出它们。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) have no ebuild in the overlay."
-msgstr "%d 个软件包在 overlay 中没有 ebuild。"
+msgid_plural "%d package(s) have no ebuild in the overlay."
+msgstr[0] "%d 个软件包在 overlay 中没有 ebuild。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) left their series upstream and need a manual promotion."
-msgstr "%d 个软件包已离开其上游系列，需要手动升级。"
+msgid_plural "%d package(s) left their series upstream and need a manual promotion."
+msgstr[0] "%d 个软件包已离开其上游系列，需要手动升级。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) could not be checked."
-msgstr "%d 个软件包无法检查。"
+msgid_plural "%d package(s) could not be checked."
+msgstr[0] "%d 个软件包无法检查。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) reported a version that could not be ordered against the current one."
-msgstr "%d 个软件包报告的版本无法与当前版本进行比较。"
+msgid_plural "%d package(s) reported a version that could not be ordered against the current one."
+msgstr[0] "%d 个软件包报告的版本无法与当前版本进行比较排序。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) have an update held by min_age_days."
-msgstr "%d 个软件包的更新被 min_age_days 搁置。"
+msgid_plural "%d package(s) have an update held by min_age_days."
+msgstr[0] "%d 个软件包的更新被 min_age_days 搁置。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) to evaluate."
-msgstr "有 %d 个软件包需要评估。"
+msgid_plural "%d package(s) to evaluate."
+msgstr[0] "%d 个软件包待评估。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) to evaluate, %d of them excluded by policy."
-msgstr "有 %d 个软件包需要评估，其中 %d 个因策略而被排除。"
+msgid_plural "%d package(s) to evaluate, %d of them excluded by policy."
+msgstr[0] "有 %d 个软件包需要评估，其中 %d 个因策略而被排除。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "BUMP"
@@ -3768,7 +3862,8 @@ msgstr "验证摘要"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
-msgstr "%d 个软件包已评估：%d 个已证明，%d 个出错，%d 个不确定，%d 个已跳过。"
+msgid_plural "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
+msgstr[0] "已评估 %d 个软件包：%d 个已证明，%d 个出错，%d 个不确定，%d 个已跳过。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded."
@@ -3780,7 +3875,8 @@ msgstr "未发布任何内容：检查不会写入 ebuild，也不会写入版�
 
 #: internal/common/report/autoupdate_check.go
 msgid "Checked %d source, %d bin; %d package(s) resolved to neither tier."
-msgstr "已检查 %d 个源代码包，%d 个二进制包；%d 个包未解析为任何层级。"
+msgid_plural "Checked %d source, %d bin; %d package(s) resolved to neither tier."
+msgstr[0] "已检查 %d 个源、%d 个二进制文件；%d 个包未解析到任何层级。"
 
 #: internal/common/report/autoupdate_check.go
 msgid "Checked %d source, %d bin."
@@ -3872,7 +3968,8 @@ msgstr "未作答复"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
-msgstr "%d 个软件包已送达，但未得到答复：不完整运行通知所计数的单元。"
+msgid_plural "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
+msgstr[0] "%d 个软件包已送达，但未得到回复：这些单元计入“未完成运行”通知的计数。"
 
 #: internal/common/report/compare_run.go
 msgid "A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."
@@ -3912,15 +4009,13 @@ msgstr "%d 也存在于 %s 中，并在下方进行比较；%d 仅存在于此�
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) scanned in the Bentoo overlay."
-msgstr "在 Bentoo overlay 中扫描了 %d 个软件包。"
+msgid_plural "%d package(s) scanned in the Bentoo overlay."
+msgstr[0] "在 Bentoo overlay 中扫描了 %d 个软件包。"
 
 #: internal/common/report/compare_run.go
 msgid "%d comparison(s) was never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
-msgstr "有 %d 项比较从未被阅读：没有人请求的审核、尝试过但失败的审核，或者内容检查拒绝的版本对。审核失败的行标记为 %s — 差异是真实的，缺少解释，且下方没有行被悄悄降级以隐藏它。"
-
-#: internal/common/report/compare_run.go
-msgid "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
-msgstr "%d 项比较从未被阅读：没有人请求的审核、尝试过但失败的审核，或者内容检查拒绝的版本对。审核失败的行标记为 %s — 差异是真实的，缺少解释，并且下方没有行被悄悄降级以隐藏它。"
+msgid_plural "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
+msgstr[0] "有 %d 次比较从未被读取：没有人请求的审核、尝试过但失败的审核，或者内容检查拒绝的版本对。审核失败的行标记为 %s — 差异是真实的，缺少解释，且下方没有任何行被悄然降级以隐藏它。"
 
 #: internal/common/report/compare_run.go
 msgid "The failed reviews, by cause: %s."
@@ -3936,7 +4031,8 @@ msgstr "没有软件包被视为冗余，因此此处不建议删除任何内容
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as redundant."
-msgstr "%d 个软件包被视为冗余。"
+msgid_plural "%d package(s) are counted as redundant."
+msgstr[0] "%d 个软件包被计为冗余。"
 
 #: internal/common/report/compare_run.go
 msgid "No per-package row reached this report, so the count above is stated without the list it was taken over."
@@ -3948,19 +4044,13 @@ msgstr "差异并不能证明作者身份：%s 也会在不进行版本号提升
 
 #: internal/common/report/compare_run.go
 msgid "%d was never compared at all, because the check refuses to diff two different versions"
-msgstr "%d 完全未进行过比较，因为检查拒绝对两个不同版本进行差异比较"
-
-#: internal/common/report/compare_run.go
-msgid "%d were never compared at all, because the check refuses to diff two different versions"
-msgstr "%d 从未进行过任何比较，因为检查拒绝对两个不同版本进行差异比较"
+msgid_plural "%d were never compared at all, because the check refuses to diff two different versions"
+msgstr[0] "%d 个从未进行过比较，因为检查拒绝对两个不同版本执行差异比较。"
 
 #: internal/common/report/compare_run.go
 msgid "%d was never compared at all, and this run did not record why"
-msgstr "%d 根本未曾进行过比较，且本次运行未记录原因"
-
-#: internal/common/report/compare_run.go
-msgid "%d were never compared at all, and this run did not record why"
-msgstr "%d 从未进行过比较，且本次运行未记录原因"
+msgid_plural "%d were never compared at all, and this run did not record why"
+msgstr[0] "%d 个从未进行过比较，且本次运行未记录原因"
 
 #: internal/common/report/compare_run.go
 msgid "the review died on the other %d"
@@ -3972,35 +4062,28 @@ msgstr "%d 曾尝试进行审核，但失败了"
 
 #: internal/common/report/compare_run.go
 msgid "%d was never submitted for review"
-msgstr "%d 从未提交过审核"
-
-#: internal/common/report/compare_run.go
-msgid "%d were never submitted for review"
-msgstr "%d 从未提交过审核"
+msgid_plural "%d were never submitted for review"
+msgstr[0] "%d 个从未提交过审核"
 
 #: internal/common/report/compare_run.go
 msgid "%d carries changes proved ours, so removing it would discard work of our own — declare it instead."
-msgstr "%d 包含经证明属于我们的更改，因此删除它将丢弃我们自己的工作 — 请改为声明它。"
-
-#: internal/common/report/compare_run.go
-msgid "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
-msgstr "%d 带有经证明属于我们的更改，因此删除它们将丢弃我们自己的工作 — 请改为声明它们。"
+msgid_plural "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
+msgstr[0] "%d 个带有更改的包已被证明是我们自己的，因此删除它们将丢弃我们自己的工作 — 请改为声明它们。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), and not one of them carries a reading."
-msgstr "%d 个包，其中没有一个带有读数。"
+msgid_plural "%d package(s), and not one of them carries a reading."
+msgstr[0] "%d 个包，其中没有一个带有读取值。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), and every one of them carries a reading."
-msgstr "%d 个包，每个包都带有读数。"
+msgid_plural "%d package(s), and every one of them carries a reading."
+msgstr[0] "%d 个包，每个包都带有读取内容。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), of which %d carries a reading."
-msgstr "%d 个包，其中 %d 个带有读数。"
-
-#: internal/common/report/compare_run.go
-msgid "%d package(s), of which %d carry a reading."
-msgstr "%d 个包，其中 %d 个带有读取次数。"
+msgid_plural "%d package(s), of which %d carry a reading."
+msgstr[0] "%d 个包，其中 %d 个带有读取内容。"
 
 #: internal/common/report/compare_run.go
 msgid "No removal advice follows from either."
@@ -4036,11 +4119,13 @@ msgstr "没有包需要变基：此处没有任何内容在%s此后已前进的�
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as needing a rebase."
-msgstr "有 %d 个软件包被认定需要变基。"
+msgid_plural "%d package(s) are counted as needing a rebase."
+msgstr[0] "%d 个包被认定需要变基。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
-msgstr "列出了 %d 个包：每个包都在 %s 此后已前进的版本之上带有我们的更改，因此既需要版本升级，也需要重新应用。"
+msgid_plural "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
+msgstr[0] "列出了 %d 个包：每个包都在 %s 此后已前进的版本之上带有我们的更改，因此既需要升级版本，也需要重新应用更改。"
 
 #: internal/common/report/compare_run.go
 msgid "Keep — the overlay copy is ahead"
@@ -4052,11 +4137,13 @@ msgstr "没有哪个软件包仅凭自身价值而被认为值得保留。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as worth keeping."
-msgstr "%d 个软件包被认为值得保留。"
+msgid_plural "%d package(s) are counted as worth keeping."
+msgstr[0] "%d 个软件包被认定为值得保留。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed, and the run recommends keeping every one of them."
-msgstr "列出了 %d 个包，并且运行建议保留其中的每一个。"
+msgid_plural "%d package(s) listed, and the run recommends keeping every one of them."
+msgstr[0] "列出了 %d 个包，并且运行建议保留其中的每一个。"
 
 #: internal/common/report/compare_run.go
 msgid "%s (%d packages)"
@@ -4064,11 +4151,13 @@ msgstr "%s (%d 个包)"
 
 #: internal/common/report/compare_run.go
 msgid "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
-msgstr "%d 个包（共 %d 个）共享一个版本对，将合并为 %d 个组；--all 则在上面列出了每个成员。"
+msgid_plural "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
+msgstr[0] "%d 个包（共 %d 个）共享同一对版本，将折叠为 %d 个组；使用 --all 则会在上方列出每个成员。"
 
 #: internal/common/report/compare_run.go
 msgid "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
-msgstr "%d 个包（共 %d 个）共享一个版本对，并在上面列为 %d 个组；传递 --all 以列出其成员。"
+msgid_plural "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
+msgstr[0] "%d 个包（共 %d 个）共享同一对版本，并在上方列为 %d 个组；传递 --all 以列出其成员。"
 
 #: internal/common/report/compare_run.go
 msgid "Unknown — no recommendation"
@@ -4080,11 +4169,13 @@ msgstr "运行中判断的每个软件包均已达到建议状态，因此此处
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as unknown."
-msgstr "%d 个包被计为未知。"
+msgid_plural "%d package(s) are counted as unknown."
+msgstr[0] "%d 个包被计为未知。"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
-msgstr "列出了 %d 个软件包。记录中没有任何内容描述它们，因此不支持任何建议。"
+msgid_plural "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
+msgstr[0] "列出了 %d 个包。记录中没有任何内容对它们进行描述，因此不支持任何建议。"
 
 #: internal/common/report/compare_run.go
 msgid "Summary"
@@ -4128,7 +4219,8 @@ msgstr "没有目标有结果可报告，因此没有任何内容被计为已重
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) processed: %d regenerated, %d failed."
-msgstr "已处理 %d 个目标：%d 个已重新生成，%d 个已失败。"
+msgid_plural "%d target(s) processed: %d regenerated, %d failed."
+msgstr[0] "%d 个目标已处理：%d 个已重新生成，%d 个失败。"
 
 #: internal/common/report/manifest_run.go
 msgid "No per-target row reached this report, so the counts above are stated without the list they were taken over."
@@ -4136,7 +4228,8 @@ msgstr "没有单个目标的行进入此报告，因此上述计数是在没有
 
 #: internal/common/report/manifest_run.go
 msgid "Dry run: %d target(s) would have their Manifest regenerated."
-msgstr "干运行：%d 个目标将重新生成其清单。"
+msgid_plural "Dry run: %d target(s) would have their Manifest regenerated."
+msgstr[0] "演练：%d 个目标将重新生成其清单。"
 
 #: internal/common/report/manifest_run.go
 msgid "Nothing ran: no command was invoked and no Manifest was written, so no target above is counted as regenerated or as failed."
@@ -4144,11 +4237,13 @@ msgstr "未运行任何内容：未调用任何命令，也未写入任何清单
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) were regenerated and are listed above."
-msgstr "%d 个目标已重新生成，并已在上文列出。"
+msgid_plural "%d target(s) were regenerated and are listed above."
+msgstr[0] "%d 个目标已重新生成，并列于上方。"
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) were regenerated and are not listed; pass --all to list them."
-msgstr "%d 个目标已重新生成，但未列出；请传递 --all 以列出这些目标。"
+msgid_plural "%d target(s) were regenerated and are not listed; pass --all to list them."
+msgstr[0] "%d 个目标已重新生成，但未列出；请传递 --all 以列出它们。"
 
 #: internal/common/report/manifest_run.go
 msgid "What a target that succeeded printed is not kept: it was shown while the run was live, and holding a verbatim copy of every worker's output would grow with the overlay. A target that failed carries its own, in full."
@@ -4184,11 +4279,13 @@ msgstr "q/esc 退出 · ctrl+c 中断 · 退出时打印完整报告"
 
 #: internal/common/report/render/fullscreen.go
 msgid "… %d more line(s) not shown — press q for the whole report"
-msgstr "… 还有 %d 行未显示 — 按 q 查看完整报告"
+msgid_plural "… %d more line(s) not shown — press q for the whole report"
+msgstr[0] "… 还有 %d 行未显示 — 按 q 查看完整报告"
 
 #: internal/common/report/render/fullscreen.go
 msgid "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
-msgstr "… 还有 %d 行和 %d 个完整部分未显示 — 按 q 查看完整报告"
+msgid_plural "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
+msgstr[0] "… 还有 %d 行和 %d 个完整部分未显示 — 按 q 查看完整报告"
 
 #: internal/common/report/render/fullscreen.go
 msgid "this section could not be rendered: %v"
@@ -4200,7 +4297,8 @@ msgstr "运行未完成"
 
 #: internal/common/report/run.go
 msgid "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
-msgstr "此报告不完整：运行已到达每个单元，但有 %d 个计划单元未得到回答。"
+msgid_plural "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
+msgstr[0] "此报告不完整：运行已触达每个单元，但有 %d 个计划单元未得到应答。"
 
 #: internal/common/report/run.go
 msgid "The counts below cover only what the run established; the rest are counted in no column."
@@ -4208,7 +4306,8 @@ msgstr "以下计数仅涵盖运行所确定的内容；其余内容计入“无
 
 #: internal/common/report/run.go
 msgid "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
-msgstr "此报告不完整：运行被中断，%d 个计划单元未被评估。"
+msgid_plural "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
+msgstr[0] "此报告不完整：运行被中断，%d 个计划单元未被评估。"
 
 #: internal/common/report/run.go
 msgid "The counts below cover only what the run reached; the rest are counted in no column."
@@ -4240,11 +4339,13 @@ msgstr "该运行未指定要操作的子卷，因此以下任何步骤均未归
 
 #: internal/common/report/snapshot_run.go
 msgid "The run operated on %d subvolume(s): %s."
-msgstr "运行操作的对象是 %d 个子卷：%s。"
+msgid_plural "The run operated on %d subvolume(s): %s."
+msgstr[0] "该运行在 %d 个子卷上执行：%s。"
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) ran: %d succeeded, %d failed."
-msgstr "运行了 %d 个步骤：%d 个成功，%d 个失败。"
+msgid_plural "%d step(s) ran: %d succeeded, %d failed."
+msgstr[0] "运行了 %d 个步骤：%d 个成功，%d 个失败。"
 
 #: internal/common/report/snapshot_run.go
 msgid "succeeded"
@@ -4252,11 +4353,13 @@ msgstr "成功"
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) succeeded and are listed above."
-msgstr "%d 个步骤已成功，并已在上方列出。"
+msgid_plural "%d step(s) succeeded and are listed above."
+msgstr[0] "%d 个步骤已成功，并已在上方列出。"
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) succeeded and are not listed; pass --all to list them."
-msgstr "%d 个步骤已成功，但未列出；请使用 --all 参数列出这些步骤。"
+msgid_plural "%d step(s) succeeded and are not listed; pass --all to list them."
+msgstr[0] "%d 个步骤已成功，但未列出；请使用 --all 参数以列出这些步骤。"
 
 #: internal/common/report/snapshot_run.go
 msgid "How long each step took is not carried here: the run's own result file keeps the timings, and 'snapshot status' is what reads them back."
@@ -4268,11 +4371,13 @@ msgstr "正在应用更新"
 
 #: internal/common/tui/model.go
 msgid "%d earlier package(s) finished"
-msgstr "%d 个先前的软件包已完成"
+msgid_plural "%d earlier package(s) finished"
+msgstr[0] "%d 个先前的软件包已完成"
 
 #: internal/common/tui/model.go
 msgid "%d earlier log line(s)"
-msgstr "%d 条更早的日志行"
+msgid_plural "%d earlier log line(s)"
+msgstr[0] "%d 条更早的日志行"
 
 #: internal/overlay/pull.go
 msgid "Already up to date with %s."
@@ -4314,7 +4419,10 @@ msgstr ""
 msgid ""
 "Found %d ebuild(s) to rename:\n"
 "\n"
-msgstr ""
+msgid_plural ""
+"Found %d ebuild(s) to rename:\n"
+"\n"
+msgstr[0] ""
 "找到 %d 个需要重命名的 ebuild：\n"
 "\n"
 
@@ -4326,9 +4434,12 @@ msgstr "    （版本后缀将被去掉）\n"
 msgid ""
 "\n"
 "⚠ Warning: %d version-specific file(s) detected:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"⚠ 警告：检测到 %d 个特定于版本的（个）文件：\n"
+"⚠ Warning: %d version-specific file(s) detected:\n"
+msgstr[0] ""
+"\n"
+"⚠ 警告：检测到 %d 个特定于版本的文件：\n"
 
 #: internal/overlay/rename.go
 msgid ""
@@ -4342,7 +4453,10 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Warning: %d target file(s) already exist:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"⚠ Warning: %d target file(s) already exist:\n"
+msgstr[0] ""
 "\n"
 "⚠ 警告：%d 个目标文件已存在：\n"
 
@@ -4358,7 +4472,10 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Error: %d target file(s) would receive more than one ebuild:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"⚠ Error: %d target file(s) would receive more than one ebuild:\n"
+msgstr[0] ""
 "\n"
 "⚠ 错误：%d 个目标文件将接收多个 ebuild：\n"
 
@@ -4374,15 +4491,21 @@ msgstr ""
 msgid ""
 "\n"
 "Warning: %d version-specific file(s) detected:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"警告：%d 个特定版本的文件已被检测到：\n"
+"Warning: %d version-specific file(s) detected:\n"
+msgstr[0] ""
+"\n"
+"警告：检测到 %d 个特定版本的文件：\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Conflicts: %d target file(s) already exist:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Conflicts: %d target file(s) already exist:\n"
+msgstr[0] ""
 "\n"
 "冲突：%d 个目标文件已存在：\n"
 
@@ -4390,15 +4513,21 @@ msgstr ""
 msgid ""
 "Dry run: %d ebuild(s) would be renamed\n"
 "\n"
-msgstr ""
-"演练：将重命名 %d 个 ebuild\n"
+msgid_plural ""
+"Dry run: %d ebuild(s) would be renamed\n"
+"\n"
+msgstr[0] ""
+"干运行：%d 个 ebuild 将被重命名\n"
 "\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "Renamed %d ebuild(s):\n"
 "\n"
-msgstr ""
+msgid_plural ""
+"Renamed %d ebuild(s):\n"
+"\n"
+msgstr[0] ""
 "已重命名 %d 个 ebuild：\n"
 "\n"
 
@@ -4406,7 +4535,10 @@ msgstr ""
 msgid ""
 "\n"
 "Failed %d ebuild(s):\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Failed %d ebuild(s):\n"
+msgstr[0] ""
 "\n"
 "%d 个 ebuild 失败：\n"
 
@@ -4414,7 +4546,10 @@ msgstr ""
 msgid ""
 "\n"
 "Manifest updated for %d package(s)\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Manifest updated for %d package(s)\n"
+msgstr[0] ""
 "\n"
 "已为 %d 个软件包更新清单\n"
 
@@ -4422,7 +4557,10 @@ msgstr ""
 msgid ""
 "\n"
 "Manifest update failed for %d package(s):\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Manifest update failed for %d package(s):\n"
+msgstr[0] ""
 "\n"
 "%d 个软件包的清单更新失败：\n"
 
@@ -4488,11 +4626,8 @@ msgstr "要将系统回滚到快照 %q 吗？这会在下次重启时从该快�
 
 #: internal/tray/messages/messages.go
 msgid "%d unread notice"
-msgstr "%d 条未读通知"
-
-#: internal/tray/messages/messages.go
-msgid "%d unread notices"
-msgstr "%d 条未读通知"
+msgid_plural "%d unread notices"
+msgstr[0] "%d 条未读通知"
 
 #: internal/tray/messages/messages.go
 msgid "%d more…"
@@ -4532,7 +4667,8 @@ msgstr "标记为已读"
 
 #: internal/tray/messages/messages.go
 msgid "%d new notices"
-msgstr "%d 条新通知"
+msgid_plural "%d new notices"
+msgstr[0] "%d 条新通知"
 
 #: internal/tray/messages/messages.go
 msgid "Low disk space on %s"
@@ -4588,11 +4724,8 @@ msgstr "网络：已断开"
 
 #: internal/tray/messages/messages.go
 msgid "%d system alert"
-msgstr "%d 条系统警报"
-
-#: internal/tray/messages/messages.go
-msgid "%d system alerts"
-msgstr "%d 条系统警报"
+msgid_plural "%d system alerts"
+msgstr[0] "%d 条系统警报"
 
 #: internal/tray/messages/messages.go
 msgid "Package build failed"
@@ -4704,8 +4837,5 @@ msgstr "仓库 %s：%s 前已同步"
 
 #: internal/tray/messages/messages.go
 msgid "%d day"
-msgstr "%d 天"
-
-#: internal/tray/messages/messages.go
-msgid "%d days"
-msgstr "%d 天"
+msgid_plural "%d days"
+msgstr[0] "%d 天"

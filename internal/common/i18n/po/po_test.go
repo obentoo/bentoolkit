@@ -5,8 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -58,13 +60,91 @@ func f(s string) string { return tr.T(s) } // a variable: skipped, not an error
 	}
 }
 
+func TestExtractPlurals(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "cmd", "a.go"), header+`
+var n int
+var _ = tr.TCount("%d package(s)", n)
+var _ = tr.TPlural("%d day", "%d days", n)
+var _ = tr.TCount[int]("%d file(s)", n)
+var _ = tr.NPlural("%d alert", "%d alerts")
+var _ = tr.TPlural(s1, s2, n) // variables: translates a pair marked elsewhere
+var s1, s2 string
+`)
+	msgs, err := Extract(root, "cmd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"%d package(s)": "%d package(s)", "%d day": "%d days", "%d file(s)": "%d file(s)", "%d alert": "%d alerts"}
+	if len(msgs) != len(want) {
+		t.Fatalf("got %+v", msgs)
+	}
+	for _, m := range msgs {
+		if want[m.ID] != m.Plural {
+			t.Errorf("%q: plural %q, want %q", m.ID, m.Plural, want[m.ID])
+		}
+	}
+	var buf bytes.Buffer
+	if err := WritePOT(&buf, msgs); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := Parse(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Plural != want[e.ID] || len(e.Forms) != 2 {
+			t.Errorf("round trip: %+v", e)
+		}
+	}
+}
+
+func TestExtractRejectsAMsgidWithTwoShapes(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "cmd", "a.go"), header+`
+var n int
+var _ = tr.T("%d day")
+var _ = tr.TPlural("%d day", "%d days", n)
+`)
+	if _, err := Extract(root, "cmd"); err == nil {
+		t.Error("a msgid used both plain and plural was accepted")
+	}
+}
+
+func TestParsePluralEntriesAndHeader(t *testing.T) {
+	in := `msgid ""
+msgstr ""
+"Language: ru\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 ? 0 : 2);\n"
+
+msgid "%d day"
+msgid_plural "%d days"
+msgstr[0] "%d день"
+msgstr[1] ""
+"%d дня"
+msgstr[2] "%d дней"
+`
+	hdr, entries, err := ParseWithHeader(strings.NewReader(in))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(hdr, "nplurals=3") {
+		t.Errorf("header = %q", hdr)
+	}
+	if len(entries) != 1 || !slices.Equal(entries[0].Forms, []string{"%d день", "%d дня", "%d дней"}) || entries[0].Str != "%d день" {
+		t.Errorf("entries = %+v", entries)
+	}
+}
+
 func TestExtractRejectsComputedN(t *testing.T) {
 	for name, call := range map[string]string{
-		"variable": `tr.N(s)`,
-		"empty":    `tr.N("")`,
-		"two args": `tr.N("a", "b")`,
-		"sprintf":  `tr.N("a" + s)`,
-		"carriage": `tr.T("\rprogress")`,
+		"variable":    `tr.N(s)`,
+		"empty":       `tr.N("")`,
+		"two args":    `tr.N("a", "b")`,
+		"sprintf":     `tr.N("a" + s)`,
+		"carriage":    `tr.T("\rprogress")`,
+		"count arity": `tr.TCount("%d x")`,
+		"nplural":     `tr.NPlural("a", s)`,
 	} {
 		root := t.TempDir()
 		writeFile(t, filepath.Join(root, "cmd", "a.go"), header+"var s string\nvar _ = "+call+"\n")
@@ -127,7 +207,7 @@ msgstr ""
 		t.Fatal(err)
 	}
 	want := []Entry{{ID: "Old %s", Str: "Velho %s", Fuzzy: true}, {ID: "Kept", Str: "Mantido"}}
-	if !slices.Equal(entries, want) {
+	if !reflect.DeepEqual(entries, want) {
 		t.Errorf("Parse = %+v, want %+v", entries, want)
 	}
 }
@@ -135,7 +215,9 @@ msgstr ""
 func TestParseRejectsUnsupportedSyntax(t *testing.T) {
 	for _, in := range []string{
 		"msgctxt \"menu\"\nmsgid \"Open\"\nmsgstr \"\"\n",
-		"msgid \"one\"\nmsgid_plural \"many\"\nmsgstr[0] \"\"\n",
+		"msgid \"one\"\nmsgstr[0] \"x\"\n",
+		"msgid \"one\"\nmsgid_plural \"many\"\nmsgstr[1] \"x\"\n",
+		"msgid_plural \"many\"\n",
 		"\"orphan string\"\n",
 		"msgid \"unterminated\n",
 		"msgstr \"no msgid\"\n",
@@ -265,12 +347,28 @@ func TestCatalogsInSync(t *testing.T) {
 	}
 	for _, lang := range langs {
 		t.Run(lang, func(t *testing.T) {
-			entries := parseFile(t, filepath.Join(root, "po", lang+".po"))
+			f, err := os.Open(filepath.Join(root, "po", lang+".po"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			hdr, entries, err := ParseWithHeader(f)
+			f.Close()
+			if err != nil {
+				t.Fatal(err)
+			}
+			nplurals := pluralCount(t, hdr)
 			if got := ids(entries); !slices.Equal(got, source) {
 				t.Fatalf("po/%s.po is out of sync with the template: run make i18n-update", lang)
 			}
 			for _, e := range entries {
-				if e.Str == "" || e.Fuzzy {
+				if e.Fuzzy {
+					continue
+				}
+				if e.Plural != "" {
+					checkPluralEntry(t, e, nplurals)
+					continue
+				}
+				if e.Str == "" {
 					continue
 				}
 				if a, b := ArgVerbs(e.ID), ArgVerbs(e.Str); !slices.Equal(a, b) {
@@ -284,6 +382,53 @@ func TestCatalogsInSync(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// pluralCount reads nplurals from a .po header.
+func pluralCount(t *testing.T, hdr string) int {
+	t.Helper()
+	m := regexp.MustCompile(`nplurals=(\d+)`).FindStringSubmatch(hdr)
+	if m == nil {
+		t.Fatal("the .po header declares no Plural-Forms")
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+// checkPluralEntry requires one form per plural category of the language,
+// each carrying the msgid's verbs. A form may omit the count itself only
+// where the language's grammar does (e.g. Russian's "one" form also covers
+// 21, 31, ...), so an absent count verb is not an error; any other verb is.
+func checkPluralEntry(t *testing.T, e Entry, nplurals int) {
+	t.Helper()
+	if len(e.Forms) != nplurals {
+		t.Errorf("%q: %d plural forms, the language has %d", e.ID, len(e.Forms), nplurals)
+		return
+	}
+	untranslated := true
+	for _, f := range e.Forms {
+		if f != "" {
+			untranslated = false
+		}
+	}
+	if untranslated {
+		return
+	}
+	for i, f := range e.Forms {
+		if f == "" {
+			t.Errorf("%q: plural form %d is empty while others are translated", e.ID, i)
+			continue
+		}
+		if a, b := ArgVerbs(e.ID), ArgVerbs(f); !slices.Equal(a, b) {
+			t.Errorf("%q: verbs %q in the msgid, %q in plural form %d", e.ID, a, b, i)
+		}
+		if strings.HasSuffix(e.ID, "\n") != strings.HasSuffix(f, "\n") {
+			t.Errorf("%q: plural form %d's trailing newline differs from the msgid's", e.ID, i)
+		}
 	}
 }
 

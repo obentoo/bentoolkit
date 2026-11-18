@@ -1279,7 +1279,7 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 		output.Error.Fprintf(os.Stderr, "  "+i18n.T("The registry was NOT updated: %v")+"\n", err)
 		return
 	}
-	output.Success.Printf("  "+i18n.T("Wrote %d version pin(s) to packages.toml.")+"\n", len(pins))
+	output.Success.Printf("  "+i18n.TCount("Wrote %d version pin(s) to packages.toml.", len(pins))+"\n", len(pins))
 	output.Info.Println("  " + i18n.T("Review the diff before it is published: 'bentoo overlay diff'"))
 }
 
@@ -1294,7 +1294,7 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	fmt.Println()
 	output.Header.Println(i18n.T("Registry Reconciliation"))
 	fmt.Println()
-	output.Info.Printf("  "+i18n.T("The registry and the overlay disagree on %d point(s).")+"\n\n", len(divs))
+	output.Info.Printf("  "+i18n.TCount("The registry and the overlay disagree on %d point(s).", len(divs))+"\n\n", len(divs))
 
 	// Counted up front, in their own loop, so the summary below cannot depend on
 	// which groups happened to be printed or in what order.
@@ -1383,11 +1383,11 @@ func displayDivergences(divs []autoupdate.Divergence, writable int) {
 	// something very different, so the two are counted apart.
 	switch {
 	case corrected == 0:
-		output.Warning.Printf("  "+i18n.T("About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time.")+"\n", writable, firstTime)
+		output.Warning.Printf("  "+i18n.TCount("About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time.", writable)+"\n", writable, firstTime)
 	case firstTime == 0:
-		output.Warning.Printf("  "+i18n.T("About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected.")+"\n", writable, corrected)
+		output.Warning.Printf("  "+i18n.TCount("About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected.", writable)+"\n", writable, corrected)
 	default:
-		output.Warning.Printf("  "+i18n.T("About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected.")+"\n", writable, firstTime, corrected)
+		output.Warning.Printf("  "+i18n.TCount("About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected.", writable)+"\n", writable, firstTime, corrected)
 	}
 	output.Warning.Println("  " + i18n.T("packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."))
 }
@@ -1400,19 +1400,19 @@ func (ar *autoupdateRun) confirmRegistryWrite(divs []autoupdate.Divergence, writ
 	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on
 		// this path, so it works from a pipe, a cron job or a CI step.
-		output.Warning.Printf("  "+i18n.T("--yes given: writing %d version pin(s) without a prompt.")+"\n", writable)
+		output.Warning.Printf("  "+i18n.TCount("--yes given: writing %d version pin(s) without a prompt.", writable)+"\n", writable)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
 		// The divergences above ARE the report; this run writes nothing.
 		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing written."))
-		output.Info.Printf("  "+i18n.T("Re-run with --yes to write these %d version pin(s) unattended.")+"\n", writable)
+		output.Info.Printf("  "+i18n.TCount("Re-run with --yes to write these %d version pin(s) unattended.", writable)+"\n", writable)
 		return false
 	}
 	// ONE question covering every divergence above, not one per entry.
 	fmt.Println()
 	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
-		i18n.T("Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"), writable, len(divs)))
+		i18n.TCount("Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)", writable), writable, len(divs)))
 }
 
 // reportRevivableOrphans is the --check --revivable add-on: it resolves the
@@ -1568,7 +1568,7 @@ func displayPendingUpdates(log *slog.Logger, updates []autoupdate.PendingUpdate)
 		fmt.Println()
 	}
 
-	output.Info.Printf(i18n.T("Total: %d pending update(s)")+"\n", len(updates))
+	output.Info.Printf(i18n.TCount("Total: %d pending update(s)", len(updates))+"\n", len(updates))
 	output.Info.Println(i18n.T("Use 'bentoo overlay autoupdate --apply <package>' to apply an update"))
 	output.Info.Println(i18n.T("Or 'bentoo overlay autoupdate --apply all' to apply every pending update"))
 }
@@ -2408,7 +2408,7 @@ func displayReviveCandidates(candidates []autoupdate.ReviveCandidate) {
 	}
 
 	fmt.Println()
-	output.Info.Printf(i18n.T("Found %d revivable orphan(s)")+"\n", len(candidates))
+	output.Info.Printf(i18n.TCount("Found %d revivable orphan(s)", len(candidates))+"\n", len(candidates))
 	output.Info.Println(i18n.T("Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate"))
 }
 

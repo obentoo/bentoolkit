@@ -127,7 +127,7 @@ func realignPlanLines(plan realignPlan) []string {
 	lines := make([]string, 0, len(plan.Atoms)+3)
 	lines = append(lines, "")
 	lines = append(lines, fmt.Sprintf(
-		i18n.T("Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."),
+		i18n.TCount("Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay.", len(plan.Atoms)),
 		len(plan.Atoms), plan.Depth))
 	for _, atom := range plan.Atoms {
 		lines = append(lines, "  "+atom)
@@ -169,18 +169,18 @@ func printRealignPlan(plan realignPlan) {
 // prompt and never the plan.
 func confirmRealignPlan(plan realignPlan, d *deps) bool {
 	if compareYes {
-		output.Warning.Printf(i18n.T("  --yes given: proving %d realignment(s) without a prompt.\n"), len(plan.Atoms))
+		output.Warning.Printf(i18n.TCount("  --yes given: proving %d realignment(s) without a prompt.\n", len(plan.Atoms)), len(plan.Atoms))
 		return true
 	}
 	if !d.registryPromptIsInteractive() {
 		output.Warning.Println(i18n.T("  Not an interactive terminal and --yes was not given: nothing was built."))
-		output.Info.Printf(i18n.T("  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"), len(plan.Atoms))
+		output.Info.Printf(i18n.TCount("  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n", len(plan.Atoms)), len(plan.Atoms))
 		return false
 	}
 
 	fmt.Println()
 	output.Warning.Printf(i18n.T("  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n"), plan.Depth)
-	return d.confirmRealignPlan(fmt.Sprintf(i18n.T("Prove %d realignment(s) at depth %s?"), len(plan.Atoms), plan.Depth))
+	return d.confirmRealignPlan(fmt.Sprintf(i18n.TCount("Prove %d realignment(s) at depth %s?", len(plan.Atoms)), len(plan.Atoms), plan.Depth))
 }
 
 // realignCandidate is one package this run would prove, with the proposal that

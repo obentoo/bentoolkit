@@ -97,7 +97,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 		return exitWith(1)
 	}
 
-	output.Success.Printf("  "+i18n.T("Repaired packages.toml: %d change(s) written.")+"\n", totalRepairs(result))
+	output.Success.Printf("  "+i18n.TCount("Repaired packages.toml: %d change(s) written.", totalRepairs(result))+"\n", totalRepairs(result))
 	output.Info.Println("  " + i18n.T("Review it before it is published: 'bentoo overlay diff'"))
 
 	// Re-lint rather than subtract the repaired rules from the list above: only
@@ -129,7 +129,7 @@ func reportUnrepaired(remaining []registry.LintIssue) error {
 		return nil
 	}
 
-	output.Warning.Printf("  "+i18n.T("%d finding(s) still need a human — --fix does not guess at them:")+"\n", len(remaining))
+	output.Warning.Printf("  "+i18n.TCount("%d finding(s) still need a human — --fix does not guess at them:", len(remaining))+"\n", len(remaining))
 	for _, issue := range remaining {
 		output.Warning.Println("    " + issue.String())
 	}
@@ -150,7 +150,7 @@ func summarizeUnrepaired(remaining []registry.LintIssue) error {
 	}
 
 	output.Warning.Printf(
-		"  "+i18n.T("Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.")+"\n",
+		"  "+i18n.TCount("Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.", len(remaining))+"\n",
 		len(remaining))
 	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
@@ -169,14 +169,14 @@ func (ar *autoupdateRun) confirmLintRepair(result *registry.RepairResult) bool {
 	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
-		output.Warning.Printf("  "+i18n.T("--yes given: writing %d repair(s) without a prompt.")+"\n", repairs)
+		output.Warning.Printf("  "+i18n.TCount("--yes given: writing %d repair(s) without a prompt.", repairs)+"\n", repairs)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
 		// The diff above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
 		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing written."))
-		output.Info.Printf("  "+i18n.T("Re-run with --yes to write these %d repair(s) unattended.")+"\n", repairs)
+		output.Info.Printf("  "+i18n.TCount("Re-run with --yes to write these %d repair(s) unattended.", repairs)+"\n", repairs)
 		return false
 	}
 
@@ -184,7 +184,7 @@ func (ar *autoupdateRun) confirmLintRepair(result *registry.RepairResult) bool {
 	// approving the rewrite they just read.
 	fmt.Println()
 	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
-		i18n.T("Write %d repair(s) to packages.toml? (the diff above is the whole change)"), repairs))
+		i18n.TCount("Write %d repair(s) to packages.toml? (the diff above is the whole change)", repairs), repairs))
 }
 
 // printRepairSummary states what the repair does in the same vocabulary the lint
@@ -198,7 +198,7 @@ func printRepairSummary(result *registry.RepairResult) {
 	}
 	sort.Strings(actions)
 
-	output.Warning.Printf("  "+i18n.T("About to rewrite packages.toml with %d repair(s):")+"\n", totalRepairs(result))
+	output.Warning.Printf("  "+i18n.TCount("About to rewrite packages.toml with %d repair(s):", totalRepairs(result))+"\n", totalRepairs(result))
 	for _, name := range actions {
 		fmt.Printf("    %-26s %d\n", name, result.Actions[name])
 	}

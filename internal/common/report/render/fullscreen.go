@@ -409,9 +409,9 @@ func (p pane) fit(budget, cells int) []string {
 func (p pane) omission(shown int) string {
 	lines := len(p.lines) - shown
 
-	sentence := fmt.Sprintf(i18n.T("… %d more line(s) not shown — press q for the whole report"), lines)
+	sentence := fmt.Sprintf(i18n.TCount("… %d more line(s) not shown — press q for the whole report", lines), lines)
 	if hidden := p.sectionsBelow(shown); hidden > 0 {
-		sentence = fmt.Sprintf(i18n.T("… %d more line(s) and %d whole section(s) not shown — press q for the whole report"), lines, hidden)
+		sentence = fmt.Sprintf(i18n.TCount("… %d more line(s) and %d whole section(s) not shown — press q for the whole report", lines), lines, hidden)
 	}
 
 	return decorate(p.paint.header, strings.Repeat(" ", indent)+sentence)

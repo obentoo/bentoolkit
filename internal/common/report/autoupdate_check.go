@@ -75,7 +75,7 @@ func versionCheckSectionIn(r AutoupdateCheck, opts SectionOptions) Section {
 	}
 
 	found := scanCounts(r.Scanned)
-	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) checked, %d with a pending update.")), len(r.Scanned), found[conditionUpdate])}
+	s.Lead = []string{fmt.Sprintf(opts.count(i18n.NPlural("%d package(s) checked, %d with a pending update.", "%d package(s) checked, %d with a pending update."), len(r.Scanned)), len(r.Scanned), found[conditionUpdate])}
 
 	s.Rows.Headers = []string{
 		opts.t(i18n.N("PACKAGE")),
@@ -102,23 +102,23 @@ func versionCheckSectionIn(r AutoupdateCheck, opts SectionOptions) Section {
 			// The list is IN ADDITION TO the count, never instead of it.
 			// A reader who scrolled past the rows still gets the number, and the
 			// two goldens differ in both places rather than only in one.
-			s.Notes = append(s.Notes, fmt.Sprintf(opts.t(i18n.N("%d package(s) are up to date and are listed above.")), found[conditionUpToDate]))
+			s.Notes = append(s.Notes, fmt.Sprintf(opts.count(i18n.NPlural("%d package(s) are up to date and are listed above.", "%d package(s) are up to date and are listed above."), found[conditionUpToDate]), found[conditionUpToDate]))
 		} else {
-			s.Notes = append(s.Notes, fmt.Sprintf(opts.t(i18n.N("%d package(s) are up to date and are not listed; pass --all to list them.")), found[conditionUpToDate]))
+			s.Notes = append(s.Notes, fmt.Sprintf(opts.count(i18n.NPlural("%d package(s) are up to date and are not listed; pass --all to list them.", "%d package(s) are up to date and are not listed; pass --all to list them."), found[conditionUpToDate]), found[conditionUpToDate]))
 		}
 	}
 	for _, stated := range []struct {
 		when condition
 		text string
 	}{
-		{conditionOrphaned, i18n.N("%d package(s) have no ebuild in the overlay.")},
-		{conditionManualPromotion, i18n.N("%d package(s) left their series upstream and need a manual promotion.")},
-		{conditionFailed, i18n.N("%d package(s) could not be checked.")},
-		{conditionNotComparable, i18n.N("%d package(s) reported a version that could not be ordered against the current one.")},
-		{conditionHeld, i18n.N("%d package(s) have an update held by min_age_days.")},
+		{conditionOrphaned, i18n.NPlural("%d package(s) have no ebuild in the overlay.", "%d package(s) have no ebuild in the overlay.")},
+		{conditionManualPromotion, i18n.NPlural("%d package(s) left their series upstream and need a manual promotion.", "%d package(s) left their series upstream and need a manual promotion.")},
+		{conditionFailed, i18n.NPlural("%d package(s) could not be checked.", "%d package(s) could not be checked.")},
+		{conditionNotComparable, i18n.NPlural("%d package(s) reported a version that could not be ordered against the current one.", "%d package(s) reported a version that could not be ordered against the current one.")},
+		{conditionHeld, i18n.NPlural("%d package(s) have an update held by min_age_days.", "%d package(s) have an update held by min_age_days.")},
 	} {
 		if found[stated.when] > 0 {
-			s.Notes = append(s.Notes, fmt.Sprintf(opts.t(stated.text), found[stated.when]))
+			s.Notes = append(s.Notes, fmt.Sprintf(opts.count(stated.text, found[stated.when]), found[stated.when]))
 		}
 	}
 
@@ -157,9 +157,9 @@ func validationPlanSection(r AutoupdateCheck, opts SectionOptions) Section {
 			excluded++
 		}
 	}
-	lead := fmt.Sprintf(opts.t(i18n.N("%d package(s) to evaluate.")), len(r.Plan))
+	lead := fmt.Sprintf(opts.count(i18n.NPlural("%d package(s) to evaluate.", "%d package(s) to evaluate."), len(r.Plan)), len(r.Plan))
 	if excluded > 0 {
-		lead = fmt.Sprintf(opts.t(i18n.N("%d package(s) to evaluate, %d of them excluded by policy.")), len(r.Plan), excluded)
+		lead = fmt.Sprintf(opts.count(i18n.NPlural("%d package(s) to evaluate, %d of them excluded by policy.", "%d package(s) to evaluate, %d of them excluded by policy."), len(r.Plan)), len(r.Plan), excluded)
 	}
 	s.Lead = []string{lead}
 
@@ -257,7 +257,7 @@ func validationSummarySection(r AutoupdateCheck, opts SectionOptions) Section {
 	return Section{
 		Title: opts.t(i18n.N("Validation Summary")),
 		Lead: []string{
-			fmt.Sprintf(opts.t(i18n.N("%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped.")),
+			fmt.Sprintf(opts.count(i18n.NPlural("%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped.", "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."), counted.Total()),
 				counted.Total(), counted.Proved, counted.Errored, counted.Inconclusive, counted.Skipped),
 			fmt.Sprintf(opts.t(i18n.N("Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded.")),
 				r.States.Ready, r.States.Wait, r.States.Human, r.States.Excluded),
@@ -411,7 +411,7 @@ func tierCounts(scanned []PackageResult) tierTally {
 // a fact the scan never established.
 func tierNote(counted tierTally, opts SectionOptions) string {
 	if counted.unresolved > 0 {
-		return fmt.Sprintf(opts.t(i18n.N("Checked %d source, %d bin; %d package(s) resolved to neither tier.")),
+		return fmt.Sprintf(opts.count(i18n.NPlural("Checked %d source, %d bin; %d package(s) resolved to neither tier.", "Checked %d source, %d bin; %d package(s) resolved to neither tier."), counted.unresolved),
 			counted.source, counted.bin, counted.unresolved)
 	}
 	return fmt.Sprintf(opts.t(i18n.N("Checked %d source, %d bin.")), counted.source, counted.bin)

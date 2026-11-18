@@ -115,7 +115,7 @@ func decideNotifications(st *state.State, accepted []notices.Notice, firstRun, p
 			urgency = max(urgency, urgencyFor(st.Notices[id].Severity, cfg.DowngradeCritical))
 		}
 		return append(msgs, notify.Message{
-			Summary: messages.Format(messages.SummaryNewNotices, len(other)),
+			Summary: messages.Count(messages.SummaryNewNotices, messages.SummaryNewNotices, len(other)),
 			Urgency: urgency,
 			Actions: []notify.Action{{Key: actionDefault, Label: messages.Text(messages.ActionOpen)}},
 			Covers:  slices.Sorted(slices.Values(other)),

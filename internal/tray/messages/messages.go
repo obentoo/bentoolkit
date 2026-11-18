@@ -187,8 +187,8 @@ const (
 // misc/i18n-extract collects it; Text translates it. The ellipsis is written
 // as an escape so no literal non-ASCII rune enters the source.
 var catalog = map[Key]string{
-	TooltipOne:        i18n.N("%d unread notice"),
-	TooltipMany:       i18n.N("%d unread notices"),
+	TooltipOne:        i18n.NPlural("%d unread notice", "%d unread notices"),
+	TooltipMany:       "%d unread notices", // translated as TooltipOne's plural
 	MenuMore:          i18n.N("%d more\u2026"),
 	MenuCheckNow:      i18n.N("Check now"),
 	MenuMarkAllRead:   i18n.N("Mark all as read"),
@@ -198,7 +198,7 @@ var catalog = map[Key]string{
 	MenuQuit:          i18n.N("Quit"),
 	ActionOpen:        i18n.N("Open"),
 	ActionMarkRead:    i18n.N("Mark as read"),
-	SummaryNewNotices: i18n.N("%d new notices"),
+	SummaryNewNotices: i18n.NPlural("%d new notices", "%d new notices"), // English reads the same for every count
 
 	SysDiskSummary:    i18n.N("Low disk space on %s"),
 	SysDiskBody:       i18n.N("%s free (%.1f%%)"),
@@ -213,8 +213,8 @@ var catalog = map[Key]string{
 	SysAlertMemory:    i18n.N("Memory: %s of %s available"),
 	SysAlertCPU:       i18n.N("CPU pressure: %.0f%% for %d min"),
 	SysAlertNetwork:   i18n.N("Network: down"),
-	SysAlertsOne:      i18n.N("%d system alert"),
-	SysAlertsMany:     i18n.N("%d system alerts"),
+	SysAlertsOne:      i18n.NPlural("%d system alert", "%d system alerts"),
+	SysAlertsMany:     "%d system alerts", // translated as SysAlertsOne's plural
 
 	SysEmergeSummary:   i18n.N("Package build failed"),
 	SysEmergeBody:      i18n.N("%s failed to build."),
@@ -245,8 +245,8 @@ var catalog = map[Key]string{
 	SysSyncSummary:        i18n.N("Repository not synced: %s"),
 	SysSyncBody:           i18n.N("%s was last synced %s ago."),
 	SysAlertSync:          i18n.N("Repository %s: synced %s ago"),
-	SysDaysOne:            i18n.N("%d day"),
-	SysDaysMany:           i18n.N("%d days"),
+	SysDaysOne:            i18n.NPlural("%d day", "%d days"),
+	SysDaysMany:           "%d days", // translated as SysDaysOne's plural
 }
 
 // Text returns k's catalog text, translated by the loaded gettext catalog
@@ -265,11 +265,18 @@ func Format(k Key, args ...any) string {
 	return fmt.Sprintf(Text(k), args...)
 }
 
-// Count formats the entry for n: one when n is 1, other for any other count,
-// with n as the format's only argument.
+// Count formats the entry for n: one when n is 1, other for any other count
+// in English, with n as the format's only argument. The pair is one gettext
+// plural entry (marked with i18n.NPlural on one), so a translation picks the
+// form its language needs for n: Russian has three.
 func Count(one, other Key, n int) string {
-	if n == 1 {
-		return Format(one, n)
+	s1, ok1 := catalog[one]
+	s2, ok2 := catalog[other]
+	if !ok1 || !ok2 {
+		if n == 1 {
+			return Format(one, n)
+		}
+		return Format(other, n)
 	}
-	return Format(other, n)
+	return fmt.Sprintf(i18n.TPlural(s1, s2, n), n)
 }

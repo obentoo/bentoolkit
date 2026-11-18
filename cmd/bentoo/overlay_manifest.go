@@ -140,7 +140,7 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 	// program is running it owns the terminal, so a direct stderr write would
 	// race with its rendering. It is a count line the operator reads as part
 	// of the command's output, so it prints bare (ui_notes.go).
-	uiInfo(fmt.Sprintf(i18n.T("Regenerating Manifest for %d package(s)"), len(targets)))
+	uiInfo(fmt.Sprintf(i18n.TCount("Regenerating Manifest for %d package(s)", len(targets)), len(targets)))
 
 	reporter, finishUI := chooseManifestReporter(log, d, ctx.Config, manifestFlags.DryRun, runCtx, cancel)
 

@@ -18,7 +18,9 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   or English locale, or a language with no installed catalog, keeps English.
   What other programs read stays English: logs, `--json`, `--porcelain`, the
   `--export` report files, generated files and commit messages, and the
-  answers a prompt accepts (`y`, `yes`). Error messages are still English.
+  answers a prompt accepts (`y`, `yes`). Counts agree with the number in each
+  language ("1 пакет", "3 пакета", "5 пакетов"). Error messages are still
+  English.
   Notice titles and summaries are shown as published. Packagers: `make
   install` now also installs `share/locale/<lang>/LC_MESSAGES/bentoolkit.mo`
   (built with `msgfmt`, see "Translations" in `docs/development.md`).

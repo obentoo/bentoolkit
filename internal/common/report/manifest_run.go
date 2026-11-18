@@ -143,7 +143,7 @@ func manifestSection(r ManifestRun, opts SectionOptions) Section {
 	// per-target detail, and a report states what it omitted rather than
 	// omitting it silently.
 	if len(r.Targets) == 0 {
-		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d target(s) processed: %d regenerated, %d failed.")),
+		s.Lead = []string{fmt.Sprintf(opts.count(i18n.NPlural("%d target(s) processed: %d regenerated, %d failed.", "%d target(s) processed: %d regenerated, %d failed."), r.Ok+r.Failed),
 			r.Ok+r.Failed, r.Ok, r.Failed)}
 		s.Notes = []string{opts.t(i18n.N("No per-target row reached this report, so the counts above are stated without the list they were taken over."))}
 		return s
@@ -153,7 +153,7 @@ func manifestSection(r ManifestRun, opts SectionOptions) Section {
 		return manifestPreview(s, r, opts)
 	}
 
-	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d target(s) processed: %d regenerated, %d failed.")),
+	s.Lead = []string{fmt.Sprintf(opts.count(i18n.NPlural("%d target(s) processed: %d regenerated, %d failed.", "%d target(s) processed: %d regenerated, %d failed."), r.Ok+r.Failed),
 		r.Ok+r.Failed, r.Ok, r.Failed)}
 
 	s.Rows.Headers = []string{opts.t(i18n.N("PACKAGE")), opts.t(i18n.N("STATE"))}
@@ -192,7 +192,7 @@ func manifestSection(r ManifestRun, opts SectionOptions) Section {
 // omission: this run deliberately established nothing about any
 // of the rows it is showing.
 func manifestPreview(s Section, r ManifestRun, opts SectionOptions) Section {
-	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("Dry run: %d target(s) would have their Manifest regenerated.")), len(r.Targets))}
+	s.Lead = []string{fmt.Sprintf(opts.count(i18n.NPlural("Dry run: %d target(s) would have their Manifest regenerated.", "Dry run: %d target(s) would have their Manifest regenerated."), len(r.Targets)), len(r.Targets))}
 
 	s.Rows.Headers = []string{opts.t(i18n.N("PACKAGE"))}
 	for _, target := range r.Targets {
@@ -224,9 +224,9 @@ func manifestNotes(r ManifestRun, opts SectionOptions) []string {
 		// reason the check's own up-to-date note is: a count never depends on
 		// which rows were listed, so the sentence is the same shape in
 		// both directions and only its tail changes.
-		notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d target(s) were regenerated and are listed above.")), r.Ok))
+		notes = append(notes, fmt.Sprintf(opts.count(i18n.NPlural("%d target(s) were regenerated and are listed above.", "%d target(s) were regenerated and are listed above."), r.Ok), r.Ok))
 	} else {
-		notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d target(s) were regenerated and are not listed; pass --all to list them.")), r.Ok))
+		notes = append(notes, fmt.Sprintf(opts.count(i18n.NPlural("%d target(s) were regenerated and are not listed; pass --all to list them.", "%d target(s) were regenerated and are not listed; pass --all to list them."), r.Ok), r.Ok))
 	}
 
 	return append(notes,

@@ -11,11 +11,19 @@ import (
 // order: it is how a reader tells little- from big-endian files apart.
 const moMagic = 0x950412de
 
-// parseMO decodes a GNU .mo catalog into msgid -> msgstr. The header entry
-// (empty msgid) and entries with a context (msgctxt, stored as
-// "ctxt\x04msgid") are skipped: bentoolkit uses neither. For a plural entry
-// ("singular\x00plural") the singular is the key and the first form the value.
-func parseMO(data []byte) (map[string]string, error) {
+// moCatalog is a decoded .mo file.
+type moCatalog struct {
+	msgs     map[string]string   // msgid -> msgstr; a plural entry's first form too
+	plurals  map[string][]string // singular msgid -> every plural form
+	nplurals int
+	rule     pluralRule
+}
+
+// parseMO decodes a GNU .mo catalog. The header entry (empty msgid) supplies
+// the plural rule; entries with a context (msgctxt, stored as
+// "ctxt\x04msgid") are skipped, as bentoolkit uses none. A plural entry
+// ("singular\x00plural" -> "form0\x00form1...") is keyed by its singular.
+func parseMO(data []byte) (*moCatalog, error) {
 	if len(data) < 28 {
 		return nil, errors.New("file too short for a .mo header")
 	}
@@ -53,7 +61,7 @@ func parseMO(data []byte) (map[string]string, error) {
 		return string(data[start : start+length]), nil
 	}
 
-	m := make(map[string]string, n)
+	c := &moCatalog{msgs: make(map[string]string, n), plurals: map[string][]string{}, nplurals: 2, rule: germanic}
 	for i := range n {
 		id, err := str(origTab, i)
 		if err != nil {
@@ -63,12 +71,23 @@ func parseMO(data []byte) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		if id == "" || strings.Contains(id, "\x04") {
+		if id == "" {
+			np, rule, err := parsePluralForms(tr)
+			if err != nil {
+				return nil, err
+			}
+			c.nplurals, c.rule = np, rule
 			continue
 		}
-		id, _, _ = strings.Cut(id, "\x00")
-		tr, _, _ = strings.Cut(tr, "\x00")
-		m[id] = tr
+		if strings.Contains(id, "\x04") {
+			continue
+		}
+		singular, _, isPlural := strings.Cut(id, "\x00")
+		forms := strings.Split(tr, "\x00")
+		if isPlural {
+			c.plurals[singular] = forms
+		}
+		c.msgs[singular] = forms[0]
 	}
-	return m, nil
+	return c, nil
 }

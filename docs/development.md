@@ -153,6 +153,14 @@ LLM prompts, and the answers a prompt accepts. Errors are not translated yet.
   translates the whole tree once, before it runs. `N` takes only a string
   literal (or a `+` of literals): the extractor cannot see a computed message,
   and refuses it.
+- **Counts.** A message whose words depend on a number goes through
+  `i18n.TCount("%d package(s) checked", n)` — English stays as written, while
+  each language picks its plural form for `n` (Russian has three: 1 пакет,
+  3 пакета, 5 пакетов). A message with real English singular and plural forms
+  uses `i18n.TPlural("%d day", "%d days", n)`; to mark a pair declared before
+  `main`, use `i18n.NPlural(singular, plural)`. Each `.po` declares its
+  language's rule in the `Plural-Forms` header, and a plural entry carries one
+  `msgstr[i]` per form.
 - **After changing marked text,** run `make i18n-update`. It regenerates
   `po/bentoolkit.pot` from the source and merges it into every `.po`; a new
   message arrives untranslated and prints in English until it is translated.

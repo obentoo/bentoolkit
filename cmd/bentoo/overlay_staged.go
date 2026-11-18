@@ -282,12 +282,12 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 // reading is the one that was wrong.
 func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 	if stagedCleanYes {
-		output.Warning.Printf(i18n.T("  --yes given: removing %d staged tree(s) without a prompt.\n"), len(plan.Remove))
+		output.Warning.Printf(i18n.TCount("  --yes given: removing %d staged tree(s) without a prompt.\n", len(plan.Remove)), len(plan.Remove))
 		return true
 	}
 	if !d.registryPromptIsInteractive() {
 		output.Warning.Println(i18n.T("  Not an interactive terminal and --yes was not given: nothing removed."))
-		output.Info.Printf(i18n.T("  Re-run with --yes to remove these %d staged tree(s) unattended.\n"), len(plan.Remove))
+		output.Info.Printf(i18n.TCount("  Re-run with --yes to remove these %d staged tree(s) unattended.\n", len(plan.Remove)), len(plan.Remove))
 		return false
 	}
 
@@ -298,7 +298,7 @@ func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 	// somebody was about to open is just as gone.
 	output.Warning.Println(i18n.T("  These directories are deleted from disk. Nothing in the overlay is read, written or removed."))
 	return d.confirmStagedClean(fmt.Sprintf(
-		i18n.T("Remove %d staged tree(s) from %s?"), len(plan.Remove), plan.StagingRoot))
+		i18n.TCount("Remove %d staged tree(s) from %s?", len(plan.Remove)), len(plan.Remove), plan.StagingRoot))
 }
 
 // displayStagedCleanReport prints what actually happened, which is not the same
@@ -341,11 +341,11 @@ func displayStagedCleanReport(report validate.SweepReport, planned int) {
 	// the reason beside each keep above is what says which — so the summary points
 	// at them rather than restating a number the operator would have to subtract.
 	if short := planned - len(report.Removed); short > 0 {
-		output.Warning.Printf(i18n.T("  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, "+
-			"each with the reason it stayed.\n"), len(report.Removed), planned, short)
+		output.Warning.Printf(i18n.TCount("  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, "+
+			"each with the reason it stayed.\n", planned), len(report.Removed), planned, short)
 		return
 	}
-	output.Success.Printf(i18n.T("  Removed %d of the %d tree(s) the plan named.\n"), len(report.Removed), planned)
+	output.Success.Printf(i18n.TCount("  Removed %d of the %d tree(s) the plan named.\n", planned), len(report.Removed), planned)
 }
 
 // printStagedCleanPlan prints the whole plan before anything is removed.

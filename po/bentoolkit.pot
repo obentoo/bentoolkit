@@ -13,7 +13,9 @@ msgstr ""
 
 #: cmd/bentoo/apply_result_childrun.go
 msgid "… %d earlier line(s) omitted"
-msgstr ""
+msgid_plural "… %d earlier line(s) omitted"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/apply_result_childrun.go
 msgid "(no output)"
@@ -438,7 +440,11 @@ msgstr ""
 msgid ""
 "\n"
 "%d schema(s) ready to save\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"%d schema(s) ready to save\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_analyze.go
 msgid "Save all successful schemas?"
@@ -452,7 +458,11 @@ msgstr ""
 msgid ""
 "\n"
 "✓ Saved %d schema(s) to packages.toml\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"✓ Saved %d schema(s) to packages.toml\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_analyze.go
 msgid "Analysis Result"
@@ -704,7 +714,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Wrote %d version pin(s) to packages.toml."
-msgstr ""
+msgid_plural "Wrote %d version pin(s) to packages.toml."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Review the diff before it is published: 'bentoo overlay diff'"
@@ -716,7 +728,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "The registry and the overlay disagree on %d point(s)."
-msgstr ""
+msgid_plural "The registry and the overlay disagree on %d point(s)."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "%s (%d):"
@@ -752,15 +766,21 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
-msgstr ""
+msgid_plural "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
-msgstr ""
+msgid_plural "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
-msgstr ""
+msgid_plural "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
@@ -768,7 +788,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "--yes given: writing %d version pin(s) without a prompt."
-msgstr ""
+msgid_plural "--yes given: writing %d version pin(s) without a prompt."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Not an interactive terminal and --yes was not given: nothing written."
@@ -776,11 +798,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Re-run with --yes to write these %d version pin(s) unattended."
-msgstr ""
+msgid_plural "Re-run with --yes to write these %d version pin(s) unattended."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
-msgstr ""
+msgid_plural "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "packages.toml: record model OK"
@@ -808,7 +834,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Total: %d pending update(s)"
-msgstr ""
+msgid_plural "Total: %d pending update(s)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Use 'bentoo overlay autoupdate --apply <package>' to apply an update"
@@ -988,7 +1016,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Found %d revivable orphan(s)"
-msgstr ""
+msgid_plural "Found %d revivable orphan(s)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate"
@@ -1028,7 +1058,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) to evaluate, deepest depth %s."
-msgstr ""
+msgid_plural "%d package(s) to evaluate, deepest depth %s."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%s %s → %s at depth %s"
@@ -1044,7 +1076,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Depth distribution (of %d package(s)): %s"
-msgstr ""
+msgid_plural "Depth distribution (of %d package(s)): %s"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "(nothing planned)"
@@ -1052,11 +1086,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
-msgstr ""
+msgid_plural "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
-msgstr ""
+msgid_plural "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Not an interactive terminal and --yes was not given: no gate ran and nothing was validated."
@@ -1064,11 +1102,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
-msgstr ""
+msgid_plural "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
-msgstr ""
+msgid_plural "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Nothing is published either way — a check writes no ebuild and no version pin."
@@ -1076,7 +1118,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Evaluate %d package(s), %d of them up to depth %s?"
-msgstr ""
+msgid_plural "Evaluate %d package(s), %d of them up to depth %s?"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Validating updates"
@@ -1088,7 +1132,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
-msgstr ""
+msgid_plural "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%s: the reviewer raised this bump to %s, past the %s this run's plan confirmed."
@@ -1206,7 +1252,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Repaired packages.toml: %d change(s) written."
-msgstr ""
+msgid_plural "Repaired packages.toml: %d change(s) written."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
@@ -1214,27 +1262,39 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "%d finding(s) still need a human — --fix does not guess at them:"
-msgstr ""
+msgid_plural "%d finding(s) still need a human — --fix does not guess at them:"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
-msgstr ""
+msgid_plural "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "--yes given: writing %d repair(s) without a prompt."
-msgstr ""
+msgid_plural "--yes given: writing %d repair(s) without a prompt."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Re-run with --yes to write these %d repair(s) unattended."
-msgstr ""
+msgid_plural "Re-run with --yes to write these %d repair(s) unattended."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
-msgstr ""
+msgid_plural "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "About to rewrite packages.toml with %d repair(s):"
-msgstr ""
+msgid_plural "About to rewrite packages.toml with %d repair(s):"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Registry Migration — record the automatic disable origin"
@@ -1254,15 +1314,21 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Stamped %d entry(ies) with disabled_by = \"auto\":"
-msgstr ""
+msgid_plural "Stamped %d entry(ies) with disabled_by = \"auto\":"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
-msgstr ""
+msgid_plural "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
-msgstr ""
+msgid_plural "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:"
@@ -1278,15 +1344,21 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "--yes given: stamping %d entry(ies) without a prompt."
-msgstr ""
+msgid_plural "--yes given: stamping %d entry(ies) without a prompt."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Re-run with --yes to stamp these %d entry(ies) unattended."
-msgstr ""
+msgid_plural "Re-run with --yes to stamp these %d entry(ies) unattended."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
-msgstr ""
+msgid_plural "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "No session started; the bundle and the staged tree are unchanged."
@@ -1346,7 +1418,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgstr ""
+msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
@@ -1366,7 +1440,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "To remove (%d ebuild(s) in %d director(ies)):"
-msgstr ""
+msgid_plural "To remove (%d ebuild(s) in %d director(ies)):"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "keeps %s"
@@ -1414,7 +1490,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "--yes given: removing %d ebuild(s) without a prompt."
-msgstr ""
+msgid_plural "--yes given: removing %d ebuild(s) without a prompt."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Not an interactive terminal and --yes was not given: nothing removed."
@@ -1422,7 +1500,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Re-run with --yes to remove these %d ebuild(s) unattended."
-msgstr ""
+msgid_plural "Re-run with --yes to remove these %d ebuild(s) unattended."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "These ebuilds are deleted from the overlay, which auto-commits and publishes."
@@ -1430,7 +1510,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Remove %d ebuild(s) from %d director(ies)?"
-msgstr ""
+msgid_plural "Remove %d ebuild(s) from %d director(ies)?"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Sweep Result"
@@ -1442,15 +1524,21 @@ msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Swept %d director(ies), removed %d ebuild(s)."
-msgstr ""
+msgid_plural "Swept %d director(ies), removed %d ebuild(s)."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "%d director(ies) blocked — see the plan above for the entry to fix."
-msgstr ""
+msgid_plural "%d director(ies) blocked — see the plan above for the entry to fix."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "%d director(ies) failed — nothing else was affected."
-msgstr ""
+msgid_plural "%d director(ies) failed — nothing else was affected."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_commit.go
 msgid "Commit staged changes with auto-generated message"
@@ -1649,7 +1737,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
-msgstr ""
+msgid_plural "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing."
@@ -1657,7 +1747,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  --yes given: proving %d realignment(s) without a prompt.\n"
-msgstr ""
+msgid_plural "  --yes given: proving %d realignment(s) without a prompt.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Not an interactive terminal and --yes was not given: nothing was built."
@@ -1665,7 +1757,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
-msgstr ""
+msgid_plural "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n"
@@ -1673,7 +1767,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "Prove %d realignment(s) at depth %s?"
-msgstr ""
+msgid_plural "Prove %d realignment(s) at depth %s?"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  %s: not in the plan — its ::gentoo baseline %s could not be read now, although the review read it: %v"
@@ -2036,7 +2132,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_manifest.go
 msgid "Regenerating Manifest for %d package(s)"
-msgstr ""
+msgid_plural "Regenerating Manifest for %d package(s)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_manifest.go
 msgid "%d ok, %d failed"
@@ -2126,7 +2224,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
-msgstr ""
+msgid_plural "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all."
@@ -2142,11 +2242,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
-msgstr ""
+msgid_plural "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
-msgstr ""
+msgid_plural "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Review the diff before it is published: 'bentoo overlay diff'"
@@ -2158,11 +2262,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
-msgstr ""
+msgid_plural "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
-msgstr ""
+msgid_plural "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Re-run with --yes to carry them out unattended."
@@ -2174,11 +2282,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Remove %d package(s) ::gentoo already provides?"
-msgstr ""
+msgid_plural "Remove %d package(s) ::gentoo already provides?"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
-msgstr ""
+msgid_plural "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --yes does not answer this one. It exists so a scripted run can proceed unattended, and discarding local work is not a decision a script may take on its own: somebody has to read what is being thrown away."
@@ -2196,19 +2308,29 @@ msgstr ""
 msgid ""
 "\n"
 "  Discarding local work in %d package(s):\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"  Discarding local work in %d package(s):\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      loses %d version(s) (%s) and %d file(s)\n"
-msgstr ""
+msgid_plural "      loses %d version(s) (%s) and %d file(s)\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      loses %d file(s)\n"
-msgstr ""
+msgid_plural "      loses %d file(s)\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Discard that work and remove these %d package(s)?"
-msgstr ""
+msgid_plural "  Discard that work and remove these %d package(s)?"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Prune Result"
@@ -2216,7 +2338,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %s removed (%d file(s))\n"
-msgstr ""
+msgid_plural "  %s removed (%d file(s))\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %s NOT removed: %v\n"
@@ -2224,23 +2348,33 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Removed %d package director(ies) from the overlay.\n"
-msgstr ""
+msgid_plural "  Removed %d package director(ies) from the overlay.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
-msgstr ""
+msgid_plural "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
-msgstr ""
+msgid_plural "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
-msgstr ""
+msgid_plural "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
-msgstr ""
+msgid_plural "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: the confirmation was declined. The overlay and .autoupdate/packages.toml are exactly as they were."
@@ -2256,7 +2390,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
-msgstr ""
+msgid_plural "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Identical to ::gentoo — our copy holds nothing of ours"
@@ -2292,7 +2428,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry: %d entr(ies) kept by --keep-registry: %s\n"
-msgstr ""
+msgid_plural "      registry: %d entr(ies) kept by --keep-registry: %s\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry entries (%d):\n"
@@ -2304,7 +2442,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
-msgstr ""
+msgid_plural "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d of them diverge from ::gentoo; --include-patched would consider them, discarding that work.\n"
@@ -2312,7 +2452,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
-msgstr ""
+msgid_plural "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Every package is refused: no local ::gentoo tree; re-run with --clone or a local provider."
@@ -2328,7 +2470,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
-msgstr ""
+msgid_plural "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Every package is refused: %v.\n"
@@ -2552,7 +2696,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  --yes given: removing %d staged tree(s) without a prompt.\n"
-msgstr ""
+msgid_plural "  --yes given: removing %d staged tree(s) without a prompt.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Not an interactive terminal and --yes was not given: nothing removed."
@@ -2560,7 +2706,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
-msgstr ""
+msgid_plural "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  These directories are deleted from disk. Nothing in the overlay is read, written or removed."
@@ -2568,7 +2716,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Remove %d staged tree(s) from %s?"
-msgstr ""
+msgid_plural "Remove %d staged tree(s) from %s?"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Staged Tree Clean Result"
@@ -2588,11 +2738,15 @@ msgstr ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
-msgstr ""
+msgid_plural "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Removed %d of the %d tree(s) the plan named.\n"
-msgstr ""
+msgid_plural "  Removed %d of the %d tree(s) the plan named.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Staged Tree Clean"
@@ -2663,7 +2817,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_targets.go
 msgid "%d package(s) lack a required implementation.\n"
-msgstr ""
+msgid_plural "%d package(s) lack a required implementation.\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_validate.go
 msgid "Check that each ebuild still matches the source it points at"
@@ -2767,7 +2923,9 @@ msgstr ""
 
 #: cmd/bentoo/overlay_validate.go
 msgid "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
-msgstr ""
+msgid_plural "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: cmd/bentoo/overlay_validate.go
 msgid "      read: %s\n"
@@ -3106,7 +3264,9 @@ msgstr ""
 
 #: internal/autoupdate/applier.go
 msgid "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
-msgstr ""
+msgid_plural "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/autoupdate/applier.go
 msgid "manifest failed for %s-%s; invoking LLM fixer to repair the ebuild"
@@ -3138,7 +3298,9 @@ msgstr ""
 
 #: internal/autoupdate/sweep.go
 msgid "reused %d distfile(s) from %s while manifesting %s"
-msgstr ""
+msgid_plural "reused %d distfile(s) from %s while manifesting %s"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/autoupdate/sweep.go
 msgid "removed the incomplete distfile %s the failed manifest step for %s left in %s"
@@ -3158,7 +3320,9 @@ msgstr ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) checked, %d with a pending update."
-msgstr ""
+msgid_plural "%d package(s) checked, %d with a pending update."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "TYPE"
@@ -3178,39 +3342,57 @@ msgstr ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) are up to date and are listed above."
-msgstr ""
+msgid_plural "%d package(s) are up to date and are listed above."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) are up to date and are not listed; pass --all to list them."
-msgstr ""
+msgid_plural "%d package(s) are up to date and are not listed; pass --all to list them."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) have no ebuild in the overlay."
-msgstr ""
+msgid_plural "%d package(s) have no ebuild in the overlay."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) left their series upstream and need a manual promotion."
-msgstr ""
+msgid_plural "%d package(s) left their series upstream and need a manual promotion."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) could not be checked."
-msgstr ""
+msgid_plural "%d package(s) could not be checked."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) reported a version that could not be ordered against the current one."
-msgstr ""
+msgid_plural "%d package(s) reported a version that could not be ordered against the current one."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) have an update held by min_age_days."
-msgstr ""
+msgid_plural "%d package(s) have an update held by min_age_days."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) to evaluate."
-msgstr ""
+msgid_plural "%d package(s) to evaluate."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) to evaluate, %d of them excluded by policy."
-msgstr ""
+msgid_plural "%d package(s) to evaluate, %d of them excluded by policy."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "BUMP"
@@ -3242,7 +3424,9 @@ msgstr ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
-msgstr ""
+msgid_plural "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded."
@@ -3254,7 +3438,9 @@ msgstr ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "Checked %d source, %d bin; %d package(s) resolved to neither tier."
-msgstr ""
+msgid_plural "Checked %d source, %d bin; %d package(s) resolved to neither tier."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/autoupdate_check.go
 msgid "Checked %d source, %d bin."
@@ -3346,7 +3532,9 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
-msgstr ""
+msgid_plural "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."
@@ -3386,15 +3574,15 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) scanned in the Bentoo overlay."
-msgstr ""
+msgid_plural "%d package(s) scanned in the Bentoo overlay."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d comparison(s) was never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
-msgstr ""
-
-#: internal/common/report/compare_run.go
-msgid "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
-msgstr ""
+msgid_plural "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "The failed reviews, by cause: %s."
@@ -3410,7 +3598,9 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as redundant."
-msgstr ""
+msgid_plural "%d package(s) are counted as redundant."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "No per-package row reached this report, so the count above is stated without the list it was taken over."
@@ -3422,19 +3612,15 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d was never compared at all, because the check refuses to diff two different versions"
-msgstr ""
-
-#: internal/common/report/compare_run.go
-msgid "%d were never compared at all, because the check refuses to diff two different versions"
-msgstr ""
+msgid_plural "%d were never compared at all, because the check refuses to diff two different versions"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d was never compared at all, and this run did not record why"
-msgstr ""
-
-#: internal/common/report/compare_run.go
-msgid "%d were never compared at all, and this run did not record why"
-msgstr ""
+msgid_plural "%d were never compared at all, and this run did not record why"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "the review died on the other %d"
@@ -3446,35 +3632,33 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d was never submitted for review"
-msgstr ""
-
-#: internal/common/report/compare_run.go
-msgid "%d were never submitted for review"
-msgstr ""
+msgid_plural "%d were never submitted for review"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d carries changes proved ours, so removing it would discard work of our own — declare it instead."
-msgstr ""
-
-#: internal/common/report/compare_run.go
-msgid "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
-msgstr ""
+msgid_plural "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), and not one of them carries a reading."
-msgstr ""
+msgid_plural "%d package(s), and not one of them carries a reading."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), and every one of them carries a reading."
-msgstr ""
+msgid_plural "%d package(s), and every one of them carries a reading."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), of which %d carries a reading."
-msgstr ""
-
-#: internal/common/report/compare_run.go
-msgid "%d package(s), of which %d carry a reading."
-msgstr ""
+msgid_plural "%d package(s), of which %d carry a reading."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "No removal advice follows from either."
@@ -3510,11 +3694,15 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as needing a rebase."
-msgstr ""
+msgid_plural "%d package(s) are counted as needing a rebase."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
-msgstr ""
+msgid_plural "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "Keep — the overlay copy is ahead"
@@ -3526,11 +3714,15 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as worth keeping."
-msgstr ""
+msgid_plural "%d package(s) are counted as worth keeping."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed, and the run recommends keeping every one of them."
-msgstr ""
+msgid_plural "%d package(s) listed, and the run recommends keeping every one of them."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%s (%d packages)"
@@ -3538,11 +3730,15 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
-msgstr ""
+msgid_plural "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
-msgstr ""
+msgid_plural "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "Unknown — no recommendation"
@@ -3554,11 +3750,15 @@ msgstr ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as unknown."
-msgstr ""
+msgid_plural "%d package(s) are counted as unknown."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
-msgstr ""
+msgid_plural "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/compare_run.go
 msgid "Summary"
@@ -3602,7 +3802,9 @@ msgstr ""
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) processed: %d regenerated, %d failed."
-msgstr ""
+msgid_plural "%d target(s) processed: %d regenerated, %d failed."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/manifest_run.go
 msgid "No per-target row reached this report, so the counts above are stated without the list they were taken over."
@@ -3610,7 +3812,9 @@ msgstr ""
 
 #: internal/common/report/manifest_run.go
 msgid "Dry run: %d target(s) would have their Manifest regenerated."
-msgstr ""
+msgid_plural "Dry run: %d target(s) would have their Manifest regenerated."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/manifest_run.go
 msgid "Nothing ran: no command was invoked and no Manifest was written, so no target above is counted as regenerated or as failed."
@@ -3618,11 +3822,15 @@ msgstr ""
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) were regenerated and are listed above."
-msgstr ""
+msgid_plural "%d target(s) were regenerated and are listed above."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) were regenerated and are not listed; pass --all to list them."
-msgstr ""
+msgid_plural "%d target(s) were regenerated and are not listed; pass --all to list them."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/manifest_run.go
 msgid "What a target that succeeded printed is not kept: it was shown while the run was live, and holding a verbatim copy of every worker's output would grow with the overlay. A target that failed carries its own, in full."
@@ -3658,11 +3866,15 @@ msgstr ""
 
 #: internal/common/report/render/fullscreen.go
 msgid "… %d more line(s) not shown — press q for the whole report"
-msgstr ""
+msgid_plural "… %d more line(s) not shown — press q for the whole report"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/render/fullscreen.go
 msgid "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
-msgstr ""
+msgid_plural "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/render/fullscreen.go
 msgid "this section could not be rendered: %v"
@@ -3674,7 +3886,9 @@ msgstr ""
 
 #: internal/common/report/run.go
 msgid "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
-msgstr ""
+msgid_plural "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/run.go
 msgid "The counts below cover only what the run established; the rest are counted in no column."
@@ -3682,7 +3896,9 @@ msgstr ""
 
 #: internal/common/report/run.go
 msgid "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
-msgstr ""
+msgid_plural "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/run.go
 msgid "The counts below cover only what the run reached; the rest are counted in no column."
@@ -3714,11 +3930,15 @@ msgstr ""
 
 #: internal/common/report/snapshot_run.go
 msgid "The run operated on %d subvolume(s): %s."
-msgstr ""
+msgid_plural "The run operated on %d subvolume(s): %s."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) ran: %d succeeded, %d failed."
-msgstr ""
+msgid_plural "%d step(s) ran: %d succeeded, %d failed."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/snapshot_run.go
 msgid "succeeded"
@@ -3726,11 +3946,15 @@ msgstr ""
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) succeeded and are listed above."
-msgstr ""
+msgid_plural "%d step(s) succeeded and are listed above."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) succeeded and are not listed; pass --all to list them."
-msgstr ""
+msgid_plural "%d step(s) succeeded and are not listed; pass --all to list them."
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/report/snapshot_run.go
 msgid "How long each step took is not carried here: the run's own result file keeps the timings, and 'snapshot status' is what reads them back."
@@ -3742,11 +3966,15 @@ msgstr ""
 
 #: internal/common/tui/model.go
 msgid "%d earlier package(s) finished"
-msgstr ""
+msgid_plural "%d earlier package(s) finished"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/common/tui/model.go
 msgid "%d earlier log line(s)"
-msgstr ""
+msgid_plural "%d earlier log line(s)"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/pull.go
 msgid "Already up to date with %s."
@@ -3786,7 +4014,11 @@ msgstr ""
 msgid ""
 "Found %d ebuild(s) to rename:\n"
 "\n"
-msgstr ""
+msgid_plural ""
+"Found %d ebuild(s) to rename:\n"
+"\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid "    (revision suffix will be stripped)\n"
@@ -3796,7 +4028,11 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Warning: %d version-specific file(s) detected:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"⚠ Warning: %d version-specific file(s) detected:\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
@@ -3808,7 +4044,11 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Warning: %d target file(s) already exist:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"⚠ Warning: %d target file(s) already exist:\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
@@ -3820,7 +4060,11 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Error: %d target file(s) would receive more than one ebuild:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"⚠ Error: %d target file(s) would receive more than one ebuild:\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
@@ -3832,43 +4076,71 @@ msgstr ""
 msgid ""
 "\n"
 "Warning: %d version-specific file(s) detected:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Warning: %d version-specific file(s) detected:\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Conflicts: %d target file(s) already exist:\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Conflicts: %d target file(s) already exist:\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
 "Dry run: %d ebuild(s) would be renamed\n"
 "\n"
-msgstr ""
+msgid_plural ""
+"Dry run: %d ebuild(s) would be renamed\n"
+"\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
 "Renamed %d ebuild(s):\n"
 "\n"
-msgstr ""
+msgid_plural ""
+"Renamed %d ebuild(s):\n"
+"\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Failed %d ebuild(s):\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Failed %d ebuild(s):\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Manifest updated for %d package(s)\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Manifest updated for %d package(s)\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Manifest update failed for %d package(s):\n"
-msgstr ""
+msgid_plural ""
+"\n"
+"Manifest update failed for %d package(s):\n"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/overlay/status.go
 msgid "No changes detected (working directory clean)"
@@ -3932,11 +4204,9 @@ msgstr ""
 
 #: internal/tray/messages/messages.go
 msgid "%d unread notice"
-msgstr ""
-
-#: internal/tray/messages/messages.go
-msgid "%d unread notices"
-msgstr ""
+msgid_plural "%d unread notices"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/tray/messages/messages.go
 msgid "%d more…"
@@ -3976,7 +4246,9 @@ msgstr ""
 
 #: internal/tray/messages/messages.go
 msgid "%d new notices"
-msgstr ""
+msgid_plural "%d new notices"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/tray/messages/messages.go
 msgid "Low disk space on %s"
@@ -4032,11 +4304,9 @@ msgstr ""
 
 #: internal/tray/messages/messages.go
 msgid "%d system alert"
-msgstr ""
-
-#: internal/tray/messages/messages.go
-msgid "%d system alerts"
-msgstr ""
+msgid_plural "%d system alerts"
+msgstr[0] ""
+msgstr[1] ""
 
 #: internal/tray/messages/messages.go
 msgid "Package build failed"
@@ -4148,8 +4418,6 @@ msgstr ""
 
 #: internal/tray/messages/messages.go
 msgid "%d day"
-msgstr ""
-
-#: internal/tray/messages/messages.go
-msgid "%d days"
-msgstr ""
+msgid_plural "%d days"
+msgstr[0] ""
+msgstr[1] ""

@@ -160,7 +160,7 @@ func displaySweepRemovable(totalRemove int, removable []autoupdate.SweepDirPlan)
 	if len(removable) == 0 {
 		return
 	}
-	fmt.Printf("  "+i18n.T("To remove (%d ebuild(s) in %d director(ies)):")+"\n", totalRemove, len(removable))
+	fmt.Printf("  "+i18n.TCount("To remove (%d ebuild(s) in %d director(ies)):", totalRemove)+"\n", totalRemove, len(removable))
 	for _, d := range removable {
 		pkgName := filepath.Base(d.Atom)
 		for _, v := range d.Remove {
@@ -263,19 +263,19 @@ func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 	}
 
 	if ar.opts.yes {
-		output.Warning.Printf("  "+i18n.T("--yes given: removing %d ebuild(s) without a prompt.")+"\n", batch.TotalRemove)
+		output.Warning.Printf("  "+i18n.TCount("--yes given: removing %d ebuild(s) without a prompt.", batch.TotalRemove)+"\n", batch.TotalRemove)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
 		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing removed."))
-		output.Info.Printf("  "+i18n.T("Re-run with --yes to remove these %d ebuild(s) unattended.")+"\n", batch.TotalRemove)
+		output.Info.Printf("  "+i18n.TCount("Re-run with --yes to remove these %d ebuild(s) unattended.", batch.TotalRemove)+"\n", batch.TotalRemove)
 		return false
 	}
 
 	fmt.Println()
 	output.Warning.Println("  " + i18n.T("These ebuilds are deleted from the overlay, which auto-commits and publishes."))
 	return ar.deps.confirmSweep(fmt.Sprintf(
-		i18n.T("Remove %d ebuild(s) from %d director(ies)?"), batch.TotalRemove, dirs))
+		i18n.TCount("Remove %d ebuild(s) from %d director(ies)?", batch.TotalRemove), batch.TotalRemove, dirs))
 }
 
 // displaySweepReport prints what actually happened, per directory and in total.
@@ -314,15 +314,15 @@ func displaySweepReport(report autoupdate.SweepReport) {
 	}
 
 	fmt.Println()
-	output.Success.Printf("  "+i18n.T("Swept %d director(ies), removed %d ebuild(s).")+"\n", report.Swept, report.Removed)
+	output.Success.Printf("  "+i18n.TCount("Swept %d director(ies), removed %d ebuild(s).", report.Swept)+"\n", report.Swept, report.Removed)
 	if report.BlockedN > 0 {
-		output.Warning.Printf("  "+i18n.T("%d director(ies) blocked — see the plan above for the entry to fix.")+"\n", report.BlockedN)
+		output.Warning.Printf("  "+i18n.TCount("%d director(ies) blocked — see the plan above for the entry to fix.", report.BlockedN)+"\n", report.BlockedN)
 	}
 	if report.Failed > 0 {
 		// Reported, but the exit code still says the command ran. The
 		// removals that succeeded really happened, and a non-zero exit would
 		// claim otherwise.
-		output.Warning.Printf("  "+i18n.T("%d director(ies) failed — nothing else was affected.")+"\n", report.Failed)
+		output.Warning.Printf("  "+i18n.TCount("%d director(ies) failed — nothing else was affected.", report.Failed)+"\n", report.Failed)
 	}
 	if report.Removed > 0 {
 		output.Info.Println("  " + i18n.T("Review the diff before it is published: 'bentoo overlay diff'"))

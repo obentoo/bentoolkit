@@ -208,7 +208,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 		// An incomplete scan makes the plan incomplete, and a plan must not
 		// silently understate its own coverage: a package absent from the report
 		// may simply never have been seen.
-		output.Warning.Printf(i18n.T("  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"), len(scan.Errors))
+		output.Warning.Printf(i18n.TCount("  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n", len(scan.Errors)), len(scan.Errors))
 		for _, e := range scan.Errors {
 			output.Info.Printf("    %s: %s\n", e.Path, e.Message)
 		}
@@ -326,7 +326,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// Nothing above this line can remove anything: the planner has no capability to
 	// delete, and the printer only reads.
 	if !pruneApply {
-		output.Info.Printf(i18n.T("  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"), eligible)
+		output.Info.Printf(i18n.TCount("  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n", eligible), eligible)
 		return nil
 	}
 
@@ -353,7 +353,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 			// Untouched, not rewritten identically. The overlay auto-commits, so
 			// a rewrite that happens to produce the same bytes is still a file the next
 			// run has to explain.
-			output.Info.Printf(i18n.T("  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"), len(atoms))
+			output.Info.Printf(i18n.TCount("  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n", len(atoms)), len(atoms))
 		} else {
 			registryErr = removePruneRegistryEntries(overlayPath, atoms)
 		}
@@ -509,7 +509,7 @@ func eligiblePrunePlans(plans []overlay.PrunePlan) []overlay.PrunePlan {
 // repeating it into a y/N line would push the question itself off the screen.
 func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 	if pruneYes {
-		output.Warning.Printf(i18n.T("  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"), n)
+		output.Warning.Printf(i18n.TCount("  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n", n), n)
 		return pruneConsentGiven
 	}
 	if !d.pruneInteractive() {
@@ -517,14 +517,14 @@ func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 		// nothing is removed, and the caller returns non-zero. A prompt written
 		// to a terminal nobody is watching does not become consent by going
 		// unanswered, so none is written.
-		output.Warning.Printf(i18n.T("  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"), n)
+		output.Warning.Printf(i18n.TCount("  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n", n), n)
 		output.Info.Println(i18n.T("  Re-run with --yes to carry them out unattended."))
 		return pruneConsentUnavailable
 	}
 
 	fmt.Println()
 	output.Warning.Println(i18n.T("  These package directories are deleted from the overlay, which auto-commits and publishes within minutes."))
-	if !d.confirmPrune(fmt.Sprintf(i18n.T("Remove %d package(s) ::gentoo already provides?"), n)) {
+	if !d.confirmPrune(fmt.Sprintf(i18n.TCount("Remove %d package(s) ::gentoo already provides?", n), n)) {
 		return pruneConsentDeclined
 	}
 	return pruneConsentGiven
@@ -551,7 +551,7 @@ func confirmIdenticalPrune(n int, d *deps) pruneConsentAnswer {
 // be answered.
 func confirmDivergingPrune(plans []overlay.PrunePlan, d *deps) pruneConsentAnswer {
 	if !d.pruneInteractive() {
-		output.Warning.Printf(i18n.T("  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"), len(plans))
+		output.Warning.Printf(i18n.TCount("  Not an interactive terminal: %d diverging package(s) were NOT removed.\n", len(plans)), len(plans))
 		output.Info.Println(i18n.T("  --yes does not answer this one. It exists so a scripted run can proceed unattended, and discarding local work is not a decision a script may take on its own: somebody has to read what is being thrown away."))
 		output.Info.Println(i18n.T("  Re-run '--apply --include-patched' from a terminal to answer for these."))
 		return pruneConsentUnavailable
@@ -584,17 +584,17 @@ func confirmDivergingPrune(plans []overlay.PrunePlan, d *deps) pruneConsentAnswe
 // operator has already been shown the report.
 func divergingPrunePrompt(plans []overlay.PrunePlan) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, i18n.T("\n  Discarding local work in %d package(s):\n"), len(plans))
+	fmt.Fprintf(&b, i18n.TCount("\n  Discarding local work in %d package(s):\n", len(plans)), len(plans))
 	for _, plan := range plans {
 		fmt.Fprintf(&b, "    %s/%s — %s\n", plan.Category, plan.Package, plan.Reason)
 		if len(plan.Versions) > 0 {
-			fmt.Fprintf(&b, i18n.T("      loses %d version(s) (%s) and %d file(s)\n"),
+			fmt.Fprintf(&b, i18n.TCount("      loses %d version(s) (%s) and %d file(s)\n", len(plan.Versions)),
 				len(plan.Versions), strings.Join(plan.Versions, ", "), len(plan.Files))
 			continue
 		}
-		fmt.Fprintf(&b, i18n.T("      loses %d file(s)\n"), len(plan.Files))
+		fmt.Fprintf(&b, i18n.TCount("      loses %d file(s)\n", len(plan.Files)), len(plan.Files))
 	}
-	fmt.Fprintf(&b, i18n.T("  Discard that work and remove these %d package(s)?"), len(plans))
+	fmt.Fprintf(&b, i18n.TCount("  Discard that work and remove these %d package(s)?", len(plans)), len(plans))
 	return b.String()
 }
 
@@ -670,7 +670,7 @@ func reportPruneOutcome(results []overlay.PruneResult, consent pruneConsent) (re
 		atom := padColumn(prunePlanAtom(res.Plan), atomWidth)
 		if prunePackageWentAway(res) {
 			removed++
-			output.Success.Printf(i18n.T("  %s removed (%d file(s))\n"), atom, len(res.Plan.Files))
+			output.Success.Printf(i18n.TCount("  %s removed (%d file(s))\n", len(res.Plan.Files)), atom, len(res.Plan.Files))
 			continue
 		}
 		// The package is named here and not left to the error text: PruneResult.Err
@@ -682,10 +682,10 @@ func reportPruneOutcome(results []overlay.PruneResult, consent pruneConsent) (re
 
 	fmt.Println()
 	if removed > 0 {
-		output.Success.Printf(i18n.T("  Removed %d package director(ies) from the overlay.\n"), removed)
+		output.Success.Printf(i18n.TCount("  Removed %d package director(ies) from the overlay.\n", removed), removed)
 	}
 	if failed > 0 {
-		output.Warning.Printf(i18n.T("  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"), failed)
+		output.Warning.Printf(i18n.TCount("  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n", failed), failed)
 	}
 	reportPruneConsentGaps(consent)
 	return removed, failed
@@ -722,10 +722,10 @@ func pruneFailureReason(res overlay.PruneResult) error {
 // would record it as done.
 func reportPruneConsentGaps(consent pruneConsent) {
 	if consent.declined > 0 {
-		output.Info.Printf(i18n.T("  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"), consent.declined)
+		output.Info.Printf(i18n.TCount("  %d planned removal(s) were declined at the prompt and left exactly as they were.\n", consent.declined), consent.declined)
 	}
 	if consent.refused > 0 {
-		output.Warning.Printf(i18n.T("  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"), consent.refused)
+		output.Warning.Printf(i18n.TCount("  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n", consent.refused), consent.refused)
 	}
 }
 
@@ -737,7 +737,7 @@ func reportPruneNothingApplied(consent pruneConsent) {
 	fmt.Println()
 	switch {
 	case consent.refused > 0:
-		output.Warning.Printf(i18n.T("  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"),
+		output.Warning.Printf(i18n.TCount("  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n", consent.refused+consent.declined),
 			consent.refused+consent.declined)
 	case consent.declined > 0:
 		output.Info.Println(i18n.T("  Nothing was removed: the confirmation was declined. The overlay and .autoupdate/packages.toml are exactly as they were."))
@@ -791,7 +791,7 @@ func removePruneRegistryEntries(overlayPath string, atoms []string) error {
 		return wrapped
 	}
 
-	output.Success.Printf(i18n.T("  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"), len(atoms))
+	output.Success.Printf(i18n.TCount("  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n", len(atoms)), len(atoms))
 	return nil
 }
 
@@ -980,7 +980,7 @@ func printPrunePlanEntry(plan overlay.PrunePlan, keepRegistry bool) {
 		// --keep-registry makes "these entries would be deleted" false, so the plan
 		// says the other thing instead. A plan that describes a run other than the
 		// one requested is worse than no plan.
-		output.Info.Printf(i18n.T("      registry: %d entr(ies) kept by --keep-registry: %s\n"),
+		output.Info.Printf(i18n.TCount("      registry: %d entr(ies) kept by --keep-registry: %s\n", len(plan.RegistryKeys)),
 			len(plan.RegistryKeys), strings.Join(plan.RegistryKeys, ", "))
 	default:
 		fmt.Printf(i18n.T("      registry entries (%d):\n"), len(plan.RegistryKeys))
@@ -1031,7 +1031,7 @@ func printPruneRefusals(plans []overlay.PrunePlan) {
 // reachable from a run where no comparison happened — see reportPruneAPIOnly
 // for that half, which sends the operator somewhere else entirely.
 func reportPruneNothingQualified(examined, diverging int, includePatched bool) {
-	output.Success.Printf(i18n.T("  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"), examined)
+	output.Success.Printf(i18n.TCount("  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n", examined), examined)
 	if diverging > 0 && !includePatched {
 		output.Info.Printf(i18n.T("  %d of them diverge from ::gentoo; --include-patched would consider them, discarding that work.\n"), diverging)
 	}
@@ -1046,7 +1046,7 @@ func reportPruneNothingQualified(examined, diverging int, includePatched bool) {
 // run could not tell — and then names the way out, because "refused" without an
 // instruction is a dead end to guess at.
 func reportPruneAPIOnly(providerName string, inScope int) {
-	output.Warning.Printf(i18n.T("  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"),
+	output.Warning.Printf(i18n.TCount("  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n", inScope),
 		providerName, inScope)
 	// The refusal in the CLI's own words. internal/overlay refuses the same case
 	// with a reason about the PROVIDER (prune.go's pruneNoLocalTreeReason) and
@@ -1076,7 +1076,7 @@ func reportPruneAPIOnly(providerName string, inScope int) {
 // It exits 0, like the API-only gate: the command ran correctly and refused.
 // A non-zero exit is tied to a removal that FAILED, and none was attempted.
 func reportPruneRegistryUnreadable(err error, inScope int) {
-	output.Warning.Printf(i18n.T("  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"),
+	output.Warning.Printf(i18n.TCount("  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n", inScope),
 		inScope)
 	output.Warning.Printf(i18n.T("  Every package is refused: %v.\n"), err)
 	output.Info.Println(i18n.T("  The registry is where 'patched' is declared, and a package whose declaration cannot be read must not be removed on the assumption that it has none."))
