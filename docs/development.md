@@ -145,7 +145,15 @@ pt_BR, ru, zh_CN); both binaries read the one `bentoolkit` catalog. What a
 program reads stays English on purpose, so scripts and log searches do not
 depend on the reader's language: logs, `--json`, `--porcelain`, `--export`
 files (`report.SectionOptions.English`), generated files, commit messages,
-LLM prompts, and the answers a prompt accepts. Errors are not translated yet.
+LLM prompts, and the answers a prompt accepts.
+
+Errors stay English by design. A failure reaches the terminal as a log
+record (`level=ERROR msg=... err=...`) whose `err` is a chain of wrapped
+errors that usually ends in the operating system's own text; the same record
+goes to the JSON log file. An English error can be searched for and pasted
+into an issue as is, and one sentence half-translated around an English
+cause helps nobody. Do not wrap `fmt.Errorf`, `errors.New` or log messages in
+`i18n.T`.
 
 - **Marking text.** Wrap a user-facing literal in `i18n.N("...")` where it is
   declared, and translate it with `i18n.T(...)` where it is shown. Command
