@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -16,16 +17,16 @@ func newSnapshotRunCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "run",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Run the snapshot pipeline now",
-		Long: `Execute the engine → prune → ship pipeline for every configured subvolume,
+		Short:       i18n.N("Run the snapshot pipeline now"),
+		Long: i18n.N(`Execute the engine → prune → ship pipeline for every configured subvolume,
 persist a RunResult for 'status', and exit non-zero if any stage failed. This is
-the command driven by the systemd timer.`,
+the command driven by the systemd timer.`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotRun(cmd, args, d)
 		},
 	}
 	cmd.Flags().BoolVar(&snapshotRunDryRun, "dry-run", false,
-		"print the pipeline that would run, without executing it")
+		i18n.N("print the pipeline that would run, without executing it"))
 	return cmd
 }
 

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
@@ -17,12 +18,12 @@ var (
 func newDiffCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "diff [path]",
-		Short: "Show diff of changes",
-		Long: `Show the diff of changes in the overlay repository.
-By default shows unstaged changes. Use --staged to show staged changes.`,
+		Short: i18n.N("Show diff of changes"),
+		Long: i18n.N(`Show the diff of changes in the overlay repository.
+By default shows unstaged changes. Use --staged to show staged changes.`),
 		RunE: runDiff,
 	}
-	cmd.Flags().BoolVarP(&diffStaged, "staged", "s", false, "Show staged changes")
+	cmd.Flags().BoolVarP(&diffStaged, "staged", "s", false, i18n.N("Show staged changes"))
 	return cmd
 }
 

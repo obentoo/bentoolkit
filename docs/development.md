@@ -136,6 +136,40 @@ cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
   --bundle bentoolkit-X.Y.Z-vendor.tar.xz.sigstore.json bentoolkit-X.Y.Z-vendor.tar.xz
 ```
 
+### Translations
+
+`bentoo`'s help text — command descriptions, flag usages and cobra's own
+headings — is translated with GNU gettext into the languages listed in
+`po/LINGUAS` (es, pt_BR, ru, zh_CN). Logs, JSON and other machine-read output
+stay in English on purpose: scripts and log searches must not depend on the
+reader's language.
+
+- **Marking text.** Wrap a user-facing literal in `i18n.N("...")` where it is
+  declared, and translate it with `i18n.T(...)` where it is shown. Command
+  trees are built before `main` loads the catalog, so `cmd/bentoo/i18n.go`
+  translates the whole tree once, before it runs. `N` takes only a string
+  literal (or a `+` of literals): the extractor cannot see a computed message,
+  and refuses it.
+- **After changing marked text,** run `make i18n-update`. It regenerates
+  `po/bentoolkit.pot` from the source and merges it into every `.po`; a new
+  message arrives untranslated and prints in English until it is translated.
+  `TestCatalogsInSync` fails while the template or a `.po` is stale, and when
+  a translation drops or reorders a `%` verb or a `{{...}}` template action.
+- **Translating.** Fill the `msgstr` of each entry, keeping flags, commands,
+  environment variables, paths, `%` verbs and `{{...}}` actions unchanged;
+  remove the `#, fuzzy` flag once an entry is checked. Terms such as overlay,
+  ebuild, Manifest, distfile and commit stay as they are.
+- **Trying a language.** `make build locale` compiles `build/locale`; then
+  `BENTOO_LOCALEDIR=build/locale LANGUAGE= LANG=pt_BR.UTF-8 build/bentoo --help`.
+  The language comes from `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`, as in
+  any gettext program; a `C` locale or an English one prints English.
+- **Installing.** `make install` installs each catalog as
+  `$(LOCALEDIR)/<lang>/LC_MESSAGES/bentoolkit.mo` (default
+  `$(PREFIX)/share/locale`) and builds the binary to read from there. A
+  package that builds with plain `go build` gets `/usr/share/locale`, or sets
+  `-X github.com/obentoo/bentoolkit/internal/common/i18n.LocaleDir=...`.
+  Gentoo installs only the languages enabled in `L10N`.
+
 ### Project Structure
 
 Two binaries, one module. Dependencies point downwards: `cmd` composes the
@@ -183,6 +217,8 @@ bentoolkit/
 │       ├── git/             # Git operations
 │       ├── github/          # GitHub API client
 │       ├── httpx/           # Outbound HTTP transport tuning
+│       ├── i18n/            # gettext catalogs: N/T, locale selection, .mo reader
+│       │   └── po/          # Message extraction and .pot/.po reading
 │       ├── logging/         # slog logger with secret redaction
 │       ├── output/          # Terminal output helpers
 │       ├── procgroup/       # Stop a child and its descendants with its context
@@ -195,8 +231,10 @@ bentoolkit/
 │       └── xdg/             # XDG Base Directory paths
 ├── misc/
 │   ├── design/design-system # Catalogue of what the terminal UI draws
+│   ├── i18n-extract/        # Writes po/bentoolkit.pot (make i18n-update)
 │   └── tray/                # .desktop file, systemd user unit, icons, E2E checklist
 ├── docs/                    # Topic pages (this directory)
+├── po/                      # Translations: bentoolkit.pot, <lang>.po, LINGUAS
 ├── config.example.yaml      # Every configuration key, documented
 └── Makefile                 # Build, install, test, lint and audit targets
 ```

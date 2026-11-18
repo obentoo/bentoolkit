@@ -10,6 +10,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -97,8 +98,8 @@ func newPruneCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "prune [category[/package]]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Remove overlay packages ::gentoo already ships identically",
-		Long: `Plan the removal of overlay packages ::gentoo already ships, and with
+		Short:       i18n.N("Remove overlay packages ::gentoo already ships identically"),
+		Long: i18n.N(`Plan the removal of overlay packages ::gentoo already ships, and with
 --apply carry that plan out.
 
 Only CONTENT may authorise a removal. The verdict from 'bentoo overlay compare'
@@ -143,16 +144,16 @@ Examples:
   bentoo overlay prune app-editors/zed          # plan one package
   bentoo overlay prune --include-patched        # consider the diverging ones too
   bentoo overlay prune --apply                  # carry the plan out
-  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry`,
+  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runPruneCmd(cmd, args, d)
 		},
 	}
-	cmd.Flags().BoolVar(&pruneApply, "apply", false, "Carry out the plan (default: plan only, remove nothing)")
-	cmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, "Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)")
-	cmd.Flags().BoolVar(&pruneKeepRegistry, "keep-registry", false, "Leave .autoupdate/packages.toml untouched")
-	cmd.Flags().BoolVar(&pruneYes, "yes", false, "Skip the identical batch's confirmation (never the diverging one)")
+	cmd.Flags().BoolVar(&pruneApply, "apply", false, i18n.N("Carry out the plan (default: plan only, remove nothing)"))
+	cmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, i18n.N("Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)"))
+	cmd.Flags().BoolVar(&pruneKeepRegistry, "keep-registry", false, i18n.N("Leave .autoupdate/packages.toml untouched"))
+	cmd.Flags().BoolVar(&pruneYes, "yes", false, i18n.N("Skip the identical batch's confirmation (never the diverging one)"))
 	return cmd
 }
 

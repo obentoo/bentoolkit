@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/notice"
 	"github.com/spf13/cobra"
 )
@@ -21,11 +22,11 @@ import (
 func newNoticeCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "notice",
-		Short: "Author bentoo notices (news item and site feed entry)",
-		Long: `Write a notice to the overlay as a GLEP 42 news item and, when notice.site_path
+		Short: i18n.N("Author bentoo notices (news item and site feed entry)"),
+		Long: i18n.N(`Write a notice to the overlay as a GLEP 42 news item and, when notice.site_path
 is configured, to the site repository as the YAML file the notices feed is
 built from. Both files share one ID. No git operation is performed: review,
-commit and push each repository yourself.`,
+commit and push each repository yourself.`),
 	}
 	cmd.AddCommand(newNoticeNewCmd(), newNoticeReviseCmd())
 	return cmd
@@ -52,28 +53,28 @@ func newNoticeNewCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "new",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Write a new notice to the overlay and the site",
-		Long: `Write a new notice. The ID is <published>-<name>. The body comes from
+		Short:       i18n.N("Write a new notice to the overlay and the site"),
+		Long: i18n.N(`Write a new notice. The ID is <published>-<name>. The body comes from
 --body-file, or from $VISUAL / $EDITOR when it is absent.
 
 --affects takes "<category>/<package>[:<slot>][ <range>[,<range>...]]", a range
 being one of <, <=, =, >=, > followed by a version, for example
---affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Repeat it for several packages.`,
+--affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Repeat it for several packages.`),
 		Args: cobra.NoArgs,
 		RunE: o.run,
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.in.Type, "type", "", "Notice type: security, release, news or announcement")
-	f.StringVar(&o.in.Severity, "severity", "", "Severity: info, warning or critical")
-	f.StringVar(&o.in.Title, "title", "", "Title, at most 50 characters")
-	f.StringVar(&o.in.Summary, "summary", "", "One-line summary, at most 300 characters")
-	f.StringVar(&o.in.Name, "name", "", "Short name of the ID: at most 20 characters of [a-z0-9+_-]")
+	f.StringVar(&o.in.Type, "type", "", i18n.N("Notice type: security, release, news or announcement"))
+	f.StringVar(&o.in.Severity, "severity", "", i18n.N("Severity: info, warning or critical"))
+	f.StringVar(&o.in.Title, "title", "", i18n.N("Title, at most 50 characters"))
+	f.StringVar(&o.in.Summary, "summary", "", i18n.N("One-line summary, at most 300 characters"))
+	f.StringVar(&o.in.Name, "name", "", i18n.N("Short name of the ID: at most 20 characters of [a-z0-9+_-]"))
 	// StringArray, not StringSlice: a slice flag would split `>=1.0,<1.2.3`
 	// at its commas.
-	f.StringArrayVar(&o.in.Affects, "affects", nil, "Affected package and version ranges (repeatable; required for security and release)")
-	f.StringVar(&o.in.Published, "published", "", "Publication date, YYYY-MM-DD (default: today in UTC)")
-	f.StringVar(&o.in.Author, "author", "", "Author, \"Name <email>\" (default: the configured git user)")
-	f.StringVar(&o.bodyFile, "body-file", "", "Read the body from this file instead of opening an editor")
+	f.StringArrayVar(&o.in.Affects, "affects", nil, i18n.N("Affected package and version ranges (repeatable; required for security and release)"))
+	f.StringVar(&o.in.Published, "published", "", i18n.N("Publication date, YYYY-MM-DD (default: today in UTC)"))
+	f.StringVar(&o.in.Author, "author", "", i18n.N("Author, \"Name <email>\" (default: the configured git user)"))
+	f.StringVar(&o.bodyFile, "body-file", "", i18n.N("Read the body from this file instead of opening an editor"))
 	return cmd
 }
 
@@ -140,20 +141,20 @@ func newNoticeReviseCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "revise <id>",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Revise a published notice in both repositories",
-		Long: `Open the notice's current text in $VISUAL / $EDITOR (or read it from
+		Short:       i18n.N("Revise a published notice in both repositories"),
+		Long: i18n.N(`Open the notice's current text in $VISUAL / $EDITOR (or read it from
 --body-file) and rewrite the news item and the site file together. The news
 item's Revision goes up by one and the site file's updated becomes now;
-the ID and the publication date stay.`,
+the ID and the publication date stay.`),
 		Args: cobra.ExactArgs(1),
 		RunE: o.run,
 	}
 	f := cmd.Flags()
-	f.StringVar(&o.changes.Severity, "severity", "", "New severity: info, warning or critical")
-	f.StringVar(&o.changes.Title, "title", "", "New title, at most 50 characters")
-	f.StringVar(&o.changes.Summary, "summary", "", "New one-line summary, at most 300 characters")
-	f.StringArrayVar(&o.changes.Affects, "affects", nil, "Replace the affected packages (repeatable; same syntax as notice new)")
-	f.StringVar(&o.bodyFile, "body-file", "", "Take the new text from this file instead of opening an editor")
+	f.StringVar(&o.changes.Severity, "severity", "", i18n.N("New severity: info, warning or critical"))
+	f.StringVar(&o.changes.Title, "title", "", i18n.N("New title, at most 50 characters"))
+	f.StringVar(&o.changes.Summary, "summary", "", i18n.N("New one-line summary, at most 300 characters"))
+	f.StringArrayVar(&o.changes.Affects, "affects", nil, i18n.N("Replace the affected packages (repeatable; same syntax as notice new)"))
+	f.StringVar(&o.bodyFile, "body-file", "", i18n.N("Take the new text from this file instead of opening an editor"))
 	return cmd
 }
 

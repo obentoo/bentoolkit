@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
@@ -18,13 +19,13 @@ var (
 func newLogCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "log",
-		Short: "Show commit history",
-		Long:  `Show the commit history of the overlay repository.`,
+		Short: i18n.N("Show commit history"),
+		Long:  i18n.N(`Show the commit history of the overlay repository.`),
 		Args:  cobra.NoArgs,
 		RunE:  runLog,
 	}
-	cmd.Flags().IntVarP(&logCount, "count", "n", 10, "Number of commits to show")
-	cmd.Flags().BoolVarP(&logOneline, "oneline", "o", false, "Show one line per commit")
+	cmd.Flags().IntVarP(&logCount, "count", "n", 10, i18n.N("Number of commits to show"))
+	cmd.Flags().BoolVarP(&logOneline, "oneline", "o", false, i18n.N("Show one line per commit"))
 	return cmd
 }
 

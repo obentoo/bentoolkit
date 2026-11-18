@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -23,22 +24,22 @@ func newSnapshotPruneCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "prune",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Apply the retention policy on demand",
-		Long: `Apply the [engine.retention] policy now, without taking a snapshot: the
+		Short:       i18n.N("Apply the retention policy on demand"),
+		Long: i18n.N(`Apply the [engine.retention] policy now, without taking a snapshot: the
 engine-native prune for every subvolume (btrbk clean / snapper cleanup timeline)
 plus the GFS retention sweep on every archive ship's rclone remote.
 
 --ship NAME scopes the prune to that one destination: the engine-local prune is
 skipped and only the named ship's remote is pruned. Recorded incremental parents
-are never deleted — each is the base of its subvolume's next incremental send.`,
+are never deleted — each is the base of its subvolume's next incremental send.`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotPrune(cmd, args, d)
 		},
 	}
 	cmd.Flags().BoolVar(&snapshotPruneDryRun, "dry-run", false,
-		"print the prune actions that would run, without executing them")
+		i18n.N("print the prune actions that would run, without executing them"))
 	cmd.Flags().StringVar(&snapshotPruneShip, "ship", "",
-		"scope the prune to the named [[ship]] destination")
+		i18n.N("scope the prune to the named [[ship]] destination"))
 	return cmd
 }
 

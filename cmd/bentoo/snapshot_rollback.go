@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -22,22 +23,22 @@ func newSnapshotRollbackCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "rollback <id>",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Roll the system back to a snapshot (snapper only)",
-		Long: `Roll the system back to snapshot <id> via snapper rollback.
+		Short:       i18n.N("Roll the system back to a snapshot (snapper only)"),
+		Long: i18n.N(`Roll the system back to snapshot <id> via snapper rollback.
 
 Rollback is snapper-specific: it requires engine.driver = "snapper" and is refused
 for any other engine. It is DESTRUCTIVE — snapper makes a read-write copy of
 snapshot <id> the new default subvolume, so the system boots into it on the next
-reboot — and prompts for confirmation unless --yes is given.`,
+reboot — and prompts for confirmation unless --yes is given.`),
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotRollback(cmd, args, d)
 		},
 	}
 	cmd.Flags().BoolVarP(&snapshotRollbackYes, "yes", "y", false,
-		"skip the destructive-rollback confirmation prompt")
+		i18n.N("skip the destructive-rollback confirmation prompt"))
 	cmd.Flags().BoolVar(&snapshotRollbackDryRun, "dry-run", false,
-		"print the destructive rollback action without performing it")
+		i18n.N("print the destructive rollback action without performing it"))
 	return cmd
 }
 

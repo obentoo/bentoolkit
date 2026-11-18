@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -15,11 +16,11 @@ func newPushCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "push",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Push committed changes to remote",
-		Long:        `Push committed changes to the remote repository.`,
+		Short:       i18n.N("Push committed changes to remote"),
+		Long:        i18n.N(`Push committed changes to the remote repository.`),
 		RunE:        runPush,
 	}
-	cmd.Flags().BoolVarP(&pushDryRun, "dry-run", "n", false, "Show what would be pushed without pushing")
+	cmd.Flags().BoolVarP(&pushDryRun, "dry-run", "n", false, i18n.N("Show what would be pushed without pushing"))
 	return cmd
 }
 

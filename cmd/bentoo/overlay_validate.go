@@ -13,6 +13,7 @@ import (
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
@@ -46,8 +47,8 @@ func newValidateCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "validate [category[/package]]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Check that each ebuild still matches the source it points at",
-		Long: `Read the build options the upstream archive declares, read the ones the
+		Short:       i18n.N("Check that each ebuild still matches the source it points at"),
+		Long: i18n.N(`Read the build options the upstream archive declares, read the ones the
 ebuild passes, and report the difference. At the default depth nothing is built,
 downloaded or changed: the archive is the one already on disk, put there by the
 manifest step.
@@ -92,7 +93,7 @@ Examples:
   bentoo overlay validate media-plugins/gst-plugins-qt6    # every version of one package
   bentoo overlay validate --json | jq .                    # one JSON document
   bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir
-  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6`,
+  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runValidate(cmd, args, d)
@@ -107,14 +108,14 @@ Examples:
 	// so it bought nothing and cost the flag its own signature. The damage exists
 	// only in rendered help and never in this line, which is why the guard is a
 	// test rather than a reading of this file: flag_usage_test.go.
-	cmd.Flags().Bool("json", false, "Write the whole report to stdout as a single JSON document. It is the same document --export=<path>.json writes to a file, at stdout instead: schema and kind at the root, and this command's own model one level down under payload. A consumer that already reads an exported report reads this one, and jq '.kind' says which command wrote it")
-	cmd.Flags().String("distdir", "", "Read distfiles from this directory (never created, never written to)")
+	cmd.Flags().Bool("json", false, i18n.N("Write the whole report to stdout as a single JSON document. It is the same document --export=<path>.json writes to a file, at stdout instead: schema and kind at the root, and this command's own model one level down under payload. A consumer that already reads an exported report reads this one, and jq '.kind' says which command wrote it"))
+	cmd.Flags().String("distdir", "", i18n.N("Read distfiles from this directory (never created, never written to)"))
 	// The default is the shipped behaviour, spelled out rather than left empty:
 	// `--depth` absent and `--depth=options` are the same run, and the
 	// value is read off THIS command below, never from a package variable.
 	cmd.Flags().String("depth", validate.DepthOptions.String(),
-		"Validate to this rung of the ladder — none, options, patches, configure, compile or install, each including every rung before it. "+
-			"Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in")
+		i18n.N("Validate to this rung of the ladder — none, options, patches, configure, compile or install, each including every rung before it. "+
+			"Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in"))
 	return cmd
 }
 

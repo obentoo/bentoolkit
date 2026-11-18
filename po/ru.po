@@ -1,0 +1,1833 @@
+# Russian translation of bentoolkit.
+# Machine-translated with Lara Translate and a project glossary, then reviewed.
+msgid ""
+msgstr ""
+"Project-Id-Version: bentoolkit\n"
+"PO-Revision-Date: 2026-11-17 00:00+0000\n"
+"Last-Translator: bentoolkit maintainers\n"
+"Language-Team: none\n"
+"Language: ru\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
+
+#: cmd/bentoo/completion.go
+msgid "Generate shell completion scripts"
+msgstr "Генерация скриптов автодополнения для командной оболочки"
+
+#: cmd/bentoo/completion.go
+msgid ""
+"Generate shell completion scripts for bentoo.\n"
+"\n"
+"To load completions:\n"
+"\n"
+"Bash:\n"
+"  $ source <(bentoo completion bash)\n"
+"  # To load completions for each session, execute once (needs\n"
+"  # app-shells/bash-completion):\n"
+"  $ mkdir -p ~/.local/share/bash-completion/completions\n"
+"  $ bentoo completion bash > ~/.local/share/bash-completion/completions/bentoo\n"
+"\n"
+"Zsh:\n"
+"  # If shell completion is not already enabled in your environment,\n"
+"  # you will need to enable it. You can execute the following once:\n"
+"  $ echo \"autoload -U compinit; compinit\" >> ~/.zshrc\n"
+"  # To load completions for each session, execute once:\n"
+"  $ bentoo completion zsh > \"${fpath[1]}/_bentoo\"\n"
+"  # You will need to start a new shell for this setup to take effect.\n"
+"\n"
+"Fish:\n"
+"  $ bentoo completion fish | source\n"
+"  # To load completions for each session, execute once:\n"
+"  $ bentoo completion fish > ~/.config/fish/completions/bentoo.fish\n"
+"\n"
+"PowerShell:\n"
+"  PS> bentoo completion powershell | Out-String | Invoke-Expression\n"
+"  # To load completions for every new session, run:\n"
+"  PS> bentoo completion powershell > bentoo.ps1\n"
+"  # and source this file from your PowerShell profile.\n"
+msgstr ""
+"Сгенерировать скрипты автодополнения для командной оболочки для bentoo.\n"
+"\n"
+"Чтобы загрузить автодополнение:\n"
+"\n"
+"Bash:\n"
+"  $ source <(bentoo completion bash)\n"
+"  # Чтобы загружать автодополнения для каждого сеанса, выполните команду один раз (требуется\n"
+"  # app-shells/bash-completion):\n"
+"  $ mkdir -p ~/.local/share/bash-completion/completions\n"
+"  $ bentoo completion bash > ~/.local/share/bash-completion/completions/bentoo\n"
+"\n"
+"Zsh:\n"
+"  # Если автодополнение в командной оболочке еще не включено в вашей среде,\n"
+"  # вам потребуется его включить. Вы можете выполнить следующее один раз:\n"
+"  $ echo \"autoload -U compinit; compinit\" >> ~/.zshrc\n"
+"  # Чтобы загружать автодополнение для каждого сеанса, выполните команду один раз:\n"
+"  $ bentoo completion zsh > \"${fpath[1]}/_bentoo\"\n"
+"  # Чтобы эти настройки вступили в силу, вам нужно будет запустить новую оболочку.\n"
+"\n"
+"Fish:\n"
+"  $ bentoo completion fish | source\n"
+"  # Чтобы загружать автодополнение для каждого сеанса, выполните команду один раз:\n"
+"  $ bentoo completion fish > ~/.config/fish/completions/bentoo.fish\n"
+"\n"
+"PowerShell:\n"
+"  PS> bentoo completion powershell | Out-String | Invoke-Expression\n"
+"  # Чтобы загружать автодополнения для каждой новой сессии, выполните команду:\n"
+"  PS> bentoo completion powershell > bentoo.ps1\n"
+"  # и подключите этот файл из вашего профиля PowerShell.\n"
+
+#: cmd/bentoo/distfile.go
+msgid "Work with distfiles Portage cannot download by itself"
+msgstr "Работа с файлами дистрибутивов, которые Portage не может скачать самостоятельно"
+
+#: cmd/bentoo/distfile.go
+msgid ""
+"Commands for the source archives 'emerge' cannot fetch on its own.\n"
+"\n"
+"A vendor that gates its download behind a registration form — or behind nothing\n"
+"more than a POST no mirror may replay — leaves Portage with a SRC_URI it cannot\n"
+"follow. The overlay records how that download is performed; these commands\n"
+"perform it."
+msgstr ""
+"Команды для исходных архивов, которые «emerge» не может загрузить самостоятельно.\n"
+"\n"
+"Поставщик, который ограничивает доступ к загрузке регистрационной формой — или вообще ничем\n"
+"больше, чем POST-запрос, который ни один зеркальный сервер не может воспроизвести, — оставляет Portage с SRC_URI, по которому он не может\n"
+"использовать. Оверлей фиксирует, как выполняется такая загрузка; эти команды\n"
+"выполняют его."
+
+#: cmd/bentoo/distfile.go
+msgid "Download a gated distfile into DISTDIR, ready for emerge"
+msgstr "Загрузить защищённый distfile в DISTDIR, готовый для emerge"
+
+#: cmd/bentoo/distfile.go
+msgid ""
+"Perform the download the overlay records for a package, and write the file\n"
+"into DISTDIR under the exact name its Manifest expects.\n"
+"\n"
+"This is the same download 'bentoo overlay autoupdate' performs before it\n"
+"regenerates a Manifest — same request, same guards, same file name — so what\n"
+"lands here is what the Manifest was computed against.\n"
+"\n"
+"Which version: the one the overlay currently carries, unless --version names\n"
+"another. Pass the version 'emerge' asked for when you are installing anything\n"
+"other than the newest ebuild.\n"
+"\n"
+"Where it lands: the host's own DISTDIR, as reported by 'portageq distdir', so\n"
+"'emerge' finds it without being told. --distdir overrides that. The directory\n"
+"has to be writable by you — on most systems DISTDIR is group-writable by the\n"
+"'portage' group, and the run stops with the directory named when it is not.\n"
+"\n"
+"A serial, when the record configures one, is read at runtime from the\n"
+"environment variable the record names (or from the secrets file) and is never\n"
+"written to the overlay, the logs or this command's output. The variable's NAME\n"
+"is printed; its value never is.\n"
+"\n"
+"Exit codes:\n"
+"  0  the file was downloaded and written\n"
+"  1  the run could not be honoured: no such record, an ambiguous atom, a\n"
+"     package that needs no authenticated fetch, an unwritable DISTDIR, a\n"
+"     missing serial, or a download the vendor refused\n"
+"\n"
+"Examples:\n"
+"  # Fetch the distfile for the version the overlay carries\n"
+"  bentoo distfile fetch app-misc/example\n"
+"\n"
+"  # Fetch the one a specific ebuild needs\n"
+"  bentoo distfile fetch app-misc/example --version 3.70.5\n"
+"\n"
+"  # Write it somewhere else (it will not be found by emerge there)\n"
+"  bentoo distfile fetch app-misc/example --distdir /tmp/dl"
+msgstr ""
+"Выполняет загрузку, записанную в оверлее для пакета, и записывает файл\n"
+"в DISTDIR под тем именем, которого ожидает его Manifest.\n"
+"\n"
+"Это та же самая операция загрузки, которую выполняет «bentoo overlay autoupdate» перед тем, как\n"
+"повторно создает Manifest — тот же запрос, те же проверки, то же имя файла — так что\n"
+"то, что ПОПАДАЕТ сюда, — это то, на основе чего был рассчитан Manifest.\n"
+"\n"
+"Какая версия: та, которую в настоящее время содержит оверлей, если только --version не указывает\n"
+"другую. Передавайте версию, запрошенную командой 'emerge', когда вы устанавливаете что-либо,\n"
+"кроме самого нового ebuild.\n"
+"\n"
+"Куда он помещается: в собственный DISTDIR хоста, как сообщает команда 'portageq distdir', поэтому\n"
+"'emerge' находит его без указания. --distdir переопределяет это. Каталог\n"
+"должен быть доступен для записи с вашей стороны — на большинстве систем DISTDIR доступен для записи группе\n"
+"группой «portage», а если это не так, выполнение останавливается с указанием имени каталога.\n"
+"\n"
+"Серийный номер, если он настроен в записи, считывается во время выполнения из\n"
+"переменной среды, указанной в записи (или из файла секретов), и никогда не\n"
+"записывается в оверлей, журналы или вывод этой команды. ИМЯ переменной\n"
+"выводится; его значение никогда не выводится.\n"
+"\n"
+"Коды завершения:\n"
+"  0  файл был загружен и записан\n"
+"  1  выполнение не удалось: нет такой записи, неоднозначный атом,\n"
+"     пакет, для которого не требуется аутентифицированная загрузка, недоступный для записи каталог DISTDIR,\n"
+"     отсутствующий серийный номер или загрузка, в которой поставщик отказал\n"
+"\n"
+"Примеры:\n"
+"  # Получить distfile для версии, которую содержит оверлей\n"
+"  bentoo distfile fetch app-misc/example\n"
+"\n"
+"  # Получить тот, который требуется конкретному ebuild\n"
+"  bentoo distfile fetch app-misc/example --version 3.70.5\n"
+"\n"
+"  # Запишите его в другое место (там emerge его не найдёт)\n"
+"  bentoo distfile fetch app-misc/example --distdir /tmp/dl"
+
+#: cmd/bentoo/distfile.go
+msgid "Directory the file is written into (default: the host's own DISTDIR, as reported by portageq distdir)"
+msgstr "Каталог, в который записывается файл (по умолчанию: собственный DISTDIR хоста, как сообщается командой portageq distdir)"
+
+#: cmd/bentoo/distfile.go
+msgid "Version whose distfile to fetch (default: the version the overlay currently carries)"
+msgstr "Версия, дистрибутивный файл которой требуется получить (по умолчанию: версия, которую в настоящее время содержит оверлей)"
+
+#: cmd/bentoo/i18n.go
+msgid "Usage:"
+msgstr "Использование:"
+
+#: cmd/bentoo/i18n.go
+msgid "Aliases:"
+msgstr "Псевдонимы:"
+
+#: cmd/bentoo/i18n.go
+msgid "Examples:"
+msgstr "Примеры:"
+
+#: cmd/bentoo/i18n.go
+msgid "Available Commands:"
+msgstr "Доступные команды:"
+
+#: cmd/bentoo/i18n.go
+msgid "Additional Commands:"
+msgstr "Дополнительные команды:"
+
+#: cmd/bentoo/i18n.go
+msgid "Flags:"
+msgstr "Флаги:"
+
+#: cmd/bentoo/i18n.go
+msgid "Global Flags:"
+msgstr "Глобальные флаги:"
+
+#: cmd/bentoo/i18n.go
+msgid "Additional help topics:"
+msgstr "Дополнительные справочные темы:"
+
+#: cmd/bentoo/i18n.go
+msgid "Use \"{{.CommandPath}} [command] --help\" for more information about a command."
+msgstr "Используйте \"{{.CommandPath}} [command] --help\" для получения дополнительной информации о команде."
+
+#: cmd/bentoo/i18n.go
+msgid "Help about any command"
+msgstr "Справка по любой команде"
+
+#: cmd/bentoo/i18n.go
+#, c-format
+msgid ""
+"Help provides help for any command in the application.\n"
+"Simply type %s help [path to command] for full details."
+msgstr ""
+"Команда help предоставляет справку по любой команде в приложении.\n"
+"Просто введите %s help [path to command], чтобы получить полную информацию."
+
+#: cmd/bentoo/i18n.go
+#, c-format
+msgid "help for %s"
+msgstr "справка по %s"
+
+#: cmd/bentoo/notice.go
+msgid "Author bentoo notices (news item and site feed entry)"
+msgstr "Создание уведомлений bentoo (новостная статья и запись в ленте сайта)"
+
+#: cmd/bentoo/notice.go
+msgid ""
+"Write a notice to the overlay as a GLEP 42 news item and, when notice.site_path\n"
+"is configured, to the site repository as the YAML file the notices feed is\n"
+"built from. Both files share one ID. No git operation is performed: review,\n"
+"commit and push each repository yourself."
+msgstr ""
+"Добавьте уведомление в оверлей в виде новости GLEP 42 и, если указан параметр notice.site_path,\n"
+"настроена, в репозиторий сайта в виде YAML-файла, из которого формируется лента уведомлений,\n"
+"из которого формируется лента уведомлений. Оба файла имеют один и тот же идентификатор. Операции Git не выполняются: просмотрите,\n"
+"самостоятельно выполняйте коммит и push для каждого репозитория."
+
+#: cmd/bentoo/notice.go
+msgid "Write a new notice to the overlay and the site"
+msgstr "Написать новое уведомление для оверлея и сайта"
+
+#: cmd/bentoo/notice.go
+msgid ""
+"Write a new notice. The ID is <published>-<name>. The body comes from\n"
+"--body-file, or from $VISUAL / $EDITOR when it is absent.\n"
+"\n"
+"--affects takes \"<category>/<package>[:<slot>][ <range>[,<range>...]]\", a range\n"
+"being one of <, <=, =, >=, > followed by a version, for example\n"
+"--affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Repeat it for several packages."
+msgstr ""
+"Создаёт новое уведомление. Идентификатор имеет формат <published>-<name>. Текст берется из\n"
+"--body-file или из $VISUAL / $EDITOR, если он отсутствует.\n"
+"\n"
+"Флаг --affects принимает значение \"<category>/<package>[:<slot>][ <range>[,<range>...]]\", где range\n"
+"где диапазон — это один из операторов <, <=, =, >=, > с последующей версией, например\n"
+"--affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Повторите это для нескольких пакетов."
+
+#: cmd/bentoo/notice.go
+msgid "Notice type: security, release, news or announcement"
+msgstr "Тип уведомления: security, release, news или announcement"
+
+#: cmd/bentoo/notice.go
+msgid "Severity: info, warning or critical"
+msgstr "Уровень серьезности: info, warning или critical"
+
+#: cmd/bentoo/notice.go
+msgid "Title, at most 50 characters"
+msgstr "Заголовок, не более 50 символов"
+
+#: cmd/bentoo/notice.go
+msgid "One-line summary, at most 300 characters"
+msgstr "Краткое описание в одну строку, не более 300 символов"
+
+#: cmd/bentoo/notice.go
+msgid "Short name of the ID: at most 20 characters of [a-z0-9+_-]"
+msgstr "Краткое имя идентификатора: не более 20 символов [a-z0-9+_-]"
+
+#: cmd/bentoo/notice.go
+msgid "Affected package and version ranges (repeatable; required for security and release)"
+msgstr "Затронутые пакеты и диапазоны версий (можно указывать несколько; обязательно для уведомлений о безопасности и релизах)"
+
+#: cmd/bentoo/notice.go
+msgid "Publication date, YYYY-MM-DD (default: today in UTC)"
+msgstr "Дата публикации, ГГГГ-ММ-ДД (по умолчанию: сегодня по UTC)"
+
+#: cmd/bentoo/notice.go
+msgid "Author, \"Name <email>\" (default: the configured git user)"
+msgstr "Автор, \"Name <email>\" (по умолчанию: настроенный пользователь Git)"
+
+#: cmd/bentoo/notice.go
+msgid "Read the body from this file instead of opening an editor"
+msgstr "Считать текст из этого файла вместо открытия редактора"
+
+#: cmd/bentoo/notice.go
+msgid "Revise a published notice in both repositories"
+msgstr "Внести изменения в опубликованное уведомление в обоих репозиториях"
+
+#: cmd/bentoo/notice.go
+msgid ""
+"Open the notice's current text in $VISUAL / $EDITOR (or read it from\n"
+"--body-file) and rewrite the news item and the site file together. The news\n"
+"item's Revision goes up by one and the site file's updated becomes now;\n"
+"the ID and the publication date stay."
+msgstr ""
+"Открывает текущий текст уведомления в $VISUAL / $EDITOR (или читает его из\n"
+"--body-file) и переписывает новостной элемент и файл сайта вместе. Новостной\n"
+"Номер Revision элемента увеличивается на единицу, а значение updated файла сайта становится текущим временем;\n"
+"ИДЕНТИФИКАТОР и ДАТА ПУБЛИКАЦИИ остаются без изменений."
+
+#: cmd/bentoo/notice.go
+msgid "New severity: info, warning or critical"
+msgstr "Новый уровень серьёзности: info, warning или critical"
+
+#: cmd/bentoo/notice.go
+msgid "New title, at most 50 characters"
+msgstr "Новый заголовок, не более 50 символов"
+
+#: cmd/bentoo/notice.go
+msgid "New one-line summary, at most 300 characters"
+msgstr "Новое однострочное краткое описание, не более 300 символов"
+
+#: cmd/bentoo/notice.go
+msgid "Replace the affected packages (repeatable; same syntax as notice new)"
+msgstr "Заменить затронутые пакеты (можно повторять; синтаксис как у notice new)"
+
+#: cmd/bentoo/notice.go
+msgid "Take the new text from this file instead of opening an editor"
+msgstr "Взять новый текст из этого файла вместо открытия редактора"
+
+#: cmd/bentoo/overlay_add.go
+msgid "Add files to the staging area"
+msgstr "Добавить файлы в индекс"
+
+#: cmd/bentoo/overlay_add.go
+msgid ""
+"Add files to the Git staging area in the overlay repository.\n"
+"If no paths are specified, adds all changes (equivalent to \"git add .\")."
+msgstr ""
+"Добавьте файлы в индекс Git в репозитории оверлея.\n"
+"Если пути не указаны, добавляются все изменения (эквивалентно команде \"git add .\")."
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analyze package and generate autoupdate schema"
+msgstr "Проанализировать пакет и сгенерировать схему автоматического обновления"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid ""
+"Analyze a package to determine the best way to check for upstream versions.\n"
+"\n"
+"The analyze command uses intelligent analysis to discover data sources and\n"
+"generate update schemas automatically. It supports multiple data sources\n"
+"including GitHub releases, PyPI, npm, crates.io, and HTML scraping.\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay analyze net-misc/foo           Analyze single package\n"
+"  bentoo overlay analyze net-misc/foo --url URL Override URL for analysis\n"
+"  bentoo overlay analyze net-misc/foo --hint \"version is in header\"\n"
+"  bentoo overlay analyze --all                  Analyze all packages without schema\n"
+"  bentoo overlay analyze net-misc/foo --no-cache  Bypass caches\n"
+"  bentoo overlay analyze net-misc/foo --force   Overwrite existing schema\n"
+"  bentoo overlay analyze net-misc/foo --dry-run Show schema without saving"
+msgstr ""
+"Анализирует пакет, чтобы определить оптимальный способ проверки наличия более новых версий.\n"
+"\n"
+"Команда analyze использует интеллектуальный анализ для обнаружения источников данных и\n"
+"автоматически генерировать схемы обновления. Она поддерживает несколько источников данных,\n"
+"включая релизы GitHub, PyPI, npm, crates.io и парсинг HTML.\n"
+"\n"
+"Примеры:\n"
+"  bentoo overlay analyze net-misc/foo           Анализ одного пакета\n"
+"  bentoo overlay analyze net-misc/foo --url URL Переопределить URL для анализа\n"
+"  bentoo overlay analyze net-misc/foo --hint \"version is in header\"\n"
+"  bentoo overlay analyze --all                  Анализировать все пакеты без схемы\n"
+"  bentoo overlay analyze net-misc/foo --no-cache  Обход КЭШЕВ\n"
+"  bentoo overlay analyze net-misc/foo --force   Перезаписать существующую схему\n"
+"  bentoo overlay analyze net-misc/foo --dry-run Отобразить схему без сохранения"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Override URL for analysis"
+msgstr "Переопределить URL для анализа"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Provide hint to LLM for guidance"
+msgstr "Предоставить подсказку LLM для получения рекомендаций"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analyze all packages without schema"
+msgstr "Проанализировать все пакеты без схемы"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Bypass all caches"
+msgstr "Обойти все кэши"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Overwrite existing schema"
+msgstr "Перезаписать существующую схему"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Show schema without saving"
+msgstr "Показать схему без сохранения"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Check and apply ebuild version updates"
+msgstr "Проверка и применение обновлений версий ebuild"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid ""
+"Automatically check upstream sources for new versions and apply updates.\n"
+"\n"
+"Distfiles (--apply, --revive and --clean, which all regenerate a Manifest):\n"
+"\n"
+"  --distdir            Directory pkgdev downloads into and digests from. It\n"
+"                       defaults to the DISTDIR this machine's own package\n"
+"                       manager reports (portageq distdir, itself normally\n"
+"                       /var/cache/distfiles) — NOT to a temporary directory, so\n"
+"                       a distfile fetched here is a distfile the next run and\n"
+"                       the package manager both reuse. Set it in the config file\n"
+"                       as autoupdate.distdir; this flag wins over that key.\n"
+"  --distfiles-cache    Read-only cache consulted before downloading: a file\n"
+"                       already there is symlinked into the working distdir\n"
+"                       instead of fetched again. Nothing is ever written back\n"
+"                       to it. Defaults to /var/cache/distfiles, and passing \"\"\n"
+"                       disables the lookup. Set it in the config file as\n"
+"                       autoupdate.distfiles_cache; this flag wins over that key.\n"
+"\n"
+"  The two default to the same directory, which makes the lookup a no-op — there\n"
+"  is nothing to link when the cache IS the working distdir. They differ once you\n"
+"  point --distdir somewhere else, and that is when the cache starts paying off.\n"
+"\n"
+"  Both names, and both meanings, are the ones `bentoo overlay manifest` already\n"
+"  uses.\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay autoupdate --check              Check all packages for updates\n"
+"  bentoo overlay autoupdate --check net-misc/foo Check specific package\n"
+"  bentoo overlay autoupdate --check --force      Check ignoring cache\n"
+"  bentoo overlay autoupdate --check --no-fetch-cache  Check with one request per read, not one per URL\n"
+"  bentoo overlay autoupdate --check --yes        Check, then write the registry pins without prompting\n"
+"  bentoo overlay autoupdate --check --only source Check only source packages\n"
+"  bentoo overlay autoupdate --check --only bin    Check only binary packages\n"
+"  bentoo overlay autoupdate --list               List pending updates\n"
+"  bentoo overlay autoupdate --apply net-misc/foo Apply update for package\n"
+"  bentoo overlay autoupdate --apply all          Apply all pending updates\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --clean    Apply and remove the old ebuild\n"
+"  bentoo overlay autoupdate --revive-list         List orphaned packages with a newer upstream\n"
+"  bentoo overlay autoupdate --check --revivable   Check active packages AND report revivable orphans\n"
+"  bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump\n"
+"  bentoo overlay autoupdate --revive all          Revive every revivable orphan\n"
+"  bentoo overlay autoupdate --repair net-misc/foo Repair a failed bump in its staged tree with claude\n"
+"  bentoo overlay autoupdate --lint                Check packages.toml against the record model\n"
+"  bentoo overlay autoupdate --lint --fix          Repair what the linter can, after showing the diff\n"
+"  bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)\n"
+"  bentoo overlay autoupdate --mark-auto-disabled --except dev-libs/icu-compat,media-libs/libjxl-compat\n"
+"                                                  ONE-SHOT: unfreeze the entries the checker disabled before\n"
+"                                                  disabled_by existed, sparing the two deliberate pins. Run it\n"
+"                                                  once per registry; without --yes it prints the plan and stops\n"
+"  bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Download into a specific directory\n"
+"  bentoo overlay autoupdate --apply all --distfiles-cache \"\"       Never reuse a cached distfile"
+msgstr ""
+"Автоматически проверять исходные репозитории на наличие новых версий и применять обновления.\n"
+"\n"
+"Distfiles (--apply, --revive и --clean, которые все регенерируют файл Manifest):\n"
+"\n"
+"  --distdir            Каталог, в который pkgdev выполняет загрузку и из которого вычисляет контрольные суммы. По умолчанию\n"
+"                       по умолчанию используется DISTDIR, который указывает собственный менеджер пакетов этой машины\n"
+"                       менеджер сообщает (portageq distdir, который обычно сам по себе\n"
+"                       /var/cache/distfiles) — НЕ во временный каталог, поэтому\n"
+"                       distfile, полученный здесь, является distfile, который при следующем запуске и\n"
+"                       который менеджер пакетов также использует повторно. Установите его в файле конфигурации\n"
+"                       как autoupdate.distdir; этот флаг имеет приоритет над этим ключом.\n"
+"  --distfiles-cache    Кэш только для чтения, к которому обращаются перед загрузкой: файл\n"
+"                       на него уже создана символическая ссылка в рабочем каталоге distdir\n"
+"                       вместо того, чтобы загружать его снова. В него никогда ничего не записывается\n"
+"                       в него. По умолчанию используется /var/cache/distfiles, а передача \"\"\n"
+"                       отключает поиск. Установите его в файле конфигурации как\n"
+"                       autoupdate.distfiles_cache; этот флаг имеет приоритет над этим ключом.\n"
+"\n"
+"  По умолчанию оба параметра указывают на один и тот же каталог, что делает поиск бесполезным —\n"
+"  нечего связывать, когда КЭШ ЯВЛЯЕТСЯ рабочим каталогом distdir. Они начинают отличаться, когда вы\n"
+"  укажете --distdir на другой каталог, и именно тогда кэш начнет приносить пользу.\n"
+"\n"
+"  Оба названия и оба значения — это те, которые уже используются в `bentoo overlay manifest`\n"
+"  uses.\n"
+"\n"
+"Примеры:\n"
+"  bentoo overlay autoupdate --check              Проверить все пакеты на наличие обновлений\n"
+"  bentoo overlay autoupdate --check net-misc/foo Проверить конкретный пакет\n"
+"  bentoo overlay autoupdate --check --force      Проверка с игнорированием кэша\n"
+"  bentoo overlay autoupdate --check --no-fetch-cache  Проверка с одним запросом на операцию чтения, а не с одним запросом на каждый URL-адрес\n"
+"  bentoo overlay autoupdate --check --yes        Проверить, а затем записать привязки реестра без запроса подтверждения\n"
+"  bentoo overlay autoupdate --check --only source Проверка только пакетов с исходным кодом\n"
+"  bentoo overlay autoupdate --check --only bin    Проверка только БИНАРНЫХ ПАКЕТОВ\n"
+"  bentoo overlay autoupdate --list               Список ожидающих обновлений\n"
+"  bentoo overlay autoupdate --apply net-misc/foo Применить обновление для пакета\n"
+"  bentoo overlay autoupdate --apply all          Применить все ожидающие обновления\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --compile  Применить обновление и выполнить сборку для проверки\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --clean    Применить обновление и удалить старый ebuild\n"
+"  bentoo overlay autoupdate --revive-list         Вывести список «бесхозных» пакетов с более новой версией в основном репозитории\n"
+"  bentoo overlay autoupdate --check --revivable   Проверка активных пакетов И вывод отчёта об осиротевших пакетах, которые можно восстановить\n"
+"  bentoo overlay autoupdate --revive net-misc/foo Восстановить \"сироту\": взять исходные данные из ::gentoo и выполнить bump\n"
+"  bentoo overlay autoupdate --revive all          Восстановить все восстановимые «сиротские» пакеты\n"
+"  bentoo overlay autoupdate --repair net-misc/foo Исправить неудачное обновление в промежуточном дереве с помощью claude\n"
+"  bentoo overlay autoupdate --lint                Проверка файла packages.toml на соответствие модели записей\n"
+"  bentoo overlay autoupdate --lint --fix          Исправить то, что может исправить линтер, после отображения diff\n"
+"  bentoo overlay autoupdate --lint --fix --yes    Исправление без участия пользователя (этот оверлей автоматически выполняет коммиты и пуши)\n"
+"  bentoo overlay autoupdate --mark-auto-disabled --except dev-libs/icu-compat,media-libs/libjxl-compat\n"
+"                                                  ОДНОКРАТНОЕ ДЕЙСТВИЕ: разморозить записи, которые ранее были отключены средством проверки\n"
+"                                                  Параметр disabled_by существовал, оставив без изменений две намеренно зафиксированные версии. Запустите его\n"
+"                                                  один раз для каждого реестра; без --yes он выводит план и останавливается\n"
+"  bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Загрузка в указанный каталог\n"
+"  bentoo overlay autoupdate --apply all --distfiles-cache \"\"       Никогда не использовать повторно кэшированный distfile"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Check for updates"
+msgstr "Проверить наличие обновлений"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "List pending updates"
+msgstr "Вывести список ожидающих обновлений"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Apply update for specified package, or \"all\" for every pending update"
+msgstr "Применить обновление для указанного пакета или \"all\" для всех ожидающих обновления"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Ignore cache when checking"
+msgstr "Игнорировать кэш при проверке"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Removed: builds run only in --check --llm, unprivileged, up to --depth=install; kept so that typing it says what to run instead"
+msgstr "Удалено: сборки выполняются только с параметрами --check --llm, без привилегий, до --depth=install; сохранено, чтобы при вводе отображалось, что следует выполнять вместо этого"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time"
+msgstr "С флагом --apply: проверяйте каждое обновление до этого уровня иерархии, а не до уровня его класса и выбранной конфигурации — none, options, patches, configure, compile или install, причем каждый из них включает все предыдущие уровни. Это ЗАМЕНЯЕТ классификацию, уровень пакета и конфигурацию в любом направлении, и это единственный параметр, который позволяет запрашивать меньший объем. Любой элемент выше \"options\" запускает сборку и, следовательно, применяет по одному пакету за раз"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Cap how deep a bump is built: a package whose average build on this host (qlop) is above this duration, or which has no build history, is taken no further than configure. Overrides autoupdate.build.budget for this run; give the same budget to --apply, or set the key, so the apply asks for the depth the check proved"
+msgstr "Ограничьте глубину сборки обновления: пакет, средняя продолжительность сборки которого на этом хосте (qlop) превышает указанное время, или пакет, не имеющий истории сборок, не продвигается дальше этапа configure. Переопределяет autoupdate.build.budget для этого запуска; задайте такой же бюджет для --apply или установите ключ, чтобы команда apply запрашивала глубину, подтверждённую проверкой."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Where the build gates of --check --llm, --revive and --repair run: host (the default), vm or container. Overrides autoupdate.build.backend for this run; a backend that is not available stops the run before any work, it never falls back to host"
+msgstr "Где выполняются контрольные точки сборки --check --llm, --revive и --repair: host (по умолчанию), vm или container. Переопределяет autoupdate.build.backend для этого запуска; если бэкэнд недоступен, запуск прекращается еще до начала работы и никогда не переключается на хост."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way"
+msgstr "ПРОПУСТИТЕ контрольную точку компиляции вместо того, чтобы запускать её без проверенного сетевого пространства имён. Без этого по-прежнему выполняется неизолированная компиляция, и ее прохождение помечается как «непроверенная изоляция». Для создания пространства имен требуются привилегии, которыми не обладает обычный пользователь, и Portage в любом случае сообщает о network-sandbox в FEATURES."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone"
+msgstr "С флагом --apply: очистить каталог этого пакета после успешного применения. БЕЗ --apply: очистить весь оверлей — каждый каталог пакета, содержащий ebuild, на который не претендует ни одна запись реестра, — при желании можно сузить область действия с помощью позиционного <category> или <category/package>. Полный план выводится ПЕРЕД подтверждением, а ebuild-файлы УДАЛЯЮТСЯ из оверлея, который автоматически выполняет коммит и пуш, поэтому для автоматического выполнения очистки требуется флаг --yes. Каталог, запись которого не имеет привязки к версии или на который не претендует ни одна запись, регистрируется и остается без изменений."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured"
+msgstr "Максимальное количество параллельных проверок/применений (1–100). Отдельная операция --clean sweep НЕ использует это значение по умолчанию: она выполняется для одного каталога за раз, если только флаг не указан явно, поскольку никогда не проводилось измерение того, конкурируют ли одновременные запуски манифеста pkgdev за DISTDIR или за собственную блокировку pkgdev."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)"
+msgstr "Тайм-аут HTTP для каждого запроса в секундах для --check, --revive и проверки vendor-tarball в --apply (0 = использовать настройку autoupdate.http_timeout, по умолчанию 30)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Restrict --check to packages of this type: \"bin\" or \"source\""
+msgstr "Ограничить действие --check пакетами следующего типа: \"bin\" или \"source\""
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "List disabled (orphaned) packages whose upstream is newer than ::gentoo"
+msgstr "Вывести список отключённых (сиротских) пакетов, чей апстрим новее, чем ::gentoo"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary"
+msgstr "С --apply или --revive: повышайте эти пакеты (cat/pkg или ключ записи, разделённые запятыми или повторяющиеся) без записи о периоде ожидания для исправления уязвимости, которое не должно откладываться. Каждый пропуск регистрируется и указывается в сводке по периоду ожидания"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply or --revive: switch the overlay's cooldown ON before anything is promoted, so every promoted version is masked for this many days (bare --cooldown = 7, range 1-3650) while the previous version stays installable. It writes the managed bentoo-cooldown block into the overlay's profiles/package.mask — PUBLISHED, so the mask reaches every host that syncs the overlay — and it is persistent: later runs mask without the flag. On an overlay already under cooldown it rewrites days= only"
+msgstr "С помощью --apply или --revive: ВКЛЮЧИТЕ период ожидания оверлея перед повышением любой версии, чтобы каждая повышенная версия была замаскирована на указанное количество дней (только --cooldown = 7, диапазон 1–3650), а предыдущая версия оставалась доступной для установки. Он записывает управляемый блок bentoo-cooldown в файл profiles/package.mask оверлея — PUBLISHED, так что маскирование распространяется на каждый хост, который синхронизирует оверлей, — и оно является постоянным: при последующих запусках маскирование применяется без указания флага. В оверлее, уже находящемся в режиме охлаждения, переписывается только days="
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan"
+msgstr "Восстановить «сиротский» пакет, взяв его из ::gentoo и обновив версию, или «all» для всех подлежащих восстановлению «сиротских» пакетов."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH"
+msgstr "Интерактивное исправление неудачного обновления: отображение пакета исправления, оставшегося после неудачного применения, рядом с сохранённым деревом в промежуточном состоянии; запуск сеанса claude в этом месте после подтверждения с запросом перед каждой командой; затем повторная проверка дерева в промежуточном состоянии и его продвижение, как это было бы сделано с помощью --apply. Требуется терминал на stdin и stdout, а также исполняемый файл claude в PATH"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass"
+msgstr "С помощью --check также сообщайте о восстановимых осиротевших пакетах (отключённых + отсутствующих, с версией в основном репозитории новее, чем в ::gentoo) в том же проходе"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "DEPRECATED, use --ui=plain instead. It is still honoured and its behaviour has not changed: it disables the live TUI and streams plain output, it is exactly --ui=plain, and it OUTRANKS both --ui and BENTOO_UI — so --no-tui --ui=fullscreen renders plain, because an opt-out a flag could override would not be an opt-out. The two environment variables it has always answered to, NO_COLOR and BENTOO_NO_TUI, are unchanged and mean the same thing as passing it"
+msgstr "УСТАРЕЛО, вместо этого используйте --ui=plain. Он по-прежнему поддерживается, и его поведение не изменилось: он отключает интерактивный TUI и выводит обычный текст, это в точности --ui=plain, и он ИМЕЕТ ПРИОРИТЕТ как над --ui, так и над BENTOO_UI — поэтому --no-tui --ui=fullscreen выводит обычный текст, поскольку отказ от параметра, который может быть переопределён флагом, не является отказом. Две переменные среды, на которые он всегда реагировал, NO_COLOR и BENTOO_NO_TUI, остались без изменений и означают то же самое, что и указание этого флага."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)"
+msgstr "Проверьте файл packages.toml на соответствие модели записи: структура (# маркер END, поле comments последним, отсутствие «плавающих» комментариев), набор полей (неизвестные или устаревшие ключи, избыточное enabled = true, канонический порядок полей) и семантика (недопустимые или неоднозначные записи, необъявленные строки релизов, отслеживание коммитов без базового источника)."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human"
+msgstr "С помощью --lint: исправление на месте нарушений, для которых существует механическое решение (устаревший двоичный ключ, избыточное enabled = true, канонический порядок полей). Объединенный diff выводится ДО подтверждения, а файл packages.toml ПУБЛИКУЕТСЯ — этот оверлей автоматически выполняет коммит и push, поэтому запись доходит до origin — именно поэтому для автоматического исправления требуется --yes. Проблемы, для которых невозможно подобрать автоматическое исправление (например, запись, отслеживающая коммиты без указания базового источника), сообщаются и передаются на рассмотрение человеку."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "ONE-SHOT MIGRATION: stamp disabled_by = \"auto\" on every entry the checker disabled before that key existed, so the reconciliation is free to re-enable them when their ebuild returns. Without it those entries state no origin, which now reads as a deliberate decision and freezes them for good. An entry that is held, already stamped, still enabled, or named in --except is left alone, and a second run changes nothing. The full plan is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended migration requires --yes"
+msgstr "ОДНОКРАТНАЯ МИГРАЦИЯ: проставьте disabled_by = \"auto\" для каждой записи, которую программа проверки отключила до появления этого ключа, чтобы при согласовании можно было снова включить их, когда их ebuild вернется. Без этого в таких записях не указывается источник, что теперь воспринимается как преднамеренное решение и навсегда блокирует их. Запись, которая УДЕРЖИВАЕТСЯ, уже ПОМЕЧЕНА, всё ещё ВКЛЮЧЕНА или указана в --except, остаётся без изменений, и повторный запуск ничего не меняет. Полный план выводится ПЕРЕД подтверждением, а файл packages.toml ПУБЛИКУЕТСЯ — это оверлей автоматически выполняет коммит и пуш, поэтому запись доходит до origin — именно поэтому для автоматической миграции требуется --yes"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --mark-auto-disabled: the entries the migration must NOT stamp, comma-separated or repeated. These are the pins a maintainer disabled ON PURPOSE — for this overlay, dev-libs/icu-compat and media-libs/libjxl-compat — and stamping one hands it back to the reconciliation that re-enabled and bumped it before. An entry naming no record in packages.toml ABORTS the run: a typo protects nothing and would otherwise pass in silence"
+msgstr "С флагом --mark-auto-disabled: записи, которые миграция НЕ должна помечать, разделённые запятыми или повторяющиеся. Это привязки, которые МЕЙНТЕЙНЕР ОТКЛЮЧИЛ НАМЕРЕННО — для этого оверлея это dev-libs/icu-compat и media-libs/libjxl-compat — и проставление метки на одной из них возвращает её в процесс согласования, который ранее повторно включил и обновил её. Запись, не соответствующая ни одной записи в packages.toml, ПРЕРЫВАЕТ выполнение: опечатка ни от чего не защищает и в противном случае прошла бы незамеченной."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, a --mark-auto-disabled migration, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix or --mark-auto-disabled it rewrites packages.toml, in an overlay that auto-commits and pushes"
+msgstr "Утверждать без запроса всё, из-за чего этот запуск иначе остановился бы и задал вопрос: согласование реестра после проверки, исправление --lint --fix, миграцию --mark-auto-disabled и отдельную очистку --clean. ОБЯЗАТЕЛЬНО для любой неинтерактивной записи — без этого флага команда, запущенная через конвейер или скрипт, выводит на экран то, что она собирается сделать, но ничего не изменяет. Обратите внимание на масштаб воздействия: с флагом --clean эта команда УДАЛЯЕТ ebuild-файлы, а с флагом --fix или --mark-auto-disabled она перезаписывает файл packages.toml в оверлее, который автоматически выполняет коммит и push."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)"
+msgstr "Каталог distfiles, используемый pkgdev (по умолчанию: собственный DISTDIR хоста, как сообщается командой portageq distdir; переопределяет ключ конфигурации autoupdate.distdir)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)"
+msgstr "Кэш distfiles, доступный только для чтения, используется перед загрузкой («» отключает его; переопределяет ключ конфигурации autoupdate.distfiles_cache)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Fetch each URL per record instead of sharing one response across records that declare it"
+msgstr "Выполнять запрос для каждого URL-адреса в отдельной записи вместо использования одного ответа для всех записей, в которых он указан"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"
+msgstr "С флагом --check: подтвердите каждое ожидающее обновление в промежуточном дереве — без него --check только считывает версии. С --check или --revive: позволить настроенному агенту claude-code участвовать в валидации. --apply публикует только то, что было подтверждено проверкой, и отклоняет этот флаг. Это активирует ОБЕ функции агента — рецензента обновлений, который анализирует изменения между двумя версиями и может запросить БОЛЬШЕ проверок, чем предусмотрено политикой глубины, и исправителя сборки, который восстанавливает STAGED ebuild после неудачной сборки и повторно запускает тот же гейт для принятия решения. Установите для ключа autoupdate.validate.review или fix_on_failure значение false, чтобы снова отключить один из них; ни один из этих ключей ничего не активирует без данного флага. Требуется, чтобы CLI claude находился в PATH и provider = \"claude-code\" — в противном случае при запуске будет выведено одно предупреждение, а гейты будут выполняться без агента."
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Commit staged changes with auto-generated message"
+msgstr "Закоммитить подготовленные изменения с автоматически сгенерированным сообщением"
+
+#: cmd/bentoo/overlay_commit.go
+msgid ""
+"Commit staged changes to the overlay repository.\n"
+"If no message is provided with -m, an automatic commit message is generated\n"
+"based on the ebuild changes and a confirmation prompt is shown.\n"
+"Use -y to skip the confirmation prompt and commit automatically."
+msgstr ""
+"Закоммитить подготовленные изменения в репозиторий оверлея.\n"
+"Если с помощью -m не указано сообщение, генерируется автоматическое сообщение коммита.\n"
+"на основе изменений в ebuild и отображается запрос на подтверждение.\n"
+"Используйте -y, чтобы пропустить запрос подтверждения и выполнить коммит автоматически."
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Custom commit message (bypasses auto-generation)"
+msgstr "Пользовательское сообщение коммита (в обход автоматической генерации)"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Show what would be committed without committing"
+msgstr "Показать, что было бы закоммичено, без выполнения коммита"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Skip confirmation prompt and commit automatically"
+msgstr "Пропустить запрос подтверждения и выполнить коммит автоматически"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Compare overlay packages with upstream repository"
+msgstr "Сравнить пакеты оверлея с upstream-репозиторием"
+
+#: cmd/bentoo/overlay_compare.go
+msgid ""
+"Compare package versions in your local Bentoo overlay against\n"
+"an upstream repository.\n"
+"\n"
+"Any repository from the Gentoo ecosystem (~428 repos) can be used by name.\n"
+"The repository list is fetched from the official Gentoo repositories.xml\n"
+"registry and cached locally. Use --sync to force a refresh.\n"
+"\n"
+"Custom repositories can also be defined in ~/.config/bentoo/config.yaml\n"
+"and take priority over registry entries.\n"
+"\n"
+"The provider (GitHub API, GitLab API, or Git) is automatically detected\n"
+"based on the repository's source URL. Use --clone to force git clone.\n"
+"\n"
+"By default, all packages are shown (outdated, up-to-date, and newer).\n"
+"Use --only-outdated to filter and show only packages that need updates.\n"
+"Use --only-redundant to see just the removal candidates, or --only-patched\n"
+"to see just the packages an .autoupdate/packages.toml entry declares a\n"
+"divergence for. The three filters combine by intersection.\n"
+"\n"
+"Where a package differs from upstream and nothing declares why, a local model\n"
+"(the claude CLI, on your own subscription) reads both ebuilds and says what the\n"
+"difference does and which side it came from. It is commentary: the verdicts and\n"
+"the removal recommendations are the same with or without it, nothing it says is\n"
+"written to a file, and --no-review contacts no model at all.\n"
+"\n"
+"Use --realign to measure every package against the ::gentoo ebuild it should be\n"
+"compared with: which baseline was used and how far it is, which structural axes\n"
+"differ, what the ebuild declares about them, and what a model makes of what is\n"
+"left. It needs ::gentoo's tree on this machine, so it is refused against any\n"
+"other repository and against an API-only provider. Without it the command behaves\n"
+"exactly as it always has.\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay compare                    # Compare with gentoo (API)\n"
+"  bentoo overlay compare guru               # Compare with GURU (API)\n"
+"  bentoo overlay compare some-overlay       # Compare with any registered repo\n"
+"  bentoo overlay compare --clone            # Compare with gentoo (git clone)\n"
+"  bentoo overlay compare --sync             # Refresh repo list before comparing\n"
+"  bentoo overlay compare --only-outdated    # Show only outdated packages\n"
+"  bentoo overlay compare --only-redundant   # Show only removal candidates\n"
+"  bentoo overlay compare --only-patched     # Show only declared divergences\n"
+"  bentoo overlay compare --no-review        # Contact no model\n"
+"  bentoo overlay compare --realign          # Review against the ::gentoo baseline"
+msgstr ""
+"Сравнивает версии пакетов в локальном оверлее Bentoo с\n"
+"upstream-репозиторием.\n"
+"\n"
+"Любой репозиторий из экосистемы Gentoo (~428 репозиториев) можно использовать по имени.\n"
+"Список репозиториев извлекается из официального реестра Gentoo repositories.xml\n"
+"реестра и кэшируется локально. Используйте --sync, чтобы принудительно выполнить обновление.\n"
+"\n"
+"Пользовательские репозитории также можно определить в ~/.config/bentoo/config.yaml\n"
+"и имеют приоритет над записями в реестре.\n"
+"\n"
+"Провайдер (GitHub API, GitLab API или Git) определяется автоматически\n"
+"на основе исходного URL-адреса репозитория. Используйте --clone, чтобы принудительно выполнить git clone.\n"
+"\n"
+"По умолчанию отображаются все пакеты (устаревшие, актуальные и более новые).\n"
+"Используйте --only-outdated, чтобы отфильтровать и показать только пакеты, требующие обновления.\n"
+"Используйте --only-redundant, чтобы увидеть только кандидаты на удаление, или --only-patched\n"
+"чтобы увидеть только те пакеты, для которых в записи .autoupdate/packages.toml указано\n"
+"расхождение. Три фильтра объединяются по принципу пересечения.\n"
+"\n"
+"Если пакет отличается от версии из основного репозитория и нигде не указана причина этого, локальная модель\n"
+"(CLI claude, в рамках вашей собственной подписки) считывает оба ebuild-файла и сообщает, что\n"
+"что означает разница и с какой стороны она появилась. Это комментарий: вердикты и\n"
+"рекомендации по удалению остаются теми же с ним или без него, и ничто из того, что он говорит, не\n"
+"записывается в файл, а --no-review вообще не обращается ни к какой модели.\n"
+"\n"
+"Используйте --realign, чтобы сравнить каждый пакет с ebuild ::gentoo, с которым его следует сравнивать:\n"
+"сравнить со следующим: какая базовая версия была использована и насколько она отличается, какие структурные оси\n"
+"отличаются, что ebuild заявляет о них и что модель делает из того, что\n"
+"left. Для этого требуется дерево ::gentoo на данном компьютере, поэтому оно отклоняется для любого\n"
+"другого репозитория и провайдера, предоставляющего только API. Без него команда работает\n"
+"точно так же, как и всегда.\n"
+"\n"
+"Примеры:\n"
+"  bentoo overlay compare                    # Сравнение с gentoo (API)\n"
+"  bentoo overlay compare guru               # Сравнение с GURU (API)\n"
+"  bentoo overlay compare some-overlay       # Сравнение с любым зарегистрированным репозиторием\n"
+"  bentoo overlay compare --clone            # Сравнение с gentoo (git clone)\n"
+"  bentoo overlay compare --sync             # Обновить список репозиториев перед сравнением\n"
+"  bentoo overlay compare --only-outdated    # Показать только устаревшие пакеты\n"
+"  bentoo overlay compare --only-redundant   # Показать только кандидатов на удаление\n"
+"  bentoo overlay compare --only-patched     # Показать только заявленные расхождения\n"
+"  bentoo overlay compare --no-review        # Модель без обращения\n"
+"  bentoo overlay compare --realign          # Сравнение с базовым уровнем ::gentoo"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Use git clone instead of API"
+msgstr "Использовать git clone вместо API"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Directory to cache data"
+msgstr "Каталог для кэширования данных"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Disable caching"
+msgstr "Отключить кэширование"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "HTTP request timeout in seconds"
+msgstr "Тайм-аут HTTP-запроса в секундах"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Auth token for API provider"
+msgstr "Токен аутентификации для провайдера API"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Show only outdated packages (Bentoo < Gentoo)"
+msgstr "Показывать только устаревшие пакеты (Bentoo < Gentoo)"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Show only redundant packages (removal candidates)"
+msgstr "Показывать только избыточные пакеты (кандидаты на удаление)"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Show only packages a registry entry declares a divergence for"
+msgstr "Показывать только пакеты, для которых запись в реестре указывает на расхождение"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Force refresh of repository list"
+msgstr "Принудительное обновление списка репозиториев"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "max parallel checks (1-100)"
+msgstr "максимальное количество параллельных проверок (1–100)"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Contact no model; print the report without commentary"
+msgstr "Не обращаться к модели; вывести отчёт без комментариев"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Review each package against its ::gentoo baseline (needs a local gentoo tree)"
+msgstr "Проверьте каждый пакет по сравнению с его базовым уровнем ::gentoo (требуется локальное дерево gentoo)"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built"
+msgstr "Подтверждать каждое предлагаемое изменение выравнивания сборкой до этой ступени лестницы — patches, configure, compile или install, причем каждая ступень включает все предыдущие. Требуется --realign; сборка выполняется в промежуточном дереве вне оверлея, и перед первой сборкой задаётся один вопрос. Отсутствие этого флага означает, что будет создан только отчёт, а сборка выполняться не будет."
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"
+msgstr "Проверьте весь план без запроса. Только --depth выполняет сборку; публикация остаётся отдельным вопросом для каждого пакета, который задаётся только в интерактивном терминале и никогда не получает ответа с помощью этого флага."
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Inspect and drive the autoupdate cooldown"
+msgstr "Просмотр и управление cooldown автообновления"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid ""
+"The autoupdate cooldown keeps every version the autoupdate promotes masked in\n"
+"profiles/package.mask (the managed bentoo-cooldown block) until it is released:\n"
+"by time (days= on the BEGIN line), by installation from ::bentoo, or by hand.\n"
+".autoupdate/cooldown.unmask lists the same atoms for a host that wants them now."
+msgstr ""
+"Период ожидания автоматического обновления обеспечивает маскировку каждой версии, которую автоматическое обновление повышает, в\n"
+"profiles/package.mask (управляемый блок bentoo-cooldown) до тех пор, пока версия не будет выпущена:\n"
+"по времени (days= в строке BEGIN), при установке из ::bentoo или вручную.\n"
+"В файле .autoupdate/cooldown.unmask перечислены те же атомы для хоста, которому они нужны прямо сейчас."
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "List the versions under cooldown (read-only, takes no lock)"
+msgstr "Вывести список версий в cooldown (только чтение, без блокировки)"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "print a JSON array of {package, version, since, eligible, group, origin, installed}"
+msgstr "Вывести массив JSON, содержащий {package, version, since, eligible, group, origin, installed}"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "system root whose var/db/pkg answers `installed`"
+msgstr "корень системы, в котором var/db/pkg отвечает `installed`"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Release a version and every older one of the package (a whole group for a grouped package)"
+msgstr "Выпустить версию и все более старые версии пакета (целую группу для сгруппированного пакета)"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Mask a version present in the overlay under the cooldown, by hand"
+msgstr "Вручную замаскировать версию в оверлее, находящуюся в cooldown"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Release every entry that is due (elapsed, installed, stale), outside an apply"
+msgstr "Разблокировать все записи, срок которых наступил (elapsed, installed, stale), вне операции apply"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "print what would be lifted and write nothing"
+msgstr "Вывести на экран то, что было бы снято, и ничего не записывать"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "system root whose var/db/pkg releases entries by installation"
+msgstr "корневой каталог системы, в котором var/db/pkg снимает блокировку записей при установке"
+
+#: cmd/bentoo/overlay_diff.go
+msgid "Show diff of changes"
+msgstr "Показать diff изменений"
+
+#: cmd/bentoo/overlay_diff.go
+msgid ""
+"Show the diff of changes in the overlay repository.\n"
+"By default shows unstaged changes. Use --staged to show staged changes."
+msgstr ""
+"Показать diff изменений в репозитории overlay.\n"
+"По умолчанию отображаются незафиксированные изменения. Используйте --staged, чтобы показать изменения, добавленные в индекс."
+
+#: cmd/bentoo/overlay_diff.go
+msgid "Show staged changes"
+msgstr "Показать изменения, добавленные в индекс"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Initialize bentoo configuration"
+msgstr "Инициализация конфигурации bentoo"
+
+#: cmd/bentoo/overlay_init.go
+msgid ""
+"Initialize bentoo configuration interactively.\n"
+"Creates a config file with overlay path and git settings."
+msgstr ""
+"Инициализирует конфигурацию bentoo в интерактивном режиме.\n"
+"Создаёт файл конфигурации с путём к оверлею и настройками Git."
+
+#: cmd/bentoo/overlay_log.go
+msgid "Show commit history"
+msgstr "Показать историю коммитов"
+
+#: cmd/bentoo/overlay_log.go
+msgid "Show the commit history of the overlay repository."
+msgstr "Показать историю коммитов репозитория оверлея."
+
+#: cmd/bentoo/overlay_log.go
+msgid "Number of commits to show"
+msgstr "Количество коммитов для отображения"
+
+#: cmd/bentoo/overlay_log.go
+msgid "Show one line per commit"
+msgstr "Показывать по одной строке на каждый коммит"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Regenerate Manifest files for overlay packages"
+msgstr "Повторно сгенерировать файлы Manifest для пакетов оверлея"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid ""
+"Regenerate Manifest files for one or more packages in the overlay.\n"
+"\n"
+"By default, the existing Manifest is moved aside before pkgdev runs so a\n"
+"fresh file is produced (clean regeneration). The backup is restored\n"
+"automatically if pkgdev fails. Use --keep to skip the clean step and let\n"
+"pkgdev reconcile the existing Manifest.\n"
+"\n"
+"Workers are dispatched in parallel up to --jobs (default 10), so larger\n"
+"overlays regenerate much faster. When stdout is a terminal, a live block\n"
+"shows one slot per active worker plus a global progress bar; finished\n"
+"packages scroll above as ✓/✗ history. Outside a TTY (CI, pipes), output\n"
+"falls back to plain start/finish log lines.\n"
+"\n"
+"Scope is selected by the optional argument:\n"
+"  (no argument)            All packages in the overlay\n"
+"  <category>               All packages in the given category\n"
+"  <category>/<package>     Only the given package\n"
+"\n"
+"The command runs as the current user — by default pkgdev is invoked with a\n"
+"temporary distdir that is discarded after the run, so no sudo is required.\n"
+"Pass --distdir to use a persistent path instead (created if missing); this\n"
+"acts as a download cache reused across runs.\n"
+"\n"
+"Before each package is processed, distfiles already present in\n"
+"--distfiles-cache (default /var/cache/distfiles) are symlinked into the\n"
+"working distdir so pkgdev can validate them locally instead of downloading\n"
+"again. The cache is opened read-only — nothing is ever written back. Pass\n"
+"--distfiles-cache \"\" to disable, or point to another directory.\n"
+"\n"
+"Examples:\n"
+"  # Regenerate every Manifest in the overlay (10 in parallel)\n"
+"  bentoo overlay manifest\n"
+"\n"
+"  # Regenerate every package in app-editors\n"
+"  bentoo overlay manifest app-editors\n"
+"\n"
+"  # Regenerate a single package\n"
+"  bentoo overlay manifest app-editors/zed\n"
+"\n"
+"  # Limit parallelism (e.g. for low-bandwidth links)\n"
+"  bentoo overlay manifest --jobs 2\n"
+"\n"
+"  # Preview without running pkgdev\n"
+"  bentoo overlay manifest --dry-run app-editors\n"
+"\n"
+"  # Skip the clean-regen step (keep existing Manifest in place)\n"
+"  bentoo overlay manifest --keep app-editors/zed\n"
+"\n"
+"  # Cache distfiles in a persistent directory\n"
+"  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles\n"
+"\n"
+"  # Disable the system distfiles cache lookup\n"
+"  bentoo overlay manifest --distfiles-cache \"\""
+msgstr ""
+"Повторно сгенерировать файлы Manifest для одного или нескольких пакетов в оверлее.\n"
+"\n"
+"По умолчанию существующий файл Manifest перемещается в другое место перед запуском pkgdev, чтобы\n"
+"создается новый файл (чистая регенерация). Резервная копия восстанавливается\n"
+"автоматически, если pkgdev завершится с ошибкой. Используйте --keep, чтобы пропустить этап очистки и позволить\n"
+"pkgdev выполнит согласование существующего файла Manifest.\n"
+"\n"
+"Рабочие процессы запускаются параллельно в количестве до --jobs (по умолчанию 10), поэтому более крупные\n"
+"оверлеи регенерируются намного быстрее. Когда stdout — это терминал, отображается динамический блок\n"
+"отображает по одному слоту на каждого активного воркера, а также общую индикаторную полосу выполнения; завершенные\n"
+"пакеты прокручиваются выше в виде истории ✓/✗. Вне TTY (CI, конвейеры) вывод\n"
+"возвращается к простым строкам журнала «начало/завершение».\n"
+"\n"
+"Область действия выбирается с помощью необязательного аргумента:\n"
+"  (без аргумента)            Все пакеты в оверлее\n"
+"  <category>               Все пакеты в указанной категории\n"
+"  <category>/<package>     Только указанный пакет\n"
+"\n"
+"Команда выполняется от имени текущего пользователя — по умолчанию pkgdev вызывается с\n"
+"временным каталогом distdir, который удаляется после выполнения, поэтому команда sudo не требуется.\n"
+"Передайте флаг --distdir, чтобы вместо этого использовать постоянный путь (создаётся, если отсутствует); это\n"
+"выступает в роли КЭША ЗАГРУЗОК, который повторно используется при разных запусках.\n"
+"\n"
+"Перед обработкой каждого пакета на dist-файлы, уже находящиеся в\n"
+"Файлы из --distfiles-cache (по умолчанию /var/cache/distfiles) связываются символьными ссылками с\n"
+"рабочий каталог distdir, чтобы pkgdev мог проверять их локально, а не скачивать\n"
+"снова. Кэш открывается только для чтения — в него никогда ничего не записывается. Передайте\n"
+"--distfiles-cache \"\" для отключения или указания другого каталога.\n"
+"\n"
+"Примеры:\n"
+"  # Повторно сгенерировать каждый Manifest в оверлее (10 параллельно)\n"
+"  bentoo overlay manifest\n"
+"\n"
+"  # Повторно сгенерировать каждый пакет в app-editors\n"
+"  bentoo overlay manifest app-editors\n"
+"\n"
+"  # Повторно сгенерировать один пакет\n"
+"  bentoo overlay manifest app-editors/zed\n"
+"\n"
+"  # Ограничение параллелизма (например, для соединений с низкой пропускной способностью)\n"
+"  bentoo overlay manifest --jobs 2\n"
+"\n"
+"  # Предварительный просмотр без запуска pkgdev\n"
+"  bentoo overlay manifest --dry-run app-editors\n"
+"\n"
+"  # Пропустить этап clean-regen (сохранить существующий файл Manifest)\n"
+"  bentoo overlay manifest --keep app-editors/zed\n"
+"\n"
+"  # Кэширование distfiles в постоянном каталоге\n"
+"  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles\n"
+"\n"
+"  # Отключить поиск в системном кэше distfiles\n"
+"  bentoo overlay manifest --distfiles-cache \"\""
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Keep existing Manifest in place (skip clean regen)"
+msgstr "Сохранить существующий файл Manifest (пропустить полное повторное создание)"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Show what would be processed without running pkgdev"
+msgstr "Показать, что было бы обработано без запуска pkgdev"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Distfiles directory used by pkgdev (default: temporary directory removed after run)"
+msgstr "Каталог distfiles, используемый pkgdev (по умолчанию: временный каталог, удаляемый после выполнения)"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Maximum parallel pkgdev workers"
+msgstr "Максимальное количество параллельных рабочих процессов pkgdev"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Read-only distfiles cache consulted before download (\"\" disables)"
+msgstr "Перед загрузкой выполняется обращение к кэшу distfiles, доступному только для чтения (\"\" отключает эту функцию)"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Remove overlay packages ::gentoo already ships identically"
+msgstr "Удалить из оверлея пакеты, которые ::gentoo уже поставляет в идентичном виде"
+
+#: cmd/bentoo/overlay_prune.go
+msgid ""
+"Plan the removal of overlay packages ::gentoo already ships, and with\n"
+"--apply carry that plan out.\n"
+"\n"
+"Only CONTENT may authorise a removal. The verdict from 'bentoo overlay compare'\n"
+"selects the candidates, and then every version the two trees share, plus the\n"
+"whole files/ tree, must match byte for byte. The two disagree in practice:\n"
+"measured on the live overlay, 8 of the 74 packages the verdict calls redundant\n"
+"carry real local changes, so a removal driven by the verdict alone deletes work.\n"
+"\n"
+"Without --apply nothing is removed, modified or disabled: the plan is printed\n"
+"and the run ends. The plan lists, per package, every file that would go and\n"
+"every .autoupdate/packages.toml entry that would go with it.\n"
+"\n"
+"Packages carrying an UNDECLARED difference — one the byte comparison found and\n"
+"nobody wrote down — are printed under their own heading and left alone unless\n"
+"--include-patched says otherwise.\n"
+"\n"
+"One kind of undeclared difference no flag reaches: the kind the overlay's own\n"
+"content PROVES is ours, because our ebuild applies a patch ::gentoo does not\n"
+"ship for that package. Such a package is refused outright and the refusal names\n"
+"the file. ::gentoo never had it, so there would be nothing to restore it from.\n"
+"\n"
+"A package whose registry entry DECLARES 'patched' is refused outright, and no\n"
+"flag here reaches it. The declaration already makes 'overlay compare' call it\n"
+"'keep' rather than 'redundant', and this command never removes a package the\n"
+"verdict refused. If such a copy is genuinely obsolete, clear its declaration\n"
+"first — that is 'overlay analyze''s business, and it leaves a record of the\n"
+"decision that a flag on this command would not.\n"
+"\n"
+"Packages no run may remove are printed last, each with its reason.\n"
+"\n"
+"A local ::gentoo tree is required, because an API provider has no content to\n"
+"authorise anything with. Configure one in ~/.config/bentoo/config.yaml:\n"
+"\n"
+"  repositories:\n"
+"    gentoo:\n"
+"      provider: local\n"
+"      path: /var/db/repos/gentoo\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay prune                          # plan the whole overlay\n"
+"  bentoo overlay prune app-editors              # plan one category\n"
+"  bentoo overlay prune app-editors/zed          # plan one package\n"
+"  bentoo overlay prune --include-patched        # consider the diverging ones too\n"
+"  bentoo overlay prune --apply                  # carry the plan out\n"
+"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry"
+msgstr ""
+"Запланировать удаление пакетов из оверлея, которые уже поставляются в ::gentoo, и с помощью\n"
+"--apply выполняет этот план.\n"
+"\n"
+"Только CONTENT может санкционировать удаление. Результат команды 'bentoo overlay compare'\n"
+"выбирает кандидатов, а затем все версии, общие для двух деревьев, а также\n"
+"все дерево files/ должно совпадать байт в байт. На практике они расходятся во мнениях:\n"
+"при измерении на рабочем оверлее 8 из 74 пакетов, которые вердикт называет избыточными,\n"
+"содержат реальные локальные изменения, поэтому удаление, основанное только на выводе команды, приводит к потере результатов работы.\n"
+"\n"
+"Без флага --apply ничего не удаляется, не изменяется и не отключается: план выводится на экран\n"
+"и выполнение завершается. В плане для каждого пакета перечислены все файлы, которые будут удалены, и\n"
+"каждую запись в .autoupdate/packages.toml, которая будет удалена вместе с ним.\n"
+"\n"
+"Пакеты, содержащие НЕОБЪЯВЛЕННОЕ различие — то, которое было обнаружено при побайтовом сравнении и\n"
+"которое никто не задокументировал — выводятся под отдельным заголовком и остаются без изменений, если только\n"
+"если флаг --include-patched не указывает иное.\n"
+"\n"
+"Один вид необъявленного различия, на который не распространяется действие ни одного флага: тот вид, который собственное содержимое оверлея\n"
+"содержимое которого ДОКАЗЫВАЕТ, что оно наше, поскольку наш ebuild применяет патч, которого ::gentoo не\n"
+"не поставляет для этого пакета. Такой пакет отклоняется сразу, и в сообщении об ОТКЛОНЕНИИ указывается\n"
+"файл. ::gentoo никогда не содержал его, поэтому не было бы ничего, из чего его можно было бы восстановить.\n"
+"\n"
+"Пакет, запись в реестре которого УКАЗЫВАЕТ «patched», отклоняется сразу, и ни один\n"
+"Здесь до него доходит флаг. Благодаря декларации команда 'overlay compare' уже называет его\n"
+"«keep» вместо «redundant», и эта команда никогда не удаляет пакет,\n"
+"вердикт «отклонено». Если такая копия действительно устарела, сначала удалите её декларацию\n"
+"сначала — это задача 'overlay analyze', и она оставляет запись о\n"
+"решение, которого не оставил бы флаг этой команды.\n"
+"\n"
+"Пакеты, которые no run не может удалить, выводятся последними, каждый с указанием причины.\n"
+"\n"
+"Требуется локальное дерево ::gentoo, поскольку у поставщика API нет контента, с помощью которого можно было бы\n"
+"для авторизации чего-либо. Настройте его в ~/.config/bentoo/config.yaml:\n"
+"\n"
+"  repositories:\n"
+"    gentoo:\n"
+"      provider: local\n"
+"      path: /var/db/repos/gentoo\n"
+"\n"
+"Примеры:\n"
+"  bentoo overlay prune                          # спланировать удаление для всего оверлея\n"
+"  bentoo overlay prune app-editors              # спланировать одну категорию\n"
+"  bentoo overlay prune app-editors/zed          # спланировать удаление одного пакета\n"
+"  bentoo overlay prune --include-patched        # учитывать также отличающиеся пакеты\n"
+"  bentoo overlay prune --apply                  # выполнить план\n"
+"  bentoo overlay prune --apply --keep-registry  # удалить файлы, сохранить реестр"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Carry out the plan (default: plan only, remove nothing)"
+msgstr "Выполнить план (по умолчанию: только составить план, ничего не удалять)"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)"
+msgstr "Также удалите пакеты с НЕОБЪЯВЛЕННЫМ отличием, отказавшись от этой работы (в любом случае отклоняется: объявленная запись 'patched' или отличие, происхождение которого подтверждается содержимым)."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Leave .autoupdate/packages.toml untouched"
+msgstr "Оставить файл .autoupdate/packages.toml без изменений"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Skip the identical batch's confirmation (never the diverging one)"
+msgstr "Пропустить подтверждение для идентичного пакета (но никогда для отличающегося)"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Pull upstream changes into the overlay"
+msgstr "Получить изменения из upstream в оверлей"
+
+#: cmd/bentoo/overlay_pull.go
+msgid ""
+"Fetch the configured remote and integrate the current branch's upstream.\n"
+"\n"
+"By default the integration is fast-forward only: if the overlay has diverged\n"
+"from its upstream, the pull refuses rather than writing a merge commit. Use\n"
+"--rebase to replay local commits on top of the upstream, or --merge to accept\n"
+"a merge commit."
+msgstr ""
+"Выполняет fetch из настроенного удалённого репозитория и интегрирует upstream текущей ветки.\n"
+"\n"
+"По умолчанию интеграция выполняется только методом fast-forward: если оверлей разошелся\n"
+"от своего апстрима, команда pull отклоняет операцию вместо того, чтобы создать коммит слияния. Используйте\n"
+"--rebase, чтобы повторно применить локальные коммиты поверх апстрима, или --merge, чтобы принять\n"
+"коммит слияния."
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Replay local commits on top of the upstream"
+msgstr "Повторно применить локальные коммиты поверх апстрима"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Merge the upstream, allowing a merge commit"
+msgstr "Выполнить слияние с веткой upstream, разрешив коммит слияния"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Show what would be pulled without integrating"
+msgstr "Показать, что было бы извлечено без интеграции"
+
+#: cmd/bentoo/overlay_push.go
+msgid "Push committed changes to remote"
+msgstr "Отправить закоммиченные изменения в удалённый репозиторий"
+
+#: cmd/bentoo/overlay_push.go
+msgid "Push committed changes to the remote repository."
+msgstr "Отправить закоммиченные изменения в удалённый репозиторий."
+
+#: cmd/bentoo/overlay_push.go
+msgid "Show what would be pushed without pushing"
+msgstr "Показать, что было бы отправлено, без фактической отправки"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Bulk rename ebuilds from old version to new version"
+msgstr "Пакетное переименование ebuild-файлов со старой версии на новую"
+
+#: cmd/bentoo/overlay_rename.go
+msgid ""
+"Rename multiple ebuild files matching a pattern from an old version to a new version.\n"
+"\n"
+"The command accepts a pattern in the format:\n"
+"  <category>:<package-pattern>:<old-version> => <new-version>\n"
+"\n"
+"Where:\n"
+"  - category: specific category name or \"*\" for all categories\n"
+"  - package-pattern: glob pattern for package names (e.g., \"gst-*\", \"python-*\")\n"
+"  - old-version: exact version to match (without revision suffix)\n"
+"  - new-version: target version to rename to\n"
+"\n"
+"Examples:\n"
+"  # Rename all gst-* packages in media-plugins from 1.24.11 to 1.26.10\n"
+"  bentoo overlay rename media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Global search across all categories\n"
+"  bentoo overlay rename *:python-*:3.11.0 => 3.12.0\n"
+"\n"
+"  # Dry run to preview changes\n"
+"  bentoo overlay rename --dry-run media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Skip confirmation prompt\n"
+"  bentoo overlay rename -y media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Force rename even if version-specific files exist\n"
+"  bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10"
+msgstr ""
+"Переименование нескольких файлов ebuild, соответствующих шаблону, из старой версии в новую.\n"
+"\n"
+"Команда принимает шаблон в следующем формате:\n"
+"  <category>:<package-pattern>:<old-version> => <new-version>\n"
+"\n"
+"Где:\n"
+"  - category: конкретное имя категории или \"*\" для всех категорий\n"
+"  - package-pattern: шаблон glob для названий пакетов (например, \"gst-*\", \"python-*\")\n"
+"  - old-version: точная версия для сопоставления (без суффикса ревизии)\n"
+"  - new-version: целевая версия, на которую нужно переименовать\n"
+"\n"
+"Примеры:\n"
+"  # Переименовать все пакеты gst-* в media-plugins с 1.24.11 на 1.26.10\n"
+"  bentoo overlay rename media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Глобальный поиск по всем категориям\n"
+"  bentoo overlay rename *:python-*:3.11.0 => 3.12.0\n"
+"\n"
+"  # Прогон в режиме \"dry run\" для предварительного просмотра изменений\n"
+"  bentoo overlay rename --dry-run media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Пропустить запрос подтверждения\n"
+"  bentoo overlay rename -y media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Принудительно переименовывать, даже если существуют файлы, привязанные к конкретной версии\n"
+"  bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Show what would be renamed without making changes"
+msgstr "Показать, что было бы переименовано, без внесения изменений"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Skip confirmation prompts (except for global search without --force)"
+msgstr "Пропускать запросы на подтверждение (кроме глобального поиска без --force)"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Skip Manifest updates after renaming"
+msgstr "Пропускать обновления Manifest после переименования"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Proceed despite version-specific files or conflicts"
+msgstr "Продолжить, несмотря на наличие файлов для конкретных версий или конфликтов"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Work with the staged trees the build gates prepare outside the overlay"
+msgstr "Работа с промежуточными деревьями, которые контрольные точки сборки подготавливают за пределами оверлея"
+
+#: cmd/bentoo/overlay_staged.go
+msgid ""
+"Inspect and clean up the staged trees that 'bentoo overlay autoupdate --apply'\n"
+"and 'bentoo overlay validate --depth' prepare under\n"
+"~/.config/bentoo/autoupdate/staging.\n"
+"\n"
+"A staged tree is a scratch copy of the overlay, built outside it so that a gate\n"
+"can compile a candidate without ever writing to the published tree. Nothing\n"
+"under this command reads, writes or removes anything in the overlay itself."
+msgstr ""
+"Проверьте и очистите промежуточные деревья, которые создают команды 'bentoo overlay autoupdate --apply'\n"
+"и 'bentoo overlay validate --depth' подготавливают в\n"
+"~/.config/bentoo/autoupdate/staging.\n"
+"\n"
+"Подготовленное дерево — это созданная с нуля копия оверлея, сформированная вне него, чтобы гейт\n"
+"может скомпилировать кандидата, ни разу не выполнив запись в опубликованное дерево. Ничто\n"
+"В рамках этой команды ничего не выполняется чтение, запись или удаление чего-либо в самом оверлее."
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Remove the staged trees no longer worth keeping, and say what stays"
+msgstr "Удалить staging-деревья, которые больше не стоит хранить, и сообщить, что остаётся"
+
+#: cmd/bentoo/overlay_staged.go
+msgid ""
+"Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by\n"
+"'bentoo overlay autoupdate --apply' and 'bentoo overlay validate --depth', and\n"
+"report every tree left behind with the reason it stays.\n"
+"\n"
+"The published overlay is never read, written or removed from. A staging root\n"
+"that sits inside the overlay is refused before a single entry is listed, by the\n"
+"same check that refuses to stage there in the first place.\n"
+"\n"
+"A tree is removed only when this command RECOGNISES it as one of its own — it\n"
+"carries the marker every staged tree is built with — and the record beside it\n"
+"shows no deciding gate FAILED. Two kinds of tree are therefore kept and named\n"
+"in the plan: the one whose gate FAILED, which is the artifact you still need\n"
+"next to the retained build log, and the one with no readable record, whose\n"
+"outcome is unknown. Keeping an unknown tree costs disk; removing it costs the\n"
+"artifact somebody was about to open.\n"
+"\n"
+"Nothing is removed before the whole plan has been printed and you have agreed\n"
+"to it. Every removal and every keep is listed — never a sample.\n"
+"\n"
+"There is no lock on the staging root, and that absence is deliberate: the\n"
+"retention rule is expressed by the PATH, and a central index of proofs would put\n"
+"back the one file every worker writes through. So a sweep running beside another\n"
+"run can REMOVE a tree that run is using — an 'overlay autoupdate --apply' or an\n"
+"'overlay validate --depth' happening at the same time. Nothing detects it. The\n"
+"cost is bounded to that one run, which fails on a working directory that no\n"
+"longer exists and is classified as an environment failure, so nothing wrong is\n"
+"published; but it is a run you have to start again. Sweep when nothing else is\n"
+"building.\n"
+"\n"
+"Exit codes:\n"
+"  0  the staging root was read and the plan reported\n"
+"  1  the run could not be honoured: the config, the overlay path or the\n"
+"     staging root could not be resolved, or the staging root could not be read\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay staged clean         # print the plan, then ask\n"
+"  bentoo overlay staged clean --yes   # remove the planned trees unattended"
+msgstr ""
+"Удаляет промежуточные копии, оставшиеся в ~/.config/bentoo/autoupdate/staging, с помощью\n"
+"'bentoo overlay autoupdate --apply' и 'bentoo overlay validate --depth', а также\n"
+"сообщить о каждом оставшемся дереве с указанием причины, по которой оно сохраняется.\n"
+"\n"
+"Опубликованный оверлей никогда не читается, не записывается и не удаляется. Корневой каталог промежуточного размещения\n"
+"который находится внутри оверлея, отклоняется еще до того, как будет выведен хотя бы один элемент, с помощью\n"
+"той же проверкой, которая изначально не позволяет выполнять там размещение в промежуточной области.\n"
+"\n"
+"Дерево удаляется только тогда, когда эта команда ПРИЗНАЁТ его своим — оно\n"
+"несёт маркер, с которым создаётся каждое помещённое в промежуточную область дерево, — и запись рядом с ним\n"
+"не показывает, что решающий контрольный пункт FAILED. Таким образом, сохраняются и получают названия два типа деревьев\n"
+"в плане: то, у которого гейт FAILED, что является артефактом, который вам всё ещё нужен,\n"
+"рядом с сохранённым журналом сборки, и то, у которого нет читаемого отчёта, чей\n"
+"результат неизвестен. Хранение неизвестного дерева требует места на диске; его удаление приводит к потере\n"
+"артефакт, который кто-то собирался открыть.\n"
+"\n"
+"Ничего не удаляется до тех пор, пока весь план не будет распечатан и вы не дадите на это согласие.\n"
+"с ним. Каждое удаление и каждое сохранение указаны — никогда не приводятся примеры.\n"
+"\n"
+"Корневой каталог промежуточного хранилища не блокируется, и это сделано намеренно:\n"
+"Правило хранения выражается через PATH, а центральный индекс подтверждений вернул бы\n"
+"восстанавливал бы тот единственный файл, через который записывает каждый рабочий процесс. Таким образом, операция очистки, выполняемая параллельно с другой\n"
+"выполнение может УДАЛИТЬ дерево, которое используется этим выполнением — 'overlay autoupdate --apply' или\n"
+"'overlay validate --depth', выполняемая одновременно. Ничто этого не обнаруживает.\n"
+"затраты связаны только с этим одним запуском, который завершается сбоем в рабочей директории, которая больше\n"
+"больше не существует и классифицируется как сбой среды, поэтому ничего неправильного не\n"
+"опубликовано; но это запуск, который вам придется начать заново. Выполняйте очистку, когда больше ничего не\n"
+"building.\n"
+"\n"
+"Коды завершения:\n"
+"  0  корневой каталог промежуточного хранилища был прочитан, и план был сообщён\n"
+"  1  выполнение не удалось: не удалось определить конфигурацию, путь к оверлею или\n"
+"     не удалось определить корневой каталог промежуточного хранилища или прочитать его содержимое\n"
+"\n"
+"Примеры:\n"
+"  bentoo overlay staged clean         # вывести план, затем запросить подтверждение\n"
+"  bentoo overlay staged clean --yes   # удалить запланированные деревья без запроса подтверждения"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Remove the planned trees without asking (default: print the plan and ask)"
+msgstr "Удалить запланированные деревья без запроса подтверждения (по умолчанию: вывести план и запросить подтверждение)"
+
+#: cmd/bentoo/overlay_status.go
+msgid "Show the status of changes in the overlay"
+msgstr "Показать статус изменений в оверлее"
+
+#: cmd/bentoo/overlay_status.go
+msgid "Display the current status of changes in the overlay repository, grouped by category/package."
+msgstr "Отображение текущего статуса изменений в репозитории оверлея, сгруппированных по категориям/пакетам."
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Find packages whose best version lacks a required Python, Lua or Ruby implementation"
+msgstr "Найти пакеты, в лучшей версии которых отсутствует требуемая реализация Python, Lua или Ruby"
+
+#: cmd/bentoo/overlay_targets.go
+msgid ""
+"Read the implementations the overlay requires from .autoupdate/targets.toml and\n"
+"report every package whose best visible version, across the overlay and ::gentoo,\n"
+"does not offer them. On a system whose PYTHON_SINGLE_TARGET holds only a required\n"
+"implementation, such a version fails emerge with \"REQUIRED_USE flag constraints are\n"
+"unsatisfied\".\n"
+"\n"
+"A row naming an overlay version means ::gentoo overtook the overlay's mirror: the\n"
+"version Portage picks is ::gentoo's, and the fix is to bump the mirror. Masks are not\n"
+"read, and only versions keyworded amd64 or ~amd64 count as visible.\n"
+"\n"
+"Exit status: 0 when no package has a gap, 1 when one has or the sweep failed."
+msgstr ""
+"Читает реализации, которые требуются оверлею, из файла .autoupdate/targets.toml и\n"
+"сообщать о каждом пакете, лучшая видимая версия которого, как в оверлее, так и в ::gentoo,\n"
+"не предлагает их. На системе, где PYTHON_SINGLE_TARGET содержит только требуемую\n"
+"реализацию, такая версия не проходит emerge с сообщением \"REQUIRED_USE flag constraints are\n"
+"unsatisfied\".\n"
+"\n"
+"Строка, в которой указана версия оверлея, означает, что ::gentoo обогнал зеркало оверлея:\n"
+"версия, которую выбирает Portage, — это версия ::gentoo, и решение заключается в обновлении зеркала. Маски не\n"
+"не считываются, и только версии с ключевыми словами amd64 или ~amd64 считаются видимыми.\n"
+"\n"
+"Код завершения: 0, если ни у одного пакета нет расхождения, 1, если у одного пакета есть расхождение или проверка не удалась."
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Sweep every package of ::gentoo, not only the packages the overlay carries"
+msgstr "Проверять каждый пакет ::gentoo, а не только пакеты, содержащиеся в оверлее"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Write the findings to stdout as one JSON array"
+msgstr "Вывести результаты в stdout в виде одного JSON-массива"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Check that each ebuild still matches the source it points at"
+msgstr "Проверить, что каждый ebuild по-прежнему соответствует исходному коду, на который он указывает"
+
+#: cmd/bentoo/overlay_validate.go
+msgid ""
+"Read the build options the upstream archive declares, read the ones the\n"
+"ebuild passes, and report the difference. At the default depth nothing is built,\n"
+"downloaded or changed: the archive is the one already on disk, put there by the\n"
+"manifest step.\n"
+"\n"
+"--depth above \"options\" is different. Each candidate is staged outside the\n"
+"overlay and upstream's own build phases are run against it, so that depth\n"
+"compiles code and downloads any distfile this host does not already hold — over\n"
+"every package the selector matches. The published overlay is still never written\n"
+"to.\n"
+"\n"
+"This catches the failure class where a version bump moves the version and the\n"
+"ebuild stays put. In media-plugins/gst-plugins-qt6 upstream removed the aalib\n"
+"and libcaca options at 1.29; the ebuild kept passing -Daalib= and -Dlibcaca=,\n"
+"and every existing check stayed green.\n"
+"\n"
+"An outcome names its own reach. A gate that could not run says SKIPPED and why\n"
+"— a missing distfile, a build system that is not Meson, an unreadable ebuild —\n"
+"so a clean report never means \"we did not look\".\n"
+"\n"
+"pkgcheck findings for each package are reported beside the option findings when\n"
+"pkgcheck is installed. They never affect the exit code: the overlay carries\n"
+"pre-existing QA findings unrelated to any bump, and letting them decide the\n"
+"status would fail the whole tree and reduce this command to noise.\n"
+"\n"
+"--depth selects how far up the ladder to go: none, options, patches,\n"
+"configure, compile or install, each rung including every rung before it. It\n"
+"defaults to options, which is this command as it has always been — read-only,\n"
+"unprivileged, building nothing. Above options the gates need a tree to build\n"
+"in, and that tree is a staged copy under ~/.config/bentoo/autoupdate/staging:\n"
+"the published overlay is never built in and never written to.\n"
+"\n"
+"Exit codes:\n"
+"  0  every gate outcome was PASS or SKIPPED\n"
+"  1  at least one finding of severity error, from any gate but pkgcheck's,\n"
+"     or an invocation that could not be honoured (a --depth that does not\n"
+"     name a rung of the ladder)\n"
+"  2  the selector names something the overlay does not hold\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay validate                                  # the whole overlay\n"
+"  bentoo overlay validate media-plugins                    # one category\n"
+"  bentoo overlay validate media-plugins/gst-plugins-qt6    # every version of one package\n"
+"  bentoo overlay validate --json | jq .                    # one JSON document\n"
+"  bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir\n"
+"  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6"
+msgstr ""
+"Читает параметры сборки, объявленные в исходном архиве, и те, которые\n"
+"передаёт ebuild, и сообщает о расхождениях. При глубине по умолчанию ничего не собирается,\n"
+"не скачивается и не изменяется: используется архив, который уже находится на диске и был помещён туда на\n"
+"этап manifest.\n"
+"\n"
+"Флаг --depth выше \"options\" отличается. Каждый кандидат размещается вне\n"
+"overlay, и в отношении него выполняются собственные этапы сборки upstream, так что при этом значении параметра --depth\n"
+"компилирует код и загружает любой distfile, которого ещё нет на этом хосте — для\n"
+"каждого пакета, которому соответствует селектор. В опубликованный оверлей по-прежнему никогда не выполняется запись\n"
+"в.\n"
+"\n"
+"Это позволяет выявить класс сбоев, когда обновление версии приводит к изменению версии, а\n"
+"ebuild остается на месте. В media-plugins/gst-plugins-qt6 разработчики удалили параметры aalib\n"
+"и параметры libcaca в версии 1.29; ebuild продолжал передавать -Daalib= и -Dlibcaca=,\n"
+"и все существующие проверки оставались ЗЕЛЁНЫМИ.\n"
+"\n"
+"Результат определяет свой собственный охват. Гейт, который не смог выполниться, сообщает SKIPPED и причину\n"
+"— отсутствующий distfile, система сборки, отличная от Meson, нечитаемый ebuild —\n"
+"поэтому чистый отчет никогда не означает «мы не проверяли».\n"
+"\n"
+"Результаты pkgcheck для каждого пакета отображаются рядом с результатами опции, когда\n"
+"pkgcheck установлен. Они никогда не влияют на код завершения: оверлей содержит\n"
+"уже имеющиеся результаты проверки качества, не связанные с каким-либо обновлением версии, и если позволить им определять\n"
+"статус привел бы к сбою всего дерева и превратил бы эту команду в бесполезный шум.\n"
+"\n"
+"--depth определяет, насколько высоко подниматься по лестнице: none, options, patches,\n"
+"configure, compile или install, причем каждая ступень включает в себя все предыдущие. По умолчанию\n"
+"По умолчанию используется значение options, что соответствует этому команде в её прежнем виде — только для чтения,\n"
+"без привилегий, ничего не собирает. Выше опций \"options\" гейтам требуется дерево для сборки\n"
+"и это дерево представляет собой промежуточную копию, расположенную в ~/.config/bentoo/autoupdate/staging:\n"
+"Опубликованный оверлей никогда не встраивается и никогда не используется для записи.\n"
+"\n"
+"Коды завершения:\n"
+"  0  результат каждого гейта был PASS или SKIPPED\n"
+"  1  хотя бы одна находка с уровнем серьезности «ошибка», полученная от любого гейта, кроме pkgcheck,\n"
+"     или вызов, который не удалось выполнить (параметр --depth, который не\n"
+"     указывает ступень лестницы)\n"
+"  2  селектор указывает на что-то, чего нет в оверлее\n"
+"\n"
+"Примеры:\n"
+"  bentoo overlay validate                                  # весь оверлей\n"
+"  bentoo overlay validate media-plugins                    # одна категория\n"
+"  bentoo overlay validate media-plugins/gst-plugins-qt6    # все версии одного пакета\n"
+"  bentoo overlay validate --json | jq .                    # один JSON-документ\n"
+"  bentoo overlay validate --distdir /var/cache/distfiles   # чтение из указанного каталога distdir\n"
+"  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Write the whole report to stdout as a single JSON document. It is the same document --export=<path>.json writes to a file, at stdout instead: schema and kind at the root, and this command's own model one level down under payload. A consumer that already reads an exported report reads this one, and jq '.kind' says which command wrote it"
+msgstr "Вывести весь отчёт в stdout в виде одного JSON-документа. Это тот же документ, который --export=<path>.json записывает в файл, но вместо этого выводит в stdout: schema и kind в корне, а собственная модель этой команды — на уровень ниже, в разделе payload. Потребитель, который уже считывает экспортированный отчет, считывает и этот отчет, а jq '.kind' указывает, какая команда его создала."
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Read distfiles from this directory (never created, never written to)"
+msgstr "Считывать distfiles из этого каталога (никогда не создаётся, в него никогда не выполняется запись)"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Validate to this rung of the ladder — none, options, patches, configure, compile or install, each including every rung before it. Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in"
+msgstr "Выполнить валидацию до этой ступени — none, options, patches, configure, compile или install, причем каждая ступень включает в себя все предшествующие ей ступени. На уровне выше \"options\" гейтам требуется дерево для сборки, и это дерево представляет собой промежуточную копию; опубликованный оверлей никогда не собирается внутри."
+
+#: cmd/bentoo/root.go
+msgid "Bentoo Linux tools"
+msgstr "Инструменты Bentoo Linux"
+
+#: cmd/bentoo/root.go
+msgid "A collection of tools for managing Bentoo Linux overlay and packages."
+msgstr "Набор инструментов для управления оверлеем и пакетами Bentoo Linux."
+
+#: cmd/bentoo/root.go
+msgid "Enable verbose output: diagnostics at the debug level and above. Without --verbose or --quiet the level comes from the BENTOO_LOG_LEVEL environment variable, which accepts debug, info, warn or error in any letter case and defaults to info; --verbose and --quiet both outrank it, and --quiet outranks --verbose"
+msgstr "Включить подробный вывод: диагностика на уровне debug и выше. Без --verbose или --quiet уровень определяется переменной среды BENTOO_LOG_LEVEL, которая принимает значения debug, info, warn или error в любом регистре и по умолчанию использует info; --verbose и --quiet имеют более высокий приоритет, чем эта переменная, а --quiet имеет более высокий приоритет, чем --verbose."
+
+#: cmd/bentoo/root.go
+msgid "Suppress non-error output"
+msgstr "Подавлять вывод, не связанный с ошибками"
+
+#: cmd/bentoo/root.go
+msgid "Disable colored output"
+msgstr "Отключить цветной вывод"
+
+#: cmd/bentoo/root.go
+msgid "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so"
+msgstr "Оверлей, с которым следует работать в этом запуске, вместо overlay.path. Без него запуск, начатый внутри другого чекаута настроенного оверлея (рабочей копии, второго клона), использует этот чекаут и сообщает об этом"
+
+#: cmd/bentoo/root.go
+msgid "Renderer for this run: auto, plain, inline or fullscreen. auto is the default and picks inline on a terminal and plain off one; it never picks fullscreen, because taking over somebody's screen is not something configuring nothing should do. plain contains no escape sequence at all and is what a pipe, a log file and a CI job want. This flag outranks the BENTOO_UI environment variable, which outranks the ui.mode configuration key. On the overlay autoupdate command alone, the deprecated opt-out flag documented there outranks all three; no other command has one. A value outside that set is rejected and NOTHING runs"
+msgstr "Режим отображения для этого запуска: auto, plain, inline или fullscreen. auto — значение по умолчанию; в терминале выбирается inline, а вне терминала — plain. Режим fullscreen никогда не выбирается, поскольку захват чужого экрана — это не то, что должно происходить при отсутствии явной настройки. Режим plain не содержит никаких управляющих последовательностей и подходит для конвейеров, файлов журналов и CI-задач. Этот флаг имеет приоритет над переменной среды BENTOO_UI, которая, в свою очередь, имеет приоритет над ключом конфигурации ui.mode. Только в команде overlay autoupdate устаревший флаг opt-out, описанный там, имеет приоритет над всеми тремя; ни в одной другой команде такого флага нет. Значение, не входящее в этот набор, отклоняется, и НЕ ВЫПОЛНЯЕТСЯ НИЧЕГО"
+
+#: cmd/bentoo/root.go
+msgid "List every package found up to date in the version-check section instead of reporting them as a count alone. It changes WHAT IS SHOWN and nothing else — the same packages are scanned, validated and acted upon either way. The count is the default because the up-to-date packages are the bulk of a 269-package overlay, and listing them is most of the reason a check that found four updates used to print 348 lines"
+msgstr "Перечислять все пакеты, признанные актуальными, в разделе проверки версий, а не только указывать их количество. Это меняет ТО, ЧТО ОТОБРАЖАЕТСЯ, и больше ничего — одни и те же пакеты сканируются, проверяются и обрабатываются в любом случае. По умолчанию выводится количество, поскольку актуальные пакеты составляют основную часть оверлея из 269 пакетов, и их перечисление является главной причиной того, что проверка, обнаружившая четыре обновления, раньше выводила 348 строк."
+
+#: cmd/bentoo/root.go
+msgid "Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had"
+msgstr "Также запишите отчёт в этот путь. Формат определяется расширением: .md — Markdown, .json — JSON, всё остальное — обычный текст. Файл всегда содержит ПОЛНЫЙ отчет — каждый пакет, каждую причину полностью, без сокращений — независимо от того, что флаги --all и --ui запрашивали у терминала, поскольку отчет сохраняется именно для тех случаев, когда терминал уже недоступен. О пути, в который невозможно выполнить запись, сообщается, при этом выполнение по-прежнему выводится на терминал и завершается с тем же статусом, который был бы у него в противном случае."
+
+#: cmd/bentoo/root.go
+msgid "Manage the Bentoo overlay repository"
+msgstr "Управление репозиторием оверлея Bentoo"
+
+#: cmd/bentoo/root.go
+msgid "Commands for managing the Bentoo overlay repository including adding files, checking status, committing changes, and pushing to remote."
+msgstr "Команды для управления репозиторием оверлея Bentoo, включая добавление файлов, проверку статуса, коммит изменений и пуш НА удалённый репозиторий."
+
+#: cmd/bentoo/snapshot.go
+msgid "Manage btrfs snapshots (btrbk + systemd)"
+msgstr "Управление снимками btrfs (btrbk + systemd)"
+
+#: cmd/bentoo/snapshot.go
+msgid ""
+"Manage btrfs snapshots declaratively via a single snapshot.toml.\n"
+"\n"
+"bentoolkit orchestrates mature tools — btrbk for snapshot/send-receive and systemd\n"
+"for scheduling — rather than reimplementing them.\n"
+"\n"
+"Examples:\n"
+"  bentoo snapshot apply               Render native config + install the timer\n"
+"  bentoo snapshot run                 Run the snapshot pipeline now\n"
+"  bentoo snapshot list                List local snapshots per subvolume\n"
+"  bentoo snapshot status              Show last run, timer state, and free space"
+msgstr ""
+"Управляет снимками btrfs декларативно с помощью одного файла snapshot.toml.\n"
+"\n"
+"bentoolkit координирует проверенные инструменты — btrbk для создания снимков/отправки и получения, а также systemd\n"
+"для планирования — вместо их повторной реализации.\n"
+"\n"
+"Примеры:\n"
+"  bentoo snapshot apply               Сформировать нативную конфигурацию + установить таймер\n"
+"  bentoo snapshot run                 Запустить конвейер создания снимков сейчас\n"
+"  bentoo snapshot list                Вывод списка локальных снимков по подтому\n"
+"  bentoo snapshot status              Показать время последнего запуска, состояние таймера и свободное место"
+
+#: cmd/bentoo/snapshot.go
+msgid "path to snapshot.toml (default: /etc/bentoo, then XDG)"
+msgstr "путь к snapshot.toml (по умолчанию: /etc/bentoo, затем XDG)"
+
+#: cmd/bentoo/snapshot_apply.go
+msgid "Render native config and install the systemd timer"
+msgstr "Сгенерировать нативную конфигурацию и установить таймер systemd"
+
+#: cmd/bentoo/snapshot_apply.go
+msgid ""
+"Load and validate snapshot.toml, render the btrbk.conf, and install +\n"
+"enable the systemd service/timer. Idempotent: re-running reconciles the units."
+msgstr ""
+"Загрузить и проверить файл snapshot.toml, сгенерировать файл btrbk.conf и установить +\n"
+"включить службу/таймер systemd. Идемпотентность: повторный запуск приводит к согласованию юнитов."
+
+#: cmd/bentoo/snapshot_apply.go
+msgid "print the configs and systemd units that would be written, without writing them"
+msgstr "Вывести на экран конфигурации и юниты systemd, которые были бы записаны, без их фактической записи"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "Install or remove the opt-in Portage emerge snapshot hook (snapper only)"
+msgstr "Установить или удалить дополнительный хук Portage для создания снимков при выполнении emerge (только для snapper)"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid ""
+"Install or remove an OPT-IN Portage hook that snapshots before and after emerge.\n"
+"\n"
+"--install writes /etc/portage/bashrc.d/50-bentoo-snapshot.sh and wires it into\n"
+"/etc/portage/bashrc via a managed block. The hook uses snapper's native pre/post\n"
+"pair per emerged package (pre_pkg_setup / post_pkg_postinst), so it requires\n"
+"engine.driver = \"snapper\". snapper errors never break an emerge.\n"
+"\n"
+"--uninstall cleanly removes the script and the managed block, preserving any\n"
+"user content in /etc/portage/bashrc.\n"
+"\n"
+"The hook is never installed implicitly: 'bentoo snapshot apply' does not touch\n"
+"/etc/portage — only this explicit command does."
+msgstr ""
+"Устанавливает или удаляет дополнительный хук Portage, который создаёт снимки до и после выполнения команды emerge.\n"
+"\n"
+"--install записывает /etc/portage/bashrc.d/50-bentoo-snapshot.sh и подключает его к\n"
+"/etc/portage/bashrc через управляемый блок. Хук использует нативные pre/post snapper\n"
+"пару для каждого установленного пакета (pre_pkg_setup / post_pkg_postinst), поэтому требуется\n"
+"engine.driver = \"snapper\". Ошибки snapper никогда не приводят к сбою emerge.\n"
+"\n"
+"--uninstall аккуратно удаляет скрипт и управляемый блок, сохраняя при этом любые\n"
+"пользовательский контент в /etc/portage/bashrc.\n"
+"\n"
+"Хук никогда не устанавливается неявно: команда 'bentoo snapshot apply' не затрагивает\n"
+"/etc/portage — только эта явная команда делает это."
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "install the Portage emerge hook (pre/post snapper snapshots)"
+msgstr "установить хук Portage emerge (снимки snapper до/после)"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "remove the Portage emerge hook"
+msgstr "удалить хук Portage emerge"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "List local snapshots per subvolume"
+msgstr "Вывести список локальных снимков по подтому"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "also list remote snapshots (btrbk targets, restic repository)"
+msgstr "также выводить список удалённых снимков (цели btrbk, репозиторий restic)"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "Apply the retention policy on demand"
+msgstr "Применить политику хранения по запросу"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid ""
+"Apply the [engine.retention] policy now, without taking a snapshot: the\n"
+"engine-native prune for every subvolume (btrbk clean / snapper cleanup timeline)\n"
+"plus the GFS retention sweep on every archive ship's rclone remote.\n"
+"\n"
+"--ship NAME scopes the prune to that one destination: the engine-local prune is\n"
+"skipped and only the named ship's remote is pruned. Recorded incremental parents\n"
+"are never deleted — each is the base of its subvolume's next incremental send."
+msgstr ""
+"Применить политику [engine.retention] сейчас, не создавая снимок:\n"
+"встроенная в движок очистка для каждого подтома (btrbk clean / snapper cleanup timeline)\n"
+"плюс очистка в соответствии с политикой хранения GFS на каждом удалённом хранилище rclone архивного «корабля».\n"
+"\n"
+"--ship NAME ограничивает область действия очистки этим одним пунктом назначения: локальная очистка движка\n"
+"пропускается, и очистка выполняется только для удалённого хранилища указанного корабля. Записанные инкрементные родительские снимки\n"
+"никогда не удаляются — каждый из них является базой для следующей инкрементной отправки своего подтома."
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "print the prune actions that would run, without executing them"
+msgstr "вывести на экран действия по очистке, которые были бы выполнены, но не выполнять их"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "scope the prune to the named [[ship]] destination"
+msgstr "ограничить область действия операции очистки указанным местом назначения [[ship]]"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "Restore a snapshot from a ship target into a path"
+msgstr "Восстановление снимка из целевого объекта ship в указанный путь"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid ""
+"Restore snapshot <id> into --target using the named --ship entry.\n"
+"\n"
+"The ship's type selects the path: an \"archive\" ship replays the object chain\n"
+"(rclone cat | decompress | btrfs receive); a \"restic\" ship runs restic restore.\n"
+"Restore is DESTRUCTIVE — it writes a subvolume into the target — so it prompts for\n"
+"confirmation unless --yes is given.\n"
+"\n"
+"Each subvolume's objects live under their own remote prefix, so a restore has to\n"
+"know which subvolume it reads from. With exactly one subvolume configured that is\n"
+"implied and --subvolume is unnecessary; with several, name one — the restore\n"
+"refuses to guess rather than read another subvolume's backups."
+msgstr ""
+"Восстанавливает снимок <id> в --target, используя именованную запись --ship.\n"
+"\n"
+"Тип ship определяет путь: ship типа \"archive\" воспроизводит цепочку объектов\n"
+"(rclone cat | decompress | btrfs receive); \"restic\"-ship выполняет команду restic restore.\n"
+"Восстановление является ДЕСТРУКТИВНЫМ — оно записывает подтом в целевой каталог — поэтому запрашивает\n"
+"подтверждения, если не указан флаг --yes.\n"
+"\n"
+"Объекты каждого подтома находятся под собственным удалённым префиксом, поэтому при восстановлении необходимо\n"
+"знать, из какого подтома он считывает данные. Если настроен ровно один подтом, это\n"
+"подразумевается, и --subvolume не требуется; если их несколько, укажите один — операция восстановления\n"
+"отказывается делать предположения, вместо того чтобы считывать резервные копии другого подтома."
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "path to restore the snapshot into (required)"
+msgstr "путь для восстановления снимка (обязательно)"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "name of the [[ship]] entry that drives the restore (required)"
+msgstr "имя записи [[ship]], которая управляет восстановлением (обязательно)"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "which configured subvolume to restore from (needed only when several are configured)"
+msgstr "из какого настроенного подтома выполнять восстановление (требуется только в случае настройки нескольких подтомов)"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "skip the destructive-restore confirmation prompt"
+msgstr "пропустить запрос подтверждения операции восстановления с удалением данных"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "print the destructive restore actions without performing them"
+msgstr "вывести на экран действия по деструктивному восстановлению без их выполнения"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "Roll the system back to a snapshot (snapper only)"
+msgstr "Откат системы к снимку состояния (только для snapper)"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid ""
+"Roll the system back to snapshot <id> via snapper rollback.\n"
+"\n"
+"Rollback is snapper-specific: it requires engine.driver = \"snapper\" and is refused\n"
+"for any other engine. It is DESTRUCTIVE — snapper makes a read-write copy of\n"
+"snapshot <id> the new default subvolume, so the system boots into it on the next\n"
+"reboot — and prompts for confirmation unless --yes is given."
+msgstr ""
+"Возвращает систему к снимку <id> с помощью команды snapper rollback.\n"
+"\n"
+"Откат выполняется только с помощью snapper: для него требуется engine.driver = \"snapper\", и он не поддерживается\n"
+"для любого другого движка. Это ДЕСТРУКТИВНОЕ действие — snapper создает копию со snapper-основным томом\n"
+"снимка <id> в качестве нового субтома по умолчанию, поэтому при следующей перезагрузке система загрузится именно в него\n"
+"перезагрузке — и запрашивает подтверждение, если не указан флаг --yes."
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "skip the destructive-rollback confirmation prompt"
+msgstr "пропустить запрос подтверждения деструктивного отката"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "print the destructive rollback action without performing it"
+msgstr "вывести на экран команду деструктивного отката без её выполнения"
+
+#: cmd/bentoo/snapshot_run.go
+msgid "Run the snapshot pipeline now"
+msgstr "Запустить конвейер снимков сейчас"
+
+#: cmd/bentoo/snapshot_run.go
+msgid ""
+"Execute the engine → prune → ship pipeline for every configured subvolume,\n"
+"persist a RunResult for 'status', and exit non-zero if any stage failed. This is\n"
+"the command driven by the systemd timer."
+msgstr ""
+"Выполняет конвейер engine → prune → ship для каждого настроенного подтома,\n"
+"сохраняет RunResult для 'status' и завершает работу с ненулевым кодом, если какой-либо этап завершился с ошибкой. Это\n"
+"команда, управляемая таймером systemd."
+
+#: cmd/bentoo/snapshot_run.go
+msgid "print the pipeline that would run, without executing it"
+msgstr "Вывести на экран конвейер, который был бы запущен, без его выполнения"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "Show the last run, timer state, and free space"
+msgstr "Отобразить информацию о последнем запуске, состоянии таймера и свободном пространстве"
+
+#: cmd/bentoo/version.go
+msgid "Print version information"
+msgstr "Вывести информацию о версии"
+
+#: cmd/bentoo/version.go
+msgid "Print the version, commit hash, and build date of bentoo."
+msgstr "Вывести на экран версию, хеш коммита и дату сборки bentoo."

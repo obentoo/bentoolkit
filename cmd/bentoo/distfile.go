@@ -8,6 +8,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
@@ -40,13 +41,13 @@ var distfileFetchVersion string
 func newDistfileCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "distfile",
-		Short: "Work with distfiles Portage cannot download by itself",
-		Long: `Commands for the source archives 'emerge' cannot fetch on its own.
+		Short: i18n.N("Work with distfiles Portage cannot download by itself"),
+		Long: i18n.N(`Commands for the source archives 'emerge' cannot fetch on its own.
 
 A vendor that gates its download behind a registration form — or behind nothing
 more than a POST no mirror may replay — leaves Portage with a SRC_URI it cannot
 follow. The overlay records how that download is performed; these commands
-perform it.`,
+perform it.`),
 	}
 	cmd.AddCommand(newDistfileFetchCmd())
 	return cmd
@@ -57,8 +58,8 @@ func newDistfileFetchCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "fetch <category/package>",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Download a gated distfile into DISTDIR, ready for emerge",
-		Long: `Perform the download the overlay records for a package, and write the file
+		Short:       i18n.N("Download a gated distfile into DISTDIR, ready for emerge"),
+		Long: i18n.N(`Perform the download the overlay records for a package, and write the file
 into DISTDIR under the exact name its Manifest expects.
 
 This is the same download 'bentoo overlay autoupdate' performs before it
@@ -93,14 +94,14 @@ Examples:
   bentoo distfile fetch app-misc/example --version 3.70.5
 
   # Write it somewhere else (it will not be found by emerge there)
-  bentoo distfile fetch app-misc/example --distdir /tmp/dl`,
+  bentoo distfile fetch app-misc/example --distdir /tmp/dl`),
 		Args: cobra.ExactArgs(1),
 		RunE: runDistfileFetch,
 	}
 	cmd.Flags().StringVar(&distfileFetchDistdir, "distdir", "",
-		"Directory the file is written into (default: the host's own DISTDIR, as reported by portageq distdir)")
+		i18n.N("Directory the file is written into (default: the host's own DISTDIR, as reported by portageq distdir)"))
 	cmd.Flags().StringVar(&distfileFetchVersion, "version", "",
-		"Version whose distfile to fetch (default: the version the overlay currently carries)")
+		i18n.N("Version whose distfile to fetch (default: the version the overlay currently carries)"))
 	return cmd
 }
 

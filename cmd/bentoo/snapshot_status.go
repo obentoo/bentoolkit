@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -19,7 +20,7 @@ func newSnapshotStatusCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "status",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Show the last run, timer state, and free space",
+		Short:       i18n.N("Show the last run, timer state, and free space"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotStatus(cmd, args, d)
 		},

@@ -13,8 +13,9 @@ COMMIT := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 SOURCE_DATE_EPOCH ?= $(shell git log -1 --format=%ct 2>/dev/null)
 BUILD_TIME := $(if $(SOURCE_DATE_EPOCH),$(shell date -u -d '@$(SOURCE_DATE_EPOCH)' '+%Y-%m-%d_%H:%M:%S'),$(shell date -u '+%Y-%m-%d_%H:%M:%S'))
 VERSION_PKG := $(MODULE)/internal/common/version
-LDFLAGS := -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME)"
-LDFLAGS_DEBUG := -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME)"
+# Recursive (=), not simple: LOCALEDIR derives from PREFIX, set further down.
+LDFLAGS = -ldflags "-s -w -X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME) -X $(I18N_PKG).LocaleDir=$(LOCALEDIR)"
+LDFLAGS_DEBUG = -ldflags "-X $(VERSION_PKG).Version=$(VERSION) -X $(VERSION_PKG).Commit=$(COMMIT) -X $(VERSION_PKG).BuildDate=$(BUILD_TIME) -X $(I18N_PKG).LocaleDir=$(LOCALEDIR)"
 
 # Directories
 BUILD_DIR := build
@@ -27,6 +28,18 @@ TRAY_MISC_DIR := misc/tray
 APPLICATIONS_DIR := $(PREFIX)/share/applications
 ICONS_DIR := $(PREFIX)/share/icons/hicolor/scalable/apps
 SYSTEMD_USER_DIR := $(PREFIX)/lib/systemd/user
+
+# Translations (see docs/development.md, "Translations"): po/<lang>.po sources,
+# compiled to $(LOCALE_BUILD_DIR)/<lang>/LC_MESSAGES/$(I18N_DOMAIN).mo and
+# installed under LOCALEDIR, the directory the binaries are built to read.
+I18N_PKG := $(MODULE)/internal/common/i18n
+I18N_DOMAIN := bentoolkit
+PO_DIR := po
+LINGUAS := $(shell cat $(PO_DIR)/LINGUAS 2>/dev/null)
+LOCALEDIR ?= $(PREFIX)/share/locale
+LOCALE_BUILD_DIR := $(BUILD_DIR)/locale
+MSGFMT ?= msgfmt
+MSGMERGE ?= msgmerge
 
 # User config install (honors XDG_CONFIG_HOME, matching internal/common/config)
 CONFIG_EXAMPLE := config.example.yaml
@@ -91,7 +104,7 @@ build-debug:
 # desktop entry, user unit (ExecStart pointing at the installed binary) and its
 # three scalable icons.
 .PHONY: install
-install: build
+install: build locale
 	install -Dm755 $(BUILD_DIR)/$(BINARY_NAME) $(DESTDIR)$(INSTALL_DIR)/$(BINARY_NAME)
 	install -Dm755 $(BUILD_DIR)/$(TRAY_BINARY) $(DESTDIR)$(INSTALL_DIR)/$(TRAY_BINARY)
 	install -Dm644 $(TRAY_MISC_DIR)/$(TRAY_BINARY).desktop $(DESTDIR)$(APPLICATIONS_DIR)/$(TRAY_BINARY).desktop
@@ -100,6 +113,9 @@ install: build
 	chmod 644 $(DESTDIR)$(SYSTEMD_USER_DIR)/$(TRAY_BINARY).service
 	@set -eu; for variant in $(TRAY_ICON_VARIANTS); do \
 		install -Dm644 "$(TRAY_ICON_SVG_DIR)/$$variant.svg" "$(DESTDIR)$(ICONS_DIR)/$$variant.svg"; \
+	done
+	@set -eu; for lang in $(LINGUAS); do \
+		install -Dm644 "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo"; \
 	done
 
 # Uninstall from system
@@ -110,6 +126,9 @@ uninstall:
 	rm -f $(DESTDIR)$(SYSTEMD_USER_DIR)/$(TRAY_BINARY).service
 	@set -eu; for variant in $(TRAY_ICON_VARIANTS); do \
 		rm -f "$(DESTDIR)$(ICONS_DIR)/$$variant.svg"; \
+	done
+	@set -eu; for lang in $(LINGUAS); do \
+		rm -f "$(DESTDIR)$(LOCALEDIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo"; \
 	done
 
 # Install the example config into the user's config dir.
@@ -356,6 +375,26 @@ tidy:
 .PHONY: check
 check: lint test audit
 
+# Compile every po/<lang>.po listed in po/LINGUAS into a .mo catalog.
+# --check also rejects a translation whose printf directives differ from its
+# msgid's. Try a build without installing it:
+#   BENTOO_LOCALEDIR=build/locale LANG=pt_BR.UTF-8 build/bentoo --help
+.PHONY: locale
+locale:
+	@set -eu; for lang in $(LINGUAS); do \
+		mkdir -p "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES"; \
+		$(MSGFMT) --check -o "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(PO_DIR)/$$lang.po"; \
+	done
+
+# Regenerate po/bentoolkit.pot from the source and merge it into every .po:
+# new messages arrive untranslated, removed ones become obsolete (#~).
+.PHONY: i18n-update
+i18n-update:
+	$(GO) run ./misc/i18n-extract $(PO_DIR)/$(I18N_DOMAIN).pot
+	@set -eu; for lang in $(LINGUAS); do \
+		$(MSGMERGE) --quiet --no-wrap --update --backup=none "$(PO_DIR)/$$lang.po" "$(PO_DIR)/$(I18N_DOMAIN).pot"; \
+	done
+
 # Help target
 .PHONY: help
 help:
@@ -387,5 +426,7 @@ help:
 	@echo "  lint            Run fmt, vet, and golangci-lint $(GOLANGCI_LINT_VERSION) (the CI pin) for every build tag"
 	@echo "  tray-icons      Render the tray icon PNGs from misc/tray/icons (needs rsvg-convert)"
 	@echo "  tidy            Tidy dependencies"
+	@echo "  locale          Compile po/*.po into build/locale (needs msgfmt)"
+	@echo "  i18n-update     Re-extract po/bentoolkit.pot and merge it into po/*.po (needs msgmerge)"
 	@echo "  check           Run lint, test, and audit"
 	@echo "  help            Show this help"

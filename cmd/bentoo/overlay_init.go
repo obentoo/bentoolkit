@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
@@ -16,9 +17,9 @@ import (
 func newInitCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "init",
-		Short: "Initialize bentoo configuration",
-		Long: `Initialize bentoo configuration interactively.
-Creates a config file with overlay path and git settings.`,
+		Short: i18n.N("Initialize bentoo configuration"),
+		Long: i18n.N(`Initialize bentoo configuration interactively.
+Creates a config file with overlay path and git settings.`),
 		RunE: runInit,
 	}
 	return cmd

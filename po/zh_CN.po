@@ -1,0 +1,1833 @@
+# Simplified Chinese translation of bentoolkit.
+# Machine-translated with Lara Translate and a project glossary, then reviewed.
+msgid ""
+msgstr ""
+"Project-Id-Version: bentoolkit\n"
+"PO-Revision-Date: 2026-11-17 00:00+0000\n"
+"Last-Translator: bentoolkit maintainers\n"
+"Language-Team: none\n"
+"Language: zh_CN\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+
+#: cmd/bentoo/completion.go
+msgid "Generate shell completion scripts"
+msgstr "生成 Shell 补全脚本"
+
+#: cmd/bentoo/completion.go
+msgid ""
+"Generate shell completion scripts for bentoo.\n"
+"\n"
+"To load completions:\n"
+"\n"
+"Bash:\n"
+"  $ source <(bentoo completion bash)\n"
+"  # To load completions for each session, execute once (needs\n"
+"  # app-shells/bash-completion):\n"
+"  $ mkdir -p ~/.local/share/bash-completion/completions\n"
+"  $ bentoo completion bash > ~/.local/share/bash-completion/completions/bentoo\n"
+"\n"
+"Zsh:\n"
+"  # If shell completion is not already enabled in your environment,\n"
+"  # you will need to enable it. You can execute the following once:\n"
+"  $ echo \"autoload -U compinit; compinit\" >> ~/.zshrc\n"
+"  # To load completions for each session, execute once:\n"
+"  $ bentoo completion zsh > \"${fpath[1]}/_bentoo\"\n"
+"  # You will need to start a new shell for this setup to take effect.\n"
+"\n"
+"Fish:\n"
+"  $ bentoo completion fish | source\n"
+"  # To load completions for each session, execute once:\n"
+"  $ bentoo completion fish > ~/.config/fish/completions/bentoo.fish\n"
+"\n"
+"PowerShell:\n"
+"  PS> bentoo completion powershell | Out-String | Invoke-Expression\n"
+"  # To load completions for every new session, run:\n"
+"  PS> bentoo completion powershell > bentoo.ps1\n"
+"  # and source this file from your PowerShell profile.\n"
+msgstr ""
+"为 bentoo 生成 Shell 补全脚本。\n"
+"\n"
+"要加载补全功能：\n"
+"\n"
+"Bash：\n"
+"  $ source <(bentoo completion bash)\n"
+"  # 要为每个会话加载补全功能，请执行一次（需要\n"
+"  # app-shells/bash-completion):\n"
+"  $ mkdir -p ~/.local/share/bash-completion/completions\n"
+"  $ bentoo completion bash > ~/.local/share/bash-completion/completions/bentoo\n"
+"\n"
+"Zsh：\n"
+"  # 如果您的环境中尚未启用 Shell 补全功能，\n"
+"  # 您需要启用它。您可以执行以下命令一次：\n"
+"  $ echo \"autoload -U compinit; compinit\" >> ~/.zshrc\n"
+"  # 要在每个会话中加载补全功能，请执行一次：\n"
+"  $ bentoo completion zsh > \"${fpath[1]}/_bentoo\"\n"
+"  # 您需要启动一个新的 shell，此设置才能生效。\n"
+"\n"
+"Fish：\n"
+"  $ bentoo completion fish | source\n"
+"  # 要为每个会话加载补全功能，请执行一次：\n"
+"  $ bentoo completion fish > ~/.config/fish/completions/bentoo.fish\n"
+"\n"
+"PowerShell：\n"
+"  PS> bentoo completion powershell | Out-String | Invoke-Expression\n"
+"  # 要为每个新会话加载补全功能，请运行：\n"
+"  PS> bentoo completion powershell > bentoo.ps1\n"
+"  # 并从您的 PowerShell 配置文件中载入此文件。\n"
+
+#: cmd/bentoo/distfile.go
+msgid "Work with distfiles Portage cannot download by itself"
+msgstr "处理 Portage 无法自行下载的 distfile"
+
+#: cmd/bentoo/distfile.go
+msgid ""
+"Commands for the source archives 'emerge' cannot fetch on its own.\n"
+"\n"
+"A vendor that gates its download behind a registration form — or behind nothing\n"
+"more than a POST no mirror may replay — leaves Portage with a SRC_URI it cannot\n"
+"follow. The overlay records how that download is performed; these commands\n"
+"perform it."
+msgstr ""
+"针对“emerge”无法自行获取的源代码归档的命令。\n"
+"\n"
+"供应商将下载设在注册表单之后——或者根本没有任何门槛\n"
+"只是一个 POST 请求，没有镜像可以重放——这会让 Portage 得到一个它无法\n"
+"遵循的 SRC_URI。Overlay 记录了该下载是如何执行的；这些命令\n"
+"执行此操作。"
+
+#: cmd/bentoo/distfile.go
+msgid "Download a gated distfile into DISTDIR, ready for emerge"
+msgstr "将受限制的distfile下载到DISTDIR，以便用于emerge"
+
+#: cmd/bentoo/distfile.go
+msgid ""
+"Perform the download the overlay records for a package, and write the file\n"
+"into DISTDIR under the exact name its Manifest expects.\n"
+"\n"
+"This is the same download 'bentoo overlay autoupdate' performs before it\n"
+"regenerates a Manifest — same request, same guards, same file name — so what\n"
+"lands here is what the Manifest was computed against.\n"
+"\n"
+"Which version: the one the overlay currently carries, unless --version names\n"
+"another. Pass the version 'emerge' asked for when you are installing anything\n"
+"other than the newest ebuild.\n"
+"\n"
+"Where it lands: the host's own DISTDIR, as reported by 'portageq distdir', so\n"
+"'emerge' finds it without being told. --distdir overrides that. The directory\n"
+"has to be writable by you — on most systems DISTDIR is group-writable by the\n"
+"'portage' group, and the run stops with the directory named when it is not.\n"
+"\n"
+"A serial, when the record configures one, is read at runtime from the\n"
+"environment variable the record names (or from the secrets file) and is never\n"
+"written to the overlay, the logs or this command's output. The variable's NAME\n"
+"is printed; its value never is.\n"
+"\n"
+"Exit codes:\n"
+"  0  the file was downloaded and written\n"
+"  1  the run could not be honoured: no such record, an ambiguous atom, a\n"
+"     package that needs no authenticated fetch, an unwritable DISTDIR, a\n"
+"     missing serial, or a download the vendor refused\n"
+"\n"
+"Examples:\n"
+"  # Fetch the distfile for the version the overlay carries\n"
+"  bentoo distfile fetch app-misc/example\n"
+"\n"
+"  # Fetch the one a specific ebuild needs\n"
+"  bentoo distfile fetch app-misc/example --version 3.70.5\n"
+"\n"
+"  # Write it somewhere else (it will not be found by emerge there)\n"
+"  bentoo distfile fetch app-misc/example --distdir /tmp/dl"
+msgstr ""
+"执行 overlay 记录的软件包下载，并将文件写入\n"
+"写入 DISTDIR，文件名与其 Manifest 所期望的完全一致。\n"
+"\n"
+"这与“bentoo overlay autoupdate”在执行以下操作之前执行的下载相同：\n"
+"重新生成 Manifest — 相同的请求、相同的保护机制、相同的文件名 — 因此\n"
+"此处落地的是 Manifest 计算所依据的内容。\n"
+"\n"
+"哪个版本：overlay 当前所包含的版本，除非 --version 指定了\n"
+"另一个版本。当您安装任何内容时，请传递“emerge”所要求的版本\n"
+"除最新 ebuild 外。\n"
+"\n"
+"它将位于何处：主机的自有 DISTDIR，如“portageq distdir”所报告，因此\n"
+"“emerge”会在未被告知的情况下找到它。--distdir 会覆盖该设置。该目录\n"
+"必须对您是可写的 — 在大多数系统上，DISTDIR 对\n"
+"“portage”组可对该目录进行组写入，如果不是这样，则运行会在指定该目录时停止。\n"
+"\n"
+"如果记录配置了序列号，则该序列号会在运行时从\n"
+"记录指定的环境变量（或从密钥文件读取），并且绝不会\n"
+"写入 overlay、日志或此命令的输出。变量的 NAME\n"
+"会被打印出来；但其值绝不会被打印出来。\n"
+"\n"
+"退出代码：\n"
+"  0  文件已下载并写入\n"
+"  1  无法执行该运行：没有此记录、原子不明确、\n"
+"     不需要经过身份验证即可获取的软件包、不可写的 DISTDIR、一个\n"
+"     缺少序列号，或供应商拒绝的下载\n"
+"\n"
+"示例：\n"
+"  # 获取 Overlay 所包含版本的 distfile\n"
+"  bentoo distfile fetch app-misc/example\n"
+"\n"
+"  # 获取特定 ebuild 所需的版本\n"
+"  bentoo distfile fetch app-misc/example --version 3.70.5\n"
+"\n"
+"  # 将其写入其他位置（emerge 将无法在那里找到它）\n"
+"  bentoo distfile fetch app-misc/example --distdir /tmp/dl"
+
+#: cmd/bentoo/distfile.go
+msgid "Directory the file is written into (default: the host's own DISTDIR, as reported by portageq distdir)"
+msgstr "文件写入的目录（默认：主机的自有 DISTDIR，由 portageq distdir 报告）"
+
+#: cmd/bentoo/distfile.go
+msgid "Version whose distfile to fetch (default: the version the overlay currently carries)"
+msgstr "要获取其 distfile 的版本（默认：overlay 当前包含的版本）"
+
+#: cmd/bentoo/i18n.go
+msgid "Usage:"
+msgstr "用法："
+
+#: cmd/bentoo/i18n.go
+msgid "Aliases:"
+msgstr "别名："
+
+#: cmd/bentoo/i18n.go
+msgid "Examples:"
+msgstr "Examples:"
+
+#: cmd/bentoo/i18n.go
+msgid "Available Commands:"
+msgstr "可用命令："
+
+#: cmd/bentoo/i18n.go
+msgid "Additional Commands:"
+msgstr "附加命令："
+
+#: cmd/bentoo/i18n.go
+msgid "Flags:"
+msgstr "标志："
+
+#: cmd/bentoo/i18n.go
+msgid "Global Flags:"
+msgstr "全局标志："
+
+#: cmd/bentoo/i18n.go
+msgid "Additional help topics:"
+msgstr "其他帮助主题："
+
+#: cmd/bentoo/i18n.go
+msgid "Use \"{{.CommandPath}} [command] --help\" for more information about a command."
+msgstr "使用“{{.CommandPath}} [command] --help”以获取有关某个命令的更多信息。"
+
+#: cmd/bentoo/i18n.go
+msgid "Help about any command"
+msgstr "有关任何命令的帮助"
+
+#: cmd/bentoo/i18n.go
+#, c-format
+msgid ""
+"Help provides help for any command in the application.\n"
+"Simply type %s help [path to command] for full details."
+msgstr ""
+"help 为应用程序中的任何命令提供帮助。\n"
+"只需键入 %s help [path to command] 即可查看完整详情。"
+
+#: cmd/bentoo/i18n.go
+#, c-format
+msgid "help for %s"
+msgstr "%s 的帮助"
+
+#: cmd/bentoo/notice.go
+msgid "Author bentoo notices (news item and site feed entry)"
+msgstr "作者 bentoo 通知（新闻条目和站点订阅源条目）"
+
+#: cmd/bentoo/notice.go
+msgid ""
+"Write a notice to the overlay as a GLEP 42 news item and, when notice.site_path\n"
+"is configured, to the site repository as the YAML file the notices feed is\n"
+"built from. Both files share one ID. No git operation is performed: review,\n"
+"commit and push each repository yourself."
+msgstr ""
+"将通知作为 GLEP 42 新闻条目写入 Overlay，并且当 notice.site_path\n"
+"已配置，则将其作为公告源所基于的 YAML 文件写入站点仓库。\n"
+"构建的 YAML 文件。这两个文件共用一个 ID。未执行任何 Git 操作：请自行审核、\n"
+"请自行对每个仓库执行提交和推送操作。"
+
+#: cmd/bentoo/notice.go
+msgid "Write a new notice to the overlay and the site"
+msgstr "向 Overlay 和站点写入一条新通知"
+
+#: cmd/bentoo/notice.go
+msgid ""
+"Write a new notice. The ID is <published>-<name>. The body comes from\n"
+"--body-file, or from $VISUAL / $EDITOR when it is absent.\n"
+"\n"
+"--affects takes \"<category>/<package>[:<slot>][ <range>[,<range>...]]\", a range\n"
+"being one of <, <=, =, >=, > followed by a version, for example\n"
+"--affects 'dev-libs/foo:1 >=1.0,<1.2.3'. Repeat it for several packages."
+msgstr ""
+"撰写一条新通知。ID 为 <published>-<name>。正文来自\n"
+"--body-file，或者在它不存在时来自 $VISUAL / $EDITOR。\n"
+"\n"
+"--affects 接受“<category>/<package>[:<slot>][ <range>[,<range>...]]”，其中范围\n"
+"是 <、<=、=、>=、> 之一，后跟一个版本，例如\n"
+"--affects 'dev-libs/foo:1 >=1.0,<1.2.3'. 对多个软件包重复此操作。"
+
+#: cmd/bentoo/notice.go
+msgid "Notice type: security, release, news or announcement"
+msgstr "通知类型：security、release、news 或 announcement"
+
+#: cmd/bentoo/notice.go
+msgid "Severity: info, warning or critical"
+msgstr "严重程度：INFO、WARNING 或 CRITICAL"
+
+#: cmd/bentoo/notice.go
+msgid "Title, at most 50 characters"
+msgstr "标题，最多 50 个字符"
+
+#: cmd/bentoo/notice.go
+msgid "One-line summary, at most 300 characters"
+msgstr "单行摘要，最多 300 个字符"
+
+#: cmd/bentoo/notice.go
+msgid "Short name of the ID: at most 20 characters of [a-z0-9+_-]"
+msgstr "ID 的短名称：最多 20 个字符，仅限 [a-z0-9+_-]"
+
+#: cmd/bentoo/notice.go
+msgid "Affected package and version ranges (repeatable; required for security and release)"
+msgstr "受影响的软件包和版本范围（可重复；对于安全和发布类型为必填项）"
+
+#: cmd/bentoo/notice.go
+msgid "Publication date, YYYY-MM-DD (default: today in UTC)"
+msgstr "发布日期，YYYY-MM-DD（默认：UTC 时间的今天）"
+
+#: cmd/bentoo/notice.go
+msgid "Author, \"Name <email>\" (default: the configured git user)"
+msgstr "作者，“姓名 <电子邮件>”（默认：已配置的 Git 用户）"
+
+#: cmd/bentoo/notice.go
+msgid "Read the body from this file instead of opening an editor"
+msgstr "从该文件读取正文，而非打开编辑器"
+
+#: cmd/bentoo/notice.go
+msgid "Revise a published notice in both repositories"
+msgstr "在两个仓库中修订已发布的通知"
+
+#: cmd/bentoo/notice.go
+msgid ""
+"Open the notice's current text in $VISUAL / $EDITOR (or read it from\n"
+"--body-file) and rewrite the news item and the site file together. The news\n"
+"item's Revision goes up by one and the site file's updated becomes now;\n"
+"the ID and the publication date stay."
+msgstr ""
+"在 $VISUAL / $EDITOR 中打开公告的当前文本（或从\n"
+"--body-file）并同时重写新闻条目和站点文件。新闻\n"
+"条目的 Revision 会加一，站点文件的 updated 会变为 now；\n"
+"ID 和发布日期保持不变。"
+
+#: cmd/bentoo/notice.go
+msgid "New severity: info, warning or critical"
+msgstr "新严重性级别：INFO、WARNING 或 CRITICAL"
+
+#: cmd/bentoo/notice.go
+msgid "New title, at most 50 characters"
+msgstr "新标题，最多 50 个字符"
+
+#: cmd/bentoo/notice.go
+msgid "New one-line summary, at most 300 characters"
+msgstr "新的单行摘要，最多 300 个字符"
+
+#: cmd/bentoo/notice.go
+msgid "Replace the affected packages (repeatable; same syntax as notice new)"
+msgstr "替换受影响的软件包（可重复；语法与 notice new 相同）"
+
+#: cmd/bentoo/notice.go
+msgid "Take the new text from this file instead of opening an editor"
+msgstr "从该文件获取新文本，而非打开编辑器"
+
+#: cmd/bentoo/overlay_add.go
+msgid "Add files to the staging area"
+msgstr "将文件添加到暂存区"
+
+#: cmd/bentoo/overlay_add.go
+msgid ""
+"Add files to the Git staging area in the overlay repository.\n"
+"If no paths are specified, adds all changes (equivalent to \"git add .\")."
+msgstr ""
+"将文件添加到叠加仓库中的 Git 暂存区。\n"
+"如果未指定路径，则添加所有更改（等同于“git add .”）。"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analyze package and generate autoupdate schema"
+msgstr "分析软件包并生成自动更新架构"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid ""
+"Analyze a package to determine the best way to check for upstream versions.\n"
+"\n"
+"The analyze command uses intelligent analysis to discover data sources and\n"
+"generate update schemas automatically. It supports multiple data sources\n"
+"including GitHub releases, PyPI, npm, crates.io, and HTML scraping.\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay analyze net-misc/foo           Analyze single package\n"
+"  bentoo overlay analyze net-misc/foo --url URL Override URL for analysis\n"
+"  bentoo overlay analyze net-misc/foo --hint \"version is in header\"\n"
+"  bentoo overlay analyze --all                  Analyze all packages without schema\n"
+"  bentoo overlay analyze net-misc/foo --no-cache  Bypass caches\n"
+"  bentoo overlay analyze net-misc/foo --force   Overwrite existing schema\n"
+"  bentoo overlay analyze net-misc/foo --dry-run Show schema without saving"
+msgstr ""
+"分析软件包，以确定检查上游版本的最佳方式。\n"
+"\n"
+"analyze 命令使用智能分析来发现数据源，并\n"
+"自动生成更新架构。它支持多种数据源\n"
+"包括 GitHub 版本、PyPI、npm、crates.io 和 HTML 抓取。\n"
+"\n"
+"示例：\n"
+"  bentoo overlay analyze net-misc/foo           分析单个软件包\n"
+"  bentoo overlay analyze net-misc/foo --url URL 用于分析的覆盖 URL\n"
+"  bentoo overlay analyze net-misc/foo --hint \"version is in header\"\n"
+"  bentoo overlay analyze --all                  分析所有没有架构的软件包\n"
+"  bentoo overlay analyze net-misc/foo --no-cache  绕过缓存\n"
+"  bentoo overlay analyze net-misc/foo --force   覆盖现有架构\n"
+"  bentoo overlay analyze net-misc/foo --dry-run 显示架构而不保存"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Override URL for analysis"
+msgstr "覆盖用于分析的 URL"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Provide hint to LLM for guidance"
+msgstr "向 LLM 提供提示以获得指导"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analyze all packages without schema"
+msgstr "分析所有没有架构的包"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Bypass all caches"
+msgstr "绕过所有缓存"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Overwrite existing schema"
+msgstr "覆盖现有架构"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Show schema without saving"
+msgstr "显示架构而不保存"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Check and apply ebuild version updates"
+msgstr "检查并应用 ebuild 版本更新"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid ""
+"Automatically check upstream sources for new versions and apply updates.\n"
+"\n"
+"Distfiles (--apply, --revive and --clean, which all regenerate a Manifest):\n"
+"\n"
+"  --distdir            Directory pkgdev downloads into and digests from. It\n"
+"                       defaults to the DISTDIR this machine's own package\n"
+"                       manager reports (portageq distdir, itself normally\n"
+"                       /var/cache/distfiles) — NOT to a temporary directory, so\n"
+"                       a distfile fetched here is a distfile the next run and\n"
+"                       the package manager both reuse. Set it in the config file\n"
+"                       as autoupdate.distdir; this flag wins over that key.\n"
+"  --distfiles-cache    Read-only cache consulted before downloading: a file\n"
+"                       already there is symlinked into the working distdir\n"
+"                       instead of fetched again. Nothing is ever written back\n"
+"                       to it. Defaults to /var/cache/distfiles, and passing \"\"\n"
+"                       disables the lookup. Set it in the config file as\n"
+"                       autoupdate.distfiles_cache; this flag wins over that key.\n"
+"\n"
+"  The two default to the same directory, which makes the lookup a no-op — there\n"
+"  is nothing to link when the cache IS the working distdir. They differ once you\n"
+"  point --distdir somewhere else, and that is when the cache starts paying off.\n"
+"\n"
+"  Both names, and both meanings, are the ones `bentoo overlay manifest` already\n"
+"  uses.\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay autoupdate --check              Check all packages for updates\n"
+"  bentoo overlay autoupdate --check net-misc/foo Check specific package\n"
+"  bentoo overlay autoupdate --check --force      Check ignoring cache\n"
+"  bentoo overlay autoupdate --check --no-fetch-cache  Check with one request per read, not one per URL\n"
+"  bentoo overlay autoupdate --check --yes        Check, then write the registry pins without prompting\n"
+"  bentoo overlay autoupdate --check --only source Check only source packages\n"
+"  bentoo overlay autoupdate --check --only bin    Check only binary packages\n"
+"  bentoo overlay autoupdate --list               List pending updates\n"
+"  bentoo overlay autoupdate --apply net-misc/foo Apply update for package\n"
+"  bentoo overlay autoupdate --apply all          Apply all pending updates\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --compile  Apply and compile test\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --clean    Apply and remove the old ebuild\n"
+"  bentoo overlay autoupdate --revive-list         List orphaned packages with a newer upstream\n"
+"  bentoo overlay autoupdate --check --revivable   Check active packages AND report revivable orphans\n"
+"  bentoo overlay autoupdate --revive net-misc/foo Revive an orphan: seed from ::gentoo and bump\n"
+"  bentoo overlay autoupdate --revive all          Revive every revivable orphan\n"
+"  bentoo overlay autoupdate --repair net-misc/foo Repair a failed bump in its staged tree with claude\n"
+"  bentoo overlay autoupdate --lint                Check packages.toml against the record model\n"
+"  bentoo overlay autoupdate --lint --fix          Repair what the linter can, after showing the diff\n"
+"  bentoo overlay autoupdate --lint --fix --yes    Repair unattended (this overlay auto-commits and pushes)\n"
+"  bentoo overlay autoupdate --mark-auto-disabled --except dev-libs/icu-compat,media-libs/libjxl-compat\n"
+"                                                  ONE-SHOT: unfreeze the entries the checker disabled before\n"
+"                                                  disabled_by existed, sparing the two deliberate pins. Run it\n"
+"                                                  once per registry; without --yes it prints the plan and stops\n"
+"  bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Download into a specific directory\n"
+"  bentoo overlay autoupdate --apply all --distfiles-cache \"\"       Never reuse a cached distfile"
+msgstr ""
+"自动检查上游源是否有新版本，并应用更新。\n"
+"\n"
+"Distfiles（--apply、--revive 和 --clean，它们都会重新生成 Manifest）：\n"
+"\n"
+"  --distdir            pkgdev 下载到并从中生成摘要的目录。它\n"
+"                       默认为此机器自己的包管理器所报告的 DISTDIR\n"
+"                       管理器报告的 DISTDIR（portageq distdir，其本身通常为\n"
+"                       /var/cache/distfiles）— 而不是临时目录，因此\n"
+"                       此处获取的 distfile 是下次运行时以及\n"
+"                       软件包管理器都会重复使用。在配置文件中将其设置为\n"
+"                       作为 autoupdate.distdir；此标志的优先级高于该键。\n"
+"  --distfiles-cache    下载前会先查询的只读缓存：如果文件\n"
+"                       已经存在的文件会被符号链接到工作 distdir 中，\n"
+"                       而不是再次获取。绝不会向其中写入任何内容\n"
+"                       到其中。默认为 /var/cache/distfiles，传递 \"\"\n"
+"                       将禁用查找。在配置文件中将其设置为\n"
+"                       autoupdate.distfiles_cache；此标志的优先级高于该键。\n"
+"\n"
+"  这两个选项默认指向同一个目录，这使得查找成为一个空操作（no-op）——\n"
+"  当缓存就是工作 distdir 时，就没有什么可链接的。一旦您\n"
+"  将 --distdir 指向其他位置，这时缓存就开始发挥作用了。\n"
+"\n"
+"  这两个名称以及它们的含义，都是`bentoo overlay manifest`已经\n"
+"  uses.\n"
+"\n"
+"示例：\n"
+"  bentoo overlay autoupdate --check              检查所有软件包的更新\n"
+"  bentoo overlay autoupdate --check net-misc/foo 检查特定软件包\n"
+"  bentoo overlay autoupdate --check --force      检查时忽略缓存\n"
+"  bentoo overlay autoupdate --check --no-fetch-cache  每次读取只发出一个请求，而不是每个 URL 发出一个请求\n"
+"  bentoo overlay autoupdate --check --yes        检查，然后不经提示写入注册表锁定\n"
+"  bentoo overlay autoupdate --check --only source 仅检查源代码包\n"
+"  bentoo overlay autoupdate --check --only bin    仅检查二进制软件包\n"
+"  bentoo overlay autoupdate --list               列出待处理的更新\n"
+"  bentoo overlay autoupdate --apply net-misc/foo 为软件包应用更新\n"
+"  bentoo overlay autoupdate --apply all          应用所有待处理的更新\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --compile  应用并进行编译测试\n"
+"  bentoo overlay autoupdate --apply net-misc/foo --clean    应用更新并移除旧的 ebuild\n"
+"  bentoo overlay autoupdate --revive-list         列出具有更新上游版本的孤立软件包\n"
+"  bentoo overlay autoupdate --check --revivable   检查活跃软件包，并报告可恢复的孤立软件包\n"
+"  bentoo overlay autoupdate --revive net-misc/foo 恢复孤立包：从 ::gentoo 获取种子并升级版本\n"
+"  bentoo overlay autoupdate --revive all          恢复所有可恢复的孤立包\n"
+"  bentoo overlay autoupdate --repair net-misc/foo 使用 claude 修复其暂存树中失败的版本更新\n"
+"  bentoo overlay autoupdate --lint                根据记录模型检查 packages.toml\n"
+"  bentoo overlay autoupdate --lint --fix          显示差异后，修复 linter 能够修复的内容\n"
+"  bentoo overlay autoupdate --lint --fix --yes    无人值守修复（此 overlay 会自动提交并推送）\n"
+"  bentoo overlay autoupdate --mark-auto-disabled --except dev-libs/icu-compat,media-libs/libjxl-compat\n"
+"                                                  一次性操作：解冻之前由检查器禁用的条目\n"
+"                                                  存在 disabled_by，保留了两个有意设定的锁定。运行它\n"
+"                                                  每个注册表运行一次；如果不加 --yes，它会打印计划并停止\n"
+"  bentoo overlay autoupdate --apply all --distdir /srv/distfiles   下载到指定目录\n"
+"  bentoo overlay autoupdate --apply all --distfiles-cache \"\"       绝不重复使用缓存的 distfile"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Check for updates"
+msgstr "检查更新"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "List pending updates"
+msgstr "列出待处理的更新"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Apply update for specified package, or \"all\" for every pending update"
+msgstr "对指定软件包应用更新，或对所有待处理更新使用 \"all\""
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Ignore cache when checking"
+msgstr "检查时忽略缓存"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Removed: builds run only in --check --llm, unprivileged, up to --depth=install; kept so that typing it says what to run instead"
+msgstr "已移除：构建仅在 --check --llm 下运行，无权限，最多到 --depth=install；保留此项是为了在键入时显示应运行的内容"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time"
+msgstr "使用 --apply：验证每次升级到此梯级的操作，而不是其类别和配置选择的操作 — none、options、patches、configure、compile 或 install，每个操作都包括其前面的所有梯级。这会以任一方向替换分类、软件包层级和配置，并且是唯一允许要求更少的输入。任何高于“options”的选项都会启动构建，因此一次只应用一个软件包"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Cap how deep a bump is built: a package whose average build on this host (qlop) is above this duration, or which has no build history, is taken no further than configure. Overrides autoupdate.build.budget for this run; give the same budget to --apply, or set the key, so the apply asks for the depth the check proved"
+msgstr "限制升级构建的深度：对于在此主机（qlop）上的平均构建时间超过此时长，或没有构建历史的软件包，其构建深度不会超过“configure”。覆盖本次运行的 autoupdate.build.budget；为 --apply 提供相同的预算，或者设置该键，以便 apply 请求检查已证明的深度。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Where the build gates of --check --llm, --revive and --repair run: host (the default), vm or container. Overrides autoupdate.build.backend for this run; a backend that is not available stops the run before any work, it never falls back to host"
+msgstr "--check --llm、--revive 和 --repair 的构建门禁运行位置：host（默认值）、vm 或 container。针对此运行覆盖 autoupdate.build.backend；如果后端不可用，则在任何工作开始之前停止运行，且绝不会回退到主机。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way"
+msgstr "SKIP 编译门，而不是在没有经过验证的网络命名空间的情况下运行它。如果没有此选项，未隔离的编译仍会运行，其通过结果将被标记为“未经验证的隔离” — 创建命名空间需要普通用户不具备的权限，无论哪种情况，Portage 都会在 FEATURES 中报告 network-sandbox。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone"
+msgstr "使用 --apply：在成功应用后，清理该软件包的目录。不使用 --apply：清理整个 overlay — 每个包含 ebuild 但没有注册表条目声明的软件包目录 — 可选通过位置参数 <category> 或 <category/package> 缩小范围。完整计划会在确认之前打印出来，ebuild 会从自动提交和推送的 overlay 中被删除，这就是为什么无人值守的清理需要 --yes 的原因。对于条目没有版本锁定或没有条目声明的目录，将报告该目录并不做任何处理。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured"
+msgstr "最大并行检查/应用数（1-100）。独立的 --clean 清理不会采用此默认值：除非显式传递该标志，否则它一次只处理一个目录，因为从未测量过并发的 pkgdev 清单运行是在 DISTDIR 上竞争还是在 pkgdev 自身的锁定上竞争。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)"
+msgstr "--check、--revive 以及 --apply 的供应商源代码包探测的每次请求 HTTP 超时（以秒为单位）（0 = 使用配置 autoupdate.http_timeout，默认为 30）"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Restrict --check to packages of this type: \"bin\" or \"source\""
+msgstr "将 --check 限制为以下类型的软件包：“bin”或“source”"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "List disabled (orphaned) packages whose upstream is newer than ::gentoo"
+msgstr "列出上游版本比 ::gentoo 更新的已禁用（孤立）软件包"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary"
+msgstr "使用 --apply 或 --revive 时：对于绝不能等待的安全修复，在没有冷却期条目的情况下提升这些软件包（cat/pkg 或记录键，以逗号分隔或重复）。每次跳过都会被记录，并列在“冷却”摘要中"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --apply or --revive: switch the overlay's cooldown ON before anything is promoted, so every promoted version is masked for this many days (bare --cooldown = 7, range 1-3650) while the previous version stays installable. It writes the managed bentoo-cooldown block into the overlay's profiles/package.mask — PUBLISHED, so the mask reaches every host that syncs the overlay — and it is persistent: later runs mask without the flag. On an overlay already under cooldown it rewrites days= only"
+msgstr "使用 --apply 或 --revive 时：在任何内容升级之前，先将 overlay 的冷却功能切换为 ON，这样每个升级的版本都会被屏蔽指定天数（仅 --cooldown = 7，范围为 1-3650），而旧版本仍可安装。它将托管的 bentoo-cooldown 块写入 overlay 的 profiles/package.mask — PUBLISHED，因此掩码会传播到同步该 overlay 的每台主机 — 并且它是持久的：之后的运行会在不使用该标志的情况下应用掩码。对于已处于冷却期的 overlay，它仅重写 days="
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan"
+msgstr "通过从 ::gentoo 种子并对其进行版本提升来恢复孤立软件包，或者使用“all”来恢复所有可恢复的孤立软件包"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH"
+msgstr "以交互方式修复失败的升级：显示因应用失败而留在其保留的暂存树旁边的修复捆绑包；经确认后，在那里启动一个 claude 会话，在执行每个命令前都进行询问；然后重新验证暂存树，并像 --apply 那样将其升级。需要在 stdin 和 stdout 上有一个终端，并且 PATH 上有 claude 可执行文件"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass"
+msgstr "使用 --check 时，还会在同一轮次中报告可恢复的孤立包（已禁用+不存在，上游版本比 ::gentoo 更新）"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "DEPRECATED, use --ui=plain instead. It is still honoured and its behaviour has not changed: it disables the live TUI and streams plain output, it is exactly --ui=plain, and it OUTRANKS both --ui and BENTOO_UI — so --no-tui --ui=fullscreen renders plain, because an opt-out a flag could override would not be an opt-out. The two environment variables it has always answered to, NO_COLOR and BENTOO_NO_TUI, are unchanged and mean the same thing as passing it"
+msgstr "已弃用，请改用 --ui=plain。它仍然有效，其行为也未发生变化：它会禁用实时TUI并以纯文本形式输出，它与 --ui=plain 完全等同，并且其优先级高于 --ui 和 BENTOO_UI — 因此 --no-tui --ui=fullscreen 会以纯文本形式渲染，因为如果一个可被标志覆盖的选择性禁用就不算真正的禁用。它始终响应的两个环境变量 NO_COLOR 和 BENTOO_NO_TUI 保持不变，其含义与传递该选项相同。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)"
+msgstr "对照记录模型检查 packages.toml：布局（# END 标记、comments 字段在最后、无浮动注释）、字段集（未知或已弃用的键、冗余的 enabled = true、规范字段顺序）和语义（无效或模糊的条目、未声明的发布行、无基准源代码的提交跟踪）"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human"
+msgstr "使用 --lint：就地修复存在机械性修复方法的违规（已弃用的二进制键、冗余的 enabled = true、规范的字段顺序）。统一的差异会在确认之前打印出来，并且 packages.toml 会被 PUBLISHED（发布）——此 overlay 会自动提交和推送，因此写入会到达源仓库——这就是为什么无人值守的修复需要 --yes 的原因。对于无法通过修复推测的问题（例如跟踪提交但没有基准源代码的条目），系统会报告这些问题并交由人工处理。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "ONE-SHOT MIGRATION: stamp disabled_by = \"auto\" on every entry the checker disabled before that key existed, so the reconciliation is free to re-enable them when their ebuild returns. Without it those entries state no origin, which now reads as a deliberate decision and freezes them for good. An entry that is held, already stamped, still enabled, or named in --except is left alone, and a second run changes nothing. The full plan is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended migration requires --yes"
+msgstr "一次性迁移：对检查器在该键存在之前禁用的每个条目，都标记 disabled_by = \"auto\"，这样在它们的 ebuild 返回时，协调过程就可以自由地重新启用它们。如果没有此操作，这些条目将不显示来源，这现在被视为一项刻意决定，并将它们永久冻结。对于被保留、已加盖标记、仍处于启用状态或在 --except 中指定的条目，将不做任何处理，第二次运行也不会有任何变化。完整计划会在确认之前打印出来，并且 packages.toml 会被 PUBLISHED — 此 overlay 会自动提交并推送，因此写入会到达 origin — 这就是为什么无人值守的迁移需要 --yes 的原因。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --mark-auto-disabled: the entries the migration must NOT stamp, comma-separated or repeated. These are the pins a maintainer disabled ON PURPOSE — for this overlay, dev-libs/icu-compat and media-libs/libjxl-compat — and stamping one hands it back to the reconciliation that re-enabled and bumped it before. An entry naming no record in packages.toml ABORTS the run: a typo protects nothing and would otherwise pass in silence"
+msgstr "使用 --mark-auto-disabled：迁移过程绝不能加盖戳记的条目，以逗号分隔或重复列出。这些是维护者故意禁用的锁定——对于此 overlay，是 dev-libs/icu-compat 和 media-libs/libjxl-compat ——而对其中一个进行标记会将其交还给之前重新启用并提升过它的协调过程。如果条目指定的名称在 packages.toml 中没有对应的记录，则会中止运行：拼写错误无法提供任何保护，否则将悄然通过。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, a --mark-auto-disabled migration, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix or --mark-auto-disabled it rewrites packages.toml, in an overlay that auto-commits and pushes"
+msgstr "对于本次运行中本应停止并询问的所有事项，一律不经提示直接批准：检查后注册表协调、--lint --fix 修复、--mark-auto-disabled 迁移以及独立的 --clean 清理。对于任何非交互式写入，此选项是必需的 — 如果没有此选项，通过管道或脚本运行的命令将仅打印其将要执行的操作，而不会进行任何更改。请注意影响范围：使用 --clean 时，这会删除 ebuild；使用 --fix 或 --mark-auto-disabled 时，这会在自动提交并推送的 overlay 中重写 packages.toml。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)"
+msgstr "pkgdev 使用的 Distfiles 目录（默认值：主机自己的 DISTDIR，由 portageq distdir 报告；覆盖 autoupdate.distdir 配置项）"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)"
+msgstr "下载前会先查询只读的 distfiles 缓存（“ ”表示禁用；会覆盖 autoupdate.distfiles_cache 配置项）"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Fetch each URL per record instead of sharing one response across records that declare it"
+msgstr "为每个记录单独获取其URL，而不是在声明该URL的多个记录之间共享同一个响应"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"
+msgstr "使用 --check：在暂存树中验证每个待处理的升级 — 不使用此选项时，--check 仅读取版本。使用 --check 或 --revive：让已配置的 claude-code 代理参与验证。--apply 仅发布经检查验证的内容，并拒绝此标志。它启用了两种代理功能：一是版本更新审核器，它会读取两个版本之间的变化，并可能要求比深度策略所选的验证级别更高的验证；二是构建修复器，它会在构建失败后修复STAGED ebuild，然后重新运行相同的关卡以做出决定。将 autoupdate.validate.review 或 fix_on_failure 设置为 false 以将其中一个功能重新禁用；如果没有此标志，这两个键都不会启用任何功能。需要 PATH 中有 claude CLI 且 provider = \"claude-code\" — 否则运行会警告一次，且关卡将在没有代理的情况下运行"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Commit staged changes with auto-generated message"
+msgstr "使用自动生成的提交信息提交已暂存的更改"
+
+#: cmd/bentoo/overlay_commit.go
+msgid ""
+"Commit staged changes to the overlay repository.\n"
+"If no message is provided with -m, an automatic commit message is generated\n"
+"based on the ebuild changes and a confirmation prompt is shown.\n"
+"Use -y to skip the confirmation prompt and commit automatically."
+msgstr ""
+"将已暂存的更改提交到 overlay 仓库。\n"
+"如果未通过 -m 提供消息，则会生成一条自动提交消息\n"
+"基于 ebuild 更改，并显示确认提示。\n"
+"使用 -y 跳过确认提示并自动提交。"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Custom commit message (bypasses auto-generation)"
+msgstr "自定义提交消息（绕过自动生成）"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Show what would be committed without committing"
+msgstr "显示将要提交的内容，但不实际提交"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Skip confirmation prompt and commit automatically"
+msgstr "跳过确认提示并自动提交"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Compare overlay packages with upstream repository"
+msgstr "将 Overlay 包与上游仓库进行比较"
+
+#: cmd/bentoo/overlay_compare.go
+msgid ""
+"Compare package versions in your local Bentoo overlay against\n"
+"an upstream repository.\n"
+"\n"
+"Any repository from the Gentoo ecosystem (~428 repos) can be used by name.\n"
+"The repository list is fetched from the official Gentoo repositories.xml\n"
+"registry and cached locally. Use --sync to force a refresh.\n"
+"\n"
+"Custom repositories can also be defined in ~/.config/bentoo/config.yaml\n"
+"and take priority over registry entries.\n"
+"\n"
+"The provider (GitHub API, GitLab API, or Git) is automatically detected\n"
+"based on the repository's source URL. Use --clone to force git clone.\n"
+"\n"
+"By default, all packages are shown (outdated, up-to-date, and newer).\n"
+"Use --only-outdated to filter and show only packages that need updates.\n"
+"Use --only-redundant to see just the removal candidates, or --only-patched\n"
+"to see just the packages an .autoupdate/packages.toml entry declares a\n"
+"divergence for. The three filters combine by intersection.\n"
+"\n"
+"Where a package differs from upstream and nothing declares why, a local model\n"
+"(the claude CLI, on your own subscription) reads both ebuilds and says what the\n"
+"difference does and which side it came from. It is commentary: the verdicts and\n"
+"the removal recommendations are the same with or without it, nothing it says is\n"
+"written to a file, and --no-review contacts no model at all.\n"
+"\n"
+"Use --realign to measure every package against the ::gentoo ebuild it should be\n"
+"compared with: which baseline was used and how far it is, which structural axes\n"
+"differ, what the ebuild declares about them, and what a model makes of what is\n"
+"left. It needs ::gentoo's tree on this machine, so it is refused against any\n"
+"other repository and against an API-only provider. Without it the command behaves\n"
+"exactly as it always has.\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay compare                    # Compare with gentoo (API)\n"
+"  bentoo overlay compare guru               # Compare with GURU (API)\n"
+"  bentoo overlay compare some-overlay       # Compare with any registered repo\n"
+"  bentoo overlay compare --clone            # Compare with gentoo (git clone)\n"
+"  bentoo overlay compare --sync             # Refresh repo list before comparing\n"
+"  bentoo overlay compare --only-outdated    # Show only outdated packages\n"
+"  bentoo overlay compare --only-redundant   # Show only removal candidates\n"
+"  bentoo overlay compare --only-patched     # Show only declared divergences\n"
+"  bentoo overlay compare --no-review        # Contact no model\n"
+"  bentoo overlay compare --realign          # Review against the ::gentoo baseline"
+msgstr ""
+"将您本地 Bentoo Overlay 中的软件包版本与以下内容进行比较：\n"
+"一个上游仓库。\n"
+"\n"
+"Gentoo 生态系统中的任何仓库（约 428 个仓库）都可以按名称使用。\n"
+"仓库列表是从官方 Gentoo repositories.xml 注册表获取的，\n"
+"注册表并本地缓存。使用 --sync 强制刷新。\n"
+"\n"
+"还可以在 ~/.config/bentoo/config.yaml 中定义自定义仓库\n"
+"并且优先于注册表条目。\n"
+"\n"
+"提供商（GitHub API、GitLab API 或 Git）会自动检测\n"
+"基于仓库的源 URL。使用 --clone 强制执行 git clone。\n"
+"\n"
+"默认情况下，会显示所有软件包（过时、最新和更新版本）。\n"
+"使用 --only-outdated 来筛选并仅显示需要更新的软件包。\n"
+"使用 --only-redundant 仅查看待移除的候选包，或使用 --only-patched\n"
+"以仅查看 .autoupdate/packages.toml 条目声明存在\n"
+"差异的包。这三个筛选条件通过交集进行组合。\n"
+"\n"
+"当某个软件包与上游存在差异，且没有任何内容说明原因时，本地模型\n"
+"（claude CLI，使用您自己的订阅）会读取两个 ebuild，并说明\n"
+"差异的作用以及差异来自哪一方。这只是说明性文字：裁定结果和\n"
+"无论有无此功能，删除建议都是一样的，它所说的任何内容都不会\n"
+"写入文件，并且 --no-review 完全不会联系任何模型。\n"
+"\n"
+"使用 --realign 将每个软件包与它应与之比较的 ::gentoo ebuild 进行比较：\n"
+"比较：使用了哪条基线以及相距多远，哪些结构轴\n"
+"有所不同，ebuild 对它们做了哪些声明，以及模型对剩余部分做了哪些处理\n"
+"剩余部分。它需要这台机器上的 ::gentoo 树，因此对于任何其他\n"
+"其他仓库以及仅提供 API 的提供商。如果没有它，该命令的行为将\n"
+"与以往完全一样。\n"
+"\n"
+"示例：\n"
+"  bentoo overlay compare                    # 与 Gentoo 进行比较（API）\n"
+"  bentoo overlay compare guru               # 与 GURU（API）进行比较\n"
+"  bentoo overlay compare some-overlay # 与任何已注册的仓库进行比较\n"
+"  bentoo overlay compare --clone            # 与 gentoo 进行比较（git clone）\n"
+"  bentoo overlay compare --sync             # 在比较之前刷新仓库列表\n"
+"  bentoo overlay compare --only-outdated    # 仅显示过时的软件包\n"
+"  bentoo overlay compare --only-redundant   # 仅显示待移除候选项\n"
+"  bentoo overlay compare --only-patched     # 仅显示已声明的差异\n"
+"  bentoo overlay compare --no-review        # 不使用模型进行联系\n"
+"  bentoo overlay compare --realign          # 对照 ::gentoo 基线进行审核"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Use git clone instead of API"
+msgstr "使用 git clone 而非 API"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Directory to cache data"
+msgstr "用于缓存数据的目录"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Disable caching"
+msgstr "禁用缓存"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "HTTP request timeout in seconds"
+msgstr "HTTP请求超时（秒）"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Auth token for API provider"
+msgstr "API 提供商的身份验证令牌"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Show only outdated packages (Bentoo < Gentoo)"
+msgstr "仅显示过时的软件包（Bentoo < Gentoo）"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Show only redundant packages (removal candidates)"
+msgstr "仅显示冗余软件包（待移除候选）"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Show only packages a registry entry declares a divergence for"
+msgstr "仅显示注册表条目声明存在差异的软件包"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Force refresh of repository list"
+msgstr "强制刷新仓库列表"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "max parallel checks (1-100)"
+msgstr "最大并行检查数（1-100）"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Contact no model; print the report without commentary"
+msgstr "不使用联系人模式；打印报告，不附带说明"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Review each package against its ::gentoo baseline (needs a local gentoo tree)"
+msgstr "对照其 ::gentoo 基线检查每个软件包（需要本地 gentoo 树）"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built"
+msgstr "通过将其构建到此阶梯的这一级来验证每个拟议的重新对齐操作——补丁、配置、编译或安装，每级都包括其前面的所有各级。需要 --realign，在 Overlay 之外的分阶段树中进行构建，并在第一次构建前询问一次。Absent 表示仅生成报告，不进行任何构建"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"
+msgstr "在不显示提示的情况下验证整个计划。只有 --depth 会执行任何构建；发布仍然是一个针对每个软件包的独立问题，仅在交互式终端中询问，且绝不会由此标志回答。"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Inspect and drive the autoupdate cooldown"
+msgstr "检查并驱动自动更新冷却期"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid ""
+"The autoupdate cooldown keeps every version the autoupdate promotes masked in\n"
+"profiles/package.mask (the managed bentoo-cooldown block) until it is released:\n"
+"by time (days= on the BEGIN line), by installation from ::bentoo, or by hand.\n"
+".autoupdate/cooldown.unmask lists the same atoms for a host that wants them now."
+msgstr ""
+"自动更新冷却期会将自动更新所提升的每个版本都屏蔽在\n"
+"profiles/package.mask（受管理的 bentoo-cooldown 块），直到其发布：\n"
+"按时间（BEGIN 行上的 days=）、通过从 ::bentoo 安装，或手动。\n"
+".autoupdate/cooldown.unmask 为现在需要这些版本的宿主机列出了相同的原子。"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "List the versions under cooldown (read-only, takes no lock)"
+msgstr "列出处于冷却期的版本（只读，不占用锁）"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "print a JSON array of {package, version, since, eligible, group, origin, installed}"
+msgstr "打印一个包含 {package, version, since, eligible, group, origin, installed} 的 JSON 数组"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "system root whose var/db/pkg answers `installed`"
+msgstr "其 var/db/pkg 回答为 `installed` 的系统根目录"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Release a version and every older one of the package (a whole group for a grouped package)"
+msgstr "发布一个版本以及该软件包的所有旧版本（对于分组的软件包，则发布整个组）"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Mask a version present in the overlay under the cooldown, by hand"
+msgstr "手动屏蔽 overlay 中处于冷却状态的版本"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "Release every entry that is due (elapsed, installed, stale), outside an apply"
+msgstr "在 apply 之外释放所有已到期的条目（elapsed、installed、stale）"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "print what would be lifted and write nothing"
+msgstr "打印将要解除的内容，但不写入任何内容"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "system root whose var/db/pkg releases entries by installation"
+msgstr "其 var/db/pkg 按安装情况释放条目的系统根目录"
+
+#: cmd/bentoo/overlay_diff.go
+msgid "Show diff of changes"
+msgstr "显示更改的差异"
+
+#: cmd/bentoo/overlay_diff.go
+msgid ""
+"Show the diff of changes in the overlay repository.\n"
+"By default shows unstaged changes. Use --staged to show staged changes."
+msgstr ""
+"显示 overlay 仓库中的更改差异。\n"
+"默认情况下显示未暂存的更改。使用 --staged 显示已暂存的更改。"
+
+#: cmd/bentoo/overlay_diff.go
+msgid "Show staged changes"
+msgstr "显示已暂存的更改"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Initialize bentoo configuration"
+msgstr "初始化 bentoo 配置"
+
+#: cmd/bentoo/overlay_init.go
+msgid ""
+"Initialize bentoo configuration interactively.\n"
+"Creates a config file with overlay path and git settings."
+msgstr ""
+"以交互方式初始化 bentoo 配置。\n"
+"创建一个包含覆盖路径和 Git 设置的配置文件。"
+
+#: cmd/bentoo/overlay_log.go
+msgid "Show commit history"
+msgstr "显示提交历史记录"
+
+#: cmd/bentoo/overlay_log.go
+msgid "Show the commit history of the overlay repository."
+msgstr "显示 overlay 仓库的提交历史记录。"
+
+#: cmd/bentoo/overlay_log.go
+msgid "Number of commits to show"
+msgstr "要显示的提交数"
+
+#: cmd/bentoo/overlay_log.go
+msgid "Show one line per commit"
+msgstr "每条提交显示一行"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Regenerate Manifest files for overlay packages"
+msgstr "为覆盖包重新生成 Manifest 文件"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid ""
+"Regenerate Manifest files for one or more packages in the overlay.\n"
+"\n"
+"By default, the existing Manifest is moved aside before pkgdev runs so a\n"
+"fresh file is produced (clean regeneration). The backup is restored\n"
+"automatically if pkgdev fails. Use --keep to skip the clean step and let\n"
+"pkgdev reconcile the existing Manifest.\n"
+"\n"
+"Workers are dispatched in parallel up to --jobs (default 10), so larger\n"
+"overlays regenerate much faster. When stdout is a terminal, a live block\n"
+"shows one slot per active worker plus a global progress bar; finished\n"
+"packages scroll above as ✓/✗ history. Outside a TTY (CI, pipes), output\n"
+"falls back to plain start/finish log lines.\n"
+"\n"
+"Scope is selected by the optional argument:\n"
+"  (no argument)            All packages in the overlay\n"
+"  <category>               All packages in the given category\n"
+"  <category>/<package>     Only the given package\n"
+"\n"
+"The command runs as the current user — by default pkgdev is invoked with a\n"
+"temporary distdir that is discarded after the run, so no sudo is required.\n"
+"Pass --distdir to use a persistent path instead (created if missing); this\n"
+"acts as a download cache reused across runs.\n"
+"\n"
+"Before each package is processed, distfiles already present in\n"
+"--distfiles-cache (default /var/cache/distfiles) are symlinked into the\n"
+"working distdir so pkgdev can validate them locally instead of downloading\n"
+"again. The cache is opened read-only — nothing is ever written back. Pass\n"
+"--distfiles-cache \"\" to disable, or point to another directory.\n"
+"\n"
+"Examples:\n"
+"  # Regenerate every Manifest in the overlay (10 in parallel)\n"
+"  bentoo overlay manifest\n"
+"\n"
+"  # Regenerate every package in app-editors\n"
+"  bentoo overlay manifest app-editors\n"
+"\n"
+"  # Regenerate a single package\n"
+"  bentoo overlay manifest app-editors/zed\n"
+"\n"
+"  # Limit parallelism (e.g. for low-bandwidth links)\n"
+"  bentoo overlay manifest --jobs 2\n"
+"\n"
+"  # Preview without running pkgdev\n"
+"  bentoo overlay manifest --dry-run app-editors\n"
+"\n"
+"  # Skip the clean-regen step (keep existing Manifest in place)\n"
+"  bentoo overlay manifest --keep app-editors/zed\n"
+"\n"
+"  # Cache distfiles in a persistent directory\n"
+"  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles\n"
+"\n"
+"  # Disable the system distfiles cache lookup\n"
+"  bentoo overlay manifest --distfiles-cache \"\""
+msgstr ""
+"为 overlay 中的一个或多个包重新生成 Manifest 文件。\n"
+"\n"
+"默认情况下，在 pkgdev 运行之前，现有的 Manifest 文件会被移至一旁，以便\n"
+"会生成一个新文件（全新重新生成）。备份已还原\n"
+"如果 pkgdev 失败，则会自动恢复。使用 --keep 跳过清理步骤，并让\n"
+"pkgdev 对现有 Manifest 进行协调。\n"
+"\n"
+"工作线程并行分发，最多可达 --jobs 个（默认为 10 个），因此较大的\n"
+"overlay 可以更快地重新生成。当 stdout 是终端时，一个实时块\n"
+"为每个活跃的 Worker 显示一个槽位，外加一个全局进度条；已完成的\n"
+"软件包以上滚动显示为 ✓/✗ 历史记录。在 TTY（CI、管道）之外，输出\n"
+"将回退到普通的“开始/完成”日志行。\n"
+"\n"
+"范围由可选参数选择：\n"
+"  (no argument)            overlay 中的所有软件包\n"
+"  <category>               指定类别中的所有软件包\n"
+"  <category>/<package>     仅指定软件包\n"
+"\n"
+"该命令以当前用户身份运行 — 默认情况下，pkgdev 调用时使用一个\n"
+"运行后会被丢弃的临时 distdir 调用，因此无需使用 sudo。\n"
+"传递 --distdir 以改用持久路径（如果不存在则创建）；这\n"
+"充当在多次运行中重复使用的下载缓存。\n"
+"\n"
+"在处理每个软件包之前，已存在于\n"
+"--distfiles-cache（默认 /var/cache/distfiles）会被符号链接到\n"
+"工作 distdir，以便 pkgdev 可以在本地验证它们，而无需再次下载\n"
+"再次下载。缓存以只读模式打开 — 永远不会写入任何内容。传递\n"
+"使用 --distfiles-cache \"\" 可禁用，或指向其他目录。\n"
+"\n"
+"示例：\n"
+"  # 重新生成 Overlay 中的每个 Manifest（并行 10 个）\n"
+"  bentoo overlay manifest\n"
+"\n"
+"  # 重新生成 app-editors 中的每个软件包\n"
+"  bentoo overlay manifest app-editors\n"
+"\n"
+"  # 重新生成单个软件包\n"
+"  bentoo overlay manifest app-editors/zed\n"
+"\n"
+"  # 限制并行度（例如，对于低带宽链路）\n"
+"  bentoo overlay manifest --jobs 2\n"
+"\n"
+"  # 不运行 pkgdev 的情况下进行预览\n"
+"  bentoo overlay manifest --dry-run app-editors\n"
+"\n"
+"  # 跳过 clean-regen 步骤（保留现有 Manifest）\n"
+"  bentoo overlay manifest --keep app-editors/zed\n"
+"\n"
+"  # 将源代码包缓存到持久性目录中\n"
+"  bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles\n"
+"\n"
+"  # 禁用系统 distfiles 缓存查找\n"
+"  bentoo overlay manifest --distfiles-cache \"\""
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Keep existing Manifest in place (skip clean regen)"
+msgstr "保留现有 Manifest 不变（跳过清理并重新生成）"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Show what would be processed without running pkgdev"
+msgstr "显示在不运行 pkgdev 的情况下将处理的内容"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Distfiles directory used by pkgdev (default: temporary directory removed after run)"
+msgstr "pkgdev 使用的 Distfiles 目录（默认：运行后删除的临时目录）"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Maximum parallel pkgdev workers"
+msgstr "最大并行 pkgdev 工作线程数"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "Read-only distfiles cache consulted before download (\"\" disables)"
+msgstr "下载前会先查询只读的 distfiles 缓存（“ ”表示禁用）"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Remove overlay packages ::gentoo already ships identically"
+msgstr "删除与 ::gentoo 已随附的软件包完全相同的 overlay 软件包"
+
+#: cmd/bentoo/overlay_prune.go
+msgid ""
+"Plan the removal of overlay packages ::gentoo already ships, and with\n"
+"--apply carry that plan out.\n"
+"\n"
+"Only CONTENT may authorise a removal. The verdict from 'bentoo overlay compare'\n"
+"selects the candidates, and then every version the two trees share, plus the\n"
+"whole files/ tree, must match byte for byte. The two disagree in practice:\n"
+"measured on the live overlay, 8 of the 74 packages the verdict calls redundant\n"
+"carry real local changes, so a removal driven by the verdict alone deletes work.\n"
+"\n"
+"Without --apply nothing is removed, modified or disabled: the plan is printed\n"
+"and the run ends. The plan lists, per package, every file that would go and\n"
+"every .autoupdate/packages.toml entry that would go with it.\n"
+"\n"
+"Packages carrying an UNDECLARED difference — one the byte comparison found and\n"
+"nobody wrote down — are printed under their own heading and left alone unless\n"
+"--include-patched says otherwise.\n"
+"\n"
+"One kind of undeclared difference no flag reaches: the kind the overlay's own\n"
+"content PROVES is ours, because our ebuild applies a patch ::gentoo does not\n"
+"ship for that package. Such a package is refused outright and the refusal names\n"
+"the file. ::gentoo never had it, so there would be nothing to restore it from.\n"
+"\n"
+"A package whose registry entry DECLARES 'patched' is refused outright, and no\n"
+"flag here reaches it. The declaration already makes 'overlay compare' call it\n"
+"'keep' rather than 'redundant', and this command never removes a package the\n"
+"verdict refused. If such a copy is genuinely obsolete, clear its declaration\n"
+"first — that is 'overlay analyze''s business, and it leaves a record of the\n"
+"decision that a flag on this command would not.\n"
+"\n"
+"Packages no run may remove are printed last, each with its reason.\n"
+"\n"
+"A local ::gentoo tree is required, because an API provider has no content to\n"
+"authorise anything with. Configure one in ~/.config/bentoo/config.yaml:\n"
+"\n"
+"  repositories:\n"
+"    gentoo:\n"
+"      provider: local\n"
+"      path: /var/db/repos/gentoo\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay prune                          # plan the whole overlay\n"
+"  bentoo overlay prune app-editors              # plan one category\n"
+"  bentoo overlay prune app-editors/zed          # plan one package\n"
+"  bentoo overlay prune --include-patched        # consider the diverging ones too\n"
+"  bentoo overlay prune --apply                  # carry the plan out\n"
+"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry"
+msgstr ""
+"规划移除 ::gentoo 已随附的覆盖软件包，并使用\n"
+"--apply 执行该计划。\n"
+"\n"
+"只有 CONTENT 才能授权移除。“bentoo overlay compare”的判定结果\n"
+"选择候选版本，然后两个树共有的每个版本，再加上\n"
+"整个 files/ 树必须逐字节匹配。两者在实践中存在分歧：\n"
+"在实时 overlay 上进行测量，在判定为冗余的 74 个软件包中，有 8 个\n"
+"包含实际的本地更改，因此仅由“判定”驱动的移除操作会删除工作内容。\n"
+"\n"
+"如果不使用 --apply，则不会删除、修改或禁用任何内容：只会打印计划\n"
+"然后运行结束。该计划按软件包列出了每个将被删除的文件，以及\n"
+"以及将与之一起删除的每个 .autoupdate/packages.toml 条目。\n"
+"\n"
+"带有“UNDECLARED”差异的包（即字节比较发现的差异，且\n"
+"没有人记录下来 — 会在各自的标题下打印出来，并且保持原样，除非\n"
+"除非 --include-patched 指定了其他方式。\n"
+"\n"
+"有一种未声明的差异不受任何标志的影响：即 overlay 自身\n"
+"内容证明属于我们，因为我们的 ebuild 应用了一个 ::gentoo 不会\n"
+"为该软件包提供。此类软件包会被直接拒绝，且拒绝信息会指明\n"
+"该文件。::gentoo 从来没有过它，因此也就没有可用于恢复它的来源。\n"
+"\n"
+"如果软件包的注册表项声明为“patched”，则该软件包会被直接拒绝，并且没有\n"
+"这里的标志可以影响到它。该声明已使“overlay compare”将其称为\n"
+"“keep”而不是“redundant”，并且此命令绝不会删除\n"
+"判定为“拒绝”。如果此类副本确实已过时，请先清除其声明\n"
+"首先 — 这属于“overlay analyze”的职责，它会留下\n"
+"此命令上的标志不会做出的决定。\n"
+"\n"
+"no run 可能会移除的软件包将最后打印，每个软件包都附有原因。\n"
+"\n"
+"需要一个本地 ::gentoo 树，因为 API 提供方没有内容可以\n"
+"用于授权任何内容。请在 ~/.config/bentoo/config.yaml 中配置一个：\n"
+"\n"
+"  repositories:\n"
+"    gentoo:\n"
+"      provider: local\n"
+"      path: /var/db/repos/gentoo\n"
+"\n"
+"示例：\n"
+"  bentoo overlay prune                          # 规划整个 overlay\n"
+"  bentoo overlay prune app-editors              # 规划一个类别\n"
+"  bentoo overlay prune app-editors/zed          # 规划一个软件包\n"
+"  bentoo overlay prune --include-patched        # 也考虑存在分歧的包\n"
+"  bentoo overlay prune --apply                  # 执行计划\n"
+"  bentoo overlay prune --apply --keep-registry  # 删除文件，保留注册表"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Carry out the plan (default: plan only, remove nothing)"
+msgstr "执行计划（默认：仅规划，不执行任何移除操作）"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)"
+msgstr "同时移除带有未声明差异的软件包，放弃该工作（无论如何都会被拒绝：已声明的“patched”条目，或内容证明源自此处的差异）"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Leave .autoupdate/packages.toml untouched"
+msgstr "保留 .autoupdate/packages.toml 不变"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Skip the identical batch's confirmation (never the diverging one)"
+msgstr "跳过对相同批次的确认（绝不跳过对存在差异的批次的确认）"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Pull upstream changes into the overlay"
+msgstr "将上游更改拉取到 overlay 中"
+
+#: cmd/bentoo/overlay_pull.go
+msgid ""
+"Fetch the configured remote and integrate the current branch's upstream.\n"
+"\n"
+"By default the integration is fast-forward only: if the overlay has diverged\n"
+"from its upstream, the pull refuses rather than writing a merge commit. Use\n"
+"--rebase to replay local commits on top of the upstream, or --merge to accept\n"
+"a merge commit."
+msgstr ""
+"FETCH 已配置的远程仓库，并将当前分支的上游集成进来。\n"
+"\n"
+"默认情况下，集成仅为快进：如果 overlay 已偏离\n"
+"与其上游发生分叉，则拉取操作会拒绝执行，而非写入合并提交。请使用\n"
+"使用 --rebase 在上游之上重放本地提交，或使用 --merge 接受\n"
+"一个合并提交。"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Replay local commits on top of the upstream"
+msgstr "在上游之上重放本地提交"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Merge the upstream, allowing a merge commit"
+msgstr "合并上游，允许合并提交"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Show what would be pulled without integrating"
+msgstr "显示在不进行集成的情况下将拉取的内容"
+
+#: cmd/bentoo/overlay_push.go
+msgid "Push committed changes to remote"
+msgstr "将已提交的更改推送到远程仓库"
+
+#: cmd/bentoo/overlay_push.go
+msgid "Push committed changes to the remote repository."
+msgstr "将已提交的更改推送到远程仓库。"
+
+#: cmd/bentoo/overlay_push.go
+msgid "Show what would be pushed without pushing"
+msgstr "显示在不执行推送的情况下将推送的内容"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Bulk rename ebuilds from old version to new version"
+msgstr "将 ebuild 从旧版本批量重命名为新版本"
+
+#: cmd/bentoo/overlay_rename.go
+msgid ""
+"Rename multiple ebuild files matching a pattern from an old version to a new version.\n"
+"\n"
+"The command accepts a pattern in the format:\n"
+"  <category>:<package-pattern>:<old-version> => <new-version>\n"
+"\n"
+"Where:\n"
+"  - category: specific category name or \"*\" for all categories\n"
+"  - package-pattern: glob pattern for package names (e.g., \"gst-*\", \"python-*\")\n"
+"  - old-version: exact version to match (without revision suffix)\n"
+"  - new-version: target version to rename to\n"
+"\n"
+"Examples:\n"
+"  # Rename all gst-* packages in media-plugins from 1.24.11 to 1.26.10\n"
+"  bentoo overlay rename media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Global search across all categories\n"
+"  bentoo overlay rename *:python-*:3.11.0 => 3.12.0\n"
+"\n"
+"  # Dry run to preview changes\n"
+"  bentoo overlay rename --dry-run media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Skip confirmation prompt\n"
+"  bentoo overlay rename -y media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # Force rename even if version-specific files exist\n"
+"  bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10"
+msgstr ""
+"将多个与模式匹配的 ebuild 文件从旧版本重命名为新版本。\n"
+"\n"
+"该命令接受以下格式的模式：\n"
+"  <category>:<package-pattern>:<old-version> => <new-version>\n"
+"\n"
+"其中：\n"
+"  - category：特定类别名称，或“*”表示所有类别\n"
+"  - package-pattern：用于包名称的通配模式（例如，“gst-*”、“python-*”）\n"
+"  - old-version：要匹配的精确版本（不带修订版后缀）\n"
+"  - new-version：要重命名的目标版本\n"
+"\n"
+"示例：\n"
+"  # 将 media-plugins 中的所有 gst-* 包从 1.24.11 重命名为 1.26.10\n"
+"  bentoo overlay rename media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # 跨所有类别的全局搜索\n"
+"  bentoo overlay rename *:python-*:3.11.0 => 3.12.0\n"
+"\n"
+"  # 使用 --dry-run 预览更改\n"
+"  bentoo overlay rename --dry-run media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # 跳过确认提示\n"
+"  bentoo overlay rename -y media-plugins:gst-*:1.24.11 => 1.26.10\n"
+"\n"
+"  # 即使存在特定版本的文件，也强制重命名\n"
+"  bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Show what would be renamed without making changes"
+msgstr "显示哪些内容将被重命名，但不实际进行更改"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Skip confirmation prompts (except for global search without --force)"
+msgstr "跳过确认提示（不带 --force 的全局搜索除外）"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Skip Manifest updates after renaming"
+msgstr "重命名后跳过 Manifest 更新"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Proceed despite version-specific files or conflicts"
+msgstr "即使存在特定版本的文件或冲突，仍要继续"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Work with the staged trees the build gates prepare outside the overlay"
+msgstr "使用构建门禁在 overlay 之外准备的暂存树进行操作"
+
+#: cmd/bentoo/overlay_staged.go
+msgid ""
+"Inspect and clean up the staged trees that 'bentoo overlay autoupdate --apply'\n"
+"and 'bentoo overlay validate --depth' prepare under\n"
+"~/.config/bentoo/autoupdate/staging.\n"
+"\n"
+"A staged tree is a scratch copy of the overlay, built outside it so that a gate\n"
+"can compile a candidate without ever writing to the published tree. Nothing\n"
+"under this command reads, writes or removes anything in the overlay itself."
+msgstr ""
+"检查并清理由“bentoo overlay autoupdate --apply”\n"
+"以及“bentoo overlay validate --depth”在以下位置准备：\n"
+"~/.config/bentoo/autoupdate/staging.\n"
+"\n"
+"暂存树是 overlay 的临时副本，构建在 overlay 之外，以便门禁\n"
+"可以在不写入已发布树的情况下编译候选版本。此命令下没有任何内容\n"
+"在此命令下，不会读取、写入或删除 overlay 本身中的任何内容。"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Remove the staged trees no longer worth keeping, and say what stays"
+msgstr "移除不再值得保留的暂存树，并说明哪些内容将保留"
+
+#: cmd/bentoo/overlay_staged.go
+msgid ""
+"Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by\n"
+"'bentoo overlay autoupdate --apply' and 'bentoo overlay validate --depth', and\n"
+"report every tree left behind with the reason it stays.\n"
+"\n"
+"The published overlay is never read, written or removed from. A staging root\n"
+"that sits inside the overlay is refused before a single entry is listed, by the\n"
+"same check that refuses to stage there in the first place.\n"
+"\n"
+"A tree is removed only when this command RECOGNISES it as one of its own — it\n"
+"carries the marker every staged tree is built with — and the record beside it\n"
+"shows no deciding gate FAILED. Two kinds of tree are therefore kept and named\n"
+"in the plan: the one whose gate FAILED, which is the artifact you still need\n"
+"next to the retained build log, and the one with no readable record, whose\n"
+"outcome is unknown. Keeping an unknown tree costs disk; removing it costs the\n"
+"artifact somebody was about to open.\n"
+"\n"
+"Nothing is removed before the whole plan has been printed and you have agreed\n"
+"to it. Every removal and every keep is listed — never a sample.\n"
+"\n"
+"There is no lock on the staging root, and that absence is deliberate: the\n"
+"retention rule is expressed by the PATH, and a central index of proofs would put\n"
+"back the one file every worker writes through. So a sweep running beside another\n"
+"run can REMOVE a tree that run is using — an 'overlay autoupdate --apply' or an\n"
+"'overlay validate --depth' happening at the same time. Nothing detects it. The\n"
+"cost is bounded to that one run, which fails on a working directory that no\n"
+"longer exists and is classified as an environment failure, so nothing wrong is\n"
+"published; but it is a run you have to start again. Sweep when nothing else is\n"
+"building.\n"
+"\n"
+"Exit codes:\n"
+"  0  the staging root was read and the plan reported\n"
+"  1  the run could not be honoured: the config, the overlay path or the\n"
+"     staging root could not be resolved, or the staging root could not be read\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay staged clean         # print the plan, then ask\n"
+"  bentoo overlay staged clean --yes   # remove the planned trees unattended"
+msgstr ""
+"通过以下命令删除 ~/.config/bentoo/autoupdate/staging 下留存的暂存副本：\n"
+"'bentoo overlay autoupdate --apply' 和 'bentoo overlay validate --depth'，以及\n"
+"报告每棵被保留的树及其保留原因。\n"
+"\n"
+"已发布的 overlay 绝不会被读取、写入或从中移除。一个暂存根目录\n"
+"位于 overlay 内的暂存根目录会在列出任何条目之前被拒绝，这是由\n"
+"正是这一检查一开始就拒绝在那里进行暂存。\n"
+"\n"
+"只有当此命令将某个树识别为其“自己”的树时，该树才会被移除 — 它\n"
+"带有每个已暂存树构建时所附的标记 — 并且其旁边的记录\n"
+"未显示任何决定性关卡FAILED。因此，在计划中保留并命名了两种树：\n"
+"在计划中：一种是其门控 FAILED 的树，这是您仍然需要留存的构件，\n"
+"在保留的构建日志旁边，以及没有可读记录的那个，其\n"
+"结果未知。保留未知树会占用磁盘空间；删除它则会失去\n"
+"有人正要打开的工件。\n"
+"\n"
+"在整个计划打印出来且您同意之前，不会有任何内容被移除。\n"
+"同意。每次移除和每次保留都会列出——绝不会是示例。\n"
+"\n"
+"暂存根目录上没有锁，这是有意为之：\n"
+"保留规则由 PATH 表示，而一个中央的证明索引会将\n"
+"将每个工作进程写入的那个文件还原回去。因此，一个清理操作在另一个操作并行运行时\n"
+"运行可以 REMOVE 该运行正在使用的树 — 一个“overlay autoupdate --apply”或一个\n"
+"同时发生的“overlay validate --depth”。没有任何东西能检测到它。\n"
+"成本仅限于那一次运行，该运行会在不再存在的工作目录上失败，\n"
+"不再存在，并被归类为环境故障，因此不会发布任何错误内容；\n"
+"已发布；但这是一次您必须重新开始的运行。在没有其他内容正在构建时进行清理\n"
+"正在构建。\n"
+"\n"
+"退出代码：\n"
+"  0  已读取暂存根目录并报告了计划\n"
+"  1  无法执行该运行：配置文件、覆盖路径或\n"
+"     无法解析暂存根目录，或者无法读取暂存根目录\n"
+"\n"
+"示例：\n"
+"  bentoo overlay staged clean         # 打印计划，然后询问\n"
+"  bentoo overlay staged clean --yes   # 无人干预地移除计划的树"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Remove the planned trees without asking (default: print the plan and ask)"
+msgstr "不经询问即删除计划的树（默认：打印计划并询问）"
+
+#: cmd/bentoo/overlay_status.go
+msgid "Show the status of changes in the overlay"
+msgstr "显示 overlay 中的更改状态"
+
+#: cmd/bentoo/overlay_status.go
+msgid "Display the current status of changes in the overlay repository, grouped by category/package."
+msgstr "显示 overlay 仓库中更改的当前状态，按类别/软件包分组。"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Find packages whose best version lacks a required Python, Lua or Ruby implementation"
+msgstr "查找最佳版本缺少所需 Python、Lua 或 Ruby 实现的软件包"
+
+#: cmd/bentoo/overlay_targets.go
+msgid ""
+"Read the implementations the overlay requires from .autoupdate/targets.toml and\n"
+"report every package whose best visible version, across the overlay and ::gentoo,\n"
+"does not offer them. On a system whose PYTHON_SINGLE_TARGET holds only a required\n"
+"implementation, such a version fails emerge with \"REQUIRED_USE flag constraints are\n"
+"unsatisfied\".\n"
+"\n"
+"A row naming an overlay version means ::gentoo overtook the overlay's mirror: the\n"
+"version Portage picks is ::gentoo's, and the fix is to bump the mirror. Masks are not\n"
+"read, and only versions keyworded amd64 or ~amd64 count as visible.\n"
+"\n"
+"Exit status: 0 when no package has a gap, 1 when one has or the sweep failed."
+msgstr ""
+"从 .autoupdate/targets.toml 读取 Overlay 所需的实现，并\n"
+"报告每个在 overlay 和 ::gentoo 中最佳可见版本\n"
+"不提供这些实现。在 PYTHON_SINGLE_TARGET 仅包含一个必需实现的系统上，\n"
+"实现，这样的版本在 emerge 时会失败，并显示“REQUIRED_USE 标志约束\n"
+"unsatisfied\".\n"
+"\n"
+"如果某一行列出了 overlay 版本，则表示 ::gentoo 已超越该 overlay 的镜像：\n"
+"Portage 选择的版本是 ::gentoo 的，解决方法是更新镜像。Mask 不会\n"
+"不会被读取，只有带有 amd64 或 ~amd64 关键字的版本才被视为可见。\n"
+"\n"
+"退出状态：当没有软件包存在缺口时为 0，当有软件包存在缺口或扫描失败时为 1。"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Sweep every package of ::gentoo, not only the packages the overlay carries"
+msgstr "扫描 ::gentoo 的每个软件包，而不仅仅是 overlay 包含的软件包"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Write the findings to stdout as one JSON array"
+msgstr "将结果以单个 JSON 数组的形式写入 stdout"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Check that each ebuild still matches the source it points at"
+msgstr "检查每个 ebuild 是否仍与其指向的源代码匹配"
+
+#: cmd/bentoo/overlay_validate.go
+msgid ""
+"Read the build options the upstream archive declares, read the ones the\n"
+"ebuild passes, and report the difference. At the default depth nothing is built,\n"
+"downloaded or changed: the archive is the one already on disk, put there by the\n"
+"manifest step.\n"
+"\n"
+"--depth above \"options\" is different. Each candidate is staged outside the\n"
+"overlay and upstream's own build phases are run against it, so that depth\n"
+"compiles code and downloads any distfile this host does not already hold — over\n"
+"every package the selector matches. The published overlay is still never written\n"
+"to.\n"
+"\n"
+"This catches the failure class where a version bump moves the version and the\n"
+"ebuild stays put. In media-plugins/gst-plugins-qt6 upstream removed the aalib\n"
+"and libcaca options at 1.29; the ebuild kept passing -Daalib= and -Dlibcaca=,\n"
+"and every existing check stayed green.\n"
+"\n"
+"An outcome names its own reach. A gate that could not run says SKIPPED and why\n"
+"— a missing distfile, a build system that is not Meson, an unreadable ebuild —\n"
+"so a clean report never means \"we did not look\".\n"
+"\n"
+"pkgcheck findings for each package are reported beside the option findings when\n"
+"pkgcheck is installed. They never affect the exit code: the overlay carries\n"
+"pre-existing QA findings unrelated to any bump, and letting them decide the\n"
+"status would fail the whole tree and reduce this command to noise.\n"
+"\n"
+"--depth selects how far up the ladder to go: none, options, patches,\n"
+"configure, compile or install, each rung including every rung before it. It\n"
+"defaults to options, which is this command as it has always been — read-only,\n"
+"unprivileged, building nothing. Above options the gates need a tree to build\n"
+"in, and that tree is a staged copy under ~/.config/bentoo/autoupdate/staging:\n"
+"the published overlay is never built in and never written to.\n"
+"\n"
+"Exit codes:\n"
+"  0  every gate outcome was PASS or SKIPPED\n"
+"  1  at least one finding of severity error, from any gate but pkgcheck's,\n"
+"     or an invocation that could not be honoured (a --depth that does not\n"
+"     name a rung of the ladder)\n"
+"  2  the selector names something the overlay does not hold\n"
+"\n"
+"Examples:\n"
+"  bentoo overlay validate                                  # the whole overlay\n"
+"  bentoo overlay validate media-plugins                    # one category\n"
+"  bentoo overlay validate media-plugins/gst-plugins-qt6    # every version of one package\n"
+"  bentoo overlay validate --json | jq .                    # one JSON document\n"
+"  bentoo overlay validate --distdir /var/cache/distfiles   # read from a named distdir\n"
+"  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6"
+msgstr ""
+"读取上游归档声明的构建选项，读取\n"
+"ebuild 传递的选项，并报告差异。在默认深度下，不会构建任何内容，\n"
+"下载或更改：归档文件是已存在于磁盘上的文件，由\n"
+"清单步骤。\n"
+"\n"
+"“options”上方的 --depth 不同。每个候选版本都会在\n"
+"overlay 之外，并对其运行上游自身的构建阶段，因此该深度\n"
+"编译代码并下载此主机尚未持有的任何 distfile — 针对\n"
+"选择器匹配的每个包。已发布的 overlay 仍然从未被写入\n"
+"to.\n"
+"\n"
+"这可以捕获以下类型的失败：版本升级导致版本变更，而\n"
+"ebuild 保持不变。在 media-plugins/gst-plugins-qt6 中，上游删除了 aalib\n"
+"在 1.29 版本中删除了 aalib 和 libcaca 选项；ebuild 一直在传递 -Daalib= 和 -Dlibcaca=，\n"
+"并且所有现有检查都保持为绿色。\n"
+"\n"
+"一个结果会指明其自身的覆盖范围。无法运行的关卡会显示 SKIPPED 以及原因\n"
+"— 缺少 distfile、不是 Meson 的构建系统、无法读取的 ebuild —\n"
+"因此，一份“无问题”的报告绝不意味着“我们没有检查”。\n"
+"\n"
+"当安装了 pkgcheck 时，每个软件包的 pkgcheck 发现结果会显示在选项发现结果旁边。\n"
+"pkgcheck 已安装。它们绝不会影响退出代码：overlay 包含\n"
+"与任何版本更新无关的先前存在的 QA 发现结果，并让它们决定\n"
+"状态将导致整个树失败，并将此命令降格为噪音。\n"
+"\n"
+"--depth 用于选择要向上追溯的层级：none、options、patches、\n"
+"configure、compile 或 install，每个级别都包含其前面的所有级别。它\n"
+"默认为 options，这正是此命令一贯的模式——只读，\n"
+"无权限，不进行任何构建。在 options 之上，这些“关卡”需要一个树来进行构建\n"
+"，而该树是位于 ~/.config/bentoo/autoupdate/staging 下的一个暂存副本：\n"
+"已发布的 overlay 绝不会被内置，也绝不会被写入。\n"
+"\n"
+"退出代码：\n"
+"  0  每个关卡的结果均为 PASS 或 SKIPPED\n"
+"  1  来自除 pkgcheck 之外的任何关卡，至少有一个严重性为“错误”的结果，\n"
+"     或者无法执行的调用（--depth 未指定\n"
+"     指定梯子的一个梯级）\n"
+"  2  选择器命名的内容并非 Overlay 所包含\n"
+"\n"
+"示例：\n"
+"  bentoo overlay validate                                  # 整个 overlay\n"
+"  bentoo overlay validate media-plugins                    # 一个类别\n"
+"  bentoo overlay validate media-plugins/gst-plugins-qt6    # 一个软件包的每个版本\n"
+"  bentoo overlay validate --json | jq .                    # 一个 JSON 文档\n"
+"  bentoo overlay validate --distdir /var/cache/distfiles   # 从指定的 distdir 读取\n"
+"  bentoo overlay validate --depth=configure media-plugins/gst-plugins-qt6"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Write the whole report to stdout as a single JSON document. It is the same document --export=<path>.json writes to a file, at stdout instead: schema and kind at the root, and this command's own model one level down under payload. A consumer that already reads an exported report reads this one, and jq '.kind' says which command wrote it"
+msgstr "将整个报告作为单个 JSON 文档写入 stdout。这是与 --export=<path>.json 写入文件的文档相同的文档，只是输出到标准输出：schema 和 kind 位于根级，而此命令自己的模型位于 payload 下的一级。已经读取导出报告的消费者会读取此报告，而 jq '.kind' 会指出是哪个命令写入了此报告。"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Read distfiles from this directory (never created, never written to)"
+msgstr "从该目录读取 distfile（从未创建，也从未写入）"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "Validate to this rung of the ladder — none, options, patches, configure, compile or install, each including every rung before it. Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in"
+msgstr "验证至此阶梯的这一级——none、options、patches、configure、compile 或 install，每一级都包含其前面的所有级。在“options”之上，关卡需要一个树来构建，而该树是一个分阶段的副本；已发布的 overlay 绝不会被构建在其中。"
+
+#: cmd/bentoo/root.go
+msgid "Bentoo Linux tools"
+msgstr "Bentoo Linux 工具"
+
+#: cmd/bentoo/root.go
+msgid "A collection of tools for managing Bentoo Linux overlay and packages."
+msgstr "用于管理 Bentoo Linux Overlay 和软件包的一系列工具。"
+
+#: cmd/bentoo/root.go
+msgid "Enable verbose output: diagnostics at the debug level and above. Without --verbose or --quiet the level comes from the BENTOO_LOG_LEVEL environment variable, which accepts debug, info, warn or error in any letter case and defaults to info; --verbose and --quiet both outrank it, and --quiet outranks --verbose"
+msgstr "启用详细输出：调试级别及以上级别的诊断信息。如果没有指定 --verbose 或 --quiet，则日志级别由环境变量 BENTOO_LOG_LEVEL 决定，该变量接受 debug、info、warn 或 error（不区分大小写），默认值为 info；--verbose 和 --quiet 的优先级都高于该环境变量，而 --quiet 的优先级又高于 --verbose。"
+
+#: cmd/bentoo/root.go
+msgid "Suppress non-error output"
+msgstr "抑制非错误输出"
+
+#: cmd/bentoo/root.go
+msgid "Disable colored output"
+msgstr "禁用彩色输出"
+
+#: cmd/bentoo/root.go
+msgid "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so"
+msgstr "本次运行要处理的 overlay，而非 overlay.path。如果没有此选项，在已配置的 overlay（工作树、第二个克隆）的另一个签出中启动的运行将使用该签出，并会说明这一点。"
+
+#: cmd/bentoo/root.go
+msgid "Renderer for this run: auto, plain, inline or fullscreen. auto is the default and picks inline on a terminal and plain off one; it never picks fullscreen, because taking over somebody's screen is not something configuring nothing should do. plain contains no escape sequence at all and is what a pipe, a log file and a CI job want. This flag outranks the BENTOO_UI environment variable, which outranks the ui.mode configuration key. On the overlay autoupdate command alone, the deprecated opt-out flag documented there outranks all three; no other command has one. A value outside that set is rejected and NOTHING runs"
+msgstr "此运行的渲染器：auto、plain、inline 或 fullscreen。auto 是默认值，在终端上选择 inline，在非终端上选择 plain；它绝不会选择 fullscreen，因为接管他人的屏幕不是“未配置任何内容”时应该做的事情。plain 完全不包含转义序列，是管道、日志文件和 CI 作业所需要的。此标志的优先级高于 BENTOO_UI 环境变量，而 BENTOO_UI 环境变量的优先级又高于 ui.mode 配置键。仅在 overlay autoupdate 命令中，其中记录的已弃用“选择退出”标志的优先级高于上述三者；其他命令均不具备此标志。该集合之外的值将被拒绝，且 NOTHING 将不会运行"
+
+#: cmd/bentoo/root.go
+msgid "List every package found up to date in the version-check section instead of reporting them as a count alone. It changes WHAT IS SHOWN and nothing else — the same packages are scanned, validated and acted upon either way. The count is the default because the up-to-date packages are the bulk of a 269-package overlay, and listing them is most of the reason a check that found four updates used to print 348 lines"
+msgstr "在版本检查部分列出所有已发现的最新软件包，而不是仅报告其数量。它只改变 WHAT IS SHOWN，除此之外别无其他——无论哪种方式，都会对相同的软件包进行扫描、验证和处理。计数是默认值，因为最新软件包在包含 269 个软件包的 Overlay 中占了绝大部分，列出这些软件包是导致发现四个更新的检查过去会打印 348 行的主要原因。"
+
+#: cmd/bentoo/root.go
+msgid "Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had"
+msgstr "还将报告写入此路径。格式取决于扩展名：.md 表示 Markdown，.json 表示 JSON，其他任何扩展名均表示纯文本。该文件始终包含完整的报告——每个软件包、每个原因都完整无缺，没有任何缩略——无论 --all 和 --ui 对终端有何要求，因为报告正是为了在终端关闭后仍可查阅而保存。如果报告了无法写入的路径，运行仍会向终端输出，并仍会以本应具有的状态退出。"
+
+#: cmd/bentoo/root.go
+msgid "Manage the Bentoo overlay repository"
+msgstr "管理 Bentoo Overlay 仓库"
+
+#: cmd/bentoo/root.go
+msgid "Commands for managing the Bentoo overlay repository including adding files, checking status, committing changes, and pushing to remote."
+msgstr "用于管理 Bentoo Overlay 仓库的命令，包括添加文件、检查状态、提交更改以及推送到远程。"
+
+#: cmd/bentoo/snapshot.go
+msgid "Manage btrfs snapshots (btrbk + systemd)"
+msgstr "管理 btrfs 快照（btrbk + systemd）"
+
+#: cmd/bentoo/snapshot.go
+msgid ""
+"Manage btrfs snapshots declaratively via a single snapshot.toml.\n"
+"\n"
+"bentoolkit orchestrates mature tools — btrbk for snapshot/send-receive and systemd\n"
+"for scheduling — rather than reimplementing them.\n"
+"\n"
+"Examples:\n"
+"  bentoo snapshot apply               Render native config + install the timer\n"
+"  bentoo snapshot run                 Run the snapshot pipeline now\n"
+"  bentoo snapshot list                List local snapshots per subvolume\n"
+"  bentoo snapshot status              Show last run, timer state, and free space"
+msgstr ""
+"通过单个 snapshot.toml 以声明式方式管理 btrfs 快照。\n"
+"\n"
+"bentoolkit 协调成熟的工具——btrbk 用于快照/发送-接收，以及 systemd\n"
+"用于调度 — 而不是重新实现它们。\n"
+"\n"
+"示例：\n"
+"  bentoo snapshot apply               渲染原生配置 + 安装定时器\n"
+"  bentoo snapshot run                 立即运行快照管道\n"
+"  bentoo snapshot list                列出每个子卷的本地快照\n"
+"  bentoo snapshot status              显示上次运行、定时器状态和可用空间"
+
+#: cmd/bentoo/snapshot.go
+msgid "path to snapshot.toml (default: /etc/bentoo, then XDG)"
+msgstr "snapshot.toml 的路径（默认：/etc/bentoo，然后是 XDG）"
+
+#: cmd/bentoo/snapshot_apply.go
+msgid "Render native config and install the systemd timer"
+msgstr "渲染原生配置文件并安装 systemd 定时器"
+
+#: cmd/bentoo/snapshot_apply.go
+msgid ""
+"Load and validate snapshot.toml, render the btrbk.conf, and install +\n"
+"enable the systemd service/timer. Idempotent: re-running reconciles the units."
+msgstr ""
+"加载并验证 snapshot.toml，渲染 btrbk.conf，并安装 +\n"
+"启用 systemd 服务/定时器。幂等性：再次运行将对单元进行协调。"
+
+#: cmd/bentoo/snapshot_apply.go
+msgid "print the configs and systemd units that would be written, without writing them"
+msgstr "打印将要写入的配置文件和systemd单元，但不实际写入它们"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "Install or remove the opt-in Portage emerge snapshot hook (snapper only)"
+msgstr "安装或移除选择加入的 Portage emerge 快照钩子（仅限 snapper）"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid ""
+"Install or remove an OPT-IN Portage hook that snapshots before and after emerge.\n"
+"\n"
+"--install writes /etc/portage/bashrc.d/50-bentoo-snapshot.sh and wires it into\n"
+"/etc/portage/bashrc via a managed block. The hook uses snapper's native pre/post\n"
+"pair per emerged package (pre_pkg_setup / post_pkg_postinst), so it requires\n"
+"engine.driver = \"snapper\". snapper errors never break an emerge.\n"
+"\n"
+"--uninstall cleanly removes the script and the managed block, preserving any\n"
+"user content in /etc/portage/bashrc.\n"
+"\n"
+"The hook is never installed implicitly: 'bentoo snapshot apply' does not touch\n"
+"/etc/portage — only this explicit command does."
+msgstr ""
+"安装或移除一个 OPT-IN Portage 钩子，该钩子会在 emerge 之前和之后创建快照。\n"
+"\n"
+"--install 会写入 /etc/portage/bashrc.d/50-bentoo-snapshot.sh 并将其关联到\n"
+"通过托管块写入 /etc/portage/bashrc。该钩子使用 snapper 的原生 pre/post\n"
+"每个已emerge的软件包一对（pre_pkg_setup / post_pkg_postinst），因此它需要\n"
+"engine.driver = \"snapper\"。snapper 错误绝不会导致 emerge 中断。\n"
+"\n"
+"--uninstall 会彻底移除脚本和托管块，同时保留任何\n"
+"/etc/portage/bashrc 中的用户内容。\n"
+"\n"
+"钩子绝不会被隐式安装：“bentoo snapshot apply”不会触及\n"
+"/etc/portage — 只有这条显式命令才会这样做。"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "install the Portage emerge hook (pre/post snapper snapshots)"
+msgstr "安装 Portage emerge 钩子（pre/post snapper 快照）"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "remove the Portage emerge hook"
+msgstr "移除 Portage emerge 钩子"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "List local snapshots per subvolume"
+msgstr "按子卷列出本地快照"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "also list remote snapshots (btrbk targets, restic repository)"
+msgstr "也列出远程快照（btrbk 目标、restic 仓库）"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "Apply the retention policy on demand"
+msgstr "按需应用保留策略"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid ""
+"Apply the [engine.retention] policy now, without taking a snapshot: the\n"
+"engine-native prune for every subvolume (btrbk clean / snapper cleanup timeline)\n"
+"plus the GFS retention sweep on every archive ship's rclone remote.\n"
+"\n"
+"--ship NAME scopes the prune to that one destination: the engine-local prune is\n"
+"skipped and only the named ship's remote is pruned. Recorded incremental parents\n"
+"are never deleted — each is the base of its subvolume's next incremental send."
+msgstr ""
+"立即应用 [engine.retention] 策略，不拍摄快照：\n"
+"对每个子卷执行引擎原生清理（btrbk clean / snapper cleanup timeline）\n"
+"外加对每个存档“ship”的 rclone 远程执行 GFS 保留清理。\n"
+"\n"
+"--ship NAME 将清理范围限定于该一个目标：引擎本地清理将被\n"
+"被跳过，仅对指定船的远程进行清理。已记录的增量父级\n"
+"永远不会被删除 — 每个都是其子卷下一次增量发送的基准。"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "print the prune actions that would run, without executing them"
+msgstr "打印将要运行的清理操作，但不执行它们"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "scope the prune to the named [[ship]] destination"
+msgstr "将清理范围限定为指定的 [[ship]] 目标"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "Restore a snapshot from a ship target into a path"
+msgstr "将快照从“ship”目标还原到路径"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid ""
+"Restore snapshot <id> into --target using the named --ship entry.\n"
+"\n"
+"The ship's type selects the path: an \"archive\" ship replays the object chain\n"
+"(rclone cat | decompress | btrfs receive); a \"restic\" ship runs restic restore.\n"
+"Restore is DESTRUCTIVE — it writes a subvolume into the target — so it prompts for\n"
+"confirmation unless --yes is given.\n"
+"\n"
+"Each subvolume's objects live under their own remote prefix, so a restore has to\n"
+"know which subvolume it reads from. With exactly one subvolume configured that is\n"
+"implied and --subvolume is unnecessary; with several, name one — the restore\n"
+"refuses to guess rather than read another subvolume's backups."
+msgstr ""
+"使用指定的 --ship 条目将快照 <id> 恢复到 --target。\n"
+"\n"
+"ship 的类型决定了路径：“archive”类型的 ship 会重放对象链\n"
+"(rclone cat | decompress | btrfs receive)；“restic”类型的 ship 运行 restic restore。\n"
+"还原操作具有破坏性 — 它会将一个子卷写入目标 — 因此系统会提示您\n"
+"除非指定了 --yes，否则会要求确认。\n"
+"\n"
+"每个子卷的对象都位于各自的远程前缀下，因此还原操作必须\n"
+"知道它从哪个子卷读取。如果只配置了一个子卷，那么\n"
+"隐含，因此无需使用 --subvolume；如果有多个子卷，请指定一个 — 还原操作\n"
+"拒绝猜测，而不是读取另一个子卷的备份。"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "path to restore the snapshot into (required)"
+msgstr "要将快照恢复到的路径（必填）"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "name of the [[ship]] entry that drives the restore (required)"
+msgstr "驱动还原的 [[ship]] 条目的名称（必填）"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "which configured subvolume to restore from (needed only when several are configured)"
+msgstr "要从中恢复的已配置子卷（仅在配置了多个子卷时需要）"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "skip the destructive-restore confirmation prompt"
+msgstr "跳过“破坏性还原”确认提示"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "print the destructive restore actions without performing them"
+msgstr "打印破坏性还原操作，但不执行这些操作"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "Roll the system back to a snapshot (snapper only)"
+msgstr "将系统回滚到快照（仅限 snapper）"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid ""
+"Roll the system back to snapshot <id> via snapper rollback.\n"
+"\n"
+"Rollback is snapper-specific: it requires engine.driver = \"snapper\" and is refused\n"
+"for any other engine. It is DESTRUCTIVE — snapper makes a read-write copy of\n"
+"snapshot <id> the new default subvolume, so the system boots into it on the next\n"
+"reboot — and prompts for confirmation unless --yes is given."
+msgstr ""
+"通过 snapper rollback 将系统回滚到快照 <id>。\n"
+"\n"
+"回滚是 snapper 特有的：它需要 engine.driver = \"snapper\"，并且会被拒绝\n"
+"对于任何其他引擎。这是破坏性的 — snapper 会创建\n"
+"将快照 <id> 设为新的默认子卷，因此系统在下次重启时将引导至该子卷\n"
+"reboot — 除非指定 --yes，否则会提示确认。"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "skip the destructive-rollback confirmation prompt"
+msgstr "跳过“DESTRUCTIVE ROLLBACK”确认提示"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "print the destructive rollback action without performing it"
+msgstr "打印破坏性回滚操作，但不执行该操作"
+
+#: cmd/bentoo/snapshot_run.go
+msgid "Run the snapshot pipeline now"
+msgstr "立即运行快照管道"
+
+#: cmd/bentoo/snapshot_run.go
+msgid ""
+"Execute the engine → prune → ship pipeline for every configured subvolume,\n"
+"persist a RunResult for 'status', and exit non-zero if any stage failed. This is\n"
+"the command driven by the systemd timer."
+msgstr ""
+"对每个已配置的子卷执行 engine → prune → ship 管道，\n"
+"为“status”保留一个 RunResult，如果任何阶段失败，则以非零值退出。这是\n"
+"由 systemd 定时器驱动的命令。"
+
+#: cmd/bentoo/snapshot_run.go
+msgid "print the pipeline that would run, without executing it"
+msgstr "打印将要运行的管道，但不执行它"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "Show the last run, timer state, and free space"
+msgstr "显示上次运行、定时器状态和可用空间"
+
+#: cmd/bentoo/version.go
+msgid "Print version information"
+msgstr "打印版本信息"
+
+#: cmd/bentoo/version.go
+msgid "Print the version, commit hash, and build date of bentoo."
+msgstr "打印 bentoo 的版本、提交哈希和构建日期。"

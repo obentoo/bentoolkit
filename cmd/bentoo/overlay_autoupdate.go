@@ -33,6 +33,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
 	"github.com/obentoo/bentoolkit/internal/common/github"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
@@ -297,8 +298,8 @@ func newAutoupdateCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "autoupdate [package]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Check and apply ebuild version updates",
-		Long: `Automatically check upstream sources for new versions and apply updates.
+		Short:       i18n.N("Check and apply ebuild version updates"),
+		Long: i18n.N(`Automatically check upstream sources for new versions and apply updates.
 
 Distfiles (--apply, --revive and --clean, which all regenerate a Manifest):
 
@@ -349,7 +350,7 @@ Examples:
                                                   disabled_by existed, sparing the two deliberate pins. Run it
                                                   once per registry; without --yes it prints the plan and stops
   bentoo overlay autoupdate --apply all --distdir /srv/distfiles   Download into a specific directory
-  bentoo overlay autoupdate --apply all --distfiles-cache ""       Never reuse a cached distfile`,
+  bentoo overlay autoupdate --apply all --distfiles-cache ""       Never reuse a cached distfile`),
 		// A method value bound to this tree's own options, not a closure:
 		// contextcheck follows a closure's call into runAutoupdate and would ask
 		// every newRootCmd caller for a context it has no use for.
@@ -357,11 +358,11 @@ Examples:
 			return runAutoupdate(cmd, args, o, d)
 		},
 	}
-	cmd.Flags().BoolVar(&o.check, "check", false, "Check for updates")
-	cmd.Flags().BoolVar(&o.list, "list", false, "List pending updates")
-	cmd.Flags().StringVar(&o.apply, "apply", "", "Apply update for specified package, or \"all\" for every pending update")
-	cmd.Flags().BoolVar(&o.force, "force", false, "Ignore cache when checking")
-	cmd.Flags().BoolVar(&o.compile, "compile", false, "Removed: builds run only in --check --llm, unprivileged, up to --depth=install; kept so that typing it says what to run instead")
+	cmd.Flags().BoolVar(&o.check, "check", false, i18n.N("Check for updates"))
+	cmd.Flags().BoolVar(&o.list, "list", false, i18n.N("List pending updates"))
+	cmd.Flags().StringVar(&o.apply, "apply", "", i18n.N("Apply update for specified package, or \"all\" for every pending update"))
+	cmd.Flags().BoolVar(&o.force, "force", false, i18n.N("Ignore cache when checking"))
+	cmd.Flags().BoolVar(&o.compile, "compile", false, i18n.N("Removed: builds run only in --check --llm, unprivileged, up to --depth=install; kept so that typing it says what to run instead"))
 	_ = cmd.Flags().MarkHidden("compile")
 	// --depth is read OFF THE COMMAND rather than bound to a package variable
 	// (newValidateCmd's convention): the value is a rung of a ladder that has to
@@ -371,21 +372,21 @@ Examples:
 	// It is what gives the depth override a surface at all. Without it the resolver would
 	// be answering a question nobody could ask, and `--compile` would be the only
 	// way to reach a build gate.
-	cmd.Flags().String("depth", "", "With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time")
-	cmd.Flags().DurationVar(&o.buildBudget, "build-budget", 0, "Cap how deep a bump is built: a package whose average build on this host (qlop) is above this duration, or which has no build history, is taken no further than configure. Overrides autoupdate.build.budget for this run; give the same budget to --apply, or set the key, so the apply asks for the depth the check proved")
-	cmd.Flags().StringVar(&o.buildBackend, "build-backend", "", "Where the build gates of --check --llm, --revive and --repair run: host (the default), vm or container. Overrides autoupdate.build.backend for this run; a backend that is not available stops the run before any work, it never falls back to host")
-	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, "SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way")
-	cmd.Flags().BoolVarP(&o.clean, "clean", "c", false, "With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone")
-	cmd.Flags().IntVar(&o.concurrency, "concurrency", autoupdate.DefaultConcurrency, "max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured")
-	cmd.Flags().IntVar(&o.timeout, "timeout", 0, "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)")
-	cmd.Flags().StringVar(&o.only, "only", "", "Restrict --check to packages of this type: \"bin\" or \"source\"")
-	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, "List disabled (orphaned) packages whose upstream is newer than ::gentoo")
-	cmd.Flags().StringSliceVar(&o.urgent, "urgent", nil, "With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary")
-	cmd.Flags().IntVar(&o.cooldown, "cooldown", 0, "With --apply or --revive: switch the overlay's cooldown ON before anything is promoted, so every promoted version is masked for this many days (bare --cooldown = 7, range 1-3650) while the previous version stays installable. It writes the managed bentoo-cooldown block into the overlay's profiles/package.mask — PUBLISHED, so the mask reaches every host that syncs the overlay — and it is persistent: later runs mask without the flag. On an overlay already under cooldown it rewrites days= only")
+	cmd.Flags().String("depth", "", i18n.N("With --apply: validate every bump to this rung of the ladder instead of the one its class and the config select — none, options, patches, configure, compile or install, each including every rung before it. This REPLACES classification, the package tier and configuration, in either direction, and it is the only input allowed to ask for less. Anything above \"options\" starts a build and therefore applies one package at a time"))
+	cmd.Flags().DurationVar(&o.buildBudget, "build-budget", 0, i18n.N("Cap how deep a bump is built: a package whose average build on this host (qlop) is above this duration, or which has no build history, is taken no further than configure. Overrides autoupdate.build.budget for this run; give the same budget to --apply, or set the key, so the apply asks for the depth the check proved"))
+	cmd.Flags().StringVar(&o.buildBackend, "build-backend", "", i18n.N("Where the build gates of --check --llm, --revive and --repair run: host (the default), vm or container. Overrides autoupdate.build.backend for this run; a backend that is not available stops the run before any work, it never falls back to host"))
+	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, i18n.N("SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way"))
+	cmd.Flags().BoolVarP(&o.clean, "clean", "c", false, i18n.N("With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone"))
+	cmd.Flags().IntVar(&o.concurrency, "concurrency", autoupdate.DefaultConcurrency, i18n.N("max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured"))
+	cmd.Flags().IntVar(&o.timeout, "timeout", 0, i18n.N("per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)"))
+	cmd.Flags().StringVar(&o.only, "only", "", i18n.N("Restrict --check to packages of this type: \"bin\" or \"source\""))
+	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, i18n.N("List disabled (orphaned) packages whose upstream is newer than ::gentoo"))
+	cmd.Flags().StringSliceVar(&o.urgent, "urgent", nil, i18n.N("With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary"))
+	cmd.Flags().IntVar(&o.cooldown, "cooldown", 0, i18n.N("With --apply or --revive: switch the overlay's cooldown ON before anything is promoted, so every promoted version is masked for this many days (bare --cooldown = 7, range 1-3650) while the previous version stays installable. It writes the managed bentoo-cooldown block into the overlay's profiles/package.mask — PUBLISHED, so the mask reaches every host that syncs the overlay — and it is persistent: later runs mask without the flag. On an overlay already under cooldown it rewrites days= only"))
 	cmd.Flags().Lookup("cooldown").NoOptDefVal = strconv.Itoa(cooldown.DefaultDays)
-	cmd.Flags().StringVar(&o.revive, "revive", "", "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan")
-	cmd.Flags().StringVar(&o.repair, "repair", "", "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH")
-	cmd.Flags().BoolVar(&o.revivable, "revivable", false, "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass")
+	cmd.Flags().StringVar(&o.revive, "revive", "", i18n.N("Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan"))
+	cmd.Flags().StringVar(&o.repair, "repair", "", i18n.N("Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH"))
+	cmd.Flags().BoolVar(&o.revivable, "revivable", false, i18n.N("With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass"))
 	// --no-tui is DEPRECATED IN ITS HELP TEXT ONLY. Its behaviour is
 	// untouched: it still disables the live TUI, it still answers to NO_COLOR
 	// and BENTOO_NO_TUI, and it still outranks --ui and BENTOO_UI, because it is
@@ -398,12 +399,12 @@ Examples:
 	// change in what the flag does. A hidden flag is also the opposite of what a
 	// deprecation is for: the operator who still passes it is exactly the reader
 	// who needs to be told what replaced it.
-	cmd.Flags().BoolVar(&o.noTUI, "no-tui", false, "DEPRECATED, use --ui=plain instead. It is still honoured and its behaviour has not changed: it disables the live TUI and streams plain output, it is exactly --ui=plain, and it OUTRANKS both --ui and BENTOO_UI — so --no-tui --ui=fullscreen renders plain, because an opt-out a flag could override would not be an opt-out. The two environment variables it has always answered to, NO_COLOR and BENTOO_NO_TUI, are unchanged and mean the same thing as passing it")
-	cmd.Flags().BoolVar(&o.lint, "lint", false, "Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)")
+	cmd.Flags().BoolVar(&o.noTUI, "no-tui", false, i18n.N("DEPRECATED, use --ui=plain instead. It is still honoured and its behaviour has not changed: it disables the live TUI and streams plain output, it is exactly --ui=plain, and it OUTRANKS both --ui and BENTOO_UI — so --no-tui --ui=fullscreen renders plain, because an opt-out a flag could override would not be an opt-out. The two environment variables it has always answered to, NO_COLOR and BENTOO_NO_TUI, are unchanged and mean the same thing as passing it"))
+	cmd.Flags().BoolVar(&o.lint, "lint", false, i18n.N("Check packages.toml against the record model: layout (# END marker, comments field last, no floating comments), field set (unknown or retired keys, redundant enabled = true, canonical field order) and semantics (invalid or ambiguous entries, undeclared release lines, commit tracking with no base source)"))
 	// No back-quoted words in this usage string: pflag reads the first one as the
 	// flag's value placeholder and strips the quotes, which would render a bool
 	// flag as "--fix binary".
-	cmd.Flags().BoolVar(&o.fix, "fix", false, "With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human")
+	cmd.Flags().BoolVar(&o.fix, "fix", false, i18n.N("With --lint: repair in place the violations that have a mechanical fix (the retired binary key, a redundant enabled = true, the canonical field order). The unified diff is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended repair requires --yes. Findings no repair can guess (an entry tracking commits with no base source) are reported and left to a human"))
 	// The presentation flags. All three change what this run SHOWS and none of
 	// them changes what it does: the same packages are scanned, validated and
 	// acted upon, and the exit status is the same, whichever way they are set.
@@ -416,9 +417,9 @@ Examples:
 
 	// No back-quoted words in either usage string below — see the --fix note
 	// above: pflag reads the first one as the flag's value placeholder.
-	cmd.Flags().BoolVar(&o.markAutoDisabled, "mark-auto-disabled", false, "ONE-SHOT MIGRATION: stamp disabled_by = \"auto\" on every entry the checker disabled before that key existed, so the reconciliation is free to re-enable them when their ebuild returns. Without it those entries state no origin, which now reads as a deliberate decision and freezes them for good. An entry that is held, already stamped, still enabled, or named in --except is left alone, and a second run changes nothing. The full plan is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended migration requires --yes")
-	cmd.Flags().StringSliceVar(&o.except, "except", nil, "With --mark-auto-disabled: the entries the migration must NOT stamp, comma-separated or repeated. These are the pins a maintainer disabled ON PURPOSE — for this overlay, dev-libs/icu-compat and media-libs/libjxl-compat — and stamping one hands it back to the reconciliation that re-enabled and bumped it before. An entry naming no record in packages.toml ABORTS the run: a typo protects nothing and would otherwise pass in silence")
-	cmd.Flags().BoolVarP(&o.yes, "yes", "y", false, "Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, a --mark-auto-disabled migration, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix or --mark-auto-disabled it rewrites packages.toml, in an overlay that auto-commits and pushes")
+	cmd.Flags().BoolVar(&o.markAutoDisabled, "mark-auto-disabled", false, i18n.N("ONE-SHOT MIGRATION: stamp disabled_by = \"auto\" on every entry the checker disabled before that key existed, so the reconciliation is free to re-enable them when their ebuild returns. Without it those entries state no origin, which now reads as a deliberate decision and freezes them for good. An entry that is held, already stamped, still enabled, or named in --except is left alone, and a second run changes nothing. The full plan is printed BEFORE the confirmation, and packages.toml is PUBLISHED — this overlay auto-commits and pushes, so the write reaches origin — which is why an unattended migration requires --yes"))
+	cmd.Flags().StringSliceVar(&o.except, "except", nil, i18n.N("With --mark-auto-disabled: the entries the migration must NOT stamp, comma-separated or repeated. These are the pins a maintainer disabled ON PURPOSE — for this overlay, dev-libs/icu-compat and media-libs/libjxl-compat — and stamping one hands it back to the reconciliation that re-enabled and bumped it before. An entry naming no record in packages.toml ABORTS the run: a typo protects nothing and would otherwise pass in silence"))
+	cmd.Flags().BoolVarP(&o.yes, "yes", "y", false, i18n.N("Approve without prompting whatever this run would otherwise stop and ask about: the post-check registry reconciliation, a --lint --fix repair, a --mark-auto-disabled migration, and a standalone --clean sweep. REQUIRED for any non-interactive write — without it, a piped or scripted run prints what it would do and changes nothing. Note the reach: with --clean this DELETES ebuilds, and with --fix or --mark-auto-disabled it rewrites packages.toml, in an overlay that auto-commits and pushes"))
 
 	// The two distfile directories. The names are byte-identical to `overlay
 	// manifest`'s and so is what they mean; the DEFAULT of --distdir is not,
@@ -435,10 +436,10 @@ Examples:
 	// pflag reads the first one as the flag's value placeholder and strips the
 	// quotes, so "portageq distdir" in back-quotes would render this as
 	// "--distdir portageq distdir".
-	cmd.Flags().StringVar(&o.distdir, "distdir", "", "Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)")
-	cmd.Flags().StringVar(&o.distfilesCache, "distfiles-cache", distfiles.DefaultCache, "Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)")
-	cmd.Flags().BoolVar(&o.noFetchCache, "no-fetch-cache", false, "Fetch each URL per record instead of sharing one response across records that declare it")
-	cmd.Flags().BoolVar(&o.llm, "llm", false, "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent")
+	cmd.Flags().StringVar(&o.distdir, "distdir", "", i18n.N("Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)"))
+	cmd.Flags().StringVar(&o.distfilesCache, "distfiles-cache", distfiles.DefaultCache, i18n.N("Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)"))
+	cmd.Flags().BoolVar(&o.noFetchCache, "no-fetch-cache", false, i18n.N("Fetch each URL per record instead of sharing one response across records that declare it"))
+	cmd.Flags().BoolVar(&o.llm, "llm", false, i18n.N("With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"))
 	return cmd
 }
 

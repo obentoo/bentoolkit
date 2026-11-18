@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/spf13/cobra"
@@ -46,8 +47,8 @@ func newRootCmdWith(d *deps) *cobra.Command {
 
 	root := &cobra.Command{
 		Use:   "bentoo",
-		Short: "Bentoo Linux tools",
-		Long:  `A collection of tools for managing Bentoo Linux overlay and packages.`,
+		Short: i18n.N("Bentoo Linux tools"),
+		Long:  i18n.N(`A collection of tools for managing Bentoo Linux overlay and packages.`),
 		// Set on the root and so covering all 30 commands, unlike the
 		// SilenceUsage below: cobra consults the ROOT's copy of both fields
 		// whichever command ran. This one stops cobra printing the error it
@@ -130,10 +131,10 @@ func newRootCmdWith(d *deps) *cobra.Command {
 	}
 
 	// Global flags
-	root.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, "Enable verbose output: diagnostics at the debug level and above. Without --verbose or --quiet the level comes from the BENTOO_LOG_LEVEL environment variable, which accepts debug, info, warn or error in any letter case and defaults to info; --verbose and --quiet both outrank it, and --quiet outranks --verbose")
-	root.PersistentFlags().BoolVarP(&quietFlag, "quiet", "q", false, "Suppress non-error output")
-	root.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, "Disable colored output")
-	root.PersistentFlags().String(overlayFlagName, "", "Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so")
+	root.PersistentFlags().BoolVarP(&verboseFlag, "verbose", "v", false, i18n.N("Enable verbose output: diagnostics at the debug level and above. Without --verbose or --quiet the level comes from the BENTOO_LOG_LEVEL environment variable, which accepts debug, info, warn or error in any letter case and defaults to info; --verbose and --quiet both outrank it, and --quiet outranks --verbose"))
+	root.PersistentFlags().BoolVarP(&quietFlag, "quiet", "q", false, i18n.N("Suppress non-error output"))
+	root.PersistentFlags().BoolVar(&noColorFlag, "no-color", false, i18n.N("Disable colored output"))
+	root.PersistentFlags().String(overlayFlagName, "", i18n.N("Overlay to work on for this run, instead of overlay.path. Without it, a run started inside another checkout of the configured overlay (a worktree, a second clone) uses that checkout and says so"))
 
 	// These three bind straight to their package variables, unlike --verbose,
 	// --quiet and --no-color above. Two reasons: pflag writes the default
@@ -152,9 +153,9 @@ func newRootCmdWith(d *deps) *cobra.Command {
 	// --no-tui deliberately stays on autoupdate. It is deprecated, it outranks
 	// --ui, and giving every command a second opt-out competing with --ui would
 	// be the opposite of retiring it (Unchanged Behavior 2).
-	root.PersistentFlags().StringVar(&autoupdateUI, "ui", "", "Renderer for this run: auto, plain, inline or fullscreen. auto is the default and picks inline on a terminal and plain off one; it never picks fullscreen, because taking over somebody's screen is not something configuring nothing should do. plain contains no escape sequence at all and is what a pipe, a log file and a CI job want. This flag outranks the BENTOO_UI environment variable, which outranks the ui.mode configuration key. On the overlay autoupdate command alone, the deprecated opt-out flag documented there outranks all three; no other command has one. A value outside that set is rejected and NOTHING runs")
-	root.PersistentFlags().BoolVar(&autoupdateAll, "all", false, "List every package found up to date in the version-check section instead of reporting them as a count alone. It changes WHAT IS SHOWN and nothing else — the same packages are scanned, validated and acted upon either way. The count is the default because the up-to-date packages are the bulk of a 269-package overlay, and listing them is most of the reason a check that found four updates used to print 348 lines")
-	root.PersistentFlags().StringVar(&autoupdateExport, "export", "", "Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had")
+	root.PersistentFlags().StringVar(&autoupdateUI, "ui", "", i18n.N("Renderer for this run: auto, plain, inline or fullscreen. auto is the default and picks inline on a terminal and plain off one; it never picks fullscreen, because taking over somebody's screen is not something configuring nothing should do. plain contains no escape sequence at all and is what a pipe, a log file and a CI job want. This flag outranks the BENTOO_UI environment variable, which outranks the ui.mode configuration key. On the overlay autoupdate command alone, the deprecated opt-out flag documented there outranks all three; no other command has one. A value outside that set is rejected and NOTHING runs"))
+	root.PersistentFlags().BoolVar(&autoupdateAll, "all", false, i18n.N("List every package found up to date in the version-check section instead of reporting them as a count alone. It changes WHAT IS SHOWN and nothing else — the same packages are scanned, validated and acted upon either way. The count is the default because the up-to-date packages are the bulk of a 269-package overlay, and listing them is most of the reason a check that found four updates used to print 348 lines"))
+	root.PersistentFlags().StringVar(&autoupdateExport, "export", "", i18n.N("Also write the report to this path. The format follows the extension: .md is Markdown, .json is JSON, anything else is plain text. The file always carries the COMPLETE report — every package, every reason in full, nothing shortened — whatever --all and --ui asked of the terminal, because a report is saved precisely for when the terminal is gone. A path that cannot be written is reported, and the run still renders to the terminal and still exits with the status it would have had"))
 
 	root.AddCommand(newDistfileCmd())
 	root.AddCommand(newNoticeCmd())
@@ -171,8 +172,8 @@ func newRootCmdWith(d *deps) *cobra.Command {
 func newOverlayCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "overlay",
-		Short: "Manage the Bentoo overlay repository",
-		Long:  `Commands for managing the Bentoo overlay repository including adding files, checking status, committing changes, and pushing to remote.`,
+		Short: i18n.N("Manage the Bentoo overlay repository"),
+		Long:  i18n.N(`Commands for managing the Bentoo overlay repository including adding files, checking status, committing changes, and pushing to remote.`),
 	}
 
 	cmd.AddCommand(

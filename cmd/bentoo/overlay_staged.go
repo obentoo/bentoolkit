@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -66,14 +67,14 @@ var stagedCleanYes bool
 func newStagedCmd(d *deps) *cobra.Command {
 	staged := &cobra.Command{
 		Use:   "staged",
-		Short: "Work with the staged trees the build gates prepare outside the overlay",
-		Long: `Inspect and clean up the staged trees that 'bentoo overlay autoupdate --apply'
+		Short: i18n.N("Work with the staged trees the build gates prepare outside the overlay"),
+		Long: i18n.N(`Inspect and clean up the staged trees that 'bentoo overlay autoupdate --apply'
 and 'bentoo overlay validate --depth' prepare under
 ~/.config/bentoo/autoupdate/staging.
 
 A staged tree is a scratch copy of the overlay, built outside it so that a gate
 can compile a candidate without ever writing to the published tree. Nothing
-under this command reads, writes or removes anything in the overlay itself.`,
+under this command reads, writes or removes anything in the overlay itself.`),
 	}
 	staged.AddCommand(newStagedCleanCmd(d))
 	return staged
@@ -84,8 +85,8 @@ func newStagedCleanCmd(d *deps) *cobra.Command {
 	clean := &cobra.Command{
 		Use:         "clean",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Remove the staged trees no longer worth keeping, and say what stays",
-		Long: `Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by
+		Short:       i18n.N("Remove the staged trees no longer worth keeping, and say what stays"),
+		Long: i18n.N(`Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by
 'bentoo overlay autoupdate --apply' and 'bentoo overlay validate --depth', and
 report every tree left behind with the reason it stays.
 
@@ -121,7 +122,7 @@ Exit codes:
 
 Examples:
   bentoo overlay staged clean         # print the plan, then ask
-  bentoo overlay staged clean --yes   # remove the planned trees unattended`,
+  bentoo overlay staged clean --yes   # remove the planned trees unattended`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStagedCleanCmd(cmd, args, d)
@@ -134,7 +135,7 @@ Examples:
 	// must do it AFTER the command it drives was built, which is what
 	// setStagedCleanYes does by never building one.
 	clean.Flags().BoolVar(&stagedCleanYes, "yes", false,
-		"Remove the planned trees without asking (default: print the plan and ask)")
+		i18n.N("Remove the planned trees without asking (default: print the plan and ask)"))
 	return clean
 }
 

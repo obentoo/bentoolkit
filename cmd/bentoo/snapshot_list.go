@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -20,13 +21,13 @@ func newSnapshotListCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "list",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "List local snapshots per subvolume",
+		Short:       i18n.N("List local snapshots per subvolume"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotList(cmd, args, d)
 		},
 	}
 	cmd.Flags().BoolVar(&snapshotListRemote, "remote", false,
-		"also list remote snapshots (btrbk targets, restic repository)")
+		i18n.N("also list remote snapshots (btrbk targets, restic repository)"))
 	return cmd
 }
 
