@@ -2096,6 +2096,18 @@ msgstr ""
 "\n"
 "Declarações de candidatos — uma por eixo não declarado, para um mantenedor aceitar ou editar. Nada aqui foi gravado em nenhum arquivo.\n"
 
+#: cmd/bentoo/overlay_compare_report.go
+msgid "content check could not read both ebuilds"
+msgstr "a verificação de conteúdo não conseguiu ler os dois ebuilds"
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "versions differ; content check needs equal ones"
+msgstr "as versões diferem; a verificação de conteúdo exige versões iguais"
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "Nothing is deleted here: act on the recommendation to remove with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+msgstr "Nada é removido aqui: aja sobre a recomendação de remoção com 'bentoo overlay prune', que decide pelo conteúdo — todas as versões que as duas árvores compartilham, mais toda a árvore files/ — e nunca apenas pelo veredicto."
+
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Inspect and drive the autoupdate cooldown"
 msgstr "Inspecionar e controlar o cooldown do autoupdate"
@@ -4203,7 +4215,7 @@ msgstr[1] "%d pacotes, e cada um deles contém uma leitura."
 #: internal/common/report/compare_run.go
 msgid "%d package(s), of which %d carries a reading."
 msgid_plural "%d package(s), of which %d carry a reading."
-msgstr[0] "%d pacote, do qual %d contém uma leitura."
+msgstr[0] "%d pacotes, dos quais %d contém uma leitura."
 msgstr[1] "%d pacotes, dos quais %d têm uma leitura."
 
 #: internal/common/report/compare_run.go
