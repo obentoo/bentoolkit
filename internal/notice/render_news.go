@@ -135,24 +135,30 @@ type wrapToken struct {
 // the character before it.
 const noLineStart = "、。，．：；！？）」』》〉】〕”’…・ー.,;:!?)]}\"'"
 
+// noLineEnd is the opening punctuation that must not end a line; it stays
+// with the character after it.
+const noLineEnd = "（「『《〈【〔“‘([{"
+
 // wrapTokens splits line into its words, and a word holding wide characters
 // further: a line may break before a wide character and between a wide
-// character and a narrow one, except before punctuation in noLineStart.
+// character and a narrow one, except before punctuation in noLineStart and
+// after punctuation in noLineEnd.
 func wrapTokens(line string) []wrapToken {
 	var toks []wrapToken
 	for word := range strings.FieldsSeq(line) {
 		start := len(toks)
-		lastWide := false
+		lastWide, prev := false, rune(0)
 		for _, r := range word {
 			wide := ansi.StringWidth(string(r)) > 1
-			breakBefore := len(toks) > start && (wide || lastWide) && !strings.ContainsRune(noLineStart, r)
+			breakBefore := len(toks) > start && (wide || lastWide) &&
+				!strings.ContainsRune(noLineStart, r) && !strings.ContainsRune(noLineEnd, prev)
 			if len(toks) == start || breakBefore {
 				toks = append(toks, wrapToken{space: len(toks) == start})
 			}
 			last := &toks[len(toks)-1]
 			last.text += string(r)
 			last.width += ansi.StringWidth(string(r))
-			lastWide = wide
+			lastWide, prev = wide, r
 		}
 	}
 	return toks

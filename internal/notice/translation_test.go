@@ -84,6 +84,16 @@ func TestWrapBody_BreaksCJKBetweenCharactersNotBeforeClosingPunctuation(t *testi
 	}
 }
 
+func TestWrapBody_OpeningPunctuationNeverEndsALine(t *testing.T) {
+	// Without the rule, the break falls between "（" and "blocker".
+	line := strings.Repeat("中", 34) + "（blocker）" + strings.Repeat("文", 30)
+	for _, l := range strings.Split(strings.TrimSuffix(wrapBody(line), "\n"), "\n") {
+		if strings.HasSuffix(l, "（") {
+			t.Errorf("line ends with opening punctuation: %q", l)
+		}
+	}
+}
+
 func TestWrapBody_MixedScriptKeepsTheSpacesItHad(t *testing.T) {
 	line := "请运行 emerge --ask dev-libs/foo 命令。" + strings.Repeat("这是一个很长的句子", 6)
 	got := strings.TrimSuffix(wrapBody(line), "\n")
