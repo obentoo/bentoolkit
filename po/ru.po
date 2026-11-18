@@ -2142,6 +2142,18 @@ msgstr ""
 "\n"
 "Декларации кандидатов — по одной на каждую необъявленную ось, чтобы сопровождающий мог их принять или отредактировать. Ничто из этого не было записано ни в какой файл.\n"
 
+#: cmd/bentoo/overlay_compare_report.go
+msgid "content check could not read both ebuilds"
+msgstr "проверка содержимого не смогла прочитать оба ebuild"
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "versions differ; content check needs equal ones"
+msgstr "версии различаются; проверке содержимого нужны одинаковые"
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "Nothing is deleted here: act on the recommendation to remove with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+msgstr "Здесь ничего не удаляется: рекомендацию удалить выполняйте через 'bentoo overlay prune', который решает по содержимому — по каждой общей для двух деревьев версии и по всему дереву files/ — и никогда только по вердикту."
+
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Inspect and drive the autoupdate cooldown"
 msgstr "Просмотр и управление cooldown автообновления"
@@ -4305,9 +4317,9 @@ msgstr[2] "%d пакетов, и каждый из них содержит по�
 #: internal/common/report/compare_run.go
 msgid "%d package(s), of which %d carries a reading."
 msgid_plural "%d package(s), of which %d carry a reading."
-msgstr[0] "%d пакет, из которых %d содержат показания."
-msgstr[1] "%d пакета, из которых %d содержат показания."
-msgstr[2] "%d пакетов, из которых %d содержат показания."
+msgstr[0] "Пакетов: %d, из них %d содержит показания."
+msgstr[1] "Пакетов: %d, из них %d содержат показания."
+msgstr[2] "Пакетов: %d, из них %d содержат показания."
 
 #: internal/common/report/compare_run.go
 msgid "No removal advice follows from either."

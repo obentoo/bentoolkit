@@ -884,7 +884,10 @@ func compareUnansweredSection(r CompareRun, opts SectionOptions) Section {
 	s.Notes = []string{opts.t(i18n.N("A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."))}
 	s.Rows.Headers = []string{opts.t(i18n.N("PACKAGE")), opts.t(i18n.N("LOCAL")), opts.t(i18n.N("REMOTE")), opts.t(i18n.N("WHY"))}
 	for _, u := range r.Unanswered {
-		s.Rows.Rows = append(s.Rows.Rows, Row{Cells: []string{u.Package, u.Local, u.Remote, u.Reason}})
+		// The reason is the adapter's closed vocabulary plus, for a failed
+		// lookup, the error's own text; only the fixed words have a catalog
+		// entry, so an error stays English, as errors do everywhere.
+		s.Rows.Rows = append(s.Rows.Rows, Row{Cells: []string{u.Package, u.Local, u.Remote, opts.t(u.Reason)}})
 	}
 	return s
 }
@@ -1429,8 +1432,26 @@ func compareSummarySection(r CompareRun, opts SectionOptions) Section {
 		// The slice is copied rather than handed over. Sections builds fresh
 		// blocks on every call, and a renderer that appended to what it was
 		// given would otherwise write back into the payload it is rendering.
-		Notes: append([]string(nil), r.Notes...),
+		//
+		// Each note goes through opts.t: a fixed sentence the adapter marked
+		// with i18n.N is shown in the reader's language, while a composed one
+		// (counts, an error's own text) has no catalog entry and comes back as
+		// written. Under SectionOptions.English, t is the identity, so an
+		// --export stays English.
+		Notes: compareTranslateAll(r.Notes, opts),
 	}
+}
+
+// compareTranslateAll returns a fresh slice holding each message in the
+// language opts selects. It never aliases its input, for the reason the
+// summary block copies its notes: a renderer that appended to what it was
+// given would write back into the payload.
+func compareTranslateAll(msgs []string, opts SectionOptions) []string {
+	out := make([]string, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, opts.t(m))
+	}
+	return out
 }
 
 // compareFindingsLead introduces a block's package findings once, so a reader
