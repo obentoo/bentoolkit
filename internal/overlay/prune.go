@@ -474,7 +474,8 @@ type PrunePlan struct {
 	// takes has at least one file listed under it.
 	Files []string
 
-	// RegistryKeys are the registry entries that would be deleted with the
+	// RegistryKeys are the registry entries that would be disabled (deleted,
+	// under --delete-registry) with the
 	// package, exactly as the caller supplied them — every one of them, since 90
 	// of 321 atoms carry more than one entry and leaving one behind orphans it.
 	// This package never looks them up: internal/overlay does not know what TOML

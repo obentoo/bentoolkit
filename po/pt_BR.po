@@ -2457,7 +2457,13 @@ msgid ""
 "\n"
 "Without --apply nothing is removed, modified or disabled: the plan is printed\n"
 "and the run ends. The plan lists, per package, every file that would go and\n"
-"every .autoupdate/packages.toml entry that would go with it.\n"
+"every .autoupdate/packages.toml entry that would be disabled with it.\n"
+"\n"
+"A removed package's registry entries are DISABLED, not deleted: each gets\n"
+"enabled = false and disabled_by = \"auto\", the same pair --check writes when an\n"
+"ebuild vanishes, so the verified probe survives and is re-enabled on its own if\n"
+"the package ever returns. --delete-registry deletes them instead, and\n"
+"--keep-registry leaves the file untouched.\n"
 "\n"
 "Packages carrying an UNDECLARED difference — one the byte comparison found and\n"
 "nobody wrote down — are printed under their own heading and left alone unless\n"
@@ -2491,7 +2497,8 @@ msgid ""
 "  bentoo overlay prune app-editors/zed          # plan one package\n"
 "  bentoo overlay prune --include-patched        # consider the diverging ones too\n"
 "  bentoo overlay prune --apply                  # carry the plan out\n"
-"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry"
+"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry as is\n"
+"  bentoo overlay prune --apply --delete-registry  # remove the files and their registry entries"
 msgstr ""
 "Planejar a remoção de pacotes do overlay ::gentoo que já são fornecidos, e com\n"
 "--apply execute esse plano.\n"
@@ -2504,7 +2511,13 @@ msgstr ""
 "\n"
 "Sem --apply, nada é removido, modificado ou desativado: o plano é impresso\n"
 "e a execução termina. O plano lista, por pacote, todos os arquivos que seriam removidos e\n"
-"cada entrada .autoupdate/packages.toml que seria removida junto com ele.\n"
+"cada entrada .autoupdate/packages.toml que seria desativada junto com ele.\n"
+"\n"
+"As entradas de registro de um pacote removido são DESATIVADAS, não excluídas:\n"
+"cada uma recebe enabled = false e disabled_by = \"auto\", o mesmo par que o --check\n"
+"grava quando um ebuild some, então a sonda verificada sobrevive e é reativada\n"
+"sozinha se o pacote voltar. --delete-registry as exclui, e --keep-registry\n"
+"não toca no arquivo.\n"
 "\n"
 "Pacotes com uma diferença UNDECLARED — uma que a comparação de bytes encontrou e\n"
 "ninguém registrou — são impressas sob seu próprio título e deixadas intocadas, a menos que\n"
@@ -2538,7 +2551,8 @@ msgstr ""
 "  bentoo overlay prune app-editors/zed          # planejar um pacote\n"
 "  bentoo overlay prune --include-patched        # considerar também os divergentes\n"
 "  bentoo overlay prune --apply                  # executar o plano\n"
-"  bentoo overlay prune --apply --keep-registry  # remover os arquivos, manter o registro"
+"  bentoo overlay prune --apply --keep-registry  # remover os arquivos, manter o registro como está\n"
+"  bentoo overlay prune --apply --delete-registry  # remover os arquivos e suas entradas de registro"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Carry out the plan (default: plan only, remove nothing)"
@@ -2551,6 +2565,10 @@ msgstr "Remover também os pacotes que apresentam uma diferença NÃO DECLARADA,
 #: cmd/bentoo/overlay_prune.go
 msgid "Leave .autoupdate/packages.toml untouched"
 msgstr "Deixar .autoupdate/packages.toml intocado"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Delete the removed packages' .autoupdate/packages.toml entries instead of disabling them"
+msgstr "Excluir as entradas .autoupdate/packages.toml dos pacotes removidos em vez de desativá-las"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Skip the identical batch's confirmation (never the diverging one)"
@@ -2745,6 +2763,16 @@ msgstr[0] "  Excluídas as entradas .autoupdate/packages.toml de %d pacote remov
 msgstr[1] "  Excluídas as entradas de .autoupdate/packages.toml de %d pacotes removidos.\n"
 
 #: cmd/bentoo/overlay_prune.go
+msgid "  The package directories are gone and the registry still lists them as enabled; the next --check disables them on its own."
+msgstr "  Os diretórios dos pacotes foram removidos e o registro ainda os lista como ativos; o próximo --check os desativa sozinho."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n"
+msgid_plural "  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n"
+msgstr[0] "  Desativadas as entradas .autoupdate/packages.toml de %d pacote removido (enabled = false, disabled_by = \"auto\").\n"
+msgstr[1] "  Desativadas as entradas .autoupdate/packages.toml de %d pacotes removidos (enabled = false, disabled_by = \"auto\").\n"
+
+#: cmd/bentoo/overlay_prune.go
 msgid "Identical to ::gentoo — our copy holds nothing of ours"
 msgstr "Idêntico a ::gentoo — nossa cópia não contém nada nosso"
 
@@ -2785,6 +2813,10 @@ msgstr[1] "      registry: %d entradas mantidas por --keep-registry: %s\n"
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry entries (%d):\n"
 msgstr "      entradas do registro (%d):\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      registry entries to disable (%d):\n"
+msgstr "      entradas de registro a desativar (%d):\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Refused — no flag on this command removes these (%d):\n"

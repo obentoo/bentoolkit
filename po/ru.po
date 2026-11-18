@@ -2508,7 +2508,13 @@ msgid ""
 "\n"
 "Without --apply nothing is removed, modified or disabled: the plan is printed\n"
 "and the run ends. The plan lists, per package, every file that would go and\n"
-"every .autoupdate/packages.toml entry that would go with it.\n"
+"every .autoupdate/packages.toml entry that would be disabled with it.\n"
+"\n"
+"A removed package's registry entries are DISABLED, not deleted: each gets\n"
+"enabled = false and disabled_by = \"auto\", the same pair --check writes when an\n"
+"ebuild vanishes, so the verified probe survives and is re-enabled on its own if\n"
+"the package ever returns. --delete-registry deletes them instead, and\n"
+"--keep-registry leaves the file untouched.\n"
 "\n"
 "Packages carrying an UNDECLARED difference — one the byte comparison found and\n"
 "nobody wrote down — are printed under their own heading and left alone unless\n"
@@ -2542,7 +2548,8 @@ msgid ""
 "  bentoo overlay prune app-editors/zed          # plan one package\n"
 "  bentoo overlay prune --include-patched        # consider the diverging ones too\n"
 "  bentoo overlay prune --apply                  # carry the plan out\n"
-"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry"
+"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry as is\n"
+"  bentoo overlay prune --apply --delete-registry  # remove the files and their registry entries"
 msgstr ""
 "Запланировать удаление пакетов из оверлея, которые уже поставляются в ::gentoo, и с помощью\n"
 "--apply выполняет этот план.\n"
@@ -2555,7 +2562,13 @@ msgstr ""
 "\n"
 "Без флага --apply ничего не удаляется, не изменяется и не отключается: план выводится на экран\n"
 "и выполнение завершается. В плане для каждого пакета перечислены все файлы, которые будут удалены, и\n"
-"каждую запись в .autoupdate/packages.toml, которая будет удалена вместе с ним.\n"
+"каждую запись в .autoupdate/packages.toml, которая будет отключена вместе с ним.\n"
+"\n"
+"Записи реестра удалённого пакета ОТКЛЮЧАЮТСЯ, а не удаляются: каждая получает\n"
+"enabled = false и disabled_by = \"auto\" — ту же пару, что пишет --check, когда\n"
+"ebuild исчезает, поэтому проверенный источник сохраняется и сам включается\n"
+"снова, если пакет вернётся. --delete-registry удаляет их, а --keep-registry\n"
+"не трогает файл.\n"
 "\n"
 "Пакеты, содержащие НЕОБЪЯВЛЕННОЕ различие — то, которое было обнаружено при побайтовом сравнении и\n"
 "которое никто не задокументировал — выводятся под отдельным заголовком и остаются без изменений, если только\n"
@@ -2589,7 +2602,8 @@ msgstr ""
 "  bentoo overlay prune app-editors/zed          # спланировать удаление одного пакета\n"
 "  bentoo overlay prune --include-patched        # учитывать также отличающиеся пакеты\n"
 "  bentoo overlay prune --apply                  # выполнить план\n"
-"  bentoo overlay prune --apply --keep-registry  # удалить файлы, сохранить реестр"
+"  bentoo overlay prune --apply --keep-registry  # удалить файлы, оставить реестр как есть\n"
+"  bentoo overlay prune --apply --delete-registry  # удалить файлы и их записи в реестре"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Carry out the plan (default: plan only, remove nothing)"
@@ -2602,6 +2616,10 @@ msgstr "Также удалите пакеты с НЕОБЪЯВЛЕННЫМ о�
 #: cmd/bentoo/overlay_prune.go
 msgid "Leave .autoupdate/packages.toml untouched"
 msgstr "Оставить файл .autoupdate/packages.toml без изменений"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Delete the removed packages' .autoupdate/packages.toml entries instead of disabling them"
+msgstr "Удалить записи удалённых пакетов в .autoupdate/packages.toml вместо их отключения"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Skip the identical batch's confirmation (never the diverging one)"
@@ -2816,6 +2834,17 @@ msgstr[1] "  Удалены записи в .autoupdate/packages.toml для %d 
 msgstr[2] "  Удалены записи в .autoupdate/packages.toml для %d удалённых пакетов.\n"
 
 #: cmd/bentoo/overlay_prune.go
+msgid "  The package directories are gone and the registry still lists them as enabled; the next --check disables them on its own."
+msgstr "  Каталоги пакетов удалены, а реестр всё ещё считает их включёнными; следующий --check отключит их сам."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n"
+msgid_plural "  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n"
+msgstr[0] "  Отключены записи .autoupdate/packages.toml для %d удалённого пакета (enabled = false, disabled_by = \"auto\").\n"
+msgstr[1] "  Отключены записи .autoupdate/packages.toml для %d удалённых пакетов (enabled = false, disabled_by = \"auto\").\n"
+msgstr[2] "  Отключены записи .autoupdate/packages.toml для %d удалённых пакетов (enabled = false, disabled_by = \"auto\").\n"
+
+#: cmd/bentoo/overlay_prune.go
 msgid "Identical to ::gentoo — our copy holds nothing of ours"
 msgstr "Идентично ::gentoo — в нашей копии нет ничего нашего"
 
@@ -2857,6 +2886,10 @@ msgstr[2] "      registry: %d записей сохранены с помощь�
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry entries (%d):\n"
 msgstr "      записи реестра (%d):\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      registry entries to disable (%d):\n"
+msgstr "      записи реестра к отключению (%d):\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Refused — no flag on this command removes these (%d):\n"

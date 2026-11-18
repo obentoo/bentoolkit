@@ -371,6 +371,7 @@ a record of the decision.
 | `--apply` | Carry out the plan | false (plan only) |
 | `--include-patched` | Also remove undeclared divergence, discarding that work | false |
 | `--keep-registry` | Leave `.autoupdate/packages.toml` untouched | false |
+| `--delete-registry` | Delete the removed packages' registry entries instead of disabling them | false |
 | `--yes` | Skip the identical batch's confirmation | false |
 
 The provider flags (`--clone`, `--cache-dir`, `--no-cache`, `--timeout`,
@@ -384,10 +385,15 @@ session with no terminal is refused there outright, `--yes` or not: that flag
 exists so a scripted run can proceed unattended, and discarding the only copy of
 something is not a decision a script may take on its own.
 
-A removal deletes the whole package directory and then every
+A removal deletes the whole package directory and then **disables** every
 `.autoupdate/packages.toml` entry of that atom — all of them, since 90 of the
-registry's 321 atoms carry more than one, and a half-deleted atom keeps updating
-a package that is gone. The registry edit runs **after** the removals and only
+registry's 321 atoms carry more than one, and a half-disabled atom keeps updating
+a package that is gone. Each entry gets `enabled = false` and
+`disabled_by = "auto"`, the pair `--check` writes when an ebuild vanishes: the
+overlay's rule is that a removed package's record is never deleted, because it
+is the probe somebody already verified, and `"auto"` lets the reconciliation
+re-enable it on its own if the package comes back. `--delete-registry` deletes
+the entries instead; `--keep-registry` leaves the file untouched. The registry edit runs **after** the removals and only
 for the packages whose directory actually went, so the file never claims a
 removal that did not happen. One failed removal does not stop the rest; the run
 reports it and exits non-zero.

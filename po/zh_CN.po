@@ -2406,7 +2406,13 @@ msgid ""
 "\n"
 "Without --apply nothing is removed, modified or disabled: the plan is printed\n"
 "and the run ends. The plan lists, per package, every file that would go and\n"
-"every .autoupdate/packages.toml entry that would go with it.\n"
+"every .autoupdate/packages.toml entry that would be disabled with it.\n"
+"\n"
+"A removed package's registry entries are DISABLED, not deleted: each gets\n"
+"enabled = false and disabled_by = \"auto\", the same pair --check writes when an\n"
+"ebuild vanishes, so the verified probe survives and is re-enabled on its own if\n"
+"the package ever returns. --delete-registry deletes them instead, and\n"
+"--keep-registry leaves the file untouched.\n"
 "\n"
 "Packages carrying an UNDECLARED difference — one the byte comparison found and\n"
 "nobody wrote down — are printed under their own heading and left alone unless\n"
@@ -2440,7 +2446,8 @@ msgid ""
 "  bentoo overlay prune app-editors/zed          # plan one package\n"
 "  bentoo overlay prune --include-patched        # consider the diverging ones too\n"
 "  bentoo overlay prune --apply                  # carry the plan out\n"
-"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry"
+"  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry as is\n"
+"  bentoo overlay prune --apply --delete-registry  # remove the files and their registry entries"
 msgstr ""
 "规划移除 ::gentoo 已随附的overlay 软件包，并使用\n"
 "--apply 执行该计划。\n"
@@ -2453,7 +2460,12 @@ msgstr ""
 "\n"
 "如果不使用 --apply，则不会删除、修改或禁用任何内容：只会打印计划\n"
 "然后运行结束。该计划按软件包列出了每个将被删除的文件，以及\n"
-"以及将与之一起删除的每个 .autoupdate/packages.toml 条目。\n"
+"以及将与之一起禁用的每个 .autoupdate/packages.toml 条目。\n"
+"\n"
+"被移除软件包的注册表条目会被“禁用”，而不是删除：每个条目都会写入\n"
+"enabled = false 和 disabled_by = \"auto\"，与 ebuild 消失时 --check 写入的一对相同，\n"
+"因此已验证的探测得以保留，软件包回来时会自动重新启用。--delete-registry 会删除它们，\n"
+"--keep-registry 则不改动该文件。\n"
 "\n"
 "带有“UNDECLARED”差异的包（即字节比较发现的差异，且\n"
 "没有人记录下来 — 会在各自的标题下打印出来，并且保持原样，除非\n"
@@ -2487,7 +2499,8 @@ msgstr ""
 "  bentoo overlay prune app-editors/zed          # 规划一个软件包\n"
 "  bentoo overlay prune --include-patched        # 也考虑存在分歧的包\n"
 "  bentoo overlay prune --apply                  # 执行计划\n"
-"  bentoo overlay prune --apply --keep-registry  # 删除文件，保留注册表"
+"  bentoo overlay prune --apply --keep-registry  # 删除文件，注册表保持原样\n"
+"  bentoo overlay prune --apply --delete-registry  # 删除文件及其注册表条目"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Carry out the plan (default: plan only, remove nothing)"
@@ -2500,6 +2513,10 @@ msgstr "同时移除带有未声明差异的软件包，放弃该工作（无论
 #: cmd/bentoo/overlay_prune.go
 msgid "Leave .autoupdate/packages.toml untouched"
 msgstr "保留 .autoupdate/packages.toml 不变"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Delete the removed packages' .autoupdate/packages.toml entries instead of disabling them"
+msgstr "删除已移除软件包的 .autoupdate/packages.toml 条目，而不是禁用它们"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Skip the identical batch's confirmation (never the diverging one)"
@@ -2674,6 +2691,15 @@ msgid_plural "  Deleted the .autoupdate/packages.toml entries of %d removed pack
 msgstr[0] "  已删除 %d 个已移除软件包的 .autoupdate/packages.toml 条目。\n"
 
 #: cmd/bentoo/overlay_prune.go
+msgid "  The package directories are gone and the registry still lists them as enabled; the next --check disables them on its own."
+msgstr "  软件包目录已删除，但注册表仍将其列为启用；下一次 --check 会自动禁用它们。"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n"
+msgid_plural "  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n"
+msgstr[0] "  已禁用 %d 个已移除软件包的 .autoupdate/packages.toml 条目（enabled = false, disabled_by = \"auto\"）。\n"
+
+#: cmd/bentoo/overlay_prune.go
 msgid "Identical to ::gentoo — our copy holds nothing of ours"
 msgstr "与 ::gentoo 相同 — 我们的副本中没有任何属于我们的内容"
 
@@ -2713,6 +2739,10 @@ msgstr[0] "      registry: --keep-registry 保留了 %d 个条目：%s\n"
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry entries (%d):\n"
 msgstr "      注册表项 (%d)：\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      registry entries to disable (%d):\n"
+msgstr "      要禁用的注册表条目（%d）：\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Refused — no flag on this command removes these (%d):\n"

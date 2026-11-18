@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 )
@@ -295,7 +297,7 @@ func forbidPruneRemovalAttempt(t *testing.T, d *deps, why string) {
 func runPruneApply(t *testing.T, overlayPath string, d *deps) (out string, code int) {
 	t.Helper()
 	out = captureStdout(t, func() {
-		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, d))
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, d, pruneTestMode()))
 	})
 	return out, code
 }
@@ -532,6 +534,7 @@ func TestPruneApplyEditsRegistryOnlyForRemovedDirectories(t *testing.T) {
 	overlayPath, prov := pruneApplyRemovablePair(t)
 	withFakeGentoo(td, prov)
 	setOverlayPruneFlags(t, true, false, false, true)
+	setOverlayPruneDeleteRegistry(t, true)
 	setOverlayPruneInteractive(t, td, false)
 	forbidPruneConfirmation(t, td)
 	spy := spyOnPruneExecutor(t, td, map[string]error{
@@ -556,6 +559,59 @@ func TestPruneApplyEditsRegistryOnlyForRemovedDirectories(t *testing.T) {
 	}
 	if !strings.Contains(after, `"`+pruneUndeclaredAtom+`"`) {
 		t.Errorf("registry entry for %q was deleted although its removal FAILED; the directory is still there, and an untracked package is how it stops being updated:\n%s", pruneUndeclaredAtom, after)
+	}
+}
+
+// TestPruneApplyDisablesRegistryByDefault: with neither --keep-registry nor
+// --delete-registry, every entry of a removed package survives as a disabled
+// record (enabled = false, disabled_by = "auto") — the overlay's contract is
+// that a removed package's record is never deleted — and the entry of a
+// package whose removal FAILED is left exactly as it was.
+func TestPruneApplyDisablesRegistryByDefault(t *testing.T) {
+	td := defaultDeps()
+	overlayPath, prov := pruneApplyRemovablePair(t)
+	withFakeGentoo(td, prov)
+	setOverlayPruneFlags(t, true, false, false, true)
+	setOverlayPruneInteractive(t, td, false)
+	forbidPruneConfirmation(t, td)
+	spy := spyOnPruneExecutor(t, td, map[string]error{
+		pruneUndeclaredAtom: errors.New("removing the directory: permission denied"),
+	})
+
+	_, _ = runPruneApply(t, overlayPath, td)
+	if len(spy.atoms) != 2 {
+		t.Fatalf("the executor was asked to remove %v, want both packages", spy.atoms)
+	}
+
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		t.Fatalf("packages.toml no longer loads: %v", err)
+	}
+	for _, key := range []string{prunedAtom, prunedAtom + "@stable"} {
+		entry, ok := cfg.Packages[key]
+		if !ok {
+			t.Errorf("registry entry %s was deleted; the default disables it", key)
+			continue
+		}
+		if entry.IsEnabled() || entry.DisabledBy != registry.DisabledByAuto {
+			t.Errorf("registry entry %s: enabled=%v disabled_by=%q, want the disabled pair (false, %q)", key, entry.IsEnabled(), entry.DisabledBy, registry.DisabledByAuto)
+		}
+	}
+	if entry, ok := cfg.Packages[pruneUndeclaredAtom]; !ok || !entry.IsEnabled() {
+		t.Errorf("registry entry %s changed although its removal FAILED (present=%v)", pruneUndeclaredAtom, ok)
+	}
+}
+
+// TestPruneRegistryFlagsAreMutuallyExclusive: keeping the file and deleting
+// from it cannot both be asked for.
+func TestPruneRegistryFlagsAreMutuallyExclusive(t *testing.T) {
+	cmd := newPruneCmd(defaultDeps())
+	cmd.SetArgs([]string{"--keep-registry", "--delete-registry"})
+	cmd.SetOut(io.Discard)
+	cmd.SetErr(io.Discard)
+	err := cmd.Execute()
+	if err == nil || !strings.Contains(err.Error(), "keep-registry") {
+		t.Fatalf("Execute() = %v, want cobra's mutual-exclusion error naming both flags", err)
 	}
 }
 
