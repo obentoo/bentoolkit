@@ -141,7 +141,8 @@ cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
 What `bentoo` and `bentoo-tray` say to a person — help text, status lines,
 prompts, the terminal report, the tray's menu and notifications — is
 translated with GNU gettext into the languages listed in `po/LINGUAS` (es,
-pt_BR, ru, zh_CN); both binaries read the one `bentoolkit` catalog. What a
+pt_BR, ru, zh_CN): `bentoo` reads `bentoolkit.mo` and the tray the same
+messages as `bentoo-tray.mo` (see "Installing" below). What a
 program reads stays English on purpose, so scripts and log searches do not
 depend on the reader's language: logs, `--json`, `--porcelain`, `--export`
 files (`report.SectionOptions.English`), generated files, commit messages,
