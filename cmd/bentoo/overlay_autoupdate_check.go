@@ -723,10 +723,9 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 // terminal was told, so both formats ask for everyScannedPackage. A knob that
 // shortens an export is a knob an export can be shortened by, and a function
 // with no parameter cannot be handed one in a hurry.
-//
-// English is set for the same reason: the file is a shared artifact, read by
-// somebody whose language is not this terminal's, so it is never translated.
 func exportContent() report.SectionOptions {
+	// English: the file is a shared artifact, read by somebody whose language
+	// is not this terminal's, so it is never translated.
 	return report.SectionOptions{ShowAll: everyScannedPackage, SkipPlan: keepThePlan, English: true}
 }
 

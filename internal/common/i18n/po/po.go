@@ -138,6 +138,11 @@ func extractFile(fset *token.FileSet, path string) ([]string, error) {
 			bad = fmt.Errorf("%s: %s.%s of an empty string", fset.Position(call.Pos()), local, sel.Sel.Name)
 			return false
 		}
+		if strings.ContainsRune(s, '\r') {
+			// gettext refuses \r in a message; keep terminal control out of it.
+			bad = fmt.Errorf("%s: %s.%s of a string with \\r: write the \\r outside the message", fset.Position(call.Pos()), local, sel.Sel.Name)
+			return false
+		}
 		ids = append(ids, s)
 		return true
 	})
@@ -186,9 +191,6 @@ msgstr ""
 	for _, m := range msgs {
 		fmt.Fprint(bw, "\n")
 		fmt.Fprintf(bw, "#: %s\n", strings.Join(m.Refs, " "))
-		if len(Verbs(m.ID)) > 0 {
-			fmt.Fprint(bw, "#, c-format\n")
-		}
 		writeField(bw, "msgid", m.ID)
 		writeField(bw, "msgstr", "")
 	}
@@ -323,8 +325,7 @@ func appendQuoted(dst *string, q string) error {
 // a literal %%.
 var verbRE = regexp.MustCompile(`%[-+# 0]*(\[\d+\])?(\d+|\*)?(\.(\d+|\*))?[a-zA-Z%]`)
 
-// Verbs returns the fmt verbs of s in order, %% excluded. A translation must
-// carry the same sequence as its msgid, or fmt prints %!v(MISSING) garbage.
+// Verbs returns the fmt verbs of s in order, %% excluded.
 func Verbs(s string) []string {
 	var out []string
 	for _, v := range verbRE.FindAllString(s, -1) {
@@ -332,5 +333,35 @@ func Verbs(s string) []string {
 			out = append(out, v)
 		}
 	}
+	return out
+}
+
+// ArgVerbs returns the verbs of s keyed by the argument each one formats, as
+// sorted "index:verb" strings ("1:%d", "2:%s"), resolving explicit indexes
+// the way fmt does: %[n] selects argument n and the next implicit verb takes
+// n+1. A translation may reorder its verbs only with explicit indexes
+// ("%[2]s ... %[1]d"), since its arguments are passed in the msgid's order;
+// it is correct exactly when its ArgVerbs equal the msgid's.
+func ArgVerbs(s string) []string {
+	var out []string
+	n := 0
+	for _, m := range verbRE.FindAllStringSubmatch(s, -1) {
+		v := m[0]
+		if v == "%%" {
+			continue
+		}
+		if m[1] != "" {
+			i, err := strconv.Atoi(m[1][1 : len(m[1])-1])
+			if err != nil {
+				i = -1
+			}
+			n = i
+			v = strings.Replace(v, m[1], "", 1)
+		} else {
+			n++
+		}
+		out = append(out, strconv.Itoa(n)+":"+v)
+	}
+	slices.Sort(out)
 	return out
 }

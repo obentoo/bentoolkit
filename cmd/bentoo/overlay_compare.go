@@ -666,7 +666,7 @@ func printCompareProgress(done, total uint64) {
 	if total > 0 {
 		percent = (done * 100) / total
 	}
-	fmt.Printf(i18n.T("\r  Checking: [%3d%%] %d/%d"), percent, done, total)
+	fmt.Printf("\r  "+i18n.T("Checking: [%3d%%] %d/%d"), percent, done, total)
 }
 
 // compareFailure logs a failed comparison and returns exit status 1. An

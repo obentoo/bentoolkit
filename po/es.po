@@ -12,6 +12,22 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
 
+#: cmd/bentoo/apply_result_childrun.go
+msgid "%s output:"
+msgstr "%s salida:"
+
+#: cmd/bentoo/apply_result_childrun.go
+msgid "… %d earlier line(s) omitted"
+msgstr "… %d línea(s) anterior(es) omitida(s)"
+
+#: cmd/bentoo/apply_result_childrun.go
+msgid "(no output)"
+msgstr "(sin salida)"
+
+#: cmd/bentoo/apply_result_childrun.go
+msgid "Full log: %s"
+msgstr "Registro completo: %s"
+
 #: cmd/bentoo/completion.go
 msgid "Generate shell completion scripts"
 msgstr "Generar scripts de autocompletado para el shell"
@@ -95,7 +111,7 @@ msgstr ""
 "\n"
 "Un proveedor que restringe su descarga mediante un formulario de registro —o sin nada\n"
 "nada más que una solicitud POST que ninguna réplica puede reproducir — deja a Portage con un SRC_URI que no puede\n"
-"seguir. La overlay registra cómo se realiza esa descarga; estos comandos\n"
+"seguir. El overlay registra cómo se realiza esa descarga; estos comandos\n"
 "lo ejecutan."
 
 #: cmd/bentoo/distfile.go
@@ -186,6 +202,34 @@ msgstr "Directorio en el que se escribe el archivo (por defecto: el DISTDIR prop
 msgid "Version whose distfile to fetch (default: the version the overlay currently carries)"
 msgstr "Versión cuyo distfile se va a descargar (por defecto: la versión que contiene actualmente el overlay)"
 
+#: cmd/bentoo/distfile.go
+msgid "loading config: %v"
+msgstr "cargando configuración: %v"
+
+#: cmd/bentoo/distfile.go
+msgid "%s-%s: wrote %s"
+msgstr "%s-%s: escribió %s"
+
+#: cmd/bentoo/distfile.go
+msgid "serial read from $%s"
+msgstr "lectura en serie desde $%s"
+
+#: cmd/bentoo/distfile.go
+msgid "emerge can now install it without downloading anything."
+msgstr "emerge ahora puede instalarlo sin descargar nada."
+
+#: cmd/bentoo/distfile.go
+msgid "Nothing to do: emerge fetches this package's distfile from a mirror by itself."
+msgstr "Nada que hacer: emerge obtiene por sí mismo el archivo distfile de este paquete desde una réplica."
+
+#: cmd/bentoo/distfile.go
+msgid "The overlay tracks no record named %s, so there is no download recorded for it."
+msgstr "El overlay no registra ningún registro denominado %s, por lo que no hay ninguna descarga registrada para él."
+
+#: cmd/bentoo/distfile.go
+msgid "The serial is read at runtime and never stored in the overlay: export it, or add it to the secrets file named above."
+msgstr "El número de serie se lee en tiempo de ejecución y nunca se almacena en el overlay: expórtelo o añádalo al archivo de secretos mencionado anteriormente."
+
 #: cmd/bentoo/i18n.go
 msgid "Usage:"
 msgstr "Uso:"
@@ -227,7 +271,6 @@ msgid "Help about any command"
 msgstr "Ayuda sobre cualquier comando"
 
 #: cmd/bentoo/i18n.go
-#, c-format
 msgid ""
 "Help provides help for any command in the application.\n"
 "Simply type %s help [path to command] for full details."
@@ -236,7 +279,6 @@ msgstr ""
 "Simplemente escriba %s help [ruta al comando] para obtener información completa."
 
 #: cmd/bentoo/i18n.go
-#, c-format
 msgid "help for %s"
 msgstr "ayuda para %s"
 
@@ -313,6 +355,10 @@ msgid "Read the body from this file instead of opening an editor"
 msgstr "Leer el cuerpo de este archivo en lugar de abrir un editor"
 
 #: cmd/bentoo/notice.go
+msgid "Wrote %s"
+msgstr "Se ha escrito %s"
+
+#: cmd/bentoo/notice.go
 msgid "Revise a published notice in both repositories"
 msgstr "Revisar un aviso publicado en ambos repositorios"
 
@@ -347,6 +393,42 @@ msgstr "Reemplazar los paquetes afectados (repetible; misma sintaxis que notice 
 #: cmd/bentoo/notice.go
 msgid "Take the new text from this file instead of opening an editor"
 msgstr "Tomar el texto nuevo de este archivo en lugar de abrir un editor"
+
+#: cmd/bentoo/notice.go
+msgid "Revised %s"
+msgstr "Revisado %s"
+
+#: cmd/bentoo/notice.go
+msgid "warning: %s"
+msgstr "advertencia: %s"
+
+#: cmd/bentoo/notice.go
+msgid "notice.site_path is not configured; save this as %s in the site repository:"
+msgstr "notice.site_path no está configurado; guárdalo como %s en el repositorio del sitio:"
+
+#: cmd/bentoo/notice.go
+msgid "notice.site_path is not configured, so the site notice was not updated; revise %s in the site repository by hand."
+msgstr "notice.site_path no está configurado, por lo que no se ha actualizado el aviso del sitio; revise %s en el repositorio del sitio manualmente."
+
+#: cmd/bentoo/notice.go
+msgid "Next steps (bentoo performs no git operation):"
+msgstr "Siguientes pasos (bentoo no realiza ninguna operación de git):"
+
+#: cmd/bentoo/notice.go
+msgid "Review the files above."
+msgstr "Revise los archivos anteriores."
+
+#: cmd/bentoo/notice.go
+msgid "Add and commit the YAML above in the site repository."
+msgstr "Añade y confirma el YAML anterior en el repositorio del sitio."
+
+#: cmd/bentoo/notice.go
+msgid "Update, add and commit %s in the site repository."
+msgstr "Actualizar, añadir y confirmar %s en el repositorio del sitio."
+
+#: cmd/bentoo/notice.go
+msgid "Push both repositories."
+msgstr "Hacer push en ambos repositorios."
 
 #: cmd/bentoo/overlay_add.go
 msgid "Add files to the staging area"
@@ -419,6 +501,130 @@ msgstr "Sobrescribir el esquema existente"
 #: cmd/bentoo/overlay_analyze.go
 msgid "Show schema without saving"
 msgstr "Mostrar el esquema sin guardar"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analyzing %s...\n"
+msgstr "Analizando %s...\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid ""
+"\n"
+"Warning: Extracted version does not match ebuild version"
+msgstr ""
+"\n"
+"Advertencia: La versión extraída no coincide con la versión del ebuild"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  Extracted: %s\n"
+msgstr "  Extraída: %s\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  Ebuild:    %s\n"
+msgstr "  Ebuild:    %s\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Save schema anyway?"
+msgstr "¿Guardar el esquema de todos modos?"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid ""
+"\n"
+"✓ Schema saved to packages.toml"
+msgstr ""
+"\n"
+"✓ Esquema guardado en packages.toml"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analyzing all packages without schema..."
+msgstr "Analizando todos los paquetes sin esquema..."
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "All packages already have schemas configured"
+msgstr "Todos los paquetes ya tienen esquemas configurados"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "No schemas were generated successfully"
+msgstr "No se ha generado ningún esquema correctamente"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid ""
+"\n"
+"%d schema(s) ready to save\n"
+msgstr ""
+"\n"
+"%d esquema(s) listo(s) para guardar\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Save all successful schemas?"
+msgstr "¿Guardar todos los esquemas correctos?"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Failed to save schema for %s: %v\n"
+msgstr "Error al guardar el esquema para %s: %v\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid ""
+"\n"
+"✓ Saved %d schema(s) to packages.toml\n"
+msgstr ""
+"\n"
+"✓ Se han guardado %d esquema(s) en packages.toml\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Analysis Result"
+msgstr "Resultado del análisis"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "    Error: %v\n"
+msgstr "    Error: %v\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "    No schema generated"
+msgstr "    No se ha generado ningún esquema"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Suggested Schema"
+msgstr "Esquema sugerido"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  ✓ Validated: extracted version %s matches ebuild\n"
+msgstr "  ✓ Validado: la versión extraída %s coincide con el ebuild\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  ⚠ Version mismatch: extracted %s, ebuild %s\n"
+msgstr "  ⚠ Discrepancia de versión: extraída %s, ebuild %s\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  (from cache)"
+msgstr "  (desde la caché)"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Batch Analysis Results"
+msgstr "Resultados del análisis por lotes"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  - %s: no schema generated\n"
+msgstr "  - %s: no se ha generado ningún esquema\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid " (validated)"
+msgstr " (validado)"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid " (unvalidated)"
+msgstr " (sin validar)"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "  ✓ %s: %s parser%s\n"
+msgstr "  ✓ %s: %s analizador%s\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "Summary: %d successful, %d failed, %d skipped\n"
+msgstr "Resumen: %d correctos, %d fallidos, %d omitidos\n"
+
+#: cmd/bentoo/overlay_analyze.go
+msgid "%s [y/N]: "
+msgstr "%s [y/N]: "
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Check and apply ebuild version updates"
@@ -590,11 +796,11 @@ msgstr "Mostrar los paquetes deshabilitados (huérfanos) cuyo upstream es más r
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "With --apply or --revive: promote these packages (cat/pkg or record key, comma-separated or repeated) without a cooldown entry, for a security fix that must not wait. Each skip is logged and listed in the Cooldown summary"
-msgstr "Con --apply o --revive: promover estos paquetes (cat/pkg o clave de registro, separados por comas o repetidos) sin una entrada de período de espera, para un parche de seguridad que no debe esperar. Cada omisión se registra y se incluye en el resumen de Cooldown"
+msgstr "Con --apply o --revive: promover estos paquetes (cat/pkg o clave de registro, separados por comas o repetidos) sin una entrada de cooldown, para un parche de seguridad que no debe esperar. Cada omisión se registra y se incluye en el resumen de Cooldown"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "With --apply or --revive: switch the overlay's cooldown ON before anything is promoted, so every promoted version is masked for this many days (bare --cooldown = 7, range 1-3650) while the previous version stays installable. It writes the managed bentoo-cooldown block into the overlay's profiles/package.mask — PUBLISHED, so the mask reaches every host that syncs the overlay — and it is persistent: later runs mask without the flag. On an overlay already under cooldown it rewrites days= only"
-msgstr "Con --apply o --revive: active el período de espera del overlay antes de promover nada, de modo que cada versión promovida quede enmascarada durante este número de días (solo --cooldown = 7, rango 1-3650) mientras la versión anterior sigue siendo instalable. Escribe el bloque gestionado bentoo-cooldown en profiles/package.mask del overlay — PUBLICADO, de modo que el enmascaramiento llegue a todos los hosts que sincronicen el overlay — y es persistente: las ejecuciones posteriores aplican el enmascaramiento sin la opción. En una overlay que ya esté en período de «cooldown», solo reescribe «days=»."
+msgstr "Con --apply o --revive: active el cooldown del overlay antes de promover nada, de modo que cada versión promovida quede enmascarada durante este número de días (solo --cooldown = 7, rango 1-3650) mientras la versión anterior sigue siendo instalable. Escribe el bloque gestionado bentoo-cooldown en profiles/package.mask del overlay — PUBLICADO, de modo que el enmascaramiento llegue a todos los hosts que sincronicen el overlay — y es persistente: las ejecuciones posteriores aplican el enmascaramiento sin la opción. En un overlay que ya esté en período de cooldown, solo reescribe «days=»."
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"all\" for every revivable orphan"
@@ -648,6 +854,774 @@ msgstr "Obtener cada URL por registro en lugar de compartir una sola respuesta e
 msgid "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"
 msgstr "Con --check: se comprueba cada actualización pendiente en un árbol staged; sin esta opción, --check solo lee las versiones. Con --check o --revive: permitir que el agente claude-code configurado participe en la validación. --apply solo publica lo que una comprobación ha demostrado y rechaza esta opción. Habilita AMBAS capacidades del agente: el revisor de actualizaciones, que lee qué ha cambiado entre las dos versiones y puede solicitar MÁS validación de la que eligió la política de profundidad, y el corrector de compilaciones, que repara el ebuild STAGED tras una compilación fallida y vuelve a ejecutar la misma puerta para tomar una decisión. Establezca autoupdate.validate.review o fix_on_failure en false para volver a desactivar una de ellas; ninguna de las dos claves habilita nada sin esta opción. Requiere que la CLI de Claude esté en PATH y que provider = \"claude-code\"; de lo contrario, la ejecución mostrará una advertencia una sola vez y las puertas se ejecutarán sin el agente."
 
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "(repair: bentoo overlay autoupdate --repair %s)"
+msgstr "(reparar: bentoo overlay autoupdate --repair %s)"
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_compare.go
+msgid "Checking: [%3d%%] %d/%d"
+msgstr "Comprobando: [%3d%%] %d/%d"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Nothing to write: no entry's pin disagrees with the overlay."
+msgstr "Nada que escribir: ningún pin de entrada discrepa con el overlay."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "The registry was NOT updated: %v"
+msgstr "El registro NO se ha actualizado: %v"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Wrote %d version pin(s) to packages.toml."
+msgstr "Se han escrito %d fijaciones de versión en packages.toml."
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Review the diff before it is published: 'bentoo overlay diff'"
+msgstr "Revise el diff antes de publicarlo: 'bentoo overlay diff'"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Registry Reconciliation"
+msgstr "Conciliación del registro"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "The registry and the overlay disagree on %d point(s)."
+msgstr "El registro y el overlay discrepan en %d punto(s)."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "%s (%d):"
+msgstr "%s (%d):"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Pins to write"
+msgstr "Anclajes que escribir"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "%s (no pin) → %s"
+msgstr "%s (sin anclaje) → %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Ebuilds no entry keeps — NOT written"
+msgstr "Ebuilds sin entrada se mantienen — NO se escriben"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Remove them with: bentoo overlay autoupdate --clean"
+msgstr "Elimínalas con: bentoo overlay autoupdate --clean"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Entries whose directory holds no ebuild — NOT written"
+msgstr "Entradas cuyo directorio no contiene ningún ebuild — NO se han escrito"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "%s (no pin)"
+msgstr "%s (sin anclaje)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "%s pins %s"
+msgstr "%s ancla %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
+msgstr "A punto de escribir %d anclaje(s) de versión en packages.toml — todos los %d anclados por PRIMERA vez."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
+msgstr "A punto de escribir %d pin(s) de versión en packages.toml — %d pin(s) obsoletos corregidos."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
+msgstr "A punto de escribir %d anclaje(s) de versión en packages.toml — %d anclados por PRIMERA vez, %d anclaje(s) obsoletos corregidos."
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
+msgstr "packages.toml está PUBLICADO: este overlay realiza confirmaciones y «push» automáticamente, por lo que esta escritura llega al repositorio de origen."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "--yes given: writing %d version pin(s) without a prompt."
+msgstr "Se ha indicado --yes: se van a escribir %d anclajes de versión sin solicitar confirmación."
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Not an interactive terminal and --yes was not given: nothing written."
+msgstr "No es un terminal interactivo y no se ha especificado --yes: no se ha escrito nada."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Re-run with --yes to write these %d version pin(s) unattended."
+msgstr "Vuelva a ejecutar con --yes para escribir estos %d anclajes de versión de forma automática."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
+msgstr "¿Escribir %d fijación(es) de versión en packages.toml? (%d divergencia(s) revisada(s))"
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "packages.toml: record model OK"
+msgstr "packages.toml: modelo de registro OK"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Pending Updates"
+msgstr "Actualizaciones pendientes"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Version: %s → %s"
+msgstr "Versión: %s → %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  %s"
+msgstr "Estado:  %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Error:   %s"
+msgstr "Error:   %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Detected: %s"
+msgstr "Detectado: %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Total: %d pending update(s)"
+msgstr "Total: %d actualización(es) pendiente(s)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Use 'bentoo overlay autoupdate --apply <package>' to apply an update"
+msgstr "Utilice «bentoo overlay autoupdate --apply <package>» para aplicar una actualización"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Or 'bentoo overlay autoupdate --apply all' to apply every pending update"
+msgstr "O «bentoo overlay autoupdate --apply all» para aplicar todas las actualizaciones pendientes"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Apply All Summary"
+msgstr "Resumen de «Aplicar todo»"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Applied:  %d"
+msgstr "Aplicados:  %d"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Obsolete: %d (pruned from pending)"
+msgstr "Obsoletos: %d (eliminados de los pendientes)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Held:     %d (hold = true; kept in pending)"
+msgstr "Retenido:     %d (hold = true; se mantiene en «pendiente»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Waiting:  %d (required version not available yet; kept in pending)"
+msgstr "En espera:  %d (la versión necesaria aún no está disponible; se mantiene en «pendiente»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Unproven: %d (no valid proof; run --check --llm, kept in pending)"
+msgstr "Sin probar: %d (no hay ninguna prueba válida; ejecuta --check --llm, se mantiene en «pendiente»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Failed:   %d"
+msgstr "Error:   %d"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Don't forget to commit the changes with 'bentoo overlay commit'"
+msgstr "No olvide hacer commit de los cambios con 'bentoo overlay commit'"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Apply Result"
+msgstr "Aplicar resultado"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Obsolete (pruned from pending)"
+msgstr "Estado:  Obsoleto (eliminado de «Pendientes»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Reason:  %s"
+msgstr "Motivo:  %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Unproven (not published; kept in pending)"
+msgstr "Estado:  No probado (no publicado; se mantiene en «pendiente»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Waiting (kept in pending)"
+msgstr "Estado:  En espera (mantenido en «pending»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Waiting: %s"
+msgstr "En espera: %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Held (%s; kept in pending)"
+msgstr "Estado:  Retenido (%s; se mantiene en «pendiente»)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Reason:  bumped by hand — drop %q in packages.toml to automate it"
+msgstr "Motivo:  actualizado manualmente — elimine %q en packages.toml para automatizarlo"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Upload pending"
+msgstr "Estado:  Carga pendiente"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Action:  %s"
+msgstr "Acción:  %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "(then re-run --apply: the served tarball is fetched, not regenerated)"
+msgstr "(luego vuelva a ejecutar --apply: se obtiene el archivo tar comprimido servido, no se vuelve a generar)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Staged:  %s"
+msgstr "Preparado:  %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Success"
+msgstr "Estado:  Correcto"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Fixed:   manifest repaired by LLM — %s"
+msgstr "Corregido:   manifiesto reparado por LLM — %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "QA:      pkgcheck findings after the fix — review before committing:"
+msgstr "QA:      Resultados de pkgcheck tras la corrección — revíselos antes de confirmar:"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Clean:   %s"
+msgstr "Limpio:  %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Registry: %s"
+msgstr "Registro: %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Cache:   %s"
+msgstr "Caché:   %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "✓ Update applied successfully"
+msgstr "✓ Actualización aplicada correctamente"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Status:  Failed"
+msgstr "Estado:  Error"
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Error:   %v"
+msgstr "Error:   %v"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Log:     %s"
+msgstr "Registro:     %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "(the tree the gates read — inspect it, or re-run a gate there by hand)"
+msgstr "(el árbol que leen las puertas: inspecciónelo o vuelva a ejecutar una puerta allí manualmente)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Repair:  bentoo overlay autoupdate --repair %s"
+msgstr "Reparar:  bentoo overlay autoupdate --repair %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Removed: %s (%d ebuilds)"
+msgstr "Eliminados: %s (%d ebuilds)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Removed: %s-%s.ebuild (old version)"
+msgstr "Eliminado: %s-%s.ebuild (versión antigua)"
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Kept:"
+msgstr "Conservado:"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "%s-%s.ebuild — claimed by %s"
+msgstr "%s-%s.ebuild — reclamado por %s"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "%s-%s.ebuild — kept by rule (live ebuild, or the last release standing)"
+msgstr "%s-%s.ebuild — conservado por regla (ebuild «live» o la última versión restante)"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Nothing to revive — no orphaned package has an upstream newer than ::gentoo"
+msgstr "Nada que reactivar: ningún paquete huérfano tiene un upstream más reciente que ::gentoo"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Revivable Orphans"
+msgstr "Paquetes huérfanos recuperables"
+
+#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go
+msgid "PACKAGE"
+msgstr "PACKAGE"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "GENTOO"
+msgstr "GENTOO"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "UPSTREAM"
+msgstr "UPSTREAM"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Found %d revivable orphan(s)"
+msgstr "Se han encontrado %d paquetes huérfanos recuperables"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate"
+msgstr "Utilice «bentoo overlay autoupdate --revive <package>» para reactivar uno o «--revive all» para todos los candidatos"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Reviving %s..."
+msgstr "Reviviendo %s..."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Revive Summary"
+msgstr "Resumen de reactivaciones"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Revived: %d"
+msgstr "Recuperados: %d"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Skipped: %d"
+msgstr "Omitidos: %d"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Failed:  %d"
+msgstr "Con errores:  %d"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "The build budget has no history to read (qlop -a -M: %v); every package counts as expensive."
+msgstr "El presupuesto de compilación no tiene historial que leer (qlop -a -M: %v); cada paquete se considera costoso."
+
+#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+msgid "Validation Plan"
+msgstr "Plan de validación"
+
+#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+msgid "No pending update to validate."
+msgstr "No hay ninguna actualización pendiente de validar."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "%d package(s) to evaluate, deepest depth %s."
+msgstr "%d paquete(s) por evaluar, profundidad máxima %s."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "%s %s → %s at depth %s"
+msgstr "%s %s → %s a una profundidad de %s"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "%s %s → %s at depth %s [not validated]"
+msgstr "%s %s → %s a profundidad %s [no validado]"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Distfiles: up to %d to fetch — one per package validated above depth none or by a binary record's fetch gate; anything already in DISTDIR is not fetched again."
+msgstr "Distfiles: hasta %d por descargar — uno por paquete validado por encima de la profundidad «none» o por la puerta de descarga de un registro binario; todo lo que ya esté en DISTDIR no se vuelve a descargar."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Depth distribution (of %d package(s)): %s"
+msgstr "Distribución por profundidad (de %d paquete(s)): %s"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "(nothing planned)"
+msgstr "(nada previsto)"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
+msgstr "Se ha especificado --yes: evaluando %d paquete(s) sin solicitud — %d de ellos ejecutan una puerta de compilación, hasta %s."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
+msgstr "Se descargan hasta %d distfile(s) y las puertas más profundas pueden tardar horas. No se publica nada."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Not an interactive terminal and --yes was not given: no gate ran and nothing was validated."
+msgstr "No es un terminal interactivo y no se ha especificado --yes: no se ha ejecutado ninguna puerta y no se ha validado nada."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
+msgstr "Vuelva a ejecutar con --yes para evaluar estos %d paquetes de forma automática: %d de ellos hasta %s, descargando hasta %d distfiles."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
+msgstr "%d paquete(s) ejecutan una puerta por encima de `options`, que descomprime y compila: esto descarga hasta %d archivo(s) distfile y puede tardar horas."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Nothing is published either way — a check writes no ebuild and no version pin."
+msgstr "En cualquier caso, no se publica nada: una comprobación no escribe ningún ebuild ni ningún anclaje de versión."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Evaluate %d package(s), %d of them up to depth %s?"
+msgstr "¿Evaluar %d paquete(s), %d de ellos hasta una profundidad de %s?"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Validating updates"
+msgstr "Validando actualizaciones"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "Use 'bentoo overlay autoupdate --list' to see pending updates"
+msgstr "Use «bentoo overlay autoupdate --list» para ver las actualizaciones pendientes"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
+msgstr "%d paquete(s) no tenían ebuild y se deshabilitaron en packages.toml (enabled = false)"
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "%s: the reviewer raised this bump to %s, past the %s this run's plan confirmed."
+msgstr "%s: el revisor elevó esta actualización a %s, superando la %s confirmada en el plan de esta ejecución."
+
+#: cmd/bentoo/overlay_autoupdate_check.go
+msgid "A raise past the confirmed depth is held at %s rather than spent unasked; re-run with --yes to approve the deeper gates for the whole run."
+msgstr "Un aumento que supere el nivel de profundidad confirmado se retiene en %s en lugar de gastarse sin que se solicite; vuelve a ejecutar el comando con --yes para aprobar los niveles de profundidad superiores para toda la ejecución."
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "=%s-%s (from %s)"
+msgstr "=%s-%s (desde %s)"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "Cooldown: %d added, %d replaced, %d graduated, %d lifted, %d unmasked"
+msgstr "Tiempo de espera: %d añadidos, %d reemplazados, %d graduados, %d levantados, %d desenmascarados"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "masked    %s (since %s)"
+msgstr "masked    %s (desde %s)"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "replaced  %s"
+msgstr "reemplazado %s"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "graduated %s"
+msgstr "graduado %s"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "unmasked  %s"
+msgstr "desenmascarado  %s"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "lifted    %s (%s)"
+msgstr "levantado    %s (%s)"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "Cooldown enabled: every promoted version stays masked in %s for %d days"
+msgstr "cooldown habilitado: cada versión promovida permanece oculta en %s durante %d días"
+
+#: cmd/bentoo/overlay_autoupdate_cooldown.go
+msgid "Cooldown delay changed from %d to %d days"
+msgstr "El periodo de espera se ha cambiado de %d a %d días"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "Fix registry for %s with LLM? [y/N/a/q]"
+msgstr "¿Corregir el registro de %s con LLM? [y/N/a/q]"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "skipping %s: %s: %v"
+msgstr "omitiendo %s: %s: %v"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "✔ %s fixed using %s: %s (resolved upstream %s)"
+msgstr "✔ %s corregido mediante %s: %s (resuelto aguas arriba %s)"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "warning: %s extracted version %q is not orderable against the current version; the parser may need more work"
+msgstr "advertencia: la versión %[2]q extraída de %[1]s no se puede ordenar en relación con la versión actual; es posible que el analizador sintáctico necesite más trabajo"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid ""
+"%s still failing after fix using %s: %s%s\n"
+"  error: %v"
+msgstr ""
+"%s sigue fallando después de la corrección con %s: %s%s\n"
+"  error: %v"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "Keep the edit anyway? [y/N]"
+msgstr "¿Desea mantener la modificación de todos modos? [y/N]"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "fixed %d · reverted %d · skipped %d"
+msgstr "corregidos %d · revertidos %d · omitidos %d"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "could not snapshot packages.toml"
+msgstr "no se ha podido crear una instantánea de packages.toml"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "could not load packages.toml"
+msgstr "no se ha podido cargar packages.toml"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "registry fix failed"
+msgstr "error al corregir el registro"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "could not build checker for re-check"
+msgstr "no se ha podido crear el verificador para volver a comprobar"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "registry fix stage %d"
+msgstr "etapa de corrección del registro %d"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "warning: could not restore packages.toml for %s: %v"
+msgstr "advertencia: no se ha podido restaurar packages.toml para %s: %v"
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "packages.toml was NOT modified."
+msgstr "packages.toml NO se ha modificado."
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "Registry Repair"
+msgstr "Reparación del registro"
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "packages.toml is unchanged."
+msgstr "packages.toml no se ha modificado."
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "The registry was NOT repaired: %v"
+msgstr "El registro NO se ha reparado: %v"
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "Repaired packages.toml: %d change(s) written."
+msgstr "packages.toml reparado: %d cambio(s) escrito(s)."
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Review it before it is published: 'bentoo overlay diff'"
+msgstr "Revísalo antes de publicarlo: 'bentoo overlay diff'"
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "%d finding(s) still need a human — --fix does not guess at them:"
+msgstr "%d hallazgo(s) aún requieren intervención humana — --fix no los resuelve automáticamente:"
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
+msgstr "Nada que reparar: los %d hallazgos anteriores no tienen solución mecánica; --fix no los adivina."
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "--yes given: writing %d repair(s) without a prompt."
+msgstr "Se ha indicado --yes: se van a escribir %d reparación(es) sin preguntar."
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "Re-run with --yes to write these %d repair(s) unattended."
+msgstr "Vuelva a ejecutarlo con --yes para escribir estas %d reparaciones sin supervisión."
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
+msgstr "¿Escribir %d reparación(es) en packages.toml? (el diff anterior es el cambio completo)"
+
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+msgid "About to rewrite packages.toml with %d repair(s):"
+msgstr "A punto de reescribir packages.toml con %d reparación(es):"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Registry Migration — record the automatic disable origin"
+msgstr "Migración del registro: registrar el origen de la desactivación automática"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "--except names entries that are not in packages.toml, so they protect nothing:"
+msgstr "--except names entradas que no están en packages.toml, por lo que no protegen nada:"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Nothing to migrate: every disabled entry already states its origin, is held, or was excluded."
+msgstr "Nada que migrar: todas las entradas deshabilitadas ya indican su origen, están retenidas o se han excluido."
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "packages.toml was NOT modified: %v"
+msgstr "packages.toml NO se ha modificado: %v"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Stamped %d entry(ies) with disabled_by = \"auto\":"
+msgstr "Se han marcado %d entrada(s) con disabled_by = \"auto\":"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
+msgstr "%d de las %d entradas previstas NO se marcaron: su asignación de habilitación no estaba donde el editor podía reescribirla."
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
+msgstr "%d entrada(s) se marcarán con disabled_by = \"auto\": el propio registro del verificador, que ahora puede conciliarse libremente:"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:"
+msgstr "%d excluidos por --except — fijaciones deliberadas, dejadas sin indicar ningún origen para que ningún análisis pueda revocarlas:"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "%d already stamped — left as they are, which is what makes a re-run a no-op:"
+msgstr "%d ya marcadas — se dejan tal cual, lo que hace que una nueva ejecución no tenga ningún efecto:"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "%d held — hold already excludes them, and stamping one would claim a disable the checker never wrote:"
+msgstr "%d retenidas — la retención ya las excluye, y marcarlas supondría reclamar una desactivación que el comprobador nunca escribió:"
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "--yes given: stamping %d entry(ies) without a prompt."
+msgstr "Se ha indicado --yes: se van a marcar %d entrada(s) sin solicitar confirmación."
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Re-run with --yes to stamp these %d entry(ies) unattended."
+msgstr "Vuelva a ejecutar con --yes para marcar estas %d entradas de forma automática."
+
+#: cmd/bentoo/overlay_autoupdate_markauto.go
+msgid "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
+msgstr "¿Sellar %d entrada(s) con disabled_by = \"auto\"? (%d excluidas, el plan anterior es el cambio completo)"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "No session started; the bundle and the staged tree are unchanged."
+msgstr "No se ha iniciado ninguna sesión; el paquete y el árbol preparado no han cambiado."
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "none"
+msgstr "ninguno"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Repair"
+msgstr "Reparar"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Version:       %s → %s"
+msgstr "Versión:       %s → %s"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Failed stage:  %s"
+msgstr "Etapa fallida:  %s"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Refused tools: %s"
+msgstr "Herramientas rechazadas: %s"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Staged tree:   %s"
+msgstr "Árbol indexado:   %s"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Bundle:        %s"
+msgstr "Paquete:        %s"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Start an interactive claude session in %s?"
+msgstr "¿Iniciar una sesión interactiva de Claude en %s?"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Re-validation"
+msgstr "Revalidación"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "✓ %s is READY: the repaired tree is proven."
+msgstr "✓ %s está LISTO: el árbol reparado está verificado."
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Publish it with 'bentoo overlay autoupdate --apply %s'"
+msgstr "Publícalo con «bentoo overlay autoupdate --apply %s»"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "%s is %s."
+msgstr "%s es %s."
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "Repair sessions"
+msgstr "Sesiones de reparación"
+
+#: cmd/bentoo/overlay_autoupdate_repair.go
+msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+msgstr "%d bump(s) necesitan su atención: a cada uno se le ofrece una sesión de reparación interactiva, una a la vez. Responda n para omitir uno."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
+msgstr "Nada que barrer: todos los ebuilds no reclamados que se han encontrado están protegidos; consulte los grupos anteriores."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Nothing to sweep: every ebuild is claimed by an entry."
+msgstr "Nada que barrer: cada ebuild está reclamado por una entrada."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Overlay Sweep"
+msgstr "Limpieza de overlay"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "No package directory holds an ebuild that no entry claims."
+msgstr "Ningún directorio de paquetes contiene un ebuild que no esté reclamado por ninguna entrada."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "To remove (%d ebuild(s) in %d director(ies)):"
+msgstr "Para eliminar (%d ebuild(s) en %d directorio(s)):"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "keeps %s"
+msgstr "mantiene %s"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Blocked — nothing removed (%d):"
+msgstr "Bloqueado — no se ha eliminado nada (%d):"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "entry %q has no version pin"
+msgstr "la entrada %q no tiene ningún anclaje de versión"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "no registry entry claims this directory"
+msgstr "ninguna entrada del registro reclama este directorio"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "would have removed: %s"
+msgstr "se habría eliminado: %s"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Held — reported by --check, never swept (%d):"
+msgstr "Retenido — informado por --check, nunca eliminado (%d):"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "held: clean it by hand if you want it gone"
+msgstr "retenido: límpielo manualmente si quiere eliminarlo"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "A held package's older ebuild is usually the fallback `hold` exists to keep."
+msgstr "El ebuild más antiguo de un paquete retenido suele ser el que se conserva como alternativa; la opción `hold` existe para mantenerlo."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Could not be planned (%d):"
+msgstr "No se ha podido planificar (%d):"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "%s — claimed by %s"
+msgstr "%s — reclamado por %s"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "%s — kept by rule (live ebuild, or the last release)"
+msgstr "%s — conservado por regla (ebuild «live» o última versión)"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "--yes given: removing %d ebuild(s) without a prompt."
+msgstr "Se ha especificado --yes: se van a eliminar %d ebuild(s) sin preguntar."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Not an interactive terminal and --yes was not given: nothing removed."
+msgstr "No es un terminal interactivo y no se ha especificado --yes: no se ha eliminado nada."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Re-run with --yes to remove these %d ebuild(s) unattended."
+msgstr "Vuelva a ejecutarlo con --yes para eliminar estos %d ebuild(s) sin supervisión."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "These ebuilds are deleted from the overlay, which auto-commits and publishes."
+msgstr "Estos ebuilds se eliminan del overlay, que realiza confirmaciones y publicaciones automáticamente."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Remove %d ebuild(s) from %d director(ies)?"
+msgstr "¿Eliminar %d ebuild(s) de %d directorio(s)?"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Sweep Result"
+msgstr "Resultado de la limpieza"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Removed: %s"
+msgstr "Eliminado: %s"
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "Swept %d director(ies), removed %d ebuild(s)."
+msgstr "Se han limpiado %d directorios y se han eliminado %d ebuilds."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "%d director(ies) blocked — see the plan above for the entry to fix."
+msgstr "%d directorio(s) bloqueado(s): consulte el plan anterior para ver la entrada que debe corregirse."
+
+#: cmd/bentoo/overlay_autoupdate_sweep.go
+msgid "%d director(ies) failed — nothing else was affected."
+msgstr "%d directorio(s) ha(n) fallado — no se ha visto afectado nada más."
+
 #: cmd/bentoo/overlay_commit.go
 msgid "Commit staged changes with auto-generated message"
 msgstr "Hacer commit de los cambios preparados con un mensaje generado automáticamente"
@@ -675,6 +1649,42 @@ msgstr "Mostrar lo que entraría en el commit sin hacerlo"
 #: cmd/bentoo/overlay_commit.go
 msgid "Skip confirmation prompt and commit automatically"
 msgstr "Omitir la confirmación y hacer el commit automáticamente"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Changes committed successfully."
+msgstr "Commit realizado correctamente."
+
+#: cmd/bentoo/overlay_commit.go
+msgid "No staged changes to commit."
+msgstr "No hay cambios preparados para confirmar."
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Dry-run mode - would commit with message:"
+msgstr "Modo de prueba (dry-run): se haría commit con el mensaje:"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Staged files:"
+msgstr "Archivos preparados:"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Generated commit message:"
+msgstr "Mensaje de confirmación generado:"
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Proceed? [y]es / [e]dit / [c]ancel: "
+msgstr "¿Desea continuar? [y]es / [e]dit / [c]ancel: "
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Enter commit message: "
+msgstr "Introduce el mensaje de confirmación: "
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Commit cancelled (empty message)."
+msgstr "Confirmación cancelada (mensaje vacío)."
+
+#: cmd/bentoo/overlay_commit.go
+msgid "Commit cancelled."
+msgstr "Confirmación cancelada."
 
 #: cmd/bentoo/overlay_compare.go
 msgid "Compare overlay packages with upstream repository"
@@ -826,6 +1836,154 @@ msgstr "Demuestre cada realineación propuesta compilándola hasta este peldaño
 msgid "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"
 msgstr "Demostrar todo el plan sin el aviso. Solo --depth compila algo; la publicación sigue siendo una pregunta independiente para cada paquete, que se formula únicamente en un terminal interactivo y nunca se responde mediante esta opción."
 
+#: cmd/bentoo/overlay_compare.go
+msgid "Found %s packages in Bentoo overlay"
+msgstr "Se han encontrado %s paquetes en el overlay Bentoo"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Options:"
+msgstr "Opciones:"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "  1. Use --clone to download the repository:"
+msgstr "  1. Utiliza --clone para descargar el repositorio:"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "  2. Configure a local repository path in ~/.config/bentoo/config.yaml:"
+msgstr "  2. Configura una ruta de repositorio local en ~/.config/bentoo/config.yaml:"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "  3. Wait until %s for rate limit reset"
+msgstr "  3. Espera hasta %s para que se restablezca el límite de solicitudes"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Tip: Use --clone flag to avoid rate limits"
+msgstr "Consejo: Utiliza la opción --clone para evitar los límites de tasa"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Try using --clone flag to download the repository instead:"
+msgstr "Prueba a usar la opción --clone para descargar el repositorio en su lugar:"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
+msgstr "Plan de realineación: %d paquete(s) que se compilarán hasta una profundidad de %s, cada uno en un árbol por etapas fuera del overlay."
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing."
+msgstr "  Cada uno es el propio ebuild de ::gentoo en nuestra versión. La compilación demuestra que sigue funcionando; la publicación es una cuestión independiente para cada paquete, que se plantea en un terminal solo después de que las puertas de ese paquete hayan dado su veredicto. Si se rechaza alguna de ellas, no se publica nada."
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  --yes given: proving %d realignment(s) without a prompt.\n"
+msgstr "  Se ha indicado --yes: se van a probar %d realineación(es) sin solicitar confirmación.\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  Not an interactive terminal and --yes was not given: nothing was built."
+msgstr "  No es un terminal interactivo y no se ha indicado --yes: no se ha compilado nada."
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
+msgstr "  Vuelva a ejecutarlo con --yes para probar estas %d realineaciones de forma desatendida. En cualquier caso, no se publica nada.\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n"
+msgstr "  Cada paquete se prepara fuera del overlay y se compila hasta una profundidad de %s. Esto consume tiempo de máquina; no publica nada.\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "Prove %d realignment(s) at depth %s?"
+msgstr "¿Probar %d realineación(es) a una profundidad de %s?"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  %s: not in the plan — its ::gentoo baseline %s could not be read now, although the review read it: %v"
+msgstr "  %s: no está en el plan — su línea de base ::gentoo %s no se ha podido leer ahora, aunque la revisión sí la leyó: %v"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid ""
+"\n"
+"  Nothing was proved — --depth: %v\n"
+msgstr ""
+"\n"
+"  No se ha probado nada — --depth: %v\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid ""
+"\n"
+"  Nothing was proved — --depth=%s builds, and a staged tree to build in could not be placed: %v\n"
+msgstr ""
+"\n"
+"  No se ha probado nada — --depth=%s compila, y no se ha podido colocar un árbol preparado para compilar en él: %v\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid ""
+"\n"
+"  Nothing to prove: no package has an undeclared divergence from a ::gentoo baseline at our own version. A baseline at another version is never proposed — adopting it would change which version we ship, which is a bump and not a realignment."
+msgstr ""
+"\n"
+"  Nada que probar: ningún paquete presenta una divergencia no declarada con respecto a una línea de base ::gentoo en nuestra propia versión. Nunca se propone una línea de base en otra versión: adoptarla cambiaría la versión que distribuimos, lo cual constituye una actualización y no una realineación."
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid ""
+"\n"
+"  Build logs will not be retained: %v\n"
+msgstr ""
+"\n"
+"  No se conservarán los registros de compilación: %v\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  %s: not proved — %v\n"
+msgstr "  %s: no demostrado — %v\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  %s: staged in %s, and no gate read it — there is nothing to publish it on.\n"
+msgstr "  %s: preparado en %s, y ninguna puerta lo ha leído — no hay nada en lo que publicarlo.\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "  %s: staged in %s\n"
+msgstr "  %s: preparado en %s\n"
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "    every gate passed or skipped — that is permission to ASK, not the answer; publishing still needs a maintainer."
+msgstr "    cada puerta superada u omitida —es permiso para PREGUNTAR, no la respuesta—; la publicación sigue necesitando un mantenedor."
+
+#: cmd/bentoo/overlay_compare_depth.go
+msgid "    the realignment does not pass as it stands, and nothing was published."
+msgstr "    la realineación no supera las puertas tal como está, y no se ha publicado nada."
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "    not offered for publication: every gate was SKIPPED, so nothing was proved about it — a proof of nothing is not evidence to publish on."
+msgstr "    no se ha ofrecido para su publicación: se OMITIERON todas las puertas, por lo que no se demostró nada al respecto; una demostración de nada no constituye una prueba sobre la que publicar."
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "    publishable — re-run in an interactive terminal to be asked; nothing is published without the maintainer's yes."
+msgstr "    publicable — vuelva a ejecutarlo en un terminal interactivo para que se le pregunte; no se publica nada sin el «sí» del mantenedor."
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "Publish %s — replace the published ebuild with the proved ::gentoo bytes?"
+msgstr "Publicar %s — ¿Sustituir el ebuild publicado por los bytes probados de ::gentoo?"
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "    declined: nothing was written, and the published overlay is byte-identical."
+msgstr "    rechazado: no se ha escrito nada y el overlay publicada es idéntica byte a byte."
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "    refused: %v\n"
+msgstr "    rechazado: %v\n"
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "    the write failed after every authority said yes — %v — the package directory needs a human before the overlay publishes itself.\n"
+msgstr "    la escritura falló después de que todas las autoridades dijeran que sí — %v — El directorio del paquete necesita una intervención humana antes de que el overlay se publique por sí sola.\n"
+
+#: cmd/bentoo/overlay_compare_promote.go
+msgid "    published: the overlay now carries the exact bytes the gates read; it commits and pushes on its own."
+msgstr "    published: el overlay ahora contiene exactamente los bytes que leyeron las puertas; realiza el commit y el push por sí sola."
+
+#: cmd/bentoo/overlay_compare_realign.go
+msgid ""
+"\n"
+"Candidate declarations — one per undeclared axis, for a maintainer to accept or edit. Nothing here was written to any file.\n"
+msgstr ""
+"\n"
+"Declaraciones de candidatos: una por cada eje no declarado, para que un mantenedor las acepte o las edite. Nada de lo que aparece aquí se ha escrito en ningún archivo.\n"
+
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Inspect and drive the autoupdate cooldown"
 msgstr "Inspeccionar y gestionar el cooldown de autoupdate"
@@ -837,7 +1995,7 @@ msgid ""
 "by time (days= on the BEGIN line), by installation from ::bentoo, or by hand.\n"
 ".autoupdate/cooldown.unmask lists the same atoms for a host that wants them now."
 msgstr ""
-"El período de espera de la actualización automática mantiene enmascarada cada versión que la actualización automática promueve en\n"
+"El cooldown de la autoupdate mantiene enmascarada cada versión que la autoupdate promueve en\n"
 "profiles/package.mask (el bloque gestionado bentoo-cooldown) hasta que se publique:\n"
 "por tiempo (days= en la línea BEGIN), por instalación desde ::bentoo o manualmente.\n"
 ".autoupdate/cooldown.unmask enumera los mismos átomos para un host que los quiere ahora."
@@ -845,6 +2003,10 @@ msgstr ""
 #: cmd/bentoo/overlay_cooldown.go
 msgid "List the versions under cooldown (read-only, takes no lock)"
 msgstr "Mostrar las versiones en cooldown (solo lectura, no adquiere ningún bloqueo)"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "cooldown disabled for this overlay"
+msgstr "cooldown desactivado para este overlay"
 
 #: cmd/bentoo/overlay_cooldown.go
 msgid "print a JSON array of {package, version, since, eligible, group, origin, installed}"
@@ -855,12 +2017,24 @@ msgid "system root whose var/db/pkg answers `installed`"
 msgstr "raíz del sistema cuya var/db/pkg responde `installed`"
 
 #: cmd/bentoo/overlay_cooldown.go
+msgid "PACKAGE\tVERSION\tSINCE\tELIGIBLE\tGROUP\tORIGIN\tINSTALLED"
+msgstr "PACKAGE\tVERSION\tSINCE\tELIGIBLE\tGROUP\tORIGIN\tINSTALLED"
+
+#: cmd/bentoo/overlay_cooldown.go
 msgid "Release a version and every older one of the package (a whole group for a grouped package)"
 msgstr "Liberar una versión y todas las anteriores del paquete (todo un grupo en el caso de un paquete agrupado)"
 
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Mask a version present in the overlay under the cooldown, by hand"
 msgstr "Enmascarar manualmente una versión presente en el overlay que está en cooldown"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "%s is already under cooldown\n"
+msgstr "%s ya está en cooldown\n"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "masked  %s (eligible %s)\n"
+msgstr "enmascarado  %s (elegible %s)\n"
 
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Release every entry that is due (elapsed, installed, stale), outside an apply"
@@ -873,6 +2047,14 @@ msgstr "mostrar lo que se eliminaría y no escribir nada"
 #: cmd/bentoo/overlay_cooldown.go
 msgid "system root whose var/db/pkg releases entries by installation"
 msgstr "raíz del sistema cuya var/db/pkg libera entradas por instalación"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "nothing to lift"
+msgstr "nada que levantar"
+
+#: cmd/bentoo/overlay_cooldown.go
+msgid "lifted  %s (%s)\n"
+msgstr "elevado  %s (%s)\n"
 
 #: cmd/bentoo/overlay_diff.go
 msgid "Show diff of changes"
@@ -901,6 +2083,94 @@ msgid ""
 msgstr ""
 "Inicializar la configuración de bentoo de forma interactiva.\n"
 "Crea un archivo de configuración con la ruta del overlay y la configuración de Git."
+
+#: cmd/bentoo/overlay_init.go
+msgid "Config already exists at: %s"
+msgstr "Ya existe una configuración en: %s"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Overwrite? [y/N]: "
+msgstr "¿Sobrescribir? [y/N]: "
+
+#: cmd/bentoo/overlay_init.go
+msgid "Aborted."
+msgstr "Cancelado."
+
+#: cmd/bentoo/overlay_init.go
+msgid "Bentoo Overlay Configuration"
+msgstr "Configuración del overlay de Bentoo"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Overlay path [%s]: "
+msgstr "Ruta del overlay [%s]: "
+
+#: cmd/bentoo/overlay_init.go
+msgid "Path does not exist: %s"
+msgstr "La ruta no existe: %s"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Create it? [y/N]: "
+msgstr "¿Crearlo? [y/N]: "
+
+#: cmd/bentoo/overlay_init.go
+msgid "Created directory: %s"
+msgstr "Directorio creado: %s"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Git remote name [origin]: "
+msgstr "Nombre del repositorio remoto de Git [origin]: "
+
+#: cmd/bentoo/overlay_init.go
+msgid "Git user not configured in ~/.gitconfig"
+msgstr "El usuario de Git no está configurado en ~/.gitconfig"
+
+#: cmd/bentoo/overlay_init.go
+msgid "You can configure it in bentoo or run:"
+msgstr "Puedes configurarlo en bentoo o ejecutar:"
+
+#: cmd/bentoo/overlay_init.go
+msgid "  git config --global user.name \"Your Name\""
+msgstr "  git config --global user.name \"Tu nombre\""
+
+#: cmd/bentoo/overlay_init.go
+msgid "  git config --global user.email \"your@email.com\""
+msgstr "  git config --global user.email \"your@email.com\""
+
+#: cmd/bentoo/overlay_init.go
+msgid "Git user name: "
+msgstr "Nombre de usuario de Git: "
+
+#: cmd/bentoo/overlay_init.go
+msgid "Git email: "
+msgstr "Correo electrónico de Git: "
+
+#: cmd/bentoo/overlay_init.go
+msgid "Using git config: %s <%s>"
+msgstr "Usando git config: %s <%s>"
+
+#: cmd/bentoo/overlay_init.go
+msgid "Configuration saved to: %s"
+msgstr "Configuración guardada en: %s"
+
+#: cmd/bentoo/overlay_init.go
+msgid "You can now use:"
+msgstr "Ahora puedes usar:"
+
+#: cmd/bentoo/overlay_init.go
+msgid "  bentoo overlay status  - View pending changes"
+msgstr "  bentoo overlay status  - Ver los cambios pendientes"
+
+#: cmd/bentoo/overlay_init.go
+msgid "  bentoo overlay add     - Stage changes"
+msgstr "  bentoo overlay add     - Añadir cambios al área de preparación"
+
+#: cmd/bentoo/overlay_init.go
+msgid "  bentoo overlay commit  - Commit with auto-generated message"
+msgstr "  bentoo overlay commit  - Confirmar con un mensaje generado automáticamente"
+
+#: cmd/bentoo/overlay_init.go
+msgid "  bentoo overlay push    - Push to remote"
+msgstr "  bentoo overlay push    - Hacer push al repositorio remoto"
 
 #: cmd/bentoo/overlay_log.go
 msgid "Show commit history"
@@ -1052,6 +2322,14 @@ msgstr "Número máximo de trabajadores de pkgdev en paralelo"
 msgid "Read-only distfiles cache consulted before download (\"\" disables)"
 msgstr "Caché de distfiles de solo lectura consultada antes de la descarga («» la desactiva)"
 
+#: cmd/bentoo/overlay_manifest.go
+msgid "Regenerating Manifest for %d package(s)"
+msgstr "Regenerando el manifiesto para %d paquete(s)"
+
+#: cmd/bentoo/overlay_manifest.go
+msgid "%d ok, %d failed"
+msgstr "%d correctos, %d con errores"
+
 #: cmd/bentoo/overlay_prune.go
 msgid "Remove overlay packages ::gentoo already ships identically"
 msgstr "Eliminar los paquetes del overlay que ::gentoo ya distribuye de forma idéntica"
@@ -1122,7 +2400,7 @@ msgstr ""
 "nadie anotó — se imprimen bajo su propio encabezado y se dejan tal cual, a menos que\n"
 "--include-patched indica lo contrario.\n"
 "\n"
-"Hay un tipo de diferencia no declarada a la que no llega ninguna opción: el tipo que el propio contenido de la overlay\n"
+"Hay un tipo de diferencia no declarada a la que no llega ninguna opción: el tipo que el propio contenido del overlay\n"
 "contenido DEMUESTRA que es nuestro, porque nuestro ebuild aplica un parche que ::gentoo no\n"
 "ship para ese paquete. Dicho paquete se rechaza de plano y el rechazo indica\n"
 "el archivo. ::gentoo nunca lo tuvo, por lo que no habría nada a partir de lo cual restaurarlo.\n"
@@ -1168,6 +2446,238 @@ msgstr "Dejar .autoupdate/packages.toml sin tocar"
 msgid "Skip the identical batch's confirmation (never the diverging one)"
 msgstr "Omitir la confirmación del lote idéntico (nunca la del lote divergente)"
 
+#: cmd/bentoo/overlay_prune.go cmd/bentoo/overlay_staged.go
+msgid "  loading config: %v\n"
+msgstr "  cargando la configuración: %v\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Overlay Prune"
+msgstr "Eliminación de elementos del overlay"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  cannot scan the overlay at %s: %v\n"
+msgstr "  no se puede analizar el overlay en %s: %v\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
+msgstr "  No se han podido analizar %d ruta(s); es posible que un paquete que falta a continuación simplemente no se haya detectado.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all."
+msgstr "  Indica una categoría (app-editors), una categoría/paquete (app-editors/zed) o ningún argumento."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was examined: this overlay holds no package to compare."
+msgstr "  No se ha examinado nada: este overlay no contiene ningún paquete para comparar."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  comparing packages: %v\n"
+msgstr "  comparando paquetes: %v\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
+msgstr "  No se ha eliminado nada: esto es un plan. Vuelva a ejecutar con --apply para llevar a cabo %d eliminación(es).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
+msgstr "  Se ha indicado --keep-registry: no se ha modificado .autoupdate/packages.toml, y aún contiene las entradas de %d paquete(s) eliminado(s).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Review the diff before it is published: 'bentoo overlay diff'"
+msgstr "  Revise el diff antes de que se publique: 'bentoo overlay diff'"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %s/%s was planned as removable but is in the refused group; no confirmation covers that group, so it was left alone (this is a bug in the prune planner).\n"
+msgstr "  %s/%s estaba previsto como eliminable, pero se encuentra en el grupo rechazado; ninguna confirmación cubre ese grupo, por lo que se ha dejado tal cual (se trata de un error en el planificador de la poda).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
+msgstr "  Se ha indicado --yes: se van a eliminar %d paquete(s) que ::gentoo ya proporciona, sin solicitar confirmación.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
+msgstr "  No es un terminal interactivo y no se ha especificado --yes: NO se han llevado a cabo %d eliminación(es) prevista(s).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Re-run with --yes to carry them out unattended."
+msgstr "  Vuelva a ejecutarlo con --yes para llevarlas a cabo de forma automática."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  These package directories are deleted from the overlay, which auto-commits and publishes within minutes."
+msgstr "  Estos directorios de paquetes se eliminan del overlay, que realiza confirmaciones automáticas y se publica en cuestión de minutos."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Remove %d package(s) ::gentoo already provides?"
+msgstr "¿Eliminar %d paquete(s) que ::gentoo ya proporciona?"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
+msgstr "  No es un terminal interactivo: NO se eliminaron %d paquete(s) divergente(s).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  --yes does not answer this one. It exists so a scripted run can proceed unattended, and discarding local work is not a decision a script may take on its own: somebody has to read what is being thrown away."
+msgstr "  --yes no responde a esta pregunta. Existe para que una ejecución mediante script pueda proceder de forma desatendida, y descartar el trabajo local no es una decisión que un script pueda tomar por sí solo: alguien tiene que leer lo que se va a desechar."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Re-run '--apply --include-patched' from a terminal to answer for these."
+msgstr "  Vuelva a ejecutar «--apply --include-patched» desde un terminal para responder a estas preguntas."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  The packages below carry work that is not in ::gentoo. Removing them destroys it — there is no copy upstream to restore it from."
+msgstr "  Los paquetes que se indican a continuación contienen trabajo que no está en ::gentoo. Eliminarlos lo destruye: no hay ninguna copia en el repositorio original desde la que se pueda restaurar."
+
+#: cmd/bentoo/overlay_prune.go
+msgid ""
+"\n"
+"  Discarding local work in %d package(s):\n"
+msgstr ""
+"\n"
+"  Se está descartando el trabajo local en %d paquete(s):\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      loses %d version(s) (%s) and %d file(s)\n"
+msgstr "      se pierden %d versión(es) (%s) y %d archivo(s)\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      loses %d file(s)\n"
+msgstr "      pierde %d archivo(s)\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Discard that work and remove these %d package(s)?"
+msgstr "  ¿Desechar ese trabajo y eliminar estos %d paquetes?"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Prune Result"
+msgstr "Resultado de la poda"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %s removed (%d file(s))\n"
+msgstr "  %s eliminado (%d archivo(s))\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %s NOT removed: %v\n"
+msgstr "  %s NO se ha eliminado: %v\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Removed %d package director(ies) from the overlay.\n"
+msgstr "  Se han eliminado %d directorios de paquetes del overlay.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
+msgstr "  %d eliminación(es) ha(n) fallado y se muestra(n) arriba; esos paquetes siguen en el overlay, con sus entradas de registro y todo.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
+msgstr "  %d eliminación(es) prevista(s) se rechazó(aron) en el aviso y se dejó(aron) exactamente como estaba(n).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
+msgstr "  %d eliminación(es) prevista(s) no se confirmó(aron) y no se llevó(aron) a cabo; consulte el motivo indicado más arriba. Esta ejecución finaliza con un código distinto de cero debido a ellas.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
+msgstr "  No se ha eliminado nada: no hubo confirmación para las %d eliminaciones previstas; consulte el motivo indicado más arriba.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was removed: the confirmation was declined. The overlay and .autoupdate/packages.toml are exactly as they were."
+msgstr "  No se ha eliminado nada: se ha rechazado la confirmación. El overlay y .autoupdate/packages.toml están exactamente como estaban."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was removed."
+msgstr "  No se ha eliminado nada."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  The package directories are gone and the registry still lists them; delete those entries by hand. An entry whose package directory no longer exists promises an endpoint for something that is not there, and the next --check disables it without saying why."
+msgstr "  Los directorios de los paquetes ya no existen, pero el registro aún los muestra; elimine esas entradas manualmente. Una entrada cuyo directorio de paquetes ya no existe promete un punto de conexión para algo que no está ahí, y la siguiente ejecución de --check la desactiva sin explicar por qué."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
+msgstr "  Se han eliminado las entradas de .autoupdate/packages.toml de %d paquete(s) eliminado(s).\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Identical to ::gentoo — our copy holds nothing of ours"
+msgstr "Idéntico a ::gentoo: nuestra copia no contiene nada nuestro"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "Diverging — something of ours is in these"
+msgstr "Divergentes: hay algo nuestro en estos"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "    %s — would be removed\n"
+msgstr "    %s — se eliminaría\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "    %s — kept on this run\n"
+msgstr "    %s — conservado en esta ejecución\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      why:      %s\n"
+msgstr "      motivo:   %s\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      versions: %s\n"
+msgstr "      versiones: %s\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      files (%d):\n"
+msgstr "      archivos (%d):\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      registry: no entry tracks this package"
+msgstr "      registro: ninguna entrada hace seguimiento de este paquete"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      registry: %d entr(ies) kept by --keep-registry: %s\n"
+msgstr "      registro: %d entrada(s) conservada(s) por --keep-registry: %s\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "      registry entries (%d):\n"
+msgstr "      entradas del registro (%d):\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Refused — no flag on this command removes these (%d):\n"
+msgstr "  Rechazado: ninguna opción de este comando elimina estos (%d):\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
+msgstr "  No hay nada que cumpla los requisitos para su eliminación: se han examinado %d paquete(s) y ninguno de ellos se puede eliminar.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  %d of them diverge from ::gentoo; --include-patched would consider them, discarding that work.\n"
+msgstr "  %d de ellos difieren de ::gentoo; --include-patched los tendría en cuenta, descartando ese trabajo.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
+msgstr "  No se ha examinado nada: el proveedor %s no expone ningún árbol local ::gentoo, por lo que no se ha podido comparar ninguno de los %d paquetes incluidos en el ámbito.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Every package is refused: no local ::gentoo tree; re-run with --clone or a local provider."
+msgstr "  Se rechaza cada paquete: no hay árbol ::gentoo local; vuelva a ejecutarlo con --clone o con un proveedor local."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Content is the only evidence that may authorise a removal, and an API can supply it only at one rate-limited request per package."
+msgstr "  El contenido es la única prueba que puede autorizar una eliminación, y una API solo puede proporcionarlo mediante una solicitud con límite de tasa por paquete."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Point bentoo at an on-disk ::gentoo in ~/.config/bentoo/config.yaml:"
+msgstr "  Haga que bentoo apunte a un ::gentoo en disco en ~/.config/bentoo/config.yaml:"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
+msgstr "  No se ha examinado nada: no se ha podido leer el registro de autoupdate, por lo que ninguno de los %d paquetes incluidos en el ámbito tiene un estado de divergencia conocido.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Every package is refused: %v.\n"
+msgstr "  Se rechaza cada paquete: %v.\n"
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  The registry is where 'patched' is declared, and a package whose declaration cannot be read must not be removed on the assumption that it has none."
+msgstr "  El registro es donde se declara «patched», y un paquete cuya declaración no se pueda leer no debe eliminarse partiendo de la suposición de que no tiene ninguna."
+
+#: cmd/bentoo/overlay_prune.go
+msgid "  Repair or restore .autoupdate/packages.toml in the overlay, then re-run."
+msgstr "  Repare o restaure .autoupdate/packages.toml en el overlay y, a continuación, vuelva a ejecutarlo."
+
 #: cmd/bentoo/overlay_pull.go
 msgid "Pull upstream changes into the overlay"
 msgstr "Incorporar los cambios del upstream al overlay"
@@ -1200,6 +2710,22 @@ msgstr "Fusionar el upstream, permitiendo un commit de merge"
 msgid "Show what would be pulled without integrating"
 msgstr "Mostrar lo que se extraería sin integrar"
 
+#: cmd/bentoo/overlay_pull.go
+msgid "Resolve conflicts manually, then run 'git add' and 'git rebase --continue'"
+msgstr "Resuelva los conflictos manualmente y, a continuación, ejecute «git add» y «git rebase --continue»"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Or abort the rebase with 'git rebase --abort'"
+msgstr "O cancele el rebase con «git rebase --abort»"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Resolve conflicts manually, then run 'git add' and 'git commit'"
+msgstr "Resuelve los conflictos manualmente y, a continuación, ejecuta «git add» y «git commit»"
+
+#: cmd/bentoo/overlay_pull.go
+msgid "Or abort the merge with 'git merge --abort'"
+msgstr "O bien, cancele la fusión con «git merge --abort»"
+
 #: cmd/bentoo/overlay_push.go
 msgid "Push committed changes to remote"
 msgstr "Enviar los commits al repositorio remoto"
@@ -1211,6 +2737,10 @@ msgstr "Enviar los commits al repositorio remoto."
 #: cmd/bentoo/overlay_push.go
 msgid "Show what would be pushed without pushing"
 msgstr "Mostrar lo que se enviaría sin realizar el envío"
+
+#: cmd/bentoo/overlay_push.go
+msgid "Dry-run mode - would push:"
+msgstr "Modo de prueba (dry-run): se haría push de:"
 
 #: cmd/bentoo/overlay_rename.go
 msgid "Bulk rename ebuilds from old version to new version"
@@ -1288,9 +2818,29 @@ msgstr "Omitir las actualizaciones del Manifest después del cambio de nombre"
 msgid "Proceed despite version-specific files or conflicts"
 msgstr "Continuar a pesar de la existencia de archivos específicos de la versión o de conflictos"
 
+#: cmd/bentoo/overlay_rename.go internal/overlay/rename.go
+msgid "No matching ebuilds found"
+msgstr "No se han encontrado ebuilds coincidentes"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Global search requires confirmation. Use --force to skip."
+msgstr "La búsqueda global requiere confirmación. Use --force para omitir."
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Dry-run mode - no changes made"
+msgstr "Modo de prueba (dry-run): no se han realizado cambios"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Operation cancelled"
+msgstr "Operación cancelada"
+
+#: cmd/bentoo/overlay_rename.go
+msgid "Proceed with rename? [y/N]: "
+msgstr "¿Desea continuar con el cambio de nombre? [y/N]: "
+
 #: cmd/bentoo/overlay_staged.go
 msgid "Work with the staged trees the build gates prepare outside the overlay"
-msgstr "Trabajar con los árboles staged que las «build gates» preparan fuera de la overlay"
+msgstr "Trabajar con los árboles staged que las «build gates» preparan fuera del overlay"
 
 #: cmd/bentoo/overlay_staged.go
 msgid ""
@@ -1396,6 +2946,86 @@ msgstr ""
 msgid "Remove the planned trees without asking (default: print the plan and ask)"
 msgstr "Eliminar los árboles planificados sin preguntar (por defecto: mostrar el plan y preguntar)"
 
+#: cmd/bentoo/overlay_staged.go
+msgid "  the staged trees could not be located: %v\n"
+msgstr "  no se han podido localizar los árboles preparados: %v\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  the staged trees could not be planned: %v\n"
+msgstr "  no se han podido planificar los árboles preparados: %v\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Nothing to remove: everything found under this root is protected — each entry above carries the reason it stays."
+msgstr "  Nada que eliminar: todo lo que se encuentra bajo esta raíz está protegido; cada entrada anterior indica el motivo por el que se mantiene."
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Nothing to remove: nothing is staged under this root."
+msgstr "  Nada que eliminar: no hay nada preparado bajo esta raíz."
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  --yes given: removing %d staged tree(s) without a prompt.\n"
+msgstr "  Se ha especificado --yes: se van a eliminar %d árbol(es) preparado(s) sin preguntar.\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Not an interactive terminal and --yes was not given: nothing removed."
+msgstr "  No es un terminal interactivo y no se ha especificado --yes: no se ha eliminado nada."
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
+msgstr "  Vuelva a ejecutar con --yes para eliminar estos %d árboles preparados sin supervisión.\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  These directories are deleted from disk. Nothing in the overlay is read, written or removed."
+msgstr "  Estos directorios se eliminan del disco. No se lee, escribe ni elimina nada del overlay."
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Remove %d staged tree(s) from %s?"
+msgstr "¿Eliminar %d árbol(es) preparado(s) de %s?"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Staged Tree Clean Result"
+msgstr "Resultado de la limpieza del árbol preparado"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Removed (%d):\n"
+msgstr "  Eliminados (%d):\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Kept — still on disk (%d):\n"
+msgstr "  Conservado — aún en el disco (%d):\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "      why: %s\n"
+msgstr "      motivo: %s\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
+msgstr "  Se han eliminado %d de los %d árboles que indicaba el plan; los %d que aún quedan se enumeran arriba, cada uno con el motivo por el que se ha mantenido.\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Removed %d of the %d tree(s) the plan named.\n"
+msgstr "  Se han eliminado %d de los %d árboles que indicaba el plan.\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "Staged Tree Clean"
+msgstr "Limpieza de árboles de staging"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Staging root: %s\n"
+msgstr "  Raíz de preparación: %s\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  To remove (%d) — recognised as this tool's own, with a record showing no deciding gate FAILED:\n"
+msgstr "  Para eliminar (%d) — reconocidos como propios de esta herramienta, con un registro que muestra que ninguna puerta decisoria ha FALLADO:\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "  Kept — nothing below is touched (%d):\n"
+msgstr "  Conservado — no se modifica nada de lo que aparece a continuación (%d):\n"
+
+#: cmd/bentoo/overlay_staged.go
+msgid "no reason was recorded, which is itself a defect: treat this tree as unexplained rather than as safe to delete"
+msgstr "no se registró ningún motivo, lo cual constituye en sí mismo un defecto: considere este árbol como no explicado y no como seguro para eliminarlo."
+
 #: cmd/bentoo/overlay_status.go
 msgid "Show the status of changes in the overlay"
 msgstr "Mostrar el estado de los cambios en el overlay"
@@ -1423,7 +3053,7 @@ msgid ""
 "Exit status: 0 when no package has a gap, 1 when one has or the sweep failed."
 msgstr ""
 "Leer las implementaciones que requiere el overlay de overlay a partir de .autoupdate/targets.toml e\n"
-"informar de todos los paquetes cuya mejor versión visible, tanto en la overlay como en ::gentoo,\n"
+"informar de todos los paquetes cuya mejor versión visible, tanto en el overlay como en ::gentoo,\n"
 "no las ofrece. En un sistema cuya variable PYTHON_SINGLE_TARGET contiene únicamente una implementación requerida,\n"
 "implementación, dicha versión falla al ejecutar emerge con el mensaje «REQUIRED_USE flag constraints are\n"
 "unsatisfied\".\n"
@@ -1441,6 +3071,22 @@ msgstr "Analizar todos los paquetes de ::gentoo, no solo los paquetes que contie
 #: cmd/bentoo/overlay_targets.go
 msgid "Write the findings to stdout as one JSON array"
 msgstr "Escribir los resultados en stdout como una única matriz JSON"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "Every package offers the required implementations.\n"
+msgstr "Cada paquete ofrece las implementaciones necesarias.\n"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "    offer unreadable: %s\n"
+msgstr "    oferta ilegible: %s\n"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "    overtaken: the overlay holds %s; bump its mirror to %s\n"
+msgstr "    superado: el overlay contiene %s; actualiza su réplica a %s\n"
+
+#: cmd/bentoo/overlay_targets.go
+msgid "%d package(s) lack a required implementation.\n"
+msgstr "%d paquete(s) carece(n) de una implementación necesaria.\n"
 
 #: cmd/bentoo/overlay_validate.go
 msgid "Check that each ebuild still matches the source it points at"
@@ -1503,7 +3149,7 @@ msgstr ""
 "--depth por encima de «options» es diferente. Cada candidato se prepara fuera del\n"
 "overlay y se ejecutan sobre él las propias fases de compilación del upstream, de modo que con --depth\n"
 "compila el código y descarga cualquier distfile que este host aún no tenga, para\n"
-"todos los paquetes con los que coincide el selector. Sigue sin escribirse nunca en la overlay publicada.\n"
+"todos los paquetes con los que coincide el selector. Sigue sin escribirse nunca en el overlay publicada.\n"
 "a.\n"
 "\n"
 "Esto detecta la clase de fallo en la que un aumento de versión cambia la versión y el\n"
@@ -1525,7 +3171,7 @@ msgstr ""
 "el valor predeterminado es «options», que es este comando tal y como ha sido siempre: de solo lectura,\n"
 "sin privilegios, sin compilar nada. Por encima de «options», las puertas necesitan un árbol en el que compilar\n"
 "y ese árbol es una copia intermedia situada en ~/.config/bentoo/autoupdate/staging:\n"
-"La overlay publicada nunca se compila ni se escribe en ella.\n"
+"El overlay publicada nunca se compila ni se escribe en ella.\n"
 "\n"
 "Códigos de salida:\n"
 "  0  todos los resultados de las puertas fueron PASS o SKIPPED\n"
@@ -1535,7 +3181,7 @@ msgstr ""
 "  2  el selector nombra algo que el overlay no contiene\n"
 "\n"
 "Ejemplos:\n"
-"  bentoo overlay validate                                  # toda la overlay\n"
+"  bentoo overlay validate                                  # toda el overlay\n"
 "  bentoo overlay validate media-plugins                    # una categoría\n"
 "  bentoo overlay validate media-plugins/gst-plugins-qt6    # todas las versiones de un paquete\n"
 "  bentoo overlay validate --json | jq .                    # un documento JSON\n"
@@ -1553,6 +3199,70 @@ msgstr "Leer los distfiles de este directorio (nunca se crea, nunca se escribe e
 #: cmd/bentoo/overlay_validate.go
 msgid "Validate to this rung of the ladder — none, options, patches, configure, compile or install, each including every rung before it. Above \"options\" the gates need a tree to build in, and that tree is a staged copy; the published overlay is never built in"
 msgstr "Validar hasta este peldaño de la escalera: none, options, patches, configure, compile o install, cada uno de los cuales incluye todos los peldaños anteriores. Por encima de «options», las puertas necesitan un árbol en el que compilar, y ese árbol es una copia intermedia; el overlay publicado nunca se compila en él."
+
+#: cmd/bentoo/overlay_validate.go
+msgid "  reading --depth: %v\n"
+msgstr "  leyendo --depth: %v\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "  %q is not a category or a category/package\n"
+msgstr "  %q no es una categoría ni una categoría/paquete\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "  --depth=%s builds, and a staged tree to build in could not be placed: %v\n"
+msgstr "  --depth=%s compilaciones, y no se ha podido colocar un árbol intermedio en el que compilar: %v\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "  build logs will not be retained: %v\n"
+msgstr "  no se conservarán los registros de compilación: %v\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "  validating %s: %v\n"
+msgstr "  validando %s: %v\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "the overlay (no path could be resolved from the config)"
+msgstr "el overlay (no se ha podido resolver ninguna ruta a partir de la configuración)"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "  nothing in the overlay matches %q\n"
+msgstr "  nada en el overlay coincide con %q\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid ""
+"Validating %s\n"
+"\n"
+msgstr ""
+"Validando %s\n"
+"\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
+msgstr "      %s %d opción(es) que upstream declara y que este ebuild no aprueba — consulte --json\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid "      read: %s\n"
+msgstr "      leído: %s\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid ""
+"\n"
+"%d ebuilds: %d failed, %d passed, %d skipped\n"
+msgstr ""
+"\n"
+"%d ebuilds: %d fallidos, %d aprobados, %d omitidos\n"
+
+#: cmd/bentoo/overlay_validate.go
+msgid ""
+"pkgcheck findings are all reported at info: its JsonStream records carry no level,\n"
+"and inferring one from the message text would be a guess. They never affect the exit code."
+msgstr ""
+"todos los hallazgos de pkgcheck se notifican como info: sus registros JsonStream no llevan ningún nivel,\n"
+"e inferir uno a partir del texto del mensaje sería una suposición. Nunca afectan al código de salida."
+
+#: cmd/bentoo/overlay_validate_report.go
+msgid "  writing the JSON report: %v\n"
+msgstr "  escribiendo el informe JSON: %v\n"
 
 #: cmd/bentoo/root.go
 msgid "Bentoo Linux tools"
@@ -1630,6 +3340,10 @@ msgstr ""
 msgid "path to snapshot.toml (default: /etc/bentoo, then XDG)"
 msgstr "ruta a snapshot.toml (por defecto: /etc/bentoo, luego XDG)"
 
+#: cmd/bentoo/snapshot.go
+msgid "dry-run: %s"
+msgstr "simulación: %s"
+
 #: cmd/bentoo/snapshot_apply.go
 msgid "Render native config and install the systemd timer"
 msgstr "Generar la configuración nativa e instalar el temporizador de systemd"
@@ -1645,6 +3359,10 @@ msgstr ""
 #: cmd/bentoo/snapshot_apply.go
 msgid "print the configs and systemd units that would be written, without writing them"
 msgstr "mostrar las configuraciones y las unidades de systemd que se escribirían, sin escribirlas"
+
+#: cmd/bentoo/snapshot_apply.go
+msgid "snapshot configuration applied (%s)"
+msgstr "configuración de instantáneas aplicada (%s)"
 
 #: cmd/bentoo/snapshot_hook.go
 msgid "Install or remove the opt-in Portage emerge snapshot hook (snapper only)"
@@ -1686,6 +3404,14 @@ msgstr "instalar el hook de Portage emerge (instantáneas de snapper previas/pos
 msgid "remove the Portage emerge hook"
 msgstr "eliminar el hook de Portage emerge"
 
+#: cmd/bentoo/snapshot_hook.go
+msgid "Portage emerge hook removed"
+msgstr "Hook de emerge de Portage eliminado"
+
+#: cmd/bentoo/snapshot_hook.go
+msgid "Portage emerge hook installed — snapper pre/post snapshots around each emerged package"
+msgstr "Hook de Portage emerge instalado — instantáneas pre/post de snapper en torno a cada paquete «emerged»"
+
 #: cmd/bentoo/snapshot_list.go
 msgid "List local snapshots per subvolume"
 msgstr "Mostrar las instantáneas locales por subvolumen"
@@ -1693,6 +3419,18 @@ msgstr "Mostrar las instantáneas locales por subvolumen"
 #: cmd/bentoo/snapshot_list.go
 msgid "also list remote snapshots (btrbk targets, restic repository)"
 msgstr "también mostrar las instantáneas remotas (destinos de btrbk, repositorio de restic)"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "(none)"
+msgstr "(ninguno)"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "remote %s unavailable: %v"
+msgstr "el %s remoto no está disponible: %v"
+
+#: cmd/bentoo/snapshot_list.go
+msgid "remote %s:"
+msgstr "remoto %s:"
 
 #: cmd/bentoo/snapshot_prune.go
 msgid "Apply the retention policy on demand"
@@ -1723,6 +3461,10 @@ msgstr "mostrar las acciones de eliminación que se ejecutarían, sin ejecutarla
 #: cmd/bentoo/snapshot_prune.go
 msgid "scope the prune to the named [[ship]] destination"
 msgstr "limitar la poda al destino [[ship]] indicado"
+
+#: cmd/bentoo/snapshot_prune.go
+msgid "snapshot prune completed (%d stages)"
+msgstr "eliminación de instantáneas completada (%d etapas)"
 
 #: cmd/bentoo/snapshot_restore.go
 msgid "Restore a snapshot from a ship target into a path"
@@ -1774,6 +3516,18 @@ msgstr "omitir el mensaje de confirmación de la restauración destructiva"
 msgid "print the destructive restore actions without performing them"
 msgstr "mostrar las acciones de restauración destructiva sin ejecutarlas"
 
+#: cmd/bentoo/snapshot_restore.go
+msgid "dry-run: would restore snapshot %s into %s via ship %q (%s)"
+msgstr "dry-run: restauraría la instantánea %s en %s a través del ship %q (%s)"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "snapshot restored (%s → %s)"
+msgstr "instantánea restaurada (%s → %s)"
+
+#: cmd/bentoo/snapshot_restore.go
+msgid "restore declined"
+msgstr "restauración rechazada"
+
 #: cmd/bentoo/snapshot_rollback.go
 msgid "Roll the system back to a snapshot (snapper only)"
 msgstr "Restaurar el sistema a una instantánea (solo snapper)"
@@ -1802,6 +3556,18 @@ msgstr "omitir la solicitud de confirmación de la reversión destructiva"
 msgid "print the destructive rollback action without performing it"
 msgstr "mostrar la acción de reversión destructiva sin ejecutarla"
 
+#: cmd/bentoo/snapshot_rollback.go
+msgid "dry-run: would run snapper rollback to snapshot %s — the system boots from it on next reboot"
+msgstr "dry-run: ejecutaría la reversión de snapper a la instantánea %s — el sistema se iniciará a partir de ella en el próximo reinicio"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "rollback to snapshot %s started — reboot to complete"
+msgstr "se ha iniciado la reversión a la instantánea %s — reinicie para completarla"
+
+#: cmd/bentoo/snapshot_rollback.go
+msgid "rollback declined"
+msgstr "reversión rechazada"
+
 #: cmd/bentoo/snapshot_run.go
 msgid "Run the snapshot pipeline now"
 msgstr "Ejecutar ahora la canalización de instantáneas"
@@ -1824,6 +3590,34 @@ msgstr "mostrar la canalización que se ejecutaría, sin ejecutarla"
 msgid "Show the last run, timer state, and free space"
 msgstr "Mostrar la última ejecución, el estado del temporizador y el espacio libre"
 
+#: cmd/bentoo/snapshot_status.go
+msgid "last run: none recorded"
+msgstr "última ejecución: no se ha registrado ninguna"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "last run: ok at %s (%d stages)"
+msgstr "última ejecución: correcta en %s (%d etapas)"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "last run: failed at %s (%d stages)"
+msgstr "última ejecución: error en %s (%d etapas)"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "timer: %s"
+msgstr "temporizador: %s"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "unknown"
+msgstr "desconocido"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "next run: %s"
+msgstr "próxima ejecución: %s"
+
+#: cmd/bentoo/snapshot_status.go
+msgid "free space on %s: %s"
+msgstr "espacio libre en %s: %s"
+
 #: cmd/bentoo/version.go
 msgid "Print version information"
 msgstr "Mostrar la información de la versión"
@@ -1831,3 +3625,1087 @@ msgstr "Mostrar la información de la versión"
 #: cmd/bentoo/version.go
 msgid "Print the version, commit hash, and build date of bentoo."
 msgstr "Imprimir la versión, el hash del commit y la fecha de compilación de bentoo."
+
+#: internal/autoupdate/applier.go
+msgid "::gentoo also ships %s and its copy differs — the bump carried OUR %s forward without re-reading it; diff %s %s"
+msgstr "::gentoo también incluye %s y su copia es diferente: la actualización trasladó NUESTRO %s sin volver a leerlo; diff %s %s"
+
+#: internal/autoupdate/applier.go
+msgid "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
+msgstr "reutilizando %d distfile(s) descargado(s) y %d distfile(s) almacenado(s) en caché para la reparación de %s-%s"
+
+#: internal/autoupdate/applier.go
+msgid "manifest failed for %s-%s; invoking LLM fixer to repair the ebuild"
+msgstr "el manifiesto ha fallado para %s-%s; se está invocando al corrector LLM para reparar el ebuild"
+
+#: internal/autoupdate/applier.go
+msgid "manifest re-check passed for %s-%s without an ebuild edit"
+msgstr "la nueva comprobación del manifest se ha superado para %s-%s sin editar el ebuild"
+
+#: internal/autoupdate/applier.go
+msgid "LLM fixer repaired %s-%s using %s: %s"
+msgstr "El corrector LLM ha reparado %s-%s utilizando %s: %s"
+
+#: internal/autoupdate/applier_gates.go
+msgid "the %s gate failed for %s-%s; invoking the LLM build fixer to repair the staged ebuild"
+msgstr "la puerta %s ha fallado para %s-%s; se está invocando al corrector de compilaciones LLM para reparar el ebuild en staging"
+
+#: internal/autoupdate/applier_gates.go
+msgid "LLM build fixer repaired %s-%s using %s: %s"
+msgstr "El corrector de compilaciones LLM ha reparado %s-%s utilizando %s: %s"
+
+#: internal/autoupdate/files_version_warning.go
+msgid "%s named for %s, and the ebuild builds ${FILESDIR} paths from a version variable — the %s ebuild will look for %s; copy or rename before src_prepare"
+msgstr "%s nombrado para %s, y el ebuild genera las rutas de ${FILESDIR} a partir de una variable de versión: el ebuild %s buscará %s; cópielo o cambie su nombre antes de src_prepare"
+
+#: internal/autoupdate/sweep.go
+msgid "quarantined an unverifiable distfile before manifesting %s: %s (in %s)"
+msgstr "se ha puesto en cuarentena un archivo distfile no verificable antes de generar el manifiesto de %s: %s (en %s)"
+
+#: internal/autoupdate/sweep.go
+msgid "reused %d distfile(s) from %s while manifesting %s"
+msgstr "se reutilizaron %d distfile(s) de %s al generar el manifiesto de %s"
+
+#: internal/autoupdate/sweep.go
+msgid "removed the incomplete distfile %s the failed manifest step for %s left in %s"
+msgstr "se ha eliminado el distfile incompleto %s que el paso de manifiesto fallido para %s dejó en %s"
+
+#: internal/autoupdate/sweep.go
+msgid "could not remove every distfile the failed manifest step for %s left in %s: %v"
+msgstr "no se pudieron eliminar todos los distfiles que el paso fallido del manifiesto para %s dejó en %s: %v"
+
+#: internal/common/report/autoupdate_check.go
+msgid "Version Check Results"
+msgstr "Resultados de la comprobación de versiones"
+
+#: internal/common/report/autoupdate_check.go
+msgid "No package is configured for autoupdate."
+msgstr "No hay ningún paquete configurado para la autoupdate."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) checked, %d with a pending update."
+msgstr "%d paquete(s) comprobado(s), %d con una actualización pendiente."
+
+#: internal/common/report/autoupdate_check.go
+msgid "TYPE"
+msgstr "TIPO"
+
+#: internal/common/report/autoupdate_check.go
+msgid "CURRENT"
+msgstr "ACTUAL"
+
+#: internal/common/report/autoupdate_check.go
+msgid "CANDIDATE"
+msgstr "CANDIDATO"
+
+#: internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+msgid "STATE"
+msgstr "ESTADO"
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) are up to date and are listed above."
+msgstr "%d paquete(s) están actualizados y se enumeran arriba."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) are up to date and are not listed; pass --all to list them."
+msgstr "%d paquete(s) están actualizados y no se muestran; usa --all para mostrarlos."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) have no ebuild in the overlay."
+msgstr "%d paquete(s) no tienen ebuild en el overlay."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) left their series upstream and need a manual promotion."
+msgstr "%d paquete(s) han abandonado su serie en el repositorio original y necesitan una promoción manual."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) could not be checked."
+msgstr "No se han podido comprobar %d paquete(s)."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) reported a version that could not be ordered against the current one."
+msgstr "%d paquete(s) indicaron una versión que no se pudo comparar con la actual."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) have an update held by min_age_days."
+msgstr "%d paquete(s) tienen una actualización retenida por min_age_days."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) to evaluate."
+msgstr "%d paquete(s) por evaluar."
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) to evaluate, %d of them excluded by policy."
+msgstr "%d paquete(s) por evaluar, %d de ellos excluidos por la política."
+
+#: internal/common/report/autoupdate_check.go
+msgid "BUMP"
+msgstr "BUMP"
+
+#: internal/common/report/autoupdate_check.go
+msgid "CLASS"
+msgstr "CLASS"
+
+#: internal/common/report/autoupdate_check.go
+msgid "DEPTH"
+msgstr "PROFUNDIDAD"
+
+#: internal/common/report/autoupdate_check.go
+msgid "%s [not validated]"
+msgstr "%s [no validado]"
+
+#: internal/common/report/autoupdate_check.go
+msgid "Validation Results"
+msgstr "Resultados de la validación"
+
+#: internal/common/report/autoupdate_check.go
+msgid "No package was evaluated."
+msgstr "No se evaluó ningún paquete."
+
+#: internal/common/report/autoupdate_check.go
+msgid "Validation Summary"
+msgstr "Resumen de la validación"
+
+#: internal/common/report/autoupdate_check.go
+msgid "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
+msgstr "%d paquete(s) evaluado(s): %d comprobado(s), %d con errores, %d no concluyente(s), %d omitido(s)."
+
+#: internal/common/report/autoupdate_check.go
+msgid "Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded."
+msgstr "Siguiente: %d listos para aplicar, %d en espera, %d para el mantenedor, %d excluidos."
+
+#: internal/common/report/autoupdate_check.go
+msgid "Nothing was published: a check writes no ebuild and no version pin."
+msgstr "No se ha publicado nada: una comprobación no escribe ningún ebuild ni ningún anclaje de versión."
+
+#: internal/common/report/autoupdate_check.go
+msgid "Checked %d source, %d bin; %d package(s) resolved to neither tier."
+msgstr "Se han comprobado %d de código fuente, %d de binarios; %d paquete(s) no se han resuelto en ninguno de los niveles."
+
+#: internal/common/report/autoupdate_check.go
+msgid "Checked %d source, %d bin."
+msgstr "Se han comprobado %d de código fuente, %d de binarios."
+
+#: internal/common/report/autoupdate_check.go
+msgid "orphaned"
+msgstr "huérfano"
+
+#: internal/common/report/autoupdate_check.go
+msgid "no ebuild in the overlay: the version columns say nothing about this package"
+msgstr "no hay ningún ebuild en el overlay: las columnas de versión no dicen nada sobre este paquete"
+
+#: internal/common/report/autoupdate_check.go
+msgid "manual promotion"
+msgstr "promoción manual"
+
+#: internal/common/report/autoupdate_check.go
+msgid "error"
+msgstr "error"
+
+#: internal/common/report/autoupdate_check.go
+msgid "not comparable"
+msgstr "no comparable"
+
+#: internal/common/report/autoupdate_check.go
+msgid "%q could not be ordered against the current %s; check the parser configuration"
+msgstr "No se ha podido ordenar %q en relación con el %s actual; comprueba la configuración del analizador sintáctico"
+
+#: internal/common/report/autoupdate_check.go
+msgid "held"
+msgstr "retenido"
+
+#: internal/common/report/autoupdate_check.go
+msgid "update"
+msgstr "actualización"
+
+#: internal/common/report/autoupdate_check.go
+msgid "up to date"
+msgstr "actualizado"
+
+#: internal/common/report/autoupdate_check.go
+msgid "waits for %s-%s (not detected)"
+msgstr "espera a %s-%s (no detectado)"
+
+#: internal/common/report/autoupdate_check.go
+msgid "requires %s-%s (%s)"
+msgstr "requiere %s-%s (%s)"
+
+#: internal/common/report/autoupdate_check.go
+msgid "%s (cached)"
+msgstr "%s (en caché)"
+
+#: internal/common/report/compare_run.go
+msgid "[reading failed]"
+msgstr "[falló la lectura]"
+
+#: internal/common/report/compare_run.go
+msgid "timed out"
+msgstr "se ha agotado el tiempo de espera"
+
+#: internal/common/report/compare_run.go
+msgid "could not start"
+msgstr "no se pudo iniciar"
+
+#: internal/common/report/compare_run.go
+msgid "exited non-zero"
+msgstr "ha salido con un código distinto de cero"
+
+#: internal/common/report/compare_run.go
+msgid "empty or unusable reply"
+msgstr "respuesta vacía o inutilizable"
+
+#: internal/common/report/compare_run.go
+msgid "cancelled"
+msgstr "cancelado"
+
+#: internal/common/report/compare_run.go
+msgid "ebuild unreadable"
+msgstr "ebuild ilegible"
+
+#: internal/common/report/compare_run.go
+msgid "other"
+msgstr "otro"
+
+#: internal/common/report/compare_run.go
+msgid "Left Without an Answer"
+msgstr "Sin respuesta"
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
+msgstr "%d paquete(s) alcanzado(s) pero sin respuesta: las unidades que cuenta el aviso de ejecución incompleta."
+
+#: internal/common/report/compare_run.go
+msgid "A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."
+msgstr "Un par cuyas versiones difieren se rechaza por diseño: la comprobación de contenido lee nuestros cambios únicamente en comparación con la misma versión upstream, por lo que no puede determinar si se transfieren a una versión más reciente."
+
+#: internal/common/report/compare_run.go
+msgid "LOCAL"
+msgstr "LOCAL"
+
+#: internal/common/report/compare_run.go
+msgid "REMOTE"
+msgstr "REMOTE"
+
+#: internal/common/report/compare_run.go
+msgid "WHY"
+msgstr "POR QUÉ"
+
+#: internal/common/report/compare_run.go
+msgid "Overlay Comparison"
+msgstr "Comparación de overlays"
+
+#: internal/common/report/compare_run.go
+msgid "%d also exists in %s and is compared below; %d exists only here and has nothing to compare against."
+msgstr "%d también existe en %s y se compara a continuación; %d solo existe aquí y no tiene nada con lo que compararse."
+
+#: internal/common/report/compare_run.go
+msgid "%d also exists in %s and is compared below; %d exist only here and have nothing to compare against."
+msgstr "%d también existe en %s y se compara a continuación; %d solo existe aquí y no tiene nada con lo que compararse."
+
+#: internal/common/report/compare_run.go
+msgid "%d also exist in %s and are compared below; %d exists only here and has nothing to compare against."
+msgstr "%d también existen en %s y se comparan a continuación; %d solo existe aquí y no tiene nada con lo que compararse."
+
+#: internal/common/report/compare_run.go
+msgid "%d also exist in %s and are compared below; %d exist only here and have nothing to compare against."
+msgstr "%d también existen en %s y se comparan a continuación; %d solo existen aquí y no tienen nada con lo que compararse."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) scanned in the Bentoo overlay."
+msgstr "%d paquete(s) analizado(s) en el overlay de Bentoo."
+
+#: internal/common/report/compare_run.go
+msgid "%d comparison(s) was never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
+msgstr "%d comparación(es) nunca se leyó(yeron): una revisión que nadie solicitó, una revisión que se intentó y falló, o un par de versiones que la comprobación de contenido rechazó. Una fila cuya revisión ha fallado está marcada como %s: la diferencia es real, falta la explicación y ninguna fila situada debajo se ha degradado silenciosamente para ocultarla."
+
+#: internal/common/report/compare_run.go
+msgid "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
+msgstr "%d comparación(es) nunca se leyeron: una revisión que nadie solicitó, una revisión que se intentó y falló, o un par de versiones que la comprobación de contenido rechazó. Una fila cuya revisión ha fallado está marcada como %s: la diferencia es real, falta la explicación y ninguna fila situada debajo se ha degradado en silencio para ocultarla."
+
+#: internal/common/report/compare_run.go
+msgid "The failed reviews, by cause: %s."
+msgstr "Las revisiones fallidas, por causa: %s."
+
+#: internal/common/report/compare_run.go
+msgid "Redundant — %s ships the version, and nothing cleared the content check"
+msgstr "Redundante: %s envía la versión y nada ha superado la comprobación de contenido"
+
+#: internal/common/report/compare_run.go
+msgid "No package is counted as redundant, so nothing here is recommended for removal."
+msgstr "No se considera ningún paquete como redundante, por lo que no se recomienda eliminar nada aquí."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) are counted as redundant."
+msgstr "%d paquete(s) se consideran redundantes."
+
+#: internal/common/report/compare_run.go
+msgid "No per-package row reached this report, so the count above is stated without the list it was taken over."
+msgstr "Ninguna fila por paquete ha llegado a este informe, por lo que el recuento anterior se indica sin la lista de la que se ha obtenido."
+
+#: internal/common/report/compare_run.go
+msgid "A difference is not proof of authorship: %s also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring."
+msgstr "Una diferencia no es prueba de autoría: %s también revisa los ebuilds «in situ», sin un «revbump», por lo que una pequeña diferencia suele deberse a que nuestra copia se ha quedado desfasada y no a un trabajo nuestro. Genere un diff antes de eliminar o declarar."
+
+#: internal/common/report/compare_run.go
+msgid "%d was never compared at all, because the check refuses to diff two different versions"
+msgstr "%d nunca se comparó en absoluto, porque la comprobación se niega a comparar dos versiones diferentes"
+
+#: internal/common/report/compare_run.go
+msgid "%d were never compared at all, because the check refuses to diff two different versions"
+msgstr "%d nunca se compararon en absoluto, porque la comprobación se niega a comparar dos versiones diferentes"
+
+#: internal/common/report/compare_run.go
+msgid "%d was never compared at all, and this run did not record why"
+msgstr "%d nunca se comparó en absoluto, y esta ejecución no registró el motivo"
+
+#: internal/common/report/compare_run.go
+msgid "%d were never compared at all, and this run did not record why"
+msgstr "%d nunca se compararon en absoluto, y esta ejecución no registró el motivo"
+
+#: internal/common/report/compare_run.go
+msgid "the review died on the other %d"
+msgstr "la revisión se interrumpió en el otro %d"
+
+#: internal/common/report/compare_run.go
+msgid "%d had a review that was attempted and failed"
+msgstr "Se intentó realizar una revisión de %d, pero falló"
+
+#: internal/common/report/compare_run.go
+msgid "%d was never submitted for review"
+msgstr "%d nunca se envió para su revisión"
+
+#: internal/common/report/compare_run.go
+msgid "%d were never submitted for review"
+msgstr "%d nunca se enviaron para su revisión"
+
+#: internal/common/report/compare_run.go
+msgid "%d carries changes proved ours, so removing it would discard work of our own — declare it instead."
+msgstr "%d contiene cambios que se ha demostrado que son nuestros, por lo que eliminarlo descartaría nuestro propio trabajo; declárelo en su lugar."
+
+#: internal/common/report/compare_run.go
+msgid "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
+msgstr "%d contienen cambios que se ha demostrado que son nuestros, por lo que eliminarlos supondría descartar nuestro propio trabajo; declárelos en su lugar."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s), and not one of them carries a reading."
+msgstr "%d paquete(s), y ninguno de ellos contiene una lectura."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s), and every one of them carries a reading."
+msgstr "%d paquete(s), y todos ellos llevan una lectura."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s), of which %d carries a reading."
+msgstr "%d paquete(s), de los cuales %d contiene una lectura."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s), of which %d carry a reading."
+msgstr "%d paquete(s), de los cuales %d tienen una lectura."
+
+#: internal/common/report/compare_run.go
+msgid "No removal advice follows from either."
+msgstr "De ninguno de los dos se deriva ninguna recomendación de eliminación."
+
+#: internal/common/report/compare_run.go
+msgid "No removal advice follows from a package nobody read."
+msgstr "No se deriva ninguna recomendación de eliminación de un paquete que nadie ha leído."
+
+#: internal/common/report/compare_run.go
+msgid "The recommendation to remove covers the whole list."
+msgstr "La recomendación de eliminar abarca toda la lista."
+
+#: internal/common/report/compare_run.go
+msgid "The recommendation to remove covers the %d somebody read, and none of the rest."
+msgstr "La recomendación de eliminar abarca el %d que alguien leyó, y ninguno de los demás."
+
+#: internal/common/report/compare_run.go
+msgid "No removal advice follows."
+msgstr "No se ofrece ninguna recomendación de eliminación."
+
+#: internal/common/report/compare_run.go
+msgid "The recommendation to remove covers the %d that were read and are not proved ours, and none of the rest."
+msgstr "La recomendación de eliminar abarca los %d que se han leído y no se ha demostrado que sean nuestros, y ninguno de los demás."
+
+#: internal/common/report/compare_run.go
+msgid "Needs Rebase — %s moved ahead of changes of ours, which must be re-applied"
+msgstr "Necesita rebase: %s se ha adelantado a nuestros cambios, que deben volver a aplicarse"
+
+#: internal/common/report/compare_run.go
+msgid "No package needs a rebase: nothing here carries changes of ours on top of a version %s has since moved past."
+msgstr "Ningún paquete necesita una rebase: aquí no hay nada que contenga cambios nuestros sobre una versión que %s ha superado desde entonces."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) are counted as needing a rebase."
+msgstr "%d paquete(s) se consideran que necesitan una rebase."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
+msgstr "%d paquete(s) en la lista: cada uno contiene cambios nuestros sobre una versión que %s ha superado desde entonces, por lo que es necesario tanto un aumento de versión como una nueva aplicación."
+
+#: internal/common/report/compare_run.go
+msgid "Keep — the overlay copy is ahead"
+msgstr "Mantener: la copia de overlay está por delante"
+
+#: internal/common/report/compare_run.go
+msgid "No package is counted as worth keeping on its own merits."
+msgstr "Ningún paquete se considera digno de conservarse por sus propios méritos."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) are counted as worth keeping."
+msgstr "%d paquete(s) se consideran dignos de conservarse."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) listed, and the run recommends keeping every one of them."
+msgstr "%d paquete(s) enumerado(s), y la ejecución recomienda conservar todos y cada uno de ellos."
+
+#: internal/common/report/compare_run.go
+msgid "%s (%d packages)"
+msgstr "%s (%d paquetes)"
+
+#: internal/common/report/compare_run.go
+msgid "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
+msgstr "%d de los %d comparten un par de versiones y se agruparían en %d grupo(s); en su lugar, --all ha enumerado todos los miembros anteriormente."
+
+#: internal/common/report/compare_run.go
+msgid "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
+msgstr "%d de los %d comparten un par de versiones y se enumeran arriba como %d grupo(s); pase --all para enumerar sus miembros."
+
+#: internal/common/report/compare_run.go
+msgid "Unknown — no recommendation"
+msgstr "Desconocido — sin recomendación"
+
+#: internal/common/report/compare_run.go
+msgid "Every package the run judged reached a recommendation, so nothing is listed here."
+msgstr "Todos los paquetes evaluados en la ejecución obtuvieron una recomendación, por lo que aquí no se indica nada."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) are counted as unknown."
+msgstr "%d paquete(s) se consideran desconocidos."
+
+#: internal/common/report/compare_run.go
+msgid "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
+msgstr "%d paquete(s) enumerado(s). No hay nada registrado que los describa, por lo que no se respalda ninguna de las dos recomendaciones."
+
+#: internal/common/report/compare_run.go
+msgid "Summary"
+msgstr "Resumen"
+
+#: internal/common/report/compare_run.go
+msgid "%d scanned · %d in both · %d only here"
+msgstr "%d analizados · %d en ambos · %d solo aquí"
+
+#: internal/common/report/compare_run.go
+msgid "keep %d · redundant %d · needs rebase %d · unknown %d"
+msgstr "conservar %d · redundante %d · necesita rebase %d · desconocido %d"
+
+#: internal/common/report/compare_run.go
+msgid "Verdicts count every package scanned; %d of %d have no row above."
+msgstr "Los veredictos contabilizan todos los paquetes analizados; %d de %d no tienen ninguna fila encima."
+
+#: internal/common/report/compare_run.go
+msgid "Beside the reason on each row, the run established more about these packages:"
+msgstr "Además del motivo que aparece en cada fila, la ejecución determinó más información sobre estos paquetes:"
+
+#: internal/common/report/compare_run.go
+msgid "DIFF"
+msgstr "DIFF"
+
+#: internal/common/report/compare_run.go
+msgid "[reading failed: %s]"
+msgstr "[error al leer: %s]"
+
+#: internal/common/report/compare_run.go
+msgid "the compared repository"
+msgstr "el repositorio comparado"
+
+#: internal/common/report/manifest_run.go
+msgid "Manifest Regeneration"
+msgstr "Regeneración del manifiesto"
+
+#: internal/common/report/manifest_run.go
+msgid "No target has an outcome to report, so nothing is counted as regenerated or as failed."
+msgstr "Ningún objetivo tiene un resultado que comunicar, por lo que nada se considera regenerado ni fallido."
+
+#: internal/common/report/manifest_run.go
+msgid "%d target(s) processed: %d regenerated, %d failed."
+msgstr "%d destino(s) procesado(s): %d regenerado(s), %d con error(es)."
+
+#: internal/common/report/manifest_run.go
+msgid "No per-target row reached this report, so the counts above are stated without the list they were taken over."
+msgstr "Ninguna fila por objetivo ha llegado a este informe, por lo que los recuentos anteriores se indican sin la lista de la que se han obtenido."
+
+#: internal/common/report/manifest_run.go
+msgid "Dry run: %d target(s) would have their Manifest regenerated."
+msgstr "Ejecución de prueba: se regeneraría el manifiesto de %d destino(s)."
+
+#: internal/common/report/manifest_run.go
+msgid "Nothing ran: no command was invoked and no Manifest was written, so no target above is counted as regenerated or as failed."
+msgstr "No se ha ejecutado nada: no se ha invocado ningún comando ni se ha escrito ningún manifiesto, por lo que ninguno de los destinos anteriores se considera regenerado ni fallido."
+
+#: internal/common/report/manifest_run.go
+msgid "%d target(s) were regenerated and are listed above."
+msgstr "%d destino(s) se han regenerado y se enumeran arriba."
+
+#: internal/common/report/manifest_run.go
+msgid "%d target(s) were regenerated and are not listed; pass --all to list them."
+msgstr "Se han regenerado %d destino(s) y no se muestran en la lista; usa --all para mostrarlos."
+
+#: internal/common/report/manifest_run.go
+msgid "What a target that succeeded printed is not kept: it was shown while the run was live, and holding a verbatim copy of every worker's output would grow with the overlay. A target that failed carries its own, in full."
+msgstr "No se conserva lo que imprimió un objetivo que se completó correctamente: se mostró mientras la ejecución estaba en curso, y guardar una copia literal de la salida de cada trabajador haría que aumentara el tamaño del overlay. Un destino que ha fallado conserva su propia salida, en su totalidad."
+
+#: internal/common/report/manifest_run.go
+msgid "regenerated"
+msgstr "regenerado"
+
+#: internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+msgid "failed"
+msgstr "fallido"
+
+#: internal/common/report/manifest_run.go
+msgid "output: %s"
+msgstr "salida: %s"
+
+#: internal/common/report/render/fullscreen.go internal/common/report/run.go
+msgid "Run Interrupted"
+msgstr "Ejecución interrumpida"
+
+#: internal/common/report/render/fullscreen.go
+msgid "This report is incomplete: the run was interrupted before its report was read out."
+msgstr "Este informe está incompleto: la ejecución se interrumpió antes de que se leyera su informe."
+
+#: internal/common/report/render/fullscreen.go
+msgid "The sections below cover only what the run had reached; anything it never got to is counted in no column."
+msgstr "Las secciones siguientes solo abarcan lo que la ejecución había alcanzado; todo aquello a lo que nunca llegó se contabiliza en la columna «no»."
+
+#: internal/common/report/render/fullscreen.go
+msgid "q/esc quit · ctrl+c interrupt · the whole report prints on exit"
+msgstr "q/esc salir · ctrl+c interrumpir · el informe completo se imprime al salir"
+
+#: internal/common/report/render/fullscreen.go
+msgid "… %d more line(s) not shown — press q for the whole report"
+msgstr "… %d línea(s) más no mostrada(s) — pulsa q para ver el informe completo"
+
+#: internal/common/report/render/fullscreen.go
+msgid "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
+msgstr "… %d línea(s) más y %d sección(es) completa(s) no mostrada(s) — pulse q para ver el informe completo"
+
+#: internal/common/report/render/fullscreen.go
+msgid "this section could not be rendered: %v"
+msgstr "no se ha podido mostrar esta sección: %v"
+
+#: internal/common/report/run.go
+msgid "Run Incomplete"
+msgstr "Ejecución incompleta"
+
+#: internal/common/report/run.go
+msgid "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
+msgstr "Este informe está incompleto: la ejecución llegó a todas las unidades, pero %d unidad(es) planificada(s) se quedó(aron) sin respuesta."
+
+#: internal/common/report/run.go
+msgid "The counts below cover only what the run established; the rest are counted in no column."
+msgstr "Los recuentos que figuran a continuación solo abarcan lo que se determinó en la ejecución; el resto se contabiliza en la columna «no»."
+
+#: internal/common/report/run.go
+msgid "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
+msgstr "Este informe está incompleto: la ejecución se interrumpió y %d unidad(es) planificada(s) no se evaluó(aron)."
+
+#: internal/common/report/run.go
+msgid "The counts below cover only what the run reached; the rest are counted in no column."
+msgstr "Los recuentos que figuran a continuación solo abarcan lo que alcanzó la ejecución; el resto se contabiliza en la columna «no»."
+
+#: internal/common/report/snapshot_run.go
+msgid "Snapshot Run"
+msgstr "Ejecución de instantánea"
+
+#: internal/common/report/snapshot_run.go
+msgid "No step has an outcome to report, so nothing is counted as succeeded or as failed."
+msgstr "Ningún paso tiene un resultado que comunicar, por lo que nada se contabiliza como correcto ni como incorrecto."
+
+#: internal/common/report/snapshot_run.go
+msgid "No per-step row reached this report, so the counts above are stated without the list they were taken over."
+msgstr "Ninguna fila por paso ha llegado a este informe, por lo que los recuentos anteriores se indican sin la lista de la que se obtuvieron."
+
+#: internal/common/report/snapshot_run.go
+msgid "SUBVOLUME"
+msgstr "SUBVOLUMEN"
+
+#: internal/common/report/snapshot_run.go
+msgid "STEP"
+msgstr "PASO"
+
+#: internal/common/report/snapshot_run.go
+msgid "The run was given no subvolume to operate on, so no step below is attributed to one."
+msgstr "No se asignó ningún subvolumen a la ejecución para que operara en él, por lo que ninguno de los pasos siguientes se atribuye a uno."
+
+#: internal/common/report/snapshot_run.go
+msgid "The run operated on %d subvolume(s): %s."
+msgstr "La ejecución operó en %d subvolumen(es): %s."
+
+#: internal/common/report/snapshot_run.go
+msgid "%d step(s) ran: %d succeeded, %d failed."
+msgstr "Se ejecutaron %d pasos: %d se completaron correctamente, %d fallaron."
+
+#: internal/common/report/snapshot_run.go
+msgid "succeeded"
+msgstr "completado correctamente"
+
+#: internal/common/report/snapshot_run.go
+msgid "%d step(s) succeeded and are listed above."
+msgstr "%d paso(s) se ha(n) completado correctamente y se muestra(n) arriba."
+
+#: internal/common/report/snapshot_run.go
+msgid "%d step(s) succeeded and are not listed; pass --all to list them."
+msgstr "%d paso(s) se completó(aron) correctamente y no se muestra(n); use --all para mostrarlos."
+
+#: internal/common/report/snapshot_run.go
+msgid "How long each step took is not carried here: the run's own result file keeps the timings, and 'snapshot status' is what reads them back."
+msgstr "Aquí no se indica cuánto tiempo ha tardado cada paso: el propio archivo de resultados de la ejecución guarda los tiempos, y «snapshot status» es lo que los lee."
+
+#: internal/common/tui/model.go
+msgid "Applying updates"
+msgstr "Aplicando actualizaciones"
+
+#: internal/common/tui/model.go
+msgid "%d earlier package(s) finished"
+msgstr "%d paquete(s) anterior(es) finalizado(s)"
+
+#: internal/common/tui/model.go
+msgid "%d earlier log line(s)"
+msgstr "%d línea(s) de registro anterior(es)"
+
+#: internal/overlay/pull.go
+msgid "Already up to date with %s."
+msgstr "Ya está actualizado con %s."
+
+#: internal/overlay/pull.go
+msgid "Dry-run: would integrate %s into %s by %s (%s)."
+msgstr "Ejecución de prueba: integraría %s en %s mediante %s (%s)."
+
+#: internal/overlay/pull.go
+msgid "Pulled %s from %s into %s."
+msgstr "Se ha extraído %s de %s a %s."
+
+#: internal/overlay/pull.go
+msgid "1 commit"
+msgstr "1 commit"
+
+#: internal/overlay/pull.go
+msgid "%d commits"
+msgstr "%d confirmaciones"
+
+#: internal/overlay/push.go
+msgid "Everything is up-to-date. Nothing to push."
+msgstr "Todo está actualizado. No hay nada que enviar."
+
+#: internal/overlay/push.go
+msgid "Changes pushed successfully."
+msgstr "Los cambios se han enviado correctamente."
+
+#: internal/overlay/rename.go
+msgid ""
+"⚠ Global search across all categories\n"
+"\n"
+msgstr ""
+"⚠ Búsqueda global en todas las categorías\n"
+"\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"Found %d ebuild(s) to rename:\n"
+"\n"
+msgstr ""
+"Se han encontrado %d ebuild(s) para cambiarles el nombre:\n"
+"\n"
+
+#: internal/overlay/rename.go
+msgid "    (revision suffix will be stripped)\n"
+msgstr "    (se eliminará el sufijo de revisión)\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"⚠ Warning: %d version-specific file(s) detected:\n"
+msgstr ""
+"\n"
+"⚠ Advertencia: Se han detectado %d archivos específicos de la versión:\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"These files will NOT be renamed automatically.\n"
+msgstr ""
+"\n"
+"Estos archivos NO se renombrarán automáticamente.\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"⚠ Warning: %d target file(s) already exist:\n"
+msgstr ""
+"\n"
+"⚠ Advertencia: Ya existen %d archivo(s) de destino:\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"Use --force to overwrite.\n"
+msgstr ""
+"\n"
+"Use --force para sobrescribir.\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"⚠ Error: %d target file(s) would receive more than one ebuild:\n"
+msgstr ""
+"\n"
+"⚠ Error: %d archivo(s) de destino recibirían más de un ebuild:\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"The rename is refused: one source would overwrite the other. --force does not override this.\n"
+msgstr ""
+"\n"
+"Se rechaza el cambio de nombre: un archivo de origen sobrescribiría al otro. --force no anula esto.\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"Warning: %d version-specific file(s) detected:\n"
+msgstr ""
+"\n"
+"Advertencia: Se han detectado %d archivos específicos de la versión:\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"Conflicts: %d target file(s) already exist:\n"
+msgstr ""
+"\n"
+"Conflictos: %d archivo(s) de destino ya existe(n):\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"Dry run: %d ebuild(s) would be renamed\n"
+"\n"
+msgstr ""
+"Ejecución de prueba: se cambiaría el nombre de %d ebuild(s)\n"
+"\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"Renamed %d ebuild(s):\n"
+"\n"
+msgstr ""
+"Se han renombrado %d ebuild(s):\n"
+"\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"Failed %d ebuild(s):\n"
+msgstr ""
+"\n"
+"%d ebuild(s) con error:\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"Manifest updated for %d package(s)\n"
+msgstr ""
+"\n"
+"Manifest actualizado para %d paquete(s)\n"
+
+#: internal/overlay/rename.go
+msgid ""
+"\n"
+"Manifest update failed for %d package(s):\n"
+msgstr ""
+"\n"
+"Error al actualizar el manifiesto de %d paquete(s):\n"
+
+#: internal/overlay/status.go
+msgid "No changes detected (working directory clean)"
+msgstr "No se han detectado cambios (el directorio de trabajo está limpio)"
+
+#: internal/snapshot/plan.go
+msgid "would write systemd unit %s"
+msgstr "escribiría la unidad systemd %s"
+
+#: internal/snapshot/plan.go
+msgid "would run systemctl daemon-reload"
+msgstr "ejecutaría «systemctl daemon-reload»"
+
+#: internal/snapshot/plan.go
+msgid "would run systemctl enable --now %s"
+msgstr "ejecutaría «systemctl enable --now %s»"
+
+#: internal/snapshot/plan.go
+msgid "would snapshot %s via engine %s (create + prune)"
+msgstr "crearía una instantánea de %s mediante el motor %s (crear + eliminar)"
+
+#: internal/snapshot/plan.go
+msgid "would ship %s to %s (%s)"
+msgstr "enviaría %s a %s (%s)"
+
+#: internal/snapshot/plan.go
+msgid "would prune %s via engine %s (%s)"
+msgstr "podaría %s mediante el motor %s (%s)"
+
+#: internal/snapshot/plan.go
+msgid "would apply GFS retention to %s (ship %q, %s)"
+msgstr "aplicaría la retención GFS a %s (enviar %q, %s)"
+
+#: internal/snapshot/plan.go
+msgid "keep %s"
+msgstr "conservar %s"
+
+#: internal/snapshot/plan.go
+msgid "no GFS policy: keep everything"
+msgstr "sin política GFS: conservar todo"
+
+#: internal/snapshot/plan.go
+msgid "would write engine config %s"
+msgstr "escribiría la configuración del motor %s"
+
+#: internal/snapshot/plan.go
+msgid "would run snapper -c %s create-config %s (if not already covered)"
+msgstr "ejecutaría «snapper -c %s create-config %s» (si aún no se ha hecho)"
+
+#: internal/snapshot/plan.go
+msgid "would run snapper -c %s set-config %s"
+msgstr "ejecutaría «snapper -c %s set-config %s»"
+
+#: internal/snapshot/restore.go
+msgid "Restore snapshot %q into %q? This will write a subvolume to the target and is destructive."
+msgstr "¿Restaurar la instantánea %q en %q? Esto escribirá un subvolumen en el destino y es una operación destructiva."
+
+#: internal/snapshot/rollback.go
+msgid "Roll the system back to snapshot %q? This boots the root filesystem from that snapshot on next reboot and is destructive."
+msgstr "¿Revertir el sistema a la instantánea %q? Esto inicia el sistema de archivos raíz a partir de esa instantánea en el siguiente reinicio y es una operación destructiva."
+
+#: internal/tray/messages/messages.go
+msgid "%d unread notice"
+msgstr "%d aviso no leído"
+
+#: internal/tray/messages/messages.go
+msgid "%d unread notices"
+msgstr "%d avisos no leídos"
+
+#: internal/tray/messages/messages.go
+msgid "%d more…"
+msgstr "%d más…"
+
+#: internal/tray/messages/messages.go
+msgid "Check now"
+msgstr "Comprobar ahora"
+
+#: internal/tray/messages/messages.go
+msgid "Mark all as read"
+msgstr "Marcar todo como leído"
+
+#: internal/tray/messages/messages.go
+msgid "Pause for 1 hour"
+msgstr "Pausar durante 1 hora"
+
+#: internal/tray/messages/messages.go
+msgid "Pause until tomorrow"
+msgstr "Pausar hasta mañana"
+
+#: internal/tray/messages/messages.go
+msgid "Resume"
+msgstr "Reanudar"
+
+#: internal/tray/messages/messages.go
+msgid "Quit"
+msgstr "Salir"
+
+#: internal/tray/messages/messages.go
+msgid "Open"
+msgstr "Abrir"
+
+#: internal/tray/messages/messages.go
+msgid "Mark as read"
+msgstr "Marcar como leído"
+
+#: internal/tray/messages/messages.go
+msgid "%d new notices"
+msgstr "%d avisos nuevos"
+
+#: internal/tray/messages/messages.go
+msgid "Low disk space on %s"
+msgstr "Poco espacio en disco en %s"
+
+#: internal/tray/messages/messages.go
+msgid "%s free (%.1f%%)"
+msgstr "%s libre (%.1f%%)"
+
+#: internal/tray/messages/messages.go
+msgid "Memory almost exhausted"
+msgstr "Memoria casi agotada"
+
+#: internal/tray/messages/messages.go
+msgid "%s of %s available; swap %s free"
+msgstr "%s de %s disponibles; %s libres en la memoria de intercambio"
+
+#: internal/tray/messages/messages.go
+msgid "CPU saturated"
+msgstr "CPU saturada"
+
+#: internal/tray/messages/messages.go
+msgid "Pressure %.0f%% for %d min"
+msgstr "Presión del %.0f%% durante %d min"
+
+#: internal/tray/messages/messages.go
+msgid "Network down"
+msgstr "Red caída"
+
+#: internal/tray/messages/messages.go
+msgid "No network connection is available."
+msgstr "No hay ninguna conexión de red disponible."
+
+#: internal/tray/messages/messages.go
+msgid "Network back"
+msgstr "Red restablecida"
+
+#: internal/tray/messages/messages.go
+msgid "Disk %s: %s free (%.1f%%)"
+msgstr "Disco %s: %s libre (%.1f%%)"
+
+#: internal/tray/messages/messages.go
+msgid "Memory: %s of %s available"
+msgstr "Memoria: %s de %s disponibles"
+
+#: internal/tray/messages/messages.go
+msgid "CPU pressure: %.0f%% for %d min"
+msgstr "Presión de la CPU: %.0f%% durante %d min"
+
+#: internal/tray/messages/messages.go
+msgid "Network: down"
+msgstr "Red: inactiva"
+
+#: internal/tray/messages/messages.go
+msgid "%d system alert"
+msgstr "%d alerta del sistema"
+
+#: internal/tray/messages/messages.go
+msgid "%d system alerts"
+msgstr "%d alertas del sistema"
+
+#: internal/tray/messages/messages.go
+msgid "Package build failed"
+msgstr "Error al compilar el paquete"
+
+#: internal/tray/messages/messages.go
+msgid "%s failed to build."
+msgstr "%s no se ha podido compilar."
+
+#: internal/tray/messages/messages.go
+msgid "%s failed to build. Log: %s"
+msgstr "%s no se ha podido compilar. Registro: %s"
+
+#: internal/tray/messages/messages.go
+msgid "%s and %d more"
+msgstr "%s y %d más"
+
+#: internal/tray/messages/messages.go
+msgid "Build failed: %s"
+msgstr "Error en la compilación: %s"
+
+#: internal/tray/messages/messages.go
+msgid "systemd unit failed"
+msgstr "error en la unidad systemd"
+
+#: internal/tray/messages/messages.go
+msgid "%s failed in the %s manager. Failed units: %d"
+msgstr "%s ha fallado en el gestor %s. Unidades con fallo: %d"
+
+#: internal/tray/messages/messages.go
+msgid "Unit %s failed (%s)"
+msgstr "La unidad %s ha fallado (%s)"
+
+#: internal/tray/messages/messages.go
+msgid "Filesystem read-only: %s"
+msgstr "Sistema de archivos de solo lectura: %s"
+
+#: internal/tray/messages/messages.go
+msgid "%s (%s, %s) is now read-only."
+msgstr "%s (%s, %s) ahora es de solo lectura."
+
+#: internal/tray/messages/messages.go
+msgid "Read-only: %s (%s, %s)"
+msgstr "Solo lectura: %s (%s, %s)"
+
+#: internal/tray/messages/messages.go
+msgid "Drive failing"
+msgstr "La unidad está fallando"
+
+#: internal/tray/messages/messages.go
+msgid "%s (serial %s): %s"
+msgstr "%s (número de serie %s): %s"
+
+#: internal/tray/messages/messages.go
+msgid "SMART reports failing"
+msgstr "Los informes SMART indican fallos"
+
+#: internal/tray/messages/messages.go
+msgid "Drive %s: %s"
+msgstr "Unidad %s: %s"
+
+#: internal/tray/messages/messages.go
+msgid "Updates available"
+msgstr "Actualizaciones disponibles"
+
+#: internal/tray/messages/messages.go
+msgid "Packages to update in @world: %d (%s)"
+msgstr "Paquetes que actualizar en @world: %d (%s)"
+
+#: internal/tray/messages/messages.go
+msgid "Updates: %d pending (%s)"
+msgstr "Actualizaciones: %d pendientes (%s)"
+
+#: internal/tray/messages/messages.go
+msgid "@world does not resolve"
+msgstr "@world no se resuelve"
+
+#: internal/tray/messages/messages.go
+msgid "Portage cannot compute the @world update. Run emerge -puDN @world to see why."
+msgstr "Portage no puede calcular la actualización de @world. Ejecute «emerge -puDN @world» para ver por qué."
+
+#: internal/tray/messages/messages.go
+msgid "Updates: @world does not resolve"
+msgstr "Actualizaciones: @world no se resuelve"
+
+#: internal/tray/messages/messages.go
+msgid "Security advisory applies"
+msgstr "Se aplica el aviso de seguridad"
+
+#: internal/tray/messages/messages.go
+msgid "GLSA %s: %s - affects %s. Applicable advisories: %d"
+msgstr "GLSA %s: %s - afecta a %s. Avisos aplicables: %d"
+
+#: internal/tray/messages/messages.go
+msgid "GLSA %s: %s"
+msgstr "GLSA %s: %s"
+
+#: internal/tray/messages/messages.go
+msgid "Repository not synced: %s"
+msgstr "Repositorio no sincronizado: %s"
+
+#: internal/tray/messages/messages.go
+msgid "%s was last synced %s ago."
+msgstr "%s se sincronizó por última vez hace %s."
+
+#: internal/tray/messages/messages.go
+msgid "Repository %s: synced %s ago"
+msgstr "Repositorio %s: sincronizado hace %s"
+
+#: internal/tray/messages/messages.go
+msgid "%d day"
+msgstr "%d día"
+
+#: internal/tray/messages/messages.go
+msgid "%d days"
+msgstr "%d días"

@@ -151,10 +151,9 @@ func Fullscreen(blocks []report.Section, opts Options) error {
 // do it — the coupling that taking sections instead of a report removed.
 // Whoever builds the sections states the count, in its own vocabulary, in its
 // own leading section; this states only what happened at the terminal.
-//
-// It is built when it is shown, in the reader's language: the dump goes to the
-// terminal, never to an export.
 func interruptNotice() report.Section {
+	// Built when shown, in the reader's language: the dump goes to the
+	// terminal, never to an export.
 	return report.Section{
 		Title: i18n.T("Run Interrupted"),
 		Lead: []string{

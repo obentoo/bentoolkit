@@ -138,11 +138,14 @@ cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
 
 ### Translations
 
-`bentoo`'s help text — command descriptions, flag usages and cobra's own
-headings — is translated with GNU gettext into the languages listed in
-`po/LINGUAS` (es, pt_BR, ru, zh_CN). Logs, JSON and other machine-read output
-stay in English on purpose: scripts and log searches must not depend on the
-reader's language.
+What `bentoo` and `bentoo-tray` say to a person — help text, status lines,
+prompts, the terminal report, the tray's menu and notifications — is
+translated with GNU gettext into the languages listed in `po/LINGUAS` (es,
+pt_BR, ru, zh_CN); both binaries read the one `bentoolkit` catalog. What a
+program reads stays English on purpose, so scripts and log searches do not
+depend on the reader's language: logs, `--json`, `--porcelain`, `--export`
+files (`report.SectionOptions.English`), generated files, commit messages,
+LLM prompts, and the answers a prompt accepts. Errors are not translated yet.
 
 - **Marking text.** Wrap a user-facing literal in `i18n.N("...")` where it is
   declared, and translate it with `i18n.T(...)` where it is shown. Command
@@ -154,9 +157,14 @@ reader's language.
   `po/bentoolkit.pot` from the source and merges it into every `.po`; a new
   message arrives untranslated and prints in English until it is translated.
   `TestCatalogsInSync` fails while the template or a `.po` is stale, and when
-  a translation drops or reorders a `%` verb or a `{{...}}` template action.
+  a translation drops, adds or reorders (without an index) a `%` verb, or
+  changes a `{{...}}` template action. A message must not contain `\r`: write
+  terminal control outside `i18n.T`.
 - **Translating.** Fill the `msgstr` of each entry, keeping flags, commands,
-  environment variables, paths, `%` verbs and `{{...}}` actions unchanged;
+  environment variables, paths, `%` verbs and `{{...}}` actions unchanged. To
+  reorder the arguments, index them: `"%[2]s em %[1]d"` — the code passes them
+  in the msgid's order. Keep answer keys such as `[y/N]` as they are, since
+  the answer is still read in English;
   remove the `#, fuzzy` flag once an entry is checked. Terms such as overlay,
   ebuild, Manifest, distfile and commit stay as they are.
 - **Trying a language.** `make build locale` compiles `build/locale`; then

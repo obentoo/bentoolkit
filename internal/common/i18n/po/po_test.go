@@ -64,6 +64,7 @@ func TestExtractRejectsComputedN(t *testing.T) {
 		"empty":    `tr.N("")`,
 		"two args": `tr.N("a", "b")`,
 		"sprintf":  `tr.N("a" + s)`,
+		"carriage": `tr.T("\rprogress")`,
 	} {
 		root := t.TempDir()
 		writeFile(t, filepath.Join(root, "cmd", "a.go"), header+"var s string\nvar _ = "+call+"\n")
@@ -85,8 +86,10 @@ func TestWritePOTRoundTrip(t *testing.T) {
 	if err := WritePOT(&buf, msgs); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(buf.String(), "#, c-format\nmsgid \"help for %s\"") {
-		t.Errorf("a message with a verb is not flagged c-format:\n%s", buf.String())
+	// No c-format flag: msgfmt checks C's syntax and would reject Go's
+	// explicit argument indexes (%[2]s); TestCatalogsInSync checks verbs.
+	if strings.Contains(buf.String(), "c-format") {
+		t.Errorf("the template flags c-format:\n%s", buf.String())
 	}
 	entries, err := Parse(&buf)
 	if err != nil {
@@ -140,6 +143,32 @@ func TestParseRejectsUnsupportedSyntax(t *testing.T) {
 	} {
 		if _, err := Parse(strings.NewReader(in)); err == nil {
 			t.Errorf("Parse accepted %q", in)
+		}
+	}
+}
+
+func TestArgVerbs(t *testing.T) {
+	same := [][2]string{
+		{"%s from %d", "%[2]d em %[1]s"},
+		{"%s %s %q %s", "%[3]q (%[4]s) %[1]s %[2]s"},
+		{"%d of %d", "%[2]d ... %[1]d"},
+		{"%s then %d", "%[1]s then %d"}, // %[1] resets; the next implicit verb is 2
+		{"100%% of %s", "%s: 100%%"},
+	}
+	for _, c := range same {
+		if a, b := ArgVerbs(c[0]), ArgVerbs(c[1]); !slices.Equal(a, b) {
+			t.Errorf("%q vs %q: %q != %q", c[0], c[1], a, b)
+		}
+	}
+	differ := [][2]string{
+		{"%s from %d", "%d from %s"}, // reordered without indexes
+		{"%d of %d", "%d of %d of %d"},
+		{"%s", "%q"},
+		{"%s and %d", "%[1]s and %[1]d"},
+	}
+	for _, c := range differ {
+		if slices.Equal(ArgVerbs(c[0]), ArgVerbs(c[1])) {
+			t.Errorf("%q and %q should differ", c[0], c[1])
 		}
 	}
 }
@@ -244,7 +273,7 @@ func TestCatalogsInSync(t *testing.T) {
 				if e.Str == "" || e.Fuzzy {
 					continue
 				}
-				if a, b := Verbs(e.ID), Verbs(e.Str); !slices.Equal(a, b) {
+				if a, b := ArgVerbs(e.ID), ArgVerbs(e.Str); !slices.Equal(a, b) {
 					t.Errorf("%q: verbs %q in the msgid, %q in the translation", e.ID, a, b)
 				}
 				if a, b := templateActionRE.FindAllString(e.ID, -1), templateActionRE.FindAllString(e.Str, -1); !slices.Equal(a, b) {

@@ -11,14 +11,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Added
 
-- **`bentoo`'s help speaks Spanish, Brazilian Portuguese, Russian and
-  Simplified Chinese.** Command descriptions, flag usages and the help
-  headings follow the usual gettext variables (`LANGUAGE`, `LC_ALL`,
-  `LC_MESSAGES`, `LANG`); a `C` or English locale, or a language with no
-  installed catalog, keeps English. Messages, errors and logs are still in
-  English. Packagers: `make install` now also installs
-  `share/locale/<lang>/LC_MESSAGES/bentoolkit.mo` (built with `msgfmt`, see
-  "Translations" in `docs/development.md`).
+- **`bentoo` and `bentoo-tray` speak Spanish, Brazilian Portuguese, Russian
+  and Simplified Chinese.** Help text, status and progress lines, prompts, the
+  terminal report and the tray's menu, tooltip and notifications follow the
+  usual gettext variables (`LANGUAGE`, `LC_ALL`, `LC_MESSAGES`, `LANG`); a `C`
+  or English locale, or a language with no installed catalog, keeps English.
+  What other programs read stays English: logs, `--json`, `--porcelain`, the
+  `--export` report files, generated files and commit messages, and the
+  answers a prompt accepts (`y`, `yes`). Error messages are still English.
+  Notice titles and summaries are shown as published. Packagers: `make
+  install` now also installs `share/locale/<lang>/LC_MESSAGES/bentoolkit.mo`
+  (built with `msgfmt`, see "Translations" in `docs/development.md`).
 
 ## [0.43.0] - 2026-11-16
 
