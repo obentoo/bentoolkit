@@ -112,6 +112,17 @@ under `tray.monitors` in the same file. The monitors, their defaults, every
 key and the known limits are described in "bentoo-tray health monitors" in
 the [README](../README.md#bentoo-tray-health-monitors).
 
+### Language
+
+The menu, the tooltip and the notifications the tray writes itself (unread
+counts, health alerts, the Open and Mark as read actions) follow
+`LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`, like `bentoo`, and use the
+same installed catalog (`bentoolkit.mo`; see "Translations" in
+[development.md](development.md#translations)). A notice's own title and
+summary are shown as published: they are not translated. Logs stay in English.
+When the tray runs as the systemd user unit, it gets the locale of the user
+manager (`systemctl --user show-environment`).
+
 ### Logging
 
 `bentoo-tray` logs one key=value event per line to standard error — the
