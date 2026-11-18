@@ -8,6 +8,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/git"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 var (
@@ -117,7 +118,7 @@ func PullWithRunner(ctx context.Context, runner git.GitExecutor, remote string, 
 	if behind == 0 {
 		result.Success = true
 		result.UpToDate = true
-		result.Message = fmt.Sprintf("Already up to date with %s.", upstream)
+		result.Message = fmt.Sprintf(i18n.T("Already up to date with %s."), upstream)
 		return result, nil
 	}
 
@@ -134,7 +135,7 @@ func PullWithRunner(ctx context.Context, runner git.GitExecutor, remote string, 
 
 	if dryRun {
 		result.Success = true
-		result.Message = fmt.Sprintf("Dry-run: would integrate %s into %s by %s (%s).",
+		result.Message = fmt.Sprintf(i18n.T("Dry-run: would integrate %s into %s by %s (%s)."),
 			upstream, branch, mode, commitPlural(behind))
 		return result, nil
 	}
@@ -158,7 +159,7 @@ func PullWithRunner(ctx context.Context, runner git.GitExecutor, remote string, 
 	}
 
 	result.Success = true
-	result.Message = fmt.Sprintf("Pulled %s from %s into %s.",
+	result.Message = fmt.Sprintf(i18n.T("Pulled %s from %s into %s."),
 		commitPlural(behind), upstream, branch)
 	return result, nil
 }
@@ -197,9 +198,9 @@ func hasUncommittedChanges(ctx context.Context, runner git.GitExecutor) (bool, e
 // commitPlural renders a commit count with the right noun.
 func commitPlural(n int) string {
 	if n == 1 {
-		return "1 commit"
+		return i18n.T("1 commit")
 	}
-	return fmt.Sprintf("%d commits", n)
+	return fmt.Sprintf(i18n.T("%d commits"), n)
 }
 
 // parseOverwriteFiles extracts the file list from git's refusal to overwrite

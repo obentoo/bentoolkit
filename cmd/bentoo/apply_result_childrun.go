@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -26,18 +27,18 @@ var progressRow = regexp.MustCompile(`^\s*\d+K( \.+)+`)
 func displayChildRuns(err error) {
 	for _, run := range autoupdate.ChildRuns(err) {
 		lines, omitted := childRunTail(run.Output)
-		output.Info.Printf("    %s output:\n", run.Label)
+		output.Info.Printf("    "+i18n.T("%s output:")+"\n", run.Label)
 		if omitted > 0 {
-			output.Info.Printf("      … %d earlier line(s) omitted\n", omitted)
+			output.Info.Printf("      "+i18n.T("… %d earlier line(s) omitted")+"\n", omitted)
 		}
 		if len(lines) == 0 {
-			output.Info.Println("      (no output)")
+			output.Info.Println("      " + i18n.T("(no output)"))
 		}
 		for _, line := range lines {
 			fmt.Printf("      %s\n", displayChildRunLine(line))
 		}
 		if run.LogPath != "" {
-			output.Info.Printf("      Full log: %s\n", displayPendingField(run.LogPath))
+			output.Info.Printf("      "+i18n.T("Full log: %s")+"\n", displayPendingField(run.LogPath))
 		}
 	}
 }

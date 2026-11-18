@@ -10,6 +10,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
@@ -65,9 +66,9 @@ func (ar *autoupdateRun) runSweep(ctx context.Context, overlayPath string, args 
 		// above already list each case; this line only names why the count is 0.
 		switch {
 		case len(batch.SkippedHeld) > 0 || len(batch.Dirs) > 0:
-			output.Info.Println("  Nothing to sweep: every unclaimed ebuild found is protected — see the groups above.")
+			output.Info.Println("  " + i18n.T("Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."))
 		default:
-			output.Info.Println("  Nothing to sweep: every ebuild is claimed by an entry.")
+			output.Info.Println("  " + i18n.T("Nothing to sweep: every ebuild is claimed by an entry."))
 		}
 		return nil
 	}
@@ -121,11 +122,11 @@ func (ar *autoupdateRun) sweepConcurrency(flagWasSet bool) int {
 // registry reconciliation's report already states.
 func displaySweepPlan(batch autoupdate.SweepBatch) {
 	fmt.Println()
-	output.Header.Println("Overlay Sweep")
+	output.Header.Println(i18n.T("Overlay Sweep"))
 	fmt.Println()
 
 	if len(batch.Dirs) == 0 && len(batch.PlanErrors) == 0 && len(batch.SkippedHeld) == 0 {
-		output.Info.Println("  No package directory holds an ebuild that no entry claims.")
+		output.Info.Println("  " + i18n.T("No package directory holds an ebuild that no entry claims."))
 		return
 	}
 
@@ -159,14 +160,14 @@ func displaySweepRemovable(totalRemove int, removable []autoupdate.SweepDirPlan)
 	if len(removable) == 0 {
 		return
 	}
-	fmt.Printf("  To remove (%d ebuild(s) in %d director(ies)):\n", totalRemove, len(removable))
+	fmt.Printf("  "+i18n.T("To remove (%d ebuild(s) in %d director(ies)):")+"\n", totalRemove, len(removable))
 	for _, d := range removable {
 		pkgName := filepath.Base(d.Atom)
 		for _, v := range d.Remove {
 			fmt.Printf("    %-45s %s-%s.ebuild\n", d.Atom, pkgName, v)
 		}
 		for _, line := range keptLines(d.Keep) {
-			output.Info.Printf("      keeps %s\n", line)
+			output.Info.Printf("      "+i18n.T("keeps %s")+"\n", line)
 		}
 	}
 	fmt.Println()
@@ -178,15 +179,15 @@ func displaySweepBlocked(blocked []autoupdate.SweepDirPlan) {
 	if len(blocked) == 0 {
 		return
 	}
-	fmt.Printf("  Blocked — nothing removed (%d):\n", len(blocked))
+	fmt.Printf("  "+i18n.T("Blocked — nothing removed (%d):")+"\n", len(blocked))
 	for _, d := range blocked {
 		if d.Blocked != "" {
-			fmt.Printf("    %-45s entry %q has no version pin\n", d.Atom, d.Blocked)
+			fmt.Printf("    %-45s "+i18n.T("entry %q has no version pin")+"\n", d.Atom, d.Blocked)
 		} else {
-			fmt.Printf("    %-45s no registry entry claims this directory\n", d.Atom)
+			fmt.Printf("    %-45s "+i18n.T("no registry entry claims this directory")+"\n", d.Atom)
 		}
 		if len(d.WouldRemove) > 0 {
-			output.Info.Printf("      would have removed: %s\n", strings.Join(d.WouldRemove, ", "))
+			output.Info.Printf("      "+i18n.T("would have removed: %s")+"\n", strings.Join(d.WouldRemove, ", "))
 		}
 	}
 	fmt.Println()
@@ -198,11 +199,11 @@ func displaySweepHeld(held []string) {
 	if len(held) == 0 {
 		return
 	}
-	fmt.Printf("  Held — reported by --check, never swept (%d):\n", len(held))
+	fmt.Printf("  "+i18n.T("Held — reported by --check, never swept (%d):")+"\n", len(held))
 	for _, a := range held {
-		fmt.Printf("    %-45s held: clean it by hand if you want it gone\n", a)
+		fmt.Printf("    %-45s "+i18n.T("held: clean it by hand if you want it gone")+"\n", a)
 	}
-	output.Info.Println("      A held package's older ebuild is usually the fallback `hold` exists to keep.")
+	output.Info.Println("      " + i18n.T("A held package's older ebuild is usually the fallback `hold` exists to keep."))
 	fmt.Println()
 }
 
@@ -212,7 +213,7 @@ func displaySweepPlanErrors(planErrors []autoupdate.SweepPlanError) {
 	if len(planErrors) == 0 {
 		return
 	}
-	fmt.Printf("  Could not be planned (%d):\n", len(planErrors))
+	fmt.Printf("  "+i18n.T("Could not be planned (%d):")+"\n", len(planErrors))
 	for _, e := range planErrors {
 		output.Error.Printf("    %-45s %v\n", e.Atom, e.Err)
 	}
@@ -238,10 +239,10 @@ func keptLines(keep map[string]string) []string {
 	lines := make([]string, 0, len(versions))
 	for _, v := range versions {
 		if key := keep[v]; key != "" {
-			lines = append(lines, fmt.Sprintf("%s — claimed by %s", v, key))
+			lines = append(lines, fmt.Sprintf(i18n.T("%s — claimed by %s"), v, key))
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%s — kept by rule (live ebuild, or the last release)", v))
+		lines = append(lines, fmt.Sprintf(i18n.T("%s — kept by rule (live ebuild, or the last release)"), v))
 	}
 	return lines
 }
@@ -262,19 +263,19 @@ func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 	}
 
 	if ar.opts.yes {
-		output.Warning.Printf("  --yes given: removing %d ebuild(s) without a prompt.\n", batch.TotalRemove)
+		output.Warning.Printf("  "+i18n.T("--yes given: removing %d ebuild(s) without a prompt.")+"\n", batch.TotalRemove)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing removed.")
-		output.Info.Printf("  Re-run with --yes to remove these %d ebuild(s) unattended.\n", batch.TotalRemove)
+		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing removed."))
+		output.Info.Printf("  "+i18n.T("Re-run with --yes to remove these %d ebuild(s) unattended.")+"\n", batch.TotalRemove)
 		return false
 	}
 
 	fmt.Println()
-	output.Warning.Println("  These ebuilds are deleted from the overlay, which auto-commits and publishes.")
+	output.Warning.Println("  " + i18n.T("These ebuilds are deleted from the overlay, which auto-commits and publishes."))
 	return ar.deps.confirmSweep(fmt.Sprintf(
-		"Remove %d ebuild(s) from %d director(ies)?", batch.TotalRemove, dirs))
+		i18n.T("Remove %d ebuild(s) from %d director(ies)?"), batch.TotalRemove, dirs))
 }
 
 // displaySweepReport prints what actually happened, per directory and in total.
@@ -285,7 +286,7 @@ func (ar *autoupdateRun) confirmSweep(batch autoupdate.SweepBatch) bool {
 // happen is not.
 func displaySweepReport(report autoupdate.SweepReport) {
 	fmt.Println()
-	output.Header.Println("Sweep Result")
+	output.Header.Println(i18n.T("Sweep Result"))
 	fmt.Println()
 
 	for _, r := range report.Results {
@@ -299,31 +300,31 @@ func displaySweepReport(report autoupdate.SweepReport) {
 			for _, v := range r.Removed {
 				names = append(names, fmt.Sprintf("%s-%s.ebuild", pkgName, v))
 			}
-			fmt.Printf("    Removed: %s\n", strings.Join(names, ", "))
+			fmt.Printf("    "+i18n.T("Removed: %s")+"\n", strings.Join(names, ", "))
 		}
 		if lines := keptLines(r.Kept); len(lines) > 0 {
-			fmt.Println("    Kept:")
+			fmt.Println("    " + i18n.T("Kept:"))
 			for _, l := range lines {
 				fmt.Printf("      %s\n", l)
 			}
 		}
 		if r.Err != nil {
-			output.Error.Printf("    Error:   %v\n", r.Err)
+			output.Error.Printf("    "+i18n.T("Error:   %v")+"\n", r.Err)
 		}
 	}
 
 	fmt.Println()
-	output.Success.Printf("  Swept %d director(ies), removed %d ebuild(s).\n", report.Swept, report.Removed)
+	output.Success.Printf("  "+i18n.T("Swept %d director(ies), removed %d ebuild(s).")+"\n", report.Swept, report.Removed)
 	if report.BlockedN > 0 {
-		output.Warning.Printf("  %d director(ies) blocked — see the plan above for the entry to fix.\n", report.BlockedN)
+		output.Warning.Printf("  "+i18n.T("%d director(ies) blocked — see the plan above for the entry to fix.")+"\n", report.BlockedN)
 	}
 	if report.Failed > 0 {
 		// Reported, but the exit code still says the command ran. The
 		// removals that succeeded really happened, and a non-zero exit would
 		// claim otherwise.
-		output.Warning.Printf("  %d director(ies) failed — nothing else was affected.\n", report.Failed)
+		output.Warning.Printf("  "+i18n.T("%d director(ies) failed — nothing else was affected.")+"\n", report.Failed)
 	}
 	if report.Removed > 0 {
-		output.Info.Println("  Review the diff before it is published: 'bentoo overlay diff'")
+		output.Info.Println("  " + i18n.T("Review the diff before it is published: 'bentoo overlay diff'"))
 	}
 }

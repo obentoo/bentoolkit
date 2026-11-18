@@ -27,6 +27,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
@@ -127,7 +128,7 @@ func validateEnvelope(rep validate.Report, complete bool) report.Run {
 // is not a finding about anybody's ebuild.
 func renderValidateJSON(run report.Run, diag io.Writer) {
 	if err := renderExport(os.Stdout, run, exportJSON); err != nil {
-		_, _ = fmt.Fprintf(diag, "  writing the JSON report: %v\n", err)
+		_, _ = fmt.Fprintf(diag, i18n.T("  writing the JSON report: %v\n"), err)
 	}
 }
 

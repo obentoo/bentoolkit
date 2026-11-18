@@ -13,6 +13,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/gentoo/repo"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
@@ -78,8 +79,8 @@ func newCompareCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "compare [repository]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Compare overlay packages with upstream repository",
-		Long: `Compare package versions in your local Bentoo overlay against
+		Short:       i18n.N("Compare overlay packages with upstream repository"),
+		Long: i18n.N(`Compare package versions in your local Bentoo overlay against
 an upstream repository.
 
 Any repository from the Gentoo ecosystem (~428 repos) can be used by name.
@@ -121,33 +122,33 @@ Examples:
   bentoo overlay compare --only-redundant   # Show only removal candidates
   bentoo overlay compare --only-patched     # Show only declared divergences
   bentoo overlay compare --no-review        # Contact no model
-  bentoo overlay compare --realign          # Review against the ::gentoo baseline`,
+  bentoo overlay compare --realign          # Review against the ::gentoo baseline`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runCompare(cmd, args, d)
 		},
 	}
-	cmd.Flags().BoolVar(&compareClone, "clone", false, "Use git clone instead of API")
-	cmd.Flags().StringVar(&compareCacheDir, "cache-dir", "", "Directory to cache data")
-	cmd.Flags().BoolVar(&compareNoCache, "no-cache", false, "Disable caching")
-	cmd.Flags().IntVar(&compareTimeout, "timeout", 30, "HTTP request timeout in seconds")
-	cmd.Flags().StringVar(&compareToken, "token", "", "Auth token for API provider")
-	cmd.Flags().BoolVar(&compareOnlyOutdated, "only-outdated", false, "Show only outdated packages (Bentoo < Gentoo)")
-	cmd.Flags().BoolVar(&compareOnlyRedundant, "only-redundant", false, "Show only redundant packages (removal candidates)")
-	cmd.Flags().BoolVar(&compareOnlyPatched, "only-patched", false, "Show only packages a registry entry declares a divergence for")
-	cmd.Flags().BoolVar(&compareSync, "sync", false, "Force refresh of repository list")
-	cmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, "max parallel checks (1-100)")
-	cmd.Flags().BoolVar(&compareNoReview, "no-review", false, "Contact no model; print the report without commentary")
-	cmd.Flags().BoolVar(&compareRealign, "realign", false, "Review each package against its ::gentoo baseline (needs a local gentoo tree)")
+	cmd.Flags().BoolVar(&compareClone, "clone", false, i18n.N("Use git clone instead of API"))
+	cmd.Flags().StringVar(&compareCacheDir, "cache-dir", "", i18n.N("Directory to cache data"))
+	cmd.Flags().BoolVar(&compareNoCache, "no-cache", false, i18n.N("Disable caching"))
+	cmd.Flags().IntVar(&compareTimeout, "timeout", 30, i18n.N("HTTP request timeout in seconds"))
+	cmd.Flags().StringVar(&compareToken, "token", "", i18n.N("Auth token for API provider"))
+	cmd.Flags().BoolVar(&compareOnlyOutdated, "only-outdated", false, i18n.N("Show only outdated packages (Bentoo < Gentoo)"))
+	cmd.Flags().BoolVar(&compareOnlyRedundant, "only-redundant", false, i18n.N("Show only redundant packages (removal candidates)"))
+	cmd.Flags().BoolVar(&compareOnlyPatched, "only-patched", false, i18n.N("Show only packages a registry entry declares a divergence for"))
+	cmd.Flags().BoolVar(&compareSync, "sync", false, i18n.N("Force refresh of repository list"))
+	cmd.Flags().IntVar(&compareConcurrency, "concurrency", overlay.DefaultCompareConcurrency, i18n.N("max parallel checks (1-100)"))
+	cmd.Flags().BoolVar(&compareNoReview, "no-review", false, i18n.N("Contact no model; print the report without commentary"))
+	cmd.Flags().BoolVar(&compareRealign, "realign", false, i18n.N("Review each package against its ::gentoo baseline (needs a local gentoo tree)"))
 	// The default is the EMPTY string and not a rung's name, unlike `overlay
 	// validate --depth`, because the two defaults mean opposite things: there the
 	// shallowest useful rung IS the shipped behaviour, here any rung at all is a
 	// build nobody asked for. Absent means report-only, which is what `--realign`
 	// shipped as.
 	cmd.Flags().StringVar(&compareDepth, "depth", "",
-		"Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. "+
-			"Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built")
-	cmd.Flags().BoolVar(&compareYes, "yes", false, "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag")
+		i18n.N("Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. "+
+			"Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built"))
+	cmd.Flags().BoolVar(&compareYes, "yes", false, i18n.N("Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"))
 	return cmd
 }
 
@@ -276,7 +277,7 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 		return nil
 	}
 
-	uiInfo(fmt.Sprintf("Found %s packages in Bentoo overlay",
+	uiInfo(fmt.Sprintf(i18n.T("Found %s packages in Bentoo overlay"),
 		output.Sprint(output.Info, fmt.Sprintf("%d", len(scanResult.Packages)))))
 
 	reportCompareScanErrors(log, scanResult.Errors)
@@ -621,23 +622,23 @@ func checkCompareGitHubRateLimit(ctx context.Context, log *slog.Logger, prov pro
 				resetAt := resetTime.Format("15:04:05")
 				log.Error("GitHub API rate limit exceeded", "resets_at", resetAt)
 				uiInfo("")
-				uiInfo("Options:")
-				uiInfo("  1. Use --clone to download the repository:")
+				uiInfo(i18n.T("Options:"))
+				uiInfo(i18n.T("  1. Use --clone to download the repository:"))
 				uiInfo(fmt.Sprintf("     bentoo overlay compare %s --clone", repoName))
 				uiInfo("")
-				uiInfo("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:")
+				uiInfo(i18n.T("  2. Configure a local repository path in ~/.config/bentoo/config.yaml:"))
 				uiInfo("     repositories:")
 				uiInfo("       gentoo:")
 				uiInfo("         provider: local")
 				uiInfo("         path: /var/db/repos/gentoo")
 				uiInfo("")
-				uiInfo(fmt.Sprintf("  3. Wait until %s for rate limit reset", resetAt))
+				uiInfo(fmt.Sprintf(i18n.T("  3. Wait until %s for rate limit reset"), resetAt))
 				return exitWith(1)
 			case remaining < 10:
 				log.Warn("GitHub API rate limit low",
 					"remaining", remaining, "resets_at", resetTime.Format("15:04:05"))
 				if !compareClone {
-					uiInfo("Tip: Use --clone flag to avoid rate limits")
+					uiInfo(i18n.T("Tip: Use --clone flag to avoid rate limits"))
 				}
 			case verbose:
 				log.Debug("GitHub API rate limit", "remaining", remaining)
@@ -665,7 +666,7 @@ func printCompareProgress(done, total uint64) {
 	if total > 0 {
 		percent = (done * 100) / total
 	}
-	fmt.Printf("\r  Checking: [%3d%%] %d/%d", percent, done, total)
+	fmt.Printf("\r  "+i18n.T("Checking: [%3d%%] %d/%d"), percent, done, total)
 }
 
 // compareFailure logs a failed comparison and returns exit status 1. An
@@ -679,7 +680,7 @@ func compareFailure(log *slog.Logger, err error, repoName string) error {
 	// Check if it's a rate limit error and suggest --clone
 	if strings.Contains(err.Error(), "rate limit") && !compareClone {
 		log.Error("GitHub API rate limit exceeded.")
-		uiInfo("Try using --clone flag to download the repository instead:")
+		uiInfo(i18n.T("Try using --clone flag to download the repository instead:"))
 		uiInfo(fmt.Sprintf("  bentoo overlay compare %s --clone", repoName))
 		return exitWith(1)
 	}

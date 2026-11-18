@@ -17,6 +17,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/filelock"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
@@ -29,11 +30,11 @@ var errCooldownDisabled = errors.New("cooldown disabled for this overlay: profil
 func newCooldownCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cooldown",
-		Short: "Inspect and drive the autoupdate cooldown",
-		Long: `The autoupdate cooldown keeps every version the autoupdate promotes masked in
+		Short: i18n.N("Inspect and drive the autoupdate cooldown"),
+		Long: i18n.N(`The autoupdate cooldown keeps every version the autoupdate promotes masked in
 profiles/package.mask (the managed bentoo-cooldown block) until it is released:
 by time (days= on the BEGIN line), by installation from ::bentoo, or by hand.
-.autoupdate/cooldown.unmask lists the same atoms for a host that wants them now.`,
+.autoupdate/cooldown.unmask lists the same atoms for a host that wants them now.`),
 	}
 	cmd.AddCommand(newCooldownStatusCmd(d), newCooldownConfirmCmd(), newCooldownAddCmd(), newCooldownSweepCmd(d))
 	return cmd
@@ -56,7 +57,7 @@ func newCooldownStatusCmd(d *deps) *cobra.Command {
 	pkgdbRoot := d.cooldownPkgdbRoot
 	cmd := &cobra.Command{
 		Use:   "status",
-		Short: "List the versions under cooldown (read-only, takes no lock)",
+		Short: i18n.N("List the versions under cooldown (read-only, takes no lock)"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
@@ -71,7 +72,7 @@ func newCooldownStatusCmd(d *deps) *cobra.Command {
 				return failWith(1, err)
 			}
 			if block == nil {
-				fmt.Println("cooldown disabled for this overlay")
+				fmt.Println(i18n.T("cooldown disabled for this overlay"))
 				return nil
 			}
 			rows := cooldownStatusRows(ctx, log, block, pkgdbRoot)
@@ -84,8 +85,8 @@ func newCooldownStatusCmd(d *deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&asJSON, "json", false, "print a JSON array of {package, version, since, eligible, group, origin, installed}")
-	cmd.Flags().StringVar(&pkgdbRoot, "pkgdb-root", pkgdbRoot, "system root whose var/db/pkg answers `installed`")
+	cmd.Flags().BoolVar(&asJSON, "json", false, i18n.N("print a JSON array of {package, version, since, eligible, group, origin, installed}"))
+	cmd.Flags().StringVar(&pkgdbRoot, "pkgdb-root", pkgdbRoot, i18n.N("system root whose var/db/pkg answers `installed`"))
 	return cmd
 }
 
@@ -131,7 +132,7 @@ func printCooldownJSON(rows []cooldownStatusRow) error {
 
 func printCooldownTable(rows []cooldownStatusRow) error {
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	if _, err := fmt.Fprintln(w, "PACKAGE\tVERSION\tSINCE\tELIGIBLE\tGROUP\tORIGIN\tINSTALLED"); err != nil {
+	if _, err := fmt.Fprintln(w, i18n.T("PACKAGE\tVERSION\tSINCE\tELIGIBLE\tGROUP\tORIGIN\tINSTALLED")); err != nil {
 		return err
 	}
 	for _, r := range rows {
@@ -153,7 +154,7 @@ func printCooldownTable(rows []cooldownStatusRow) error {
 func newCooldownConfirmCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "confirm =cat/pkg-N...",
-		Short: "Release a version and every older one of the package (a whole group for a grouped package)",
+		Short: i18n.N("Release a version and every older one of the package (a whole group for a grouped package)"),
 		Args:  cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			confirms := make([]cooldown.Confirm, 0, len(args))
@@ -183,7 +184,7 @@ func newCooldownConfirmCmd() *cobra.Command {
 func newCooldownAddCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "add =cat/pkg-PVR",
-		Short: "Mask a version present in the overlay under the cooldown, by hand",
+		Short: i18n.N("Mask a version present in the overlay under the cooldown, by hand"),
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			pkg, version, err := cooldown.ParseAtom(args[0])
@@ -200,7 +201,7 @@ func newCooldownAddCmd() *cobra.Command {
 					Group: recordCooldownGroup(log, overlayPath, pkg),
 				}
 				if !block.Add(e) {
-					fmt.Printf("%s is already under cooldown\n", e.Atom())
+					fmt.Printf(i18n.T("%s is already under cooldown\n"), e.Atom())
 					return nil
 				}
 				if err := block.Save(overlayPath); err != nil {
@@ -208,7 +209,7 @@ func newCooldownAddCmd() *cobra.Command {
 				}
 				eligible := block.Eligible(pkg).UTC().Format(time.RFC3339)
 				log.Info("cooldown: entry added", "package", pkg, "version", version, "origin", e.Origin, "eligible", eligible)
-				fmt.Printf("masked  %s (eligible %s)\n", e.Atom(), eligible)
+				fmt.Printf(i18n.T("masked  %s (eligible %s)\n"), e.Atom(), eligible)
 				return nil
 			})
 		},
@@ -237,7 +238,7 @@ func newCooldownSweepCmd(d *deps) *cobra.Command {
 	pkgdbRoot := d.cooldownPkgdbRoot
 	cmd := &cobra.Command{
 		Use:   "sweep",
-		Short: "Release every entry that is due (elapsed, installed, stale), outside an apply",
+		Short: i18n.N("Release every entry that is due (elapsed, installed, stale), outside an apply"),
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := commandContext(cmd)
@@ -270,18 +271,18 @@ func newCooldownSweepCmd(d *deps) *cobra.Command {
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "print what would be lifted and write nothing")
-	cmd.Flags().StringVar(&pkgdbRoot, "pkgdb-root", pkgdbRoot, "system root whose var/db/pkg releases entries by installation")
+	cmd.Flags().BoolVar(&dryRun, "dry-run", false, i18n.N("print what would be lifted and write nothing"))
+	cmd.Flags().StringVar(&pkgdbRoot, "pkgdb-root", pkgdbRoot, i18n.N("system root whose var/db/pkg releases entries by installation"))
 	return cmd
 }
 
 func printCooldownLifts(lifts []cooldown.Lift) {
 	if len(lifts) == 0 {
-		fmt.Println("nothing to lift")
+		fmt.Println(i18n.T("nothing to lift"))
 		return
 	}
 	for _, l := range lifts {
-		fmt.Printf("lifted  %s (%s)\n", l.Atom(), l.Reason)
+		fmt.Printf(i18n.T("lifted  %s (%s)\n"), l.Atom(), l.Reason)
 	}
 }
 

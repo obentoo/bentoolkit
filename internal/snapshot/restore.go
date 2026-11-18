@@ -8,6 +8,8 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // restore.go is the snapshot RESTORE entry point. Restore dispatches by
@@ -238,7 +240,7 @@ func Restore(ctx context.Context, id, target string, opts RestoreOptions) error 
 		if confirm == nil {
 			confirm = defaultConfirmFunc
 		}
-		prompt := fmt.Sprintf("Restore snapshot %q into %q? This will write a subvolume to the target and is destructive.", id, target)
+		prompt := fmt.Sprintf(i18n.T("Restore snapshot %q into %q? This will write a subvolume to the target and is destructive."), id, target)
 		if !confirm(prompt) {
 			return ErrRestoreDeclined
 		}

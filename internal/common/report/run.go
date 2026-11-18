@@ -1,6 +1,10 @@
 package report
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
+)
 
 // SchemaVersion is the version number every exported document carries at its
 // root. It is what a consumer reads before it reads anything else.
@@ -176,9 +180,9 @@ func (r Run) Sections(opts SectionOptions) []Section {
 	if r.Complete {
 		return blocks
 	}
-	gap := incompleteSection(r.NotEvaluated)
+	gap := incompleteSection(r.NotEvaluated, opts)
 	if r.Interrupted {
-		gap = interruptedSection(r.NotEvaluated)
+		gap = interruptedSection(r.NotEvaluated, opts)
 	}
 	return append([]Section{gap}, blocks...)
 }
@@ -187,15 +191,15 @@ func (r Run) Sections(opts SectionOptions) []Section {
 // but left some of it without an answer. It must not say "interrupted": on
 // 2026-11-05 a compare nobody interrupted printed exactly that over 19 version
 // pairs the content check had refused.
-func incompleteSection(notEvaluated int) Section {
+func incompleteSection(notEvaluated int, opts SectionOptions) Section {
 	return Section{
-		Title: "Run Incomplete",
+		Title: opts.t(i18n.N("Run Incomplete")),
 		Lead: []string{
-			fmt.Sprintf("This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer.",
+			fmt.Sprintf(opts.t(i18n.N("This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer.")),
 				notEvaluated),
 		},
 		Notes: []string{
-			"The counts below cover only what the run established; the rest are counted in no column.",
+			opts.t(i18n.N("The counts below cover only what the run established; the rest are counted in no column.")),
 		},
 	}
 }
@@ -210,15 +214,15 @@ func incompleteSection(notEvaluated int) Section {
 // sections below say it in the payload's own vocabulary. The count is stated
 // even when it is zero: "0" is what says an interrupt after the last unit lost
 // nothing.
-func interruptedSection(notEvaluated int) Section {
+func interruptedSection(notEvaluated int, opts SectionOptions) Section {
 	return Section{
-		Title: "Run Interrupted",
+		Title: opts.t(i18n.N("Run Interrupted")),
 		Lead: []string{
-			fmt.Sprintf("This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated.",
+			fmt.Sprintf(opts.t(i18n.N("This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated.")),
 				notEvaluated),
 		},
 		Notes: []string{
-			"The counts below cover only what the run reached; the rest are counted in no column.",
+			opts.t(i18n.N("The counts below cover only what the run reached; the rest are counted in no column.")),
 		},
 	}
 }
@@ -275,4 +279,29 @@ type SectionOptions struct {
 	// question later, and the reader of the file is not the operator
 	// who saw the plan go by on screen.
 	SkipPlan bool
+	// English says the report in English whatever language the reader's
+	// locale selects. An export sets it: a file is a shared artifact, read
+	// later by somebody whose language is not this terminal's. The zero value
+	// is the on-screen report, said in the language of the loaded catalog.
+	English bool
+}
+
+// t translates msgid unless the report must stay in English. msgid is a
+// literal marked with i18n.N at the call site, so the extractor finds it.
+func (o SectionOptions) t(msgid string) string {
+	if o.English {
+		return msgid
+	}
+	return i18n.T(msgid)
+}
+
+// agree translates the form of a sentence that agrees with n: one when n is 1,
+// many otherwise. Both are literals marked with i18n.N at the call site; a
+// whole sentence per form gives a translator the grammar of their own language
+// instead of an English verb to slot in.
+func (o SectionOptions) agree(n int, one, many string) string {
+	if n == 1 {
+		return o.t(one)
+	}
+	return o.t(many)
 }

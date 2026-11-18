@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // tailCap is the exact capacity of each task's bounded tail ring. Once a
@@ -170,7 +171,7 @@ func newModel() *model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Line
 	return &model{
-		header:  "Applying updates",
+		header:  i18n.T("Applying updates"),
 		index:   make(map[string]*task),
 		spinner: sp,
 		width:   defaultWidth,
@@ -519,12 +520,12 @@ func (f frame) fold(budget int) []string {
 	tails := trimTails(f.tasks, n, budget)
 
 	rows := append(make([]string, 0, n), f.head...)
-	rows = appendFolded(rows, f.history, history, "earlier package(s) finished")
+	rows = appendFolded(rows, f.history, history, i18n.T("%d earlier package(s) finished"))
 	for i, t := range f.tasks {
 		rows = append(rows, t.row...)
 		rows = append(rows, t.tail[tails[i]:]...)
 	}
-	rows = appendFolded(rows, f.logs, logs, "earlier log line(s)")
+	rows = appendFolded(rows, f.logs, logs, i18n.T("%d earlier log line(s)"))
 	return append(rows, f.trailer...)
 }
 
@@ -567,10 +568,11 @@ func trimTails(tasks []taskBlock, n, budget int) []int {
 }
 
 // appendFolded appends the entries kept after the dropped oldest ones, behind
-// one `… N <what>` line when any entry was dropped.
-func appendFolded(rows []string, entries [][]string, dropped int, what string) []string {
+// one `… <count>` line when any entry was dropped; count is a translated format
+// with one %d for the number dropped.
+func appendFolded(rows []string, entries [][]string, dropped int, count string) []string {
 	if dropped > 0 {
-		rows = append(rows, styleTail.Render(fmt.Sprintf("%s %d %s", ellipsis, dropped, what)))
+		rows = append(rows, styleTail.Render(ellipsis+" "+fmt.Sprintf(count, dropped)))
 	}
 	for _, e := range entries[dropped:] {
 		rows = append(rows, e...)

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -27,8 +28,8 @@ var renameFlags RenameFlags
 func newRenameCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "rename <category>:<package-pattern>:<old-version> => <new-version>",
-		Short: "Bulk rename ebuilds from old version to new version",
-		Long: `Rename multiple ebuild files matching a pattern from an old version to a new version.
+		Short: i18n.N("Bulk rename ebuilds from old version to new version"),
+		Long: i18n.N(`Rename multiple ebuild files matching a pattern from an old version to a new version.
 
 The command accepts a pattern in the format:
   <category>:<package-pattern>:<old-version> => <new-version>
@@ -53,14 +54,14 @@ Examples:
   bentoo overlay rename -y media-plugins:gst-*:1.24.11 => 1.26.10
 
   # Force rename even if version-specific files exist
-  bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10`,
+  bentoo overlay rename --force media-plugins:gst-*:1.24.11 => 1.26.10`),
 		Args: cobra.ExactArgs(3),
 		RunE: runRename,
 	}
-	cmd.Flags().BoolVarP(&renameFlags.DryRun, "dry-run", "n", false, "Show what would be renamed without making changes")
-	cmd.Flags().BoolVarP(&renameFlags.Yes, "yes", "y", false, "Skip confirmation prompts (except for global search without --force)")
-	cmd.Flags().BoolVar(&renameFlags.NoManifest, "no-manifest", false, "Skip Manifest updates after renaming")
-	cmd.Flags().BoolVar(&renameFlags.Force, "force", false, "Proceed despite version-specific files or conflicts")
+	cmd.Flags().BoolVarP(&renameFlags.DryRun, "dry-run", "n", false, i18n.N("Show what would be renamed without making changes"))
+	cmd.Flags().BoolVarP(&renameFlags.Yes, "yes", "y", false, i18n.N("Skip confirmation prompts (except for global search without --force)"))
+	cmd.Flags().BoolVar(&renameFlags.NoManifest, "no-manifest", false, i18n.N("Skip Manifest updates after renaming"))
+	cmd.Flags().BoolVar(&renameFlags.Force, "force", false, i18n.N("Proceed despite version-specific files or conflicts"))
 	return cmd
 }
 
@@ -102,7 +103,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 
 	// No matches found
 	if len(previewResult.Matches) == 0 {
-		uiInfo("No matching ebuilds found")
+		uiInfo(i18n.T("No matching ebuilds found"))
 		return nil
 	}
 
@@ -127,20 +128,20 @@ func runRename(cmd *cobra.Command, args []string) error {
 	if isGlobalSearch && !opts.Force {
 		needsConfirmation = true
 		if opts.SkipPrompt {
-			uiWarn("Global search requires confirmation. Use --force to skip.")
+			uiWarn(i18n.T("Global search requires confirmation. Use --force to skip."))
 		}
 	}
 
 	// Dry-run mode: don't execute
 	if opts.DryRun {
-		uiInfo("Dry-run mode - no changes made")
+		uiInfo(i18n.T("Dry-run mode - no changes made"))
 		return nil
 	}
 
 	// Prompt for confirmation if needed
 	if needsConfirmation {
 		if !promptConfirmation() {
-			uiInfo("Operation cancelled")
+			uiInfo(i18n.T("Operation cancelled"))
 			return nil
 		}
 	}
@@ -162,7 +163,7 @@ func runRename(cmd *cobra.Command, args []string) error {
 // promptConfirmation asks the user to confirm the operation.
 // Returns true if user confirms, false otherwise.
 func promptConfirmation() bool {
-	fmt.Print("Proceed with rename? [y/N]: ")
+	fmt.Print(i18n.T("Proceed with rename? [y/N]: "))
 
 	reader := bufio.NewReader(os.Stdin)
 	input, err := reader.ReadString('\n')

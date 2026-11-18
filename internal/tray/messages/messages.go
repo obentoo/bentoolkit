@@ -1,12 +1,19 @@
 // Package messages is bentoo-tray's message catalog: every menu label,
 // notification text and summary format the tray shows, in English, in one
-// place. It is a leaf package: it imports nothing of this module,
-// so the desktop wrappers, the tray policy and the command can all use it.
+// place. Each entry is marked for gettext extraction and translated when it is
+// shown, through the bentoolkit catalog the command loads at startup. It
+// imports only internal/common/i18n of this module, so the desktop wrappers,
+// the tray policy and the command can all use it.
+//
+// Notice contents (titles and summaries from the feed or from Portage news)
+// are data, not catalog text: they are never translated.
 package messages
 
 import (
 	"fmt"
 	"strconv"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // Key names one catalog entry.
@@ -176,77 +183,79 @@ const (
 	SysDaysMany
 )
 
-// catalog is the English text of every Key. The ellipsis is written as an
-// escape so no literal non-ASCII rune enters the source.
+// catalog is the English text of every Key, each marked with i18n.N so
+// misc/i18n-extract collects it; Text translates it. The ellipsis is written
+// as an escape so no literal non-ASCII rune enters the source.
 var catalog = map[Key]string{
-	TooltipOne:        "%d unread notice",
-	TooltipMany:       "%d unread notices",
-	MenuMore:          "%d more\u2026",
-	MenuCheckNow:      "Check now",
-	MenuMarkAllRead:   "Mark all as read",
-	MenuPauseHour:     "Pause for 1 hour",
-	MenuPauseTomorrow: "Pause until tomorrow",
-	MenuResume:        "Resume",
-	MenuQuit:          "Quit",
-	ActionOpen:        "Open",
-	ActionMarkRead:    "Mark as read",
-	SummaryNewNotices: "%d new notices",
+	TooltipOne:        i18n.N("%d unread notice"),
+	TooltipMany:       i18n.N("%d unread notices"),
+	MenuMore:          i18n.N("%d more\u2026"),
+	MenuCheckNow:      i18n.N("Check now"),
+	MenuMarkAllRead:   i18n.N("Mark all as read"),
+	MenuPauseHour:     i18n.N("Pause for 1 hour"),
+	MenuPauseTomorrow: i18n.N("Pause until tomorrow"),
+	MenuResume:        i18n.N("Resume"),
+	MenuQuit:          i18n.N("Quit"),
+	ActionOpen:        i18n.N("Open"),
+	ActionMarkRead:    i18n.N("Mark as read"),
+	SummaryNewNotices: i18n.N("%d new notices"),
 
-	SysDiskSummary:    "Low disk space on %s",
-	SysDiskBody:       "%s free (%.1f%%)",
-	SysMemorySummary:  "Memory almost exhausted",
-	SysMemoryBody:     "%s of %s available; swap %s free",
-	SysCPUSummary:     "CPU saturated",
-	SysCPUBody:        "Pressure %.0f%% for %d min",
-	SysNetDownSummary: "Network down",
-	SysNetDownBody:    "No network connection is available.",
-	SysNetBackSummary: "Network back",
-	SysAlertDisk:      "Disk %s: %s free (%.1f%%)",
-	SysAlertMemory:    "Memory: %s of %s available",
-	SysAlertCPU:       "CPU pressure: %.0f%% for %d min",
-	SysAlertNetwork:   "Network: down",
-	SysAlertsOne:      "%d system alert",
-	SysAlertsMany:     "%d system alerts",
+	SysDiskSummary:    i18n.N("Low disk space on %s"),
+	SysDiskBody:       i18n.N("%s free (%.1f%%)"),
+	SysMemorySummary:  i18n.N("Memory almost exhausted"),
+	SysMemoryBody:     i18n.N("%s of %s available; swap %s free"),
+	SysCPUSummary:     i18n.N("CPU saturated"),
+	SysCPUBody:        i18n.N("Pressure %.0f%% for %d min"),
+	SysNetDownSummary: i18n.N("Network down"),
+	SysNetDownBody:    i18n.N("No network connection is available."),
+	SysNetBackSummary: i18n.N("Network back"),
+	SysAlertDisk:      i18n.N("Disk %s: %s free (%.1f%%)"),
+	SysAlertMemory:    i18n.N("Memory: %s of %s available"),
+	SysAlertCPU:       i18n.N("CPU pressure: %.0f%% for %d min"),
+	SysAlertNetwork:   i18n.N("Network: down"),
+	SysAlertsOne:      i18n.N("%d system alert"),
+	SysAlertsMany:     i18n.N("%d system alerts"),
 
-	SysEmergeSummary:   "Package build failed",
-	SysEmergeBody:      "%s failed to build.",
-	SysEmergeBodyLog:   "%s failed to build. Log: %s",
-	SysEmergeMore:      "%s and %d more",
-	SysAlertEmerge:     "Build failed: %s",
-	SysUnitsSummary:    "systemd unit failed",
-	SysUnitsBody:       "%s failed in the %s manager. Failed units: %d",
-	SysAlertUnit:       "Unit %s failed (%s)",
-	SysReadonlySummary: "Filesystem read-only: %s",
-	SysReadonlyBody:    "%s (%s, %s) is now read-only.",
-	SysAlertReadonly:   "Read-only: %s (%s, %s)",
-	SysSmartSummary:    "Drive failing",
-	SysSmartBody:       "%s (serial %s): %s",
-	SysSmartFailing:    "SMART reports failing",
-	SysAlertSmart:      "Drive %s: %s",
+	SysEmergeSummary:   i18n.N("Package build failed"),
+	SysEmergeBody:      i18n.N("%s failed to build."),
+	SysEmergeBodyLog:   i18n.N("%s failed to build. Log: %s"),
+	SysEmergeMore:      i18n.N("%s and %d more"),
+	SysAlertEmerge:     i18n.N("Build failed: %s"),
+	SysUnitsSummary:    i18n.N("systemd unit failed"),
+	SysUnitsBody:       i18n.N("%s failed in the %s manager. Failed units: %d"),
+	SysAlertUnit:       i18n.N("Unit %s failed (%s)"),
+	SysReadonlySummary: i18n.N("Filesystem read-only: %s"),
+	SysReadonlyBody:    i18n.N("%s (%s, %s) is now read-only."),
+	SysAlertReadonly:   i18n.N("Read-only: %s (%s, %s)"),
+	SysSmartSummary:    i18n.N("Drive failing"),
+	SysSmartBody:       i18n.N("%s (serial %s): %s"),
+	SysSmartFailing:    i18n.N("SMART reports failing"),
+	SysAlertSmart:      i18n.N("Drive %s: %s"),
 
-	SysUpdatesSummary:     "Updates available",
-	SysUpdatesBody:        "Packages to update in @world: %d (%s)",
-	SysUpdatesMore:        "%s and %d more",
-	SysInfoUpdates:        "Updates: %d pending (%s)",
-	SysWorldBrokenSummary: "@world does not resolve",
-	SysWorldBrokenBody:    "Portage cannot compute the @world update. Run emerge -puDN @world to see why.",
-	SysInfoWorldBroken:    "Updates: @world does not resolve",
-	SysGLSASummary:        "Security advisory applies",
-	SysGLSABody:           "GLSA %s: %s - affects %s. Applicable advisories: %d",
-	SysAlertGLSA:          "GLSA %s: %s",
-	SysSyncSummary:        "Repository not synced: %s",
-	SysSyncBody:           "%s was last synced %s ago.",
-	SysAlertSync:          "Repository %s: synced %s ago",
-	SysDaysOne:            "%d day",
-	SysDaysMany:           "%d days",
+	SysUpdatesSummary:     i18n.N("Updates available"),
+	SysUpdatesBody:        i18n.N("Packages to update in @world: %d (%s)"),
+	SysUpdatesMore:        i18n.N("%s and %d more"),
+	SysInfoUpdates:        i18n.N("Updates: %d pending (%s)"),
+	SysWorldBrokenSummary: i18n.N("@world does not resolve"),
+	SysWorldBrokenBody:    i18n.N("Portage cannot compute the @world update. Run emerge -puDN @world to see why."),
+	SysInfoWorldBroken:    i18n.N("Updates: @world does not resolve"),
+	SysGLSASummary:        i18n.N("Security advisory applies"),
+	SysGLSABody:           i18n.N("GLSA %s: %s - affects %s. Applicable advisories: %d"),
+	SysAlertGLSA:          i18n.N("GLSA %s: %s"),
+	SysSyncSummary:        i18n.N("Repository not synced: %s"),
+	SysSyncBody:           i18n.N("%s was last synced %s ago."),
+	SysAlertSync:          i18n.N("Repository %s: synced %s ago"),
+	SysDaysOne:            i18n.N("%d day"),
+	SysDaysMany:           i18n.N("%d days"),
 }
 
-// Text returns k's catalog text. A key with no entry, which the catalog test
+// Text returns k's catalog text, translated by the loaded gettext catalog
+// (English when none is loaded). A key with no entry, which the catalog test
 // rules out, yields its own name ("messages.Key(N)") rather than an empty
 // label, so the gap shows on screen instead of hiding.
 func Text(k Key) string {
 	if s, ok := catalog[k]; ok {
-		return s
+		return i18n.T(s)
 	}
 	return "messages.Key(" + strconv.Itoa(int(k)) + ")"
 }

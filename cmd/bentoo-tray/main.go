@@ -25,6 +25,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/version"
 	"github.com/obentoo/bentoolkit/internal/common/xdg"
 	"github.com/obentoo/bentoolkit/internal/desktop/dbusx"
@@ -64,6 +65,10 @@ const newsPoll = time.Minute
 // logLevelEnv selects the log level.
 const logLevelEnv = "BENTOO_TRAY_LOG_LEVEL"
 
+// i18nDomain names the gettext catalog the tray shares with bentoo:
+// <dir>/<lang>/LC_MESSAGES/bentoolkit.mo.
+const i18nDomain = "bentoolkit"
+
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr, os.Getenv))
 }
@@ -84,6 +89,12 @@ func run(args []string, stderr io.Writer, getenv func(string) string) int {
 	case len(args) > 0:
 		log.Error("unknown arguments; the only option is --version", "args", strings.Join(args, " "))
 		return exitStartup
+	}
+
+	// Before any menu or notification text is built. A catalog that cannot
+	// be read leaves every text in English; the tray runs on.
+	if _, err := i18n.Init(i18nDomain); err != nil {
+		log.Warn("cannot load the translations; continuing in English", "domain", i18nDomain, "error", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)

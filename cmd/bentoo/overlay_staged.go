@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/spf13/cobra"
 )
@@ -66,14 +67,14 @@ var stagedCleanYes bool
 func newStagedCmd(d *deps) *cobra.Command {
 	staged := &cobra.Command{
 		Use:   "staged",
-		Short: "Work with the staged trees the build gates prepare outside the overlay",
-		Long: `Inspect and clean up the staged trees that 'bentoo overlay autoupdate --apply'
+		Short: i18n.N("Work with the staged trees the build gates prepare outside the overlay"),
+		Long: i18n.N(`Inspect and clean up the staged trees that 'bentoo overlay autoupdate --apply'
 and 'bentoo overlay validate --depth' prepare under
 ~/.config/bentoo/autoupdate/staging.
 
 A staged tree is a scratch copy of the overlay, built outside it so that a gate
 can compile a candidate without ever writing to the published tree. Nothing
-under this command reads, writes or removes anything in the overlay itself.`,
+under this command reads, writes or removes anything in the overlay itself.`),
 	}
 	staged.AddCommand(newStagedCleanCmd(d))
 	return staged
@@ -84,8 +85,8 @@ func newStagedCleanCmd(d *deps) *cobra.Command {
 	clean := &cobra.Command{
 		Use:         "clean",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Remove the staged trees no longer worth keeping, and say what stays",
-		Long: `Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by
+		Short:       i18n.N("Remove the staged trees no longer worth keeping, and say what stays"),
+		Long: i18n.N(`Remove the staged copies left under ~/.config/bentoo/autoupdate/staging by
 'bentoo overlay autoupdate --apply' and 'bentoo overlay validate --depth', and
 report every tree left behind with the reason it stays.
 
@@ -121,7 +122,7 @@ Exit codes:
 
 Examples:
   bentoo overlay staged clean         # print the plan, then ask
-  bentoo overlay staged clean --yes   # remove the planned trees unattended`,
+  bentoo overlay staged clean --yes   # remove the planned trees unattended`),
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runStagedCleanCmd(cmd, args, d)
@@ -134,7 +135,7 @@ Examples:
 	// must do it AFTER the command it drives was built, which is what
 	// setStagedCleanYes does by never building one.
 	clean.Flags().BoolVar(&stagedCleanYes, "yes", false,
-		"Remove the planned trees without asking (default: print the plan and ask)")
+		i18n.N("Remove the planned trees without asking (default: print the plan and ask)"))
 	return clean
 }
 
@@ -164,13 +165,13 @@ func runStagedCleanCmd(cmd *cobra.Command, _ []string, d *deps) error {
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		output.Error.Fprintf(os.Stderr, "  loading config: %v\n", err)
+		output.Error.Fprintf(os.Stderr, i18n.T("  loading config: %v\n"), err)
 		return exitWith(1)
 	}
 
 	stagingRoot, err := autoupdateStagingRoot()
 	if err != nil {
-		output.Error.Fprintf(os.Stderr, "  the staged trees could not be located: %v\n", err)
+		output.Error.Fprintf(os.Stderr, i18n.T("  the staged trees could not be located: %v\n"), err)
 		return exitWith(1)
 	}
 
@@ -205,7 +206,7 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 		// Reported verbatim: the refusal an operator reads has to be the one the
 		// planner reached — "the staging root is inside the overlay" and "the
 		// root could not be walked" are different problems with different fixes.
-		output.Error.Fprintf(os.Stderr, "  the staged trees could not be planned: %v\n", err)
+		output.Error.Fprintf(os.Stderr, i18n.T("  the staged trees could not be planned: %v\n"), err)
 		return exitWith(1)
 	}
 
@@ -228,9 +229,9 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 	// so an empty Kept beside an empty Remove means the walk saw nothing.
 	if len(plan.Remove) == 0 {
 		if len(plan.Kept) > 0 {
-			output.Info.Println("  Nothing to remove: everything found under this root is protected — each entry above carries the reason it stays.")
+			output.Info.Println(i18n.T("  Nothing to remove: everything found under this root is protected — each entry above carries the reason it stays."))
 		} else {
-			output.Info.Println("  Nothing to remove: nothing is staged under this root.")
+			output.Info.Println(i18n.T("  Nothing to remove: nothing is staged under this root."))
 		}
 		return nil
 	}
@@ -281,12 +282,12 @@ func runStagedClean(ctx context.Context, overlayPath, stagingRoot string, d *dep
 // reading is the one that was wrong.
 func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 	if stagedCleanYes {
-		output.Warning.Printf("  --yes given: removing %d staged tree(s) without a prompt.\n", len(plan.Remove))
+		output.Warning.Printf(i18n.T("  --yes given: removing %d staged tree(s) without a prompt.\n"), len(plan.Remove))
 		return true
 	}
 	if !d.registryPromptIsInteractive() {
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing removed.")
-		output.Info.Printf("  Re-run with --yes to remove these %d staged tree(s) unattended.\n", len(plan.Remove))
+		output.Warning.Println(i18n.T("  Not an interactive terminal and --yes was not given: nothing removed."))
+		output.Info.Printf(i18n.T("  Re-run with --yes to remove these %d staged tree(s) unattended.\n"), len(plan.Remove))
 		return false
 	}
 
@@ -295,9 +296,9 @@ func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 	// help text. These are scratch copies outside the overlay, so this is not the
 	// published deletion `overlay autoupdate --clean` asks about — but a tree
 	// somebody was about to open is just as gone.
-	output.Warning.Println("  These directories are deleted from disk. Nothing in the overlay is read, written or removed.")
+	output.Warning.Println(i18n.T("  These directories are deleted from disk. Nothing in the overlay is read, written or removed."))
 	return d.confirmStagedClean(fmt.Sprintf(
-		"Remove %d staged tree(s) from %s?", len(plan.Remove), plan.StagingRoot))
+		i18n.T("Remove %d staged tree(s) from %s?"), len(plan.Remove), plan.StagingRoot))
 }
 
 // displayStagedCleanReport prints what actually happened, which is not the same
@@ -315,11 +316,11 @@ func confirmStagedClean(plan validate.StagedSweepPlan, d *deps) bool {
 // same object, and only the number the operator approved tells them apart.
 func displayStagedCleanReport(report validate.SweepReport, planned int) {
 	fmt.Println()
-	output.Header.Println("Staged Tree Clean Result")
+	output.Header.Println(i18n.T("Staged Tree Clean Result"))
 	fmt.Println()
 
 	if len(report.Removed) > 0 {
-		fmt.Printf("  Removed (%d):\n", len(report.Removed))
+		fmt.Printf(i18n.T("  Removed (%d):\n"), len(report.Removed))
 		for _, path := range report.Removed {
 			fmt.Printf("    %s\n", path)
 		}
@@ -327,10 +328,10 @@ func displayStagedCleanReport(report validate.SweepReport, planned int) {
 	}
 
 	if len(report.Kept) > 0 {
-		fmt.Printf("  Kept — still on disk (%d):\n", len(report.Kept))
+		fmt.Printf(i18n.T("  Kept — still on disk (%d):\n"), len(report.Kept))
 		for _, entry := range report.Kept {
 			fmt.Printf("    %s\n", entry.Path)
-			output.Info.Printf("      why: %s\n", stagedKeepReason(entry))
+			output.Info.Printf(i18n.T("      why: %s\n"), stagedKeepReason(entry))
 		}
 		fmt.Println()
 	}
@@ -340,11 +341,11 @@ func displayStagedCleanReport(report validate.SweepReport, planned int) {
 	// the reason beside each keep above is what says which — so the summary points
 	// at them rather than restating a number the operator would have to subtract.
 	if short := planned - len(report.Removed); short > 0 {
-		output.Warning.Printf("  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, "+
-			"each with the reason it stayed.\n", len(report.Removed), planned, short)
+		output.Warning.Printf(i18n.T("  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, "+
+			"each with the reason it stayed.\n"), len(report.Removed), planned, short)
 		return
 	}
-	output.Success.Printf("  Removed %d of the %d tree(s) the plan named.\n", len(report.Removed), planned)
+	output.Success.Printf(i18n.T("  Removed %d of the %d tree(s) the plan named.\n"), len(report.Removed), planned)
 }
 
 // printStagedCleanPlan prints the whole plan before anything is removed.
@@ -364,9 +365,9 @@ func displayStagedCleanReport(report validate.SweepReport, planned int) {
 // so two runs over one staging root print something an operator can diff.
 func printStagedCleanPlan(plan validate.StagedSweepPlan) {
 	fmt.Println()
-	output.Header.Println("Staged Tree Clean")
+	output.Header.Println(i18n.T("Staged Tree Clean"))
 	fmt.Println()
-	output.Info.Printf("  Staging root: %s\n", plan.StagingRoot)
+	output.Info.Printf(i18n.T("  Staging root: %s\n"), plan.StagingRoot)
 	fmt.Println()
 
 	if len(plan.Remove) > 0 {
@@ -376,7 +377,7 @@ func printStagedCleanPlan(plan validate.StagedSweepPlan) {
 		// showing no deciding gate FAILED. "No gate failed" alone would read as if an
 		// unreadable record counted as a pass, which is the one reading the retention
 		// policy refuses.
-		fmt.Printf("  To remove (%d) — recognised as this tool's own, with a record showing no deciding gate FAILED:\n",
+		fmt.Printf(i18n.T("  To remove (%d) — recognised as this tool's own, with a record showing no deciding gate FAILED:\n"),
 			len(plan.Remove))
 		for _, path := range plan.Remove {
 			fmt.Printf("    %s\n", path)
@@ -385,10 +386,10 @@ func printStagedCleanPlan(plan validate.StagedSweepPlan) {
 	}
 
 	if len(plan.Kept) > 0 {
-		fmt.Printf("  Kept — nothing below is touched (%d):\n", len(plan.Kept))
+		fmt.Printf(i18n.T("  Kept — nothing below is touched (%d):\n"), len(plan.Kept))
 		for _, entry := range plan.Kept {
 			fmt.Printf("    %s\n", entry.Path)
-			output.Info.Printf("      why: %s\n", stagedKeepReason(entry))
+			output.Info.Printf(i18n.T("      why: %s\n"), stagedKeepReason(entry))
 		}
 		fmt.Println()
 	}
@@ -406,5 +407,5 @@ func stagedKeepReason(entry validate.SweptEntry) string {
 	if reason := strings.TrimSpace(entry.Reason); reason != "" {
 		return reason
 	}
-	return "no reason was recorded, which is itself a defect: treat this tree as unexplained rather than as safe to delete"
+	return i18n.T("no reason was recorded, which is itself a defect: treat this tree as unexplained rather than as safe to delete")
 }

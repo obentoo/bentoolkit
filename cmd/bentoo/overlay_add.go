@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -11,9 +12,9 @@ func newAddCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "add [paths...]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Add files to the staging area",
-		Long: `Add files to the Git staging area in the overlay repository.
-If no paths are specified, adds all changes (equivalent to "git add .").`,
+		Short:       i18n.N("Add files to the staging area"),
+		Long: i18n.N(`Add files to the Git staging area in the overlay repository.
+If no paths are specified, adds all changes (equivalent to "git add .").`),
 		RunE: runAdd,
 	}
 	return cmd

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -20,18 +21,18 @@ func newPullCmd() *cobra.Command {
 		// "sync" is the name this command shipped under. It stays as an alias so
 		// existing scripts and muscle memory keep working.
 		Aliases: []string{"sync"},
-		Short:   "Pull upstream changes into the overlay",
-		Long: `Fetch the configured remote and integrate the current branch's upstream.
+		Short:   i18n.N("Pull upstream changes into the overlay"),
+		Long: i18n.N(`Fetch the configured remote and integrate the current branch's upstream.
 
 By default the integration is fast-forward only: if the overlay has diverged
 from its upstream, the pull refuses rather than writing a merge commit. Use
 --rebase to replay local commits on top of the upstream, or --merge to accept
-a merge commit.`,
+a merge commit.`),
 		RunE: runPull,
 	}
-	cmd.Flags().BoolVar(&pullRebase, "rebase", false, "Replay local commits on top of the upstream")
-	cmd.Flags().BoolVar(&pullMerge, "merge", false, "Merge the upstream, allowing a merge commit")
-	cmd.Flags().BoolVarP(&pullDryRun, "dry-run", "n", false, "Show what would be pulled without integrating")
+	cmd.Flags().BoolVar(&pullRebase, "rebase", false, i18n.N("Replay local commits on top of the upstream"))
+	cmd.Flags().BoolVar(&pullMerge, "merge", false, i18n.N("Merge the upstream, allowing a merge commit"))
+	cmd.Flags().BoolVarP(&pullDryRun, "dry-run", "n", false, i18n.N("Show what would be pulled without integrating"))
 	cmd.MarkFlagsMutuallyExclusive("rebase", "merge")
 	return cmd
 }
@@ -75,11 +76,11 @@ func runPull(cmd *cobra.Command, args []string) error {
 				log.Error("conflicting file", "file", conflict)
 			}
 			if mode == overlay.PullRebase {
-				uiInfo("Resolve conflicts manually, then run 'git add' and 'git rebase --continue'")
-				uiInfo("Or abort the rebase with 'git rebase --abort'")
+				uiInfo(i18n.T("Resolve conflicts manually, then run 'git add' and 'git rebase --continue'"))
+				uiInfo(i18n.T("Or abort the rebase with 'git rebase --abort'"))
 			} else {
-				uiInfo("Resolve conflicts manually, then run 'git add' and 'git commit'")
-				uiInfo("Or abort the merge with 'git merge --abort'")
+				uiInfo(i18n.T("Resolve conflicts manually, then run 'git add' and 'git commit'"))
+				uiInfo(i18n.T("Or abort the merge with 'git merge --abort'"))
 			}
 		}
 		return exitWith(1)

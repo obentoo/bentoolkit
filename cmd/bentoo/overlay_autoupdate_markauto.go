@@ -6,6 +6,7 @@ import (
 
 	"github.com/fatih/color"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -42,12 +43,12 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 		// load cannot be migrated either, and failing here is the cheapest place
 		// to say so.
 		ar.log().Error("failed to plan the disable-origin migration", "err", err)
-		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  "+i18n.T("packages.toml was NOT modified."))
 		return exitWith(1)
 	}
 
 	fmt.Println()
-	output.Header.Println("Registry Migration — record the automatic disable origin")
+	output.Header.Println(i18n.T("Registry Migration — record the automatic disable origin"))
 	fmt.Println()
 	printAutoDisableMigrationPlan(plan)
 
@@ -57,12 +58,12 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 	// list above waiting to be stamped — after which the reconciliation is free
 	// to re-enable and bump the very pin that exists to prevent that.
 	if len(plan.UnmatchedExcept) > 0 {
-		output.Error.Fprintln(os.Stderr, "  --except names entries that are not in packages.toml, so they protect nothing:")
+		output.Error.Fprintln(os.Stderr, "  "+i18n.T("--except names entries that are not in packages.toml, so they protect nothing:"))
 		for _, pkg := range plan.UnmatchedExcept {
 			output.Error.Fprintln(os.Stderr, "    "+pkg)
 		}
 		ar.log().Error("refusing to migrate: --except entries match no record — fix the spelling and re-run", "unmatched", len(plan.UnmatchedExcept))
-		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  "+i18n.T("packages.toml was NOT modified."))
 		return exitWith(1)
 	}
 
@@ -71,7 +72,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 		// changes?" is exactly the question that teaches an operator to answer
 		// yes without reading, and the one prompt here that has to survive that
 		// habit is the one that publishes.
-		output.Success.Println("  Nothing to migrate: every disabled entry already states its origin, is held, or was excluded.")
+		output.Success.Println("  " + i18n.T("Nothing to migrate: every disabled entry already states its origin, is held, or was excluded."))
 		return nil
 	}
 
@@ -79,7 +80,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 		// Return WITHOUT calling MarkAutoDisabled: the file is never opened, so
 		// it stays byte-identical by construction rather than by care. The
 		// entries above are still frozen, so the exit code still says so.
-		output.Warning.Println("  packages.toml is unchanged.")
+		output.Warning.Println("  " + i18n.T("packages.toml is unchanged."))
 		return exitWith(1)
 	}
 
@@ -87,15 +88,15 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 	if err != nil {
 		// The write is atomic, so this means the registry is exactly as it was.
 		ar.log().Error("failed to record the automatic origin", "err", err)
-		output.Error.Fprintf(os.Stderr, "  packages.toml was NOT modified: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  "+i18n.T("packages.toml was NOT modified: %v")+"\n", err)
 		return exitWith(1)
 	}
 
-	output.Success.Printf("  Stamped %d entry(ies) with disabled_by = \"auto\":\n", len(marked))
+	output.Success.Printf("  "+i18n.T("Stamped %d entry(ies) with disabled_by = \"auto\":")+"\n", len(marked))
 	for _, pkg := range marked {
 		fmt.Println("    " + pkg)
 	}
-	output.Info.Println("  Review it before it is published: 'bentoo overlay diff'")
+	output.Info.Println("  " + i18n.T("Review it before it is published: 'bentoo overlay diff'"))
 
 	// The plan and the write are separate reads of the same file, and only the
 	// second one touched it. A shortfall means a record the plan selected has an
@@ -103,7 +104,7 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 	// human's eye, and one a bare success line would hide behind a smaller count
 	// nobody was going to compare.
 	if len(marked) != len(plan.Mark) {
-		output.Warning.Printf("  %d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it.\n",
+		output.Warning.Printf("  "+i18n.T("%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it.")+"\n",
 			len(plan.Mark)-len(marked), len(plan.Mark))
 		return failWith(1, fmt.Errorf("the migration is incomplete: %d entry(ies) remain without an origin", len(plan.Mark)-len(marked)))
 	}
@@ -124,10 +125,10 @@ func (ar *autoupdateRun) runMarkAutoDisabled(overlayPath string) error {
 // because they have no disable to explain, and listing them would bury the five
 // lines that matter.
 func printAutoDisableMigrationPlan(plan *registry.AutoDisableMigration) {
-	printAutoDisableGroup(output.Warning, fmt.Sprintf("%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:", len(plan.Mark)), plan.Mark)
-	printAutoDisableGroup(output.Info, fmt.Sprintf("%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:", len(plan.Excluded)), plan.Excluded)
-	printAutoDisableGroup(output.Info, fmt.Sprintf("%d already stamped — left as they are, which is what makes a re-run a no-op:", len(plan.AlreadyStamped)), plan.AlreadyStamped)
-	printAutoDisableGroup(output.Info, fmt.Sprintf("%d held — hold already excludes them, and stamping one would claim a disable the checker never wrote:", len(plan.Held)), plan.Held)
+	printAutoDisableGroup(output.Warning, fmt.Sprintf(i18n.T("%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"), len(plan.Mark)), plan.Mark)
+	printAutoDisableGroup(output.Info, fmt.Sprintf(i18n.T("%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:"), len(plan.Excluded)), plan.Excluded)
+	printAutoDisableGroup(output.Info, fmt.Sprintf(i18n.T("%d already stamped — left as they are, which is what makes a re-run a no-op:"), len(plan.AlreadyStamped)), plan.AlreadyStamped)
+	printAutoDisableGroup(output.Info, fmt.Sprintf(i18n.T("%d held — hold already excludes them, and stamping one would claim a disable the checker never wrote:"), len(plan.Held)), plan.Held)
 	fmt.Println()
 }
 
@@ -153,19 +154,19 @@ func printAutoDisableGroup(style *color.Color, heading string, pkgs []string) {
 // answer is no — a run that silently declines to write is indistinguishable from
 // one that wrote and failed to say so.
 func (ar *autoupdateRun) confirmAutoDisableMigration(plan *registry.AutoDisableMigration) bool {
-	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
+	output.Warning.Println("  " + i18n.T("packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."))
 
 	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
-		output.Warning.Printf("  --yes given: stamping %d entry(ies) without a prompt.\n", len(plan.Mark))
+		output.Warning.Printf("  "+i18n.T("--yes given: stamping %d entry(ies) without a prompt.")+"\n", len(plan.Mark))
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
 		// The plan above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
-		output.Info.Printf("  Re-run with --yes to stamp these %d entry(ies) unattended.\n", len(plan.Mark))
+		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing written."))
+		output.Info.Printf("  "+i18n.T("Re-run with --yes to stamp these %d entry(ies) unattended.")+"\n", len(plan.Mark))
 		return false
 	}
 
@@ -173,6 +174,6 @@ func (ar *autoupdateRun) confirmAutoDisableMigration(plan *registry.AutoDisableM
 	// approving the migration they just read.
 	fmt.Println()
 	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
-		"Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)",
+		i18n.T("Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"),
 		len(plan.Mark), len(plan.Excluded)))
 }

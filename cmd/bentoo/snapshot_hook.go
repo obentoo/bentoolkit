@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -18,8 +19,8 @@ var (
 func newSnapshotHookCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "hook",
-		Short: "Install or remove the opt-in Portage emerge snapshot hook (snapper only)",
-		Long: `Install or remove an OPT-IN Portage hook that snapshots before and after emerge.
+		Short: i18n.N("Install or remove the opt-in Portage emerge snapshot hook (snapper only)"),
+		Long: i18n.N(`Install or remove an OPT-IN Portage hook that snapshots before and after emerge.
 
 --install writes /etc/portage/bashrc.d/50-bentoo-snapshot.sh and wires it into
 /etc/portage/bashrc via a managed block. The hook uses snapper's native pre/post
@@ -30,13 +31,13 @@ engine.driver = "snapper". snapper errors never break an emerge.
 user content in /etc/portage/bashrc.
 
 The hook is never installed implicitly: 'bentoo snapshot apply' does not touch
-/etc/portage — only this explicit command does.`,
+/etc/portage — only this explicit command does.`),
 		RunE: runSnapshotHook,
 	}
 	cmd.Flags().BoolVar(&snapshotHookInstall, "install", false,
-		"install the Portage emerge hook (pre/post snapper snapshots)")
+		i18n.N("install the Portage emerge hook (pre/post snapper snapshots)"))
 	cmd.Flags().BoolVar(&snapshotHookUninstall, "uninstall", false,
-		"remove the Portage emerge hook")
+		i18n.N("remove the Portage emerge hook"))
 	return cmd
 }
 
@@ -57,7 +58,7 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 			log.Error("snapshot hook: failed", "err", err)
 			return exitWith(1)
 		}
-		output.PrintSuccess("Portage emerge hook removed")
+		output.PrintSuccess("%s", i18n.T("Portage emerge hook removed"))
 		return nil
 	}
 
@@ -80,6 +81,6 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 		log.Error("snapshot hook: failed", "err", err)
 		return exitWith(1)
 	}
-	output.PrintSuccess("Portage emerge hook installed — snapper pre/post snapshots around each emerged package")
+	output.PrintSuccess("%s", i18n.T("Portage emerge hook installed — snapper pre/post snapshots around each emerged package"))
 	return nil
 }

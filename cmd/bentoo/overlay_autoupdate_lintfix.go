@@ -8,6 +8,7 @@ import (
 
 	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
 
@@ -44,7 +45,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 		// rewrite failed the inertness gate. Both mean report it and change
 		// nothing; neither is a condition to retry around.
 		ar.log().Error("failed to repair packages.toml", "err", err)
-		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  "+i18n.T("packages.toml was NOT modified."))
 		return exitWith(1)
 	}
 
@@ -66,14 +67,14 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 		// No diff means no review, and no review means no write: this gate exists
 		// to stop a change nobody has seen from being published.
 		ar.log().Error("failed to render the repair as a diff", "err", err)
-		output.Error.Fprintln(os.Stderr, "  packages.toml was NOT modified.")
+		output.Error.Fprintln(os.Stderr, "  "+i18n.T("packages.toml was NOT modified."))
 		return exitWith(1)
 	}
 
 	// The diff comes BEFORE the question, always. A confirmation for a change
 	// nobody has seen does not gather consent, it manufactures it.
 	fmt.Println()
-	output.Header.Println("Registry Repair")
+	output.Header.Println(i18n.T("Registry Repair"))
 	fmt.Println()
 	printRepairDiff(diff)
 	fmt.Println()
@@ -83,7 +84,7 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 		// Return WITHOUT calling Write: the file is never opened, so it stays
 		// byte-identical by construction rather than by care. Every finding the
 		// lint reported is still there, so the exit code still says so.
-		output.Warning.Println("  packages.toml is unchanged.")
+		output.Warning.Println("  " + i18n.T("packages.toml is unchanged."))
 		return exitWith(1)
 	}
 
@@ -92,12 +93,12 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 		// "the filesystem refused" and "the rewrite stopped being provably inert
 		// between the diff and now". Either way the registry is untouched.
 		ar.log().Error("failed to write the repaired packages.toml", "err", err)
-		output.Error.Fprintf(os.Stderr, "  The registry was NOT repaired: %v\n", err)
+		output.Error.Fprintf(os.Stderr, "  "+i18n.T("The registry was NOT repaired: %v")+"\n", err)
 		return exitWith(1)
 	}
 
-	output.Success.Printf("  Repaired packages.toml: %d change(s) written.\n", totalRepairs(result))
-	output.Info.Println("  Review it before it is published: 'bentoo overlay diff'")
+	output.Success.Printf("  "+i18n.T("Repaired packages.toml: %d change(s) written.")+"\n", totalRepairs(result))
+	output.Info.Println("  " + i18n.T("Review it before it is published: 'bentoo overlay diff'"))
 
 	// Re-lint rather than subtract the repaired rules from the list above: only
 	// the file on disk can say whether the repair did what it claimed, and this
@@ -124,11 +125,11 @@ func (ar *autoupdateRun) runLintFix(overlayPath string, issues []registry.LintIs
 // next --lint will contradict.
 func reportUnrepaired(remaining []registry.LintIssue) error {
 	if len(remaining) == 0 {
-		output.Success.Println("packages.toml: record model OK")
+		output.Success.Println(i18n.T("packages.toml: record model OK"))
 		return nil
 	}
 
-	output.Warning.Printf("  %d finding(s) still need a human — --fix does not guess at them:\n", len(remaining))
+	output.Warning.Printf("  "+i18n.T("%d finding(s) still need a human — --fix does not guess at them:")+"\n", len(remaining))
 	for _, issue := range remaining {
 		output.Warning.Println("    " + issue.String())
 	}
@@ -144,12 +145,12 @@ func reportUnrepaired(remaining []registry.LintIssue) error {
 // that a rule may carry no repair; said together, the second explains the first.
 func summarizeUnrepaired(remaining []registry.LintIssue) error {
 	if len(remaining) == 0 {
-		output.Success.Println("packages.toml: record model OK")
+		output.Success.Println(i18n.T("packages.toml: record model OK"))
 		return nil
 	}
 
 	output.Warning.Printf(
-		"  Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.\n",
+		"  "+i18n.T("Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them.")+"\n",
 		len(remaining))
 	return failWith(1, fmt.Errorf("packages.toml: %d issue(s) remain", len(remaining)))
 }
@@ -168,14 +169,14 @@ func (ar *autoupdateRun) confirmLintRepair(result *registry.RepairResult) bool {
 	if ar.opts.yes {
 		// An explicit, in-so-many-words approval. Stdin is never read on this
 		// path, so it works from a pipe, a cron job or a CI step.
-		output.Warning.Printf("  --yes given: writing %d repair(s) without a prompt.\n", repairs)
+		output.Warning.Printf("  "+i18n.T("--yes given: writing %d repair(s) without a prompt.")+"\n", repairs)
 		return true
 	}
 	if !ar.deps.registryPromptIsInteractive() {
 		// The diff above IS the report; this run writes nothing. Prompting here
 		// would ask a pipe for consent — `yes | bentoo …` would publish.
-		output.Warning.Println("  Not an interactive terminal and --yes was not given: nothing written.")
-		output.Info.Printf("  Re-run with --yes to write these %d repair(s) unattended.\n", repairs)
+		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: nothing written."))
+		output.Info.Printf("  "+i18n.T("Re-run with --yes to write these %d repair(s) unattended.")+"\n", repairs)
 		return false
 	}
 
@@ -183,7 +184,7 @@ func (ar *autoupdateRun) confirmLintRepair(result *registry.RepairResult) bool {
 	// approving the rewrite they just read.
 	fmt.Println()
 	return ar.deps.confirmRegistryWrite(fmt.Sprintf(
-		"Write %d repair(s) to packages.toml? (the diff above is the whole change)", repairs))
+		i18n.T("Write %d repair(s) to packages.toml? (the diff above is the whole change)"), repairs))
 }
 
 // printRepairSummary states what the repair does in the same vocabulary the lint
@@ -197,11 +198,11 @@ func printRepairSummary(result *registry.RepairResult) {
 	}
 	sort.Strings(actions)
 
-	output.Warning.Printf("  About to rewrite packages.toml with %d repair(s):\n", totalRepairs(result))
+	output.Warning.Printf("  "+i18n.T("About to rewrite packages.toml with %d repair(s):")+"\n", totalRepairs(result))
 	for _, name := range actions {
 		fmt.Printf("    %-26s %d\n", name, result.Actions[name])
 	}
-	output.Warning.Println("  packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin.")
+	output.Warning.Println("  " + i18n.T("packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."))
 }
 
 // totalRepairs is how many individual repairs the rewrite applies, summed over

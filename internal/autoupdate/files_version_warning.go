@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // filesdirVersionedRef matches a ${FILESDIR} path built from a version
@@ -62,6 +63,6 @@ func (a *Applier) warnIfFilesNameOldVersion(pkg, oldVersion, newVersion string) 
 		return
 	}
 	a.reporter.TaskStage(pkg, fmt.Sprintf(
-		"%s named for %s, and the ebuild builds ${FILESDIR} paths from a version variable — the %s ebuild will look for %s; copy or rename before src_prepare",
+		i18n.T("%s named for %s, and the ebuild builds ${FILESDIR} paths from a version variable — the %s ebuild will look for %s; copy or rename before src_prepare"),
 		strings.Join(stale, ", "), oldPV, newPV, strings.ReplaceAll(strings.Join(stale, ", "), oldP, pkgName+"-"+newPV)))
 }

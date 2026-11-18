@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
@@ -216,5 +217,13 @@ func runMain(root *cobra.Command) int {
 // main is the process's single exit: every handler returns, its deferred calls
 // run, and only then does exitProcess end the process with the mapped code.
 func main() {
+	// The catalog loads here, not in the root's PersistentPreRunE: --help and
+	// usage errors are printed before that hook runs. Logging is not set up
+	// yet, so an unreadable catalog is reported on stderr; bentoo carries on
+	// in English.
+	if _, err := i18n.Init(i18nDomain); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "bentoo: translations disabled: %v\n", err)
+	}
+	localizeCommandTree(rootCmd)
 	exitProcess(runMain(rootCmd))
 }

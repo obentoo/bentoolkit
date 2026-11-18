@@ -32,6 +32,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
 	"github.com/obentoo/bentoolkit/internal/common/ebuild"
 	"github.com/obentoo/bentoolkit/internal/common/fileutil"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
@@ -2400,7 +2401,7 @@ func (a *Applier) warnIfGentooDiverges(pkg, oldVersion string) {
 	}
 
 	a.reporter.TaskStage(pkg, fmt.Sprintf(
-		"::gentoo also ships %s and its copy differs — the bump carried OUR %s forward without re-reading it; diff %s %s",
+		i18n.T("::gentoo also ships %s and its copy differs — the bump carried OUR %s forward without re-reading it; diff %s %s"),
 		oldVersion, oldVersion, theirs, ours))
 }
 
@@ -2721,7 +2722,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		a.logger().Info("manifest fix: distdir prepared",
 			"package", pkg, "version", version, "carried", carried, "copied", copied)
 		if carried+copied > 0 {
-			a.reporter.Log("info", fmt.Sprintf("reusing %d downloaded and %d cached distfile(s) for the %s-%s repair",
+			a.reporter.Log("info", fmt.Sprintf(i18n.T("reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"),
 				carried, copied, pkg, version))
 		}
 	}
@@ -2746,7 +2747,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 
 	a.logger().Info("manifest failed; invoking LLM fixer to repair the ebuild", "package", pkg, "version", version)
 	a.substage(result, pkg, fixer.StageManifestFix)
-	a.reporter.Log("info", fmt.Sprintf("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild", pkg, version))
+	a.reporter.Log("info", fmt.Sprintf(i18n.T("manifest failed for %s-%s; invoking LLM fixer to repair the ebuild"), pkg, version))
 
 	// Read to tell a repair from a transient failure after the re-check; an
 	// unreadable ebuild only means the run is reported as a repair, as before.
@@ -2810,7 +2811,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		// first failure was transient (a timeout, a flaky mirror), not repaired.
 		a.logger().Info("manifest re-check passed without an ebuild edit; the first failure was transient",
 			"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)
-		a.reporter.Log("info", fmt.Sprintf("manifest re-check passed for %s-%s without an ebuild edit", pkg, version))
+		a.reporter.Log("info", fmt.Sprintf(i18n.T("manifest re-check passed for %s-%s without an ebuild edit"), pkg, version))
 		return distdir, nil
 	}
 
@@ -2822,7 +2823,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 	// over time: an audit of a bad edit months from now must not read the bare
 	// word as a pinned identity. One string feeds both sinks so the operator's
 	// log and the TUI report can never drift apart.
-	fixLine := fmt.Sprintf("LLM fixer repaired %s-%s using %s: %s",
+	fixLine := fmt.Sprintf(i18n.T("LLM fixer repaired %s-%s using %s: %s"),
 		pkg, version, fixer.FormatModelUsed(fixRes.Model), fixRes.Summary)
 	a.logger().Info("LLM fixer repaired the ebuild",
 		"package", pkg, "version", version, "model", fixer.FormatModelUsed(fixRes.Model), "summary", fixRes.Summary)

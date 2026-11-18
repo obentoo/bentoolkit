@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -16,15 +17,15 @@ func newSnapshotApplyCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "apply",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Render native config and install the systemd timer",
-		Long: `Load and validate snapshot.toml, render the btrbk.conf, and install +
-enable the systemd service/timer. Idempotent: re-running reconciles the units.`,
+		Short:       i18n.N("Render native config and install the systemd timer"),
+		Long: i18n.N(`Load and validate snapshot.toml, render the btrbk.conf, and install +
+enable the systemd service/timer. Idempotent: re-running reconciles the units.`),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotApply(cmd, args, d)
 		},
 	}
 	cmd.Flags().BoolVar(&snapshotApplyDryRun, "dry-run", false,
-		"print the configs and systemd units that would be written, without writing them")
+		i18n.N("print the configs and systemd units that would be written, without writing them"))
 	return cmd
 }
 
@@ -50,6 +51,6 @@ func runSnapshotApply(cmd *cobra.Command, _ []string, d *deps) error {
 		return exitWith(1)
 	}
 
-	output.PrintSuccess("snapshot configuration applied (%s)", path)
+	output.PrintSuccess(i18n.T("snapshot configuration applied (%s)"), path)
 	return nil
 }

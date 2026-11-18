@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/overlay"
 	"github.com/spf13/cobra"
@@ -11,8 +12,8 @@ func newStatusCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "status",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Show the status of changes in the overlay",
-		Long:        `Display the current status of changes in the overlay repository, grouped by category/package.`,
+		Short:       i18n.N("Show the status of changes in the overlay"),
+		Long:        i18n.N(`Display the current status of changes in the overlay repository, grouped by category/package.`),
 		RunE:        runStatus,
 	}
 	return cmd

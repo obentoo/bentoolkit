@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/spf13/cobra"
 )
 
@@ -10,8 +11,8 @@ import (
 func newCompletionCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "completion [bash|zsh|fish|powershell]",
-		Short: "Generate shell completion scripts",
-		Long: `Generate shell completion scripts for bentoo.
+		Short: i18n.N("Generate shell completion scripts"),
+		Long: i18n.N(`Generate shell completion scripts for bentoo.
 
 To load completions:
 
@@ -40,7 +41,7 @@ PowerShell:
   # To load completions for every new session, run:
   PS> bentoo completion powershell > bentoo.ps1
   # and source this file from your PowerShell profile.
-`,
+`),
 		DisableFlagsInUseLine: true,
 		ValidArgs:             []string{"bash", "zsh", "fish", "powershell"},
 		Args:                  cobra.MatchAll(cobra.ExactArgs(1), cobra.OnlyValidArgs),

@@ -3,6 +3,7 @@ package main
 import (
 	"log/slog"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
 	"github.com/spf13/cobra"
@@ -19,8 +20,8 @@ var snapshotConfigPath string
 func newSnapshotCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "snapshot",
-		Short: "Manage btrfs snapshots (btrbk + systemd)",
-		Long: `Manage btrfs snapshots declaratively via a single snapshot.toml.
+		Short: i18n.N("Manage btrfs snapshots (btrbk + systemd)"),
+		Long: i18n.N(`Manage btrfs snapshots declaratively via a single snapshot.toml.
 
 bentoolkit orchestrates mature tools — btrbk for snapshot/send-receive and systemd
 for scheduling — rather than reimplementing them.
@@ -29,10 +30,10 @@ Examples:
   bentoo snapshot apply               Render native config + install the timer
   bentoo snapshot run                 Run the snapshot pipeline now
   bentoo snapshot list                List local snapshots per subvolume
-  bentoo snapshot status              Show last run, timer state, and free space`,
+  bentoo snapshot status              Show last run, timer state, and free space`),
 	}
 	cmd.PersistentFlags().StringVar(&snapshotConfigPath, "config", "",
-		"path to snapshot.toml (default: /etc/bentoo, then XDG)")
+		i18n.N("path to snapshot.toml (default: /etc/bentoo, then XDG)"))
 
 	cmd.AddCommand(
 		newSnapshotApplyCmd(d),
@@ -68,7 +69,7 @@ func loadSnapshotConfig(log *slog.Logger) (*snapshot.Config, string, error) {
 // frames them as a dry-run preview, so the wording stays consistent across verbs.
 func printDryRunPlan(lines []string) {
 	for _, line := range lines {
-		output.PrintInfo("dry-run: %s", line)
+		output.PrintInfo(i18n.T("dry-run: %s"), line)
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/tui"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -32,8 +33,8 @@ func newManifestCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "manifest [<category> | <category>/<package>]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Regenerate Manifest files for overlay packages",
-		Long: `Regenerate Manifest files for one or more packages in the overlay.
+		Short:       i18n.N("Regenerate Manifest files for overlay packages"),
+		Long: i18n.N(`Regenerate Manifest files for one or more packages in the overlay.
 
 By default, the existing Manifest is moved aside before pkgdev runs so a
 fresh file is produced (clean regeneration). The backup is restored
@@ -85,17 +86,17 @@ Examples:
   bentoo overlay manifest --distdir ~/.cache/bentoo/distfiles
 
   # Disable the system distfiles cache lookup
-  bentoo overlay manifest --distfiles-cache ""`,
+  bentoo overlay manifest --distfiles-cache ""`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runManifest(cmd, args, d)
 		},
 	}
-	cmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, "Keep existing Manifest in place (skip clean regen)")
-	cmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, "Show what would be processed without running pkgdev")
-	cmd.Flags().StringVar(&manifestFlags.Distdir, "distdir", "", "Distfiles directory used by pkgdev (default: temporary directory removed after run)")
-	cmd.Flags().IntVarP(&manifestFlags.Jobs, "jobs", "j", overlay.DefaultManifestJobs, "Maximum parallel pkgdev workers")
-	cmd.Flags().StringVar(&manifestFlags.DistfilesCache, "distfiles-cache", overlay.DefaultDistfilesCache, "Read-only distfiles cache consulted before download (\"\" disables)")
+	cmd.Flags().BoolVar(&manifestFlags.Keep, "keep", false, i18n.N("Keep existing Manifest in place (skip clean regen)"))
+	cmd.Flags().BoolVarP(&manifestFlags.DryRun, "dry-run", "n", false, i18n.N("Show what would be processed without running pkgdev"))
+	cmd.Flags().StringVar(&manifestFlags.Distdir, "distdir", "", i18n.N("Distfiles directory used by pkgdev (default: temporary directory removed after run)"))
+	cmd.Flags().IntVarP(&manifestFlags.Jobs, "jobs", "j", overlay.DefaultManifestJobs, i18n.N("Maximum parallel pkgdev workers"))
+	cmd.Flags().StringVar(&manifestFlags.DistfilesCache, "distfiles-cache", overlay.DefaultDistfilesCache, i18n.N("Read-only distfiles cache consulted before download (\"\" disables)"))
 	return cmd
 }
 
@@ -139,7 +140,7 @@ func runManifest(cmd *cobra.Command, args []string, d *deps) error {
 	// program is running it owns the terminal, so a direct stderr write would
 	// race with its rendering. It is a count line the operator reads as part
 	// of the command's output, so it prints bare (ui_notes.go).
-	uiInfo(fmt.Sprintf("Regenerating Manifest for %d package(s)", len(targets)))
+	uiInfo(fmt.Sprintf(i18n.T("Regenerating Manifest for %d package(s)"), len(targets)))
 
 	reporter, finishUI := chooseManifestReporter(log, d, ctx.Config, manifestFlags.DryRun, runCtx, cancel)
 
@@ -250,5 +251,5 @@ func chooseManifestReporter(log *slog.Logger, d *deps, cfg *config.Config, dryRu
 // integers. A --dry-run returns before the run opens a batch, so this is never
 // called for one.
 func manifestLiveSummary(result overlay.ManifestResult) string {
-	return fmt.Sprintf("%d ok, %d failed", result.Ok(), result.Failed())
+	return fmt.Sprintf(i18n.T("%d ok, %d failed"), result.Ok(), result.Failed())
 }

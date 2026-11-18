@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/targets"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/spf13/cobra"
 )
@@ -16,8 +17,8 @@ func newTargetsCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "targets",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Find packages whose best version lacks a required Python, Lua or Ruby implementation",
-		Long: `Read the implementations the overlay requires from .autoupdate/targets.toml and
+		Short:       i18n.N("Find packages whose best version lacks a required Python, Lua or Ruby implementation"),
+		Long: i18n.N(`Read the implementations the overlay requires from .autoupdate/targets.toml and
 report every package whose best visible version, across the overlay and ::gentoo,
 does not offer them. On a system whose PYTHON_SINGLE_TARGET holds only a required
 implementation, such a version fails emerge with "REQUIRED_USE flag constraints are
@@ -27,14 +28,14 @@ A row naming an overlay version means ::gentoo overtook the overlay's mirror: th
 version Portage picks is ::gentoo's, and the fix is to bump the mirror. Masks are not
 read, and only versions keyworded amd64 or ~amd64 count as visible.
 
-Exit status: 0 when no package has a gap, 1 when one has or the sweep failed.`,
+Exit status: 0 when no package has a gap, 1 when one has or the sweep failed.`),
 		Example: `  bentoo overlay targets
   bentoo overlay targets --all     # every ::gentoo package, not only those the overlay carries
   bentoo overlay targets --json`,
 		RunE: runTargets,
 	}
-	cmd.Flags().Bool("all", false, "Sweep every package of ::gentoo, not only the packages the overlay carries")
-	cmd.Flags().Bool("json", false, "Write the findings to stdout as one JSON array")
+	cmd.Flags().Bool("all", false, i18n.N("Sweep every package of ::gentoo, not only the packages the overlay carries"))
+	cmd.Flags().Bool("json", false, i18n.N("Write the findings to stdout as one JSON array"))
 	return cmd
 }
 
@@ -99,7 +100,7 @@ func runTargets(cmd *cobra.Command, _ []string) error {
 // formatTargetFindings renders one block per package, plain text.
 func formatTargetFindings(findings []targets.Finding) string {
 	if len(findings) == 0 {
-		return "Every package offers the required implementations.\n"
+		return i18n.T("Every package offers the required implementations.\n")
 	}
 	var b strings.Builder
 	for _, f := range findings {
@@ -108,12 +109,12 @@ func formatTargetFindings(findings []targets.Finding) string {
 			fmt.Fprintf(&b, "    %s\n", g)
 		}
 		if f.Unreadable != "" {
-			fmt.Fprintf(&b, "    offer unreadable: %s\n", f.Unreadable)
+			fmt.Fprintf(&b, i18n.T("    offer unreadable: %s\n"), f.Unreadable)
 		}
 		if f.OverlayVersion != "" {
-			fmt.Fprintf(&b, "    overtaken: the overlay holds %s; bump its mirror to %s\n", f.OverlayVersion, f.Version)
+			fmt.Fprintf(&b, i18n.T("    overtaken: the overlay holds %s; bump its mirror to %s\n"), f.OverlayVersion, f.Version)
 		}
 	}
-	fmt.Fprintf(&b, "%d package(s) lack a required implementation.\n", len(findings))
+	fmt.Fprintf(&b, i18n.T("%d package(s) lack a required implementation.\n"), len(findings))
 	return b.String()
 }

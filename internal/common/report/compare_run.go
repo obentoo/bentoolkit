@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // This file declares the payload for `overlay compare`, renders it, and carries
@@ -777,25 +779,30 @@ const (
 // compareReadingFailedMark is the marker a row carries when the review of its
 // difference was attempted and failed.
 //
-// It is a constant because two places print it and they must not drift: the
+// It is one function because two places print it and they must not drift: the
 // row detail that carries it, and the note in the first section that says what
 // it means. A marker whose explanation names a different string is worse than
 // no marker at all — the reader searches the report for a legend that is not
 // there.
-const compareReadingFailedMark = "[reading failed]"
+func compareReadingFailedMark(opts SectionOptions) string {
+	return opts.t(i18n.N("[reading failed]"))
+}
 
 // compareReviewCauseOrder is the review-cause vocabulary in its stated order.
 // The scope note orders ReadingFailures by count, highest first,
 // and breaks ties by this order, so the note reads the same whatever order the
 // producer listed the entries in. A cause missing from it sorts last.
+//
+// Each cause is also marked for translation: the report says it in the
+// reader's language, while the payload keeps the producer's English word.
 var compareReviewCauseOrder = []string{
-	"timed out", "could not start", "exited non-zero", "empty or unusable reply",
-	"cancelled", "ebuild unreadable", "other",
+	i18n.N("timed out"), i18n.N("could not start"), i18n.N("exited non-zero"), i18n.N("empty or unusable reply"),
+	i18n.N("cancelled"), i18n.N("ebuild unreadable"), i18n.N("other"),
 }
 
 // compareFailureCounts renders ReadingFailures as "<n> <cause>" joined by ", ",
 // highest count first and ties in compareReviewCauseOrder.
-func compareFailureCounts(failures []CauseCount) string {
+func compareFailureCounts(failures []CauseCount, opts SectionOptions) string {
 	rank := func(cause string) int {
 		for i, c := range compareReviewCauseOrder {
 			if c == cause {
@@ -818,7 +825,7 @@ func compareFailureCounts(failures []CauseCount) string {
 	})
 	parts := make([]string, 0, len(sorted))
 	for _, f := range sorted {
-		parts = append(parts, fmt.Sprintf("%d %s", f.Count, f.Cause))
+		parts = append(parts, fmt.Sprintf("%d %s", f.Count, opts.t(f.Cause)))
 	}
 	return strings.Join(parts, ", ")
 }
@@ -844,13 +851,13 @@ func compareFailureCounts(failures []CauseCount) string {
 // count. SectionOptions.SkipPlan is not read: none of the six blocks is a plan.
 func (r CompareRun) Sections(opts SectionOptions) []Section {
 	blocks := []Section{
-		compareScopeSection(r),
-		compareUnansweredSection(r),
-		compareRedundantSection(r),
-		compareNeedsRebaseSection(r),
-		compareKeepSection(r, opts.ShowAll),
-		compareUnknownSection(r),
-		compareSummarySection(r),
+		compareScopeSectionIn(r, opts),
+		compareUnansweredSection(r, opts),
+		compareRedundantSection(r, opts),
+		compareNeedsRebaseSection(r, opts),
+		compareKeepSection(r, opts),
+		compareUnknownSection(r, opts),
+		compareSummarySection(r, opts),
 	}
 	out := blocks[:0]
 	for _, b := range blocks {
@@ -866,36 +873,20 @@ func (r CompareRun) Sections(opts SectionOptions) []Section {
 // one block that may be absent: it qualifies the envelope's gap block, which is
 // itself printed only on an incomplete run, and with nothing unanswered it
 // returns the zero Section, which Sections drops.
-func compareUnansweredSection(r CompareRun) Section {
+func compareUnansweredSection(r CompareRun, opts SectionOptions) Section {
 	if len(r.Unanswered) == 0 {
 		return Section{}
 	}
-	s := Section{Title: "Left Without an Answer"}
+	s := Section{Title: opts.t(i18n.N("Left Without an Answer"))}
 	s.Lead = []string{fmt.Sprintf(
-		"%d package(s) reached but left without an answer: the units the incomplete-run notice counts.",
+		opts.t(i18n.N("%d package(s) reached but left without an answer: the units the incomplete-run notice counts.")),
 		len(r.Unanswered))}
-	s.Notes = []string{"A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."}
-	s.Rows.Headers = []string{"PACKAGE", "LOCAL", "REMOTE", "WHY"}
+	s.Notes = []string{opts.t(i18n.N("A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."))}
+	s.Rows.Headers = []string{opts.t(i18n.N("PACKAGE")), opts.t(i18n.N("LOCAL")), opts.t(i18n.N("REMOTE")), opts.t(i18n.N("WHY"))}
 	for _, u := range r.Unanswered {
 		s.Rows.Rows = append(s.Rows.Rows, Row{Cells: []string{u.Package, u.Local, u.Remote, u.Reason}})
 	}
 	return s
-}
-
-// compareAgrees picks the form of a verb that agrees with n.
-//
-// The report's "package(s)" idiom sidesteps the NOUN and leaves the verb where
-// it was, so a run with one of something reads "1 were never compared at all".
-// A count is written by the same code whatever it counts and English is not,
-// which is the whole of why this exists. It is deliberately not a pluraliser:
-// it takes both forms as arguments, because the ones this report needs are
-// is/are, has/have, was/were, exists/exist and carries/carry, and a rule that
-// derived those from a stem would be wrong on four of the five.
-func compareAgrees(n int, singular, plural string) string {
-	if n == 1 {
-		return singular
-	}
-	return plural
 }
 
 // compareScopeSection is the first block: how much was scanned, how much of it
@@ -911,20 +902,42 @@ func compareAgrees(n int, singular, plural string) string {
 // cause applies to a listed package is answered by the redundant block from
 // each row's Reading.
 func compareScopeSection(r CompareRun) Section {
-	s := Section{Title: "Overlay Comparison"}
+	return compareScopeSectionIn(r, SectionOptions{})
+}
 
-	s.Lead = []string{fmt.Sprintf(
-		"%d package(s) scanned in the Bentoo overlay. %d also %s in %s and %s compared below; %d %s only here and %s nothing to compare against.",
-		r.Scanned,
-		r.InBoth, compareAgrees(r.InBoth, "exists", "exist"), compareRepository(r), compareAgrees(r.InBoth, "is", "are"),
-		r.OnlyLocal, compareAgrees(r.OnlyLocal, "exists", "exist"), compareAgrees(r.OnlyLocal, "has", "have"))}
+// compareScopeSectionIn is compareScopeSection said in the language opts
+// selects.
+//
+// The verb of each count agrees with it, so each sentence is written once per
+// form: the report's "package(s)" idiom sidesteps the NOUN and leaves the verb
+// where it was, and "1 were never read" is the sentence that avoids.
+func compareScopeSectionIn(r CompareRun, opts SectionOptions) Section {
+	s := Section{Title: opts.t(i18n.N("Overlay Comparison"))}
+
+	var compared string
+	switch {
+	case r.InBoth == 1 && r.OnlyLocal == 1:
+		compared = opts.t(i18n.N("%d also exists in %s and is compared below; %d exists only here and has nothing to compare against."))
+	case r.InBoth == 1:
+		compared = opts.t(i18n.N("%d also exists in %s and is compared below; %d exist only here and have nothing to compare against."))
+	case r.OnlyLocal == 1:
+		compared = opts.t(i18n.N("%d also exist in %s and are compared below; %d exists only here and has nothing to compare against."))
+	default:
+		compared = opts.t(i18n.N("%d also exist in %s and are compared below; %d exist only here and have nothing to compare against."))
+	}
+	s.Lead = []string{
+		fmt.Sprintf(opts.t(i18n.N("%d package(s) scanned in the Bentoo overlay.")), r.Scanned) + " " +
+			fmt.Sprintf(compared, r.InBoth, compareRepository(r, opts), r.OnlyLocal),
+	}
 
 	if r.Unread > 0 {
 		s.Notes = []string{fmt.Sprintf(
-			"%d comparison(s) %s never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it.",
-			r.Unread, compareAgrees(r.Unread, "was", "were"), compareReadingFailedMark)}
-		if counts := compareFailureCounts(r.ReadingFailures); counts != "" {
-			s.Notes[0] += " The failed reviews, by cause: " + counts + "."
+			opts.agree(r.Unread,
+				i18n.N("%d comparison(s) was never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."),
+				i18n.N("%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it.")),
+			r.Unread, compareReadingFailedMark(opts))}
+		if counts := compareFailureCounts(r.ReadingFailures, opts); counts != "" {
+			s.Notes[0] += " " + fmt.Sprintf(opts.t(i18n.N("The failed reviews, by cause: %s.")), counts)
 		}
 	}
 
@@ -942,8 +955,8 @@ func compareScopeSection(r CompareRun) Section {
 // vocabulary it is drawn from is what keeps "no difference was found" from
 // being read as "no comparison was made", and re-wording it here would reopen
 // the conflation.
-func compareRedundantSection(r CompareRun) Section {
-	s := Section{Title: "Redundant — " + compareRepository(r) + " ships the version, and nothing cleared the content check"}
+func compareRedundantSection(r CompareRun, opts SectionOptions) Section {
+	s := Section{Title: fmt.Sprintf(opts.t(i18n.N("Redundant — %s ships the version, and nothing cleared the content check")), compareRepository(r, opts))}
 
 	// The guard is on the count the run established, not on the length of the
 	// list, for the reason manifest_run.go gives at length: the two are
@@ -951,13 +964,13 @@ func compareRedundantSection(r CompareRun) Section {
 	// claiming "nothing" from the wrong one is how a report starts lying about
 	// the numbers it exists to state.
 	if r.Verdicts.Redundant == 0 && len(r.Redundant) == 0 {
-		s.Lead = []string{"No package is counted as redundant, so nothing here is recommended for removal."}
+		s.Lead = []string{opts.t(i18n.N("No package is counted as redundant, so nothing here is recommended for removal."))}
 		return s
 	}
 
 	if len(r.Redundant) == 0 {
-		s.Lead = []string{fmt.Sprintf("%d package(s) are counted as redundant.", r.Verdicts.Redundant)}
-		s.Notes = []string{"No per-package row reached this report, so the count above is stated without the list it was taken over."}
+		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) are counted as redundant.")), r.Verdicts.Redundant)}
+		s.Notes = []string{opts.t(i18n.N("No per-package row reached this report, so the count above is stated without the list it was taken over."))}
 		return s
 	}
 
@@ -965,8 +978,8 @@ func compareRedundantSection(r CompareRun) Section {
 	// unconditional recommendation to remove would contradict this section's own
 	// title two lines above it, and nobody should delete work of ours because
 	// a report showed an unread package as if it had been checked.
-	s.Lead = []string{compareRedundantLead(r.Redundant)}
-	s.Rows = comparePkgTable(r, r.Redundant, true)
+	s.Lead = []string{compareRedundantLead(r.Redundant, opts)}
+	s.Rows = comparePkgTable(r, r.Redundant, true, opts)
 
 	// The caveat, and nothing else. The reading breakdown is in the Lead, where
 	// an operator meets it BEFORE the list it qualifies rather than after; saying
@@ -978,9 +991,9 @@ func compareRedundantSection(r CompareRun) Section {
 	// behind than work of ours — and a caveat that appeared only sometimes is a
 	// caveat a reader learns to ignore.
 	s.Notes = []string{fmt.Sprintf(
-		"A difference is not proof of authorship: %s also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring.",
-		compareRepository(r))}
-	s.Notes = append(s.Notes, comparePkgNotes(r.Redundant)...)
+		opts.t(i18n.N("A difference is not proof of authorship: %s also revises ebuilds in place, without a revbump, so a small diff is often our copy having fallen behind rather than work of ours. Diff before removing or declaring.")),
+		compareRepository(r, opts))}
+	s.Notes = append(s.Notes, comparePkgNotes(r.Redundant, opts)...)
 
 	return s
 }
@@ -1004,7 +1017,7 @@ func compareRedundantSection(r CompareRun) Section {
 // stating the wrong cause is worse than stating none. Every clause is
 // conditional on its count, since a false "never compared" invites an operator
 // to distrust a list with nothing wrong with it.
-func compareRedundantLead(pkgs []ComparePkg) string {
+func compareRedundantLead(pkgs []ComparePkg, opts SectionOptions) string {
 	var read, provedOurs, versionsDiffer, refusedUnstated, failed, notRequested int
 	for _, p := range pkgs {
 		switch p.Reading {
@@ -1034,9 +1047,10 @@ func compareRedundantLead(pkgs []ComparePkg) string {
 
 	var clauses []string
 	if versionsDiffer > 0 {
-		clauses = append(clauses, fmt.Sprintf(
-			"%d %s never compared at all, because the check refuses to diff two different versions",
-			versionsDiffer, compareAgrees(versionsDiffer, "was", "were")))
+		clauses = append(clauses, fmt.Sprintf(opts.agree(versionsDiffer,
+			i18n.N("%d was never compared at all, because the check refuses to diff two different versions"),
+			i18n.N("%d were never compared at all, because the check refuses to diff two different versions")),
+			versionsDiffer))
 	}
 	if refusedUnstated > 0 {
 		// The remaining causes — no overlay path, a provider that cannot resolve
@@ -1045,9 +1059,10 @@ func compareRedundantLead(pkgs []ComparePkg) string {
 		// a cause the run never established, which is the objection `func
 		// compareDiffCell` in cmd/bentoo/overlay_compare_report.go already makes
 		// about printing "unreadable" for a state it cannot observe.
-		clauses = append(clauses, fmt.Sprintf(
-			"%d %s never compared at all, and this run did not record why",
-			refusedUnstated, compareAgrees(refusedUnstated, "was", "were")))
+		clauses = append(clauses, fmt.Sprintf(opts.agree(refusedUnstated,
+			i18n.N("%d was never compared at all, and this run did not record why"),
+			i18n.N("%d were never compared at all, and this run did not record why")),
+			refusedUnstated))
 	}
 	if failed > 0 {
 		// "the other" is only true when the two clauses account for every
@@ -1056,42 +1071,47 @@ func compareRedundantLead(pkgs []ComparePkg) string {
 		// count on its own, because a reader cannot subtract what they were not
 		// given.
 		if versionsDiffer > 0 && refusedUnstated == 0 && versionsDiffer+failed == len(pkgs) {
-			clauses = append(clauses, fmt.Sprintf("the review died on the other %d", failed))
+			clauses = append(clauses, fmt.Sprintf(opts.t(i18n.N("the review died on the other %d")), failed))
 		} else {
-			clauses = append(clauses, fmt.Sprintf("%d had a review that was attempted and failed", failed))
+			clauses = append(clauses, fmt.Sprintf(opts.t(i18n.N("%d had a review that was attempted and failed")), failed))
 		}
 	}
 	if notRequested > 0 {
-		clauses = append(clauses, fmt.Sprintf("%d %s never submitted for review",
-			notRequested, compareAgrees(notRequested, "was", "were")))
+		clauses = append(clauses, fmt.Sprintf(opts.agree(notRequested,
+			i18n.N("%d was never submitted for review"),
+			i18n.N("%d were never submitted for review")),
+			notRequested))
 	}
 
-	sentences := []string{compareReadingCount(len(pkgs), read)}
+	sentences := []string{compareReadingCount(len(pkgs), read, opts)}
 	if len(clauses) > 0 {
 		sentences = append(sentences, strings.Join(clauses, "; ")+".")
 	}
 	if provedOurs > 0 {
 		// Read, and read as ours: prune refuses these, so the advice below is
 		// taken over the rest and this sentence says what to do instead.
-		sentences = append(sentences, fmt.Sprintf(
-			"%d %s changes proved ours, so removing %s would discard work of our own — declare %s instead.",
-			provedOurs, compareAgrees(provedOurs, "carries", "carry"),
-			compareAgrees(provedOurs, "it", "them"), compareAgrees(provedOurs, "it", "them")))
-		return strings.Join(append(sentences, compareProvedOursAdvice(read-provedOurs)), " ")
+		sentences = append(sentences, fmt.Sprintf(opts.agree(provedOurs,
+			i18n.N("%d carries changes proved ours, so removing it would discard work of our own — declare it instead."),
+			i18n.N("%d carry changes proved ours, so removing them would discard work of our own — declare them instead.")),
+			provedOurs))
+		return strings.Join(append(sentences, compareProvedOursAdvice(read-provedOurs, opts)), " ")
 	}
-	return strings.Join(append(sentences, compareRemovalAdvice(len(pkgs), read, len(clauses))), " ")
+	return strings.Join(append(sentences, compareRemovalAdvice(len(pkgs), read, len(clauses), opts)), " ")
 }
 
 // compareReadingCount is the first sentence: how many packages are listed, and
 // how many of them anybody read.
-func compareReadingCount(listed, read int) string {
+func compareReadingCount(listed, read int, opts SectionOptions) string {
 	switch read {
 	case 0:
-		return fmt.Sprintf("%d package(s), and not one of them carries a reading.", listed)
+		return fmt.Sprintf(opts.t(i18n.N("%d package(s), and not one of them carries a reading.")), listed)
 	case listed:
-		return fmt.Sprintf("%d package(s), and every one of them carries a reading.", listed)
+		return fmt.Sprintf(opts.t(i18n.N("%d package(s), and every one of them carries a reading.")), listed)
 	default:
-		return fmt.Sprintf("%d package(s), of which %d %s a reading.", listed, read, compareAgrees(read, "carries", "carry"))
+		return fmt.Sprintf(opts.agree(read,
+			i18n.N("%d package(s), of which %d carries a reading."),
+			i18n.N("%d package(s), of which %d carry a reading.")),
+			listed, read)
 	}
 }
 
@@ -1100,28 +1120,28 @@ func compareReadingCount(listed, read int) string {
 //
 // It reads the same two numbers the sentences before it were built from, so the
 // advice cannot say more than the evidence above it just said.
-func compareRemovalAdvice(listed, read, causes int) string {
+func compareRemovalAdvice(listed, read, causes int, opts SectionOptions) string {
 	switch {
 	case read == 0 && causes == 2:
 		// The measured overlay's wording, kept to the byte: two causes, so
 		// "either" is what names them both.
-		return "No removal advice follows from either."
+		return opts.t(i18n.N("No removal advice follows from either."))
 	case read == 0:
-		return "No removal advice follows from a package nobody read."
+		return opts.t(i18n.N("No removal advice follows from a package nobody read."))
 	case read == listed:
-		return "The recommendation to remove covers the whole list."
+		return opts.t(i18n.N("The recommendation to remove covers the whole list."))
 	default:
-		return fmt.Sprintf("The recommendation to remove covers the %d somebody read, and none of the rest.", read)
+		return fmt.Sprintf(opts.t(i18n.N("The recommendation to remove covers the %d somebody read, and none of the rest.")), read)
 	}
 }
 
 // compareProvedOursAdvice is the removal advice once some read rows are proved
 // ours: it covers only the read rows that are not, and never the whole list.
-func compareProvedOursAdvice(removable int) string {
+func compareProvedOursAdvice(removable int, opts SectionOptions) string {
 	if removable == 0 {
-		return "No removal advice follows."
+		return opts.t(i18n.N("No removal advice follows."))
 	}
-	return fmt.Sprintf("The recommendation to remove covers the %d that were read and are not proved ours, and none of the rest.", removable)
+	return fmt.Sprintf(opts.t(i18n.N("The recommendation to remove covers the %d that were read and are not proved ours, and none of the rest.")), removable)
 }
 
 // compareNeedsRebaseSection is the block that asks for work rather than for a
@@ -1136,26 +1156,26 @@ func compareProvedOursAdvice(removable int) string {
 // alone, and a diff cell there would be a number with no decision attached to
 // it — a column that means nothing on most rows teaches a reader to stop
 // reading it, which is exactly when the one row that matters goes past.
-func compareNeedsRebaseSection(r CompareRun) Section {
-	s := Section{Title: "Needs Rebase — " + compareRepository(r) + " moved ahead of changes of ours, which must be re-applied"}
+func compareNeedsRebaseSection(r CompareRun, opts SectionOptions) Section {
+	s := Section{Title: fmt.Sprintf(opts.t(i18n.N("Needs Rebase — %s moved ahead of changes of ours, which must be re-applied")), compareRepository(r, opts))}
 
 	if r.Verdicts.NeedsRebase == 0 && len(r.NeedsRebase) == 0 {
-		s.Lead = []string{"No package needs a rebase: nothing here carries changes of ours on top of a version " +
-			compareRepository(r) + " has since moved past."}
+		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("No package needs a rebase: nothing here carries changes of ours on top of a version %s has since moved past.")),
+			compareRepository(r, opts))}
 		return s
 	}
 
 	if len(r.NeedsRebase) == 0 {
-		s.Lead = []string{fmt.Sprintf("%d package(s) are counted as needing a rebase.", r.Verdicts.NeedsRebase)}
-		s.Notes = []string{"No per-package row reached this report, so the count above is stated without the list it was taken over."}
+		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) are counted as needing a rebase.")), r.Verdicts.NeedsRebase)}
+		s.Notes = []string{opts.t(i18n.N("No per-package row reached this report, so the count above is stated without the list it was taken over."))}
 		return s
 	}
 
 	s.Lead = []string{fmt.Sprintf(
-		"%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed.",
-		len(r.NeedsRebase), compareRepository(r))}
-	s.Rows = comparePkgTable(r, r.NeedsRebase, true)
-	s.Notes = comparePkgNotes(r.NeedsRebase)
+		opts.t(i18n.N("%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed.")),
+		len(r.NeedsRebase), compareRepository(r, opts))}
+	s.Rows = comparePkgTable(r, r.NeedsRebase, true, opts)
+	s.Notes = comparePkgNotes(r.NeedsRebase, opts)
 
 	return s
 }
@@ -1171,23 +1191,24 @@ func compareNeedsRebaseSection(r CompareRun) Section {
 // exist in both trees, because a package with nothing to compare against has
 // no row to print. The gap between the two is stated once, in words, in the
 // summary block — which is what CompareRun.Verdicts' own doc says it is for.
-func compareKeepSection(r CompareRun, listEvery bool) Section {
-	s := Section{Title: "Keep — the overlay copy is ahead"}
+func compareKeepSection(r CompareRun, opts SectionOptions) Section {
+	listEvery := opts.ShowAll
+	s := Section{Title: opts.t(i18n.N("Keep — the overlay copy is ahead"))}
 
 	if r.Verdicts.Keep == 0 && len(r.Keep) == 0 {
-		s.Lead = []string{"No package is counted as worth keeping on its own merits."}
+		s.Lead = []string{opts.t(i18n.N("No package is counted as worth keeping on its own merits."))}
 		return s
 	}
 
 	if len(r.Keep) == 0 {
-		s.Lead = []string{fmt.Sprintf("%d package(s) are counted as worth keeping.", r.Verdicts.Keep)}
-		s.Notes = []string{"No per-package row reached this report, so the count above is stated without the list it was taken over."}
+		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) are counted as worth keeping.")), r.Verdicts.Keep)}
+		s.Notes = []string{opts.t(i18n.N("No per-package row reached this report, so the count above is stated without the list it was taken over."))}
 		return s
 	}
 
-	s.Lead = []string{fmt.Sprintf("%d package(s) listed, and the run recommends keeping every one of them.", len(r.Keep))}
-	s.Rows = compareKeepTable(r, listEvery)
-	s.Notes = append(compareKeepNotes(r, listEvery), comparePkgNotes(r.Keep)...)
+	s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) listed, and the run recommends keeping every one of them.")), len(r.Keep))}
+	s.Rows = compareKeepTable(r, listEvery, opts)
+	s.Notes = append(compareKeepNotes(r, listEvery, opts), comparePkgNotes(r.Keep, opts)...)
 
 	return s
 }
@@ -1210,12 +1231,12 @@ func compareKeepSection(r CompareRun, listEvery bool) Section {
 // or every repeat carrying a finding of its own. The first arm below is the
 // right answer for that run and for a payload nobody ran the rule over: list
 // every kept package, because there is nothing to collapse.
-func compareKeepTable(r CompareRun, listEvery bool) Table {
-	t := Table{Headers: comparePkgHeaders(r, false)}
+func compareKeepTable(r CompareRun, listEvery bool, opts SectionOptions) Table {
+	t := Table{Headers: comparePkgHeaders(r, false, opts)}
 
 	if listEvery || len(r.KeepGroups) == 0 {
 		for _, p := range r.Keep {
-			t.Rows = append(t.Rows, comparePkgRow(p, false))
+			t.Rows = append(t.Rows, comparePkgRow(p, false, opts))
 		}
 		return t
 	}
@@ -1230,14 +1251,14 @@ func compareKeepTable(r CompareRun, listEvery bool) Table {
 		for _, member := range g.Members {
 			grouped[member] = true
 		}
-		t.Rows = append(t.Rows, compareKeepGroupRow(g, status))
+		t.Rows = append(t.Rows, compareKeepGroupRow(g, status, opts))
 	}
 
 	for _, p := range r.Keep {
 		if grouped[p.Package] {
 			continue
 		}
-		t.Rows = append(t.Rows, comparePkgRow(p, false))
+		t.Rows = append(t.Rows, comparePkgRow(p, false, opts))
 	}
 
 	return t
@@ -1255,7 +1276,7 @@ func compareKeepTable(r CompareRun, listEvery bool) Table {
 // computing a new one. A member the Keep list does not carry leaves the cell
 // empty, which says "the run established none" in the way every empty cell in
 // this report does.
-func compareKeepGroupRow(g KeepGroup, status map[string]string) Row {
+func compareKeepGroupRow(g KeepGroup, status map[string]string, opts SectionOptions) Row {
 	shared := ""
 	if len(g.Members) > 0 {
 		shared = status[g.Members[0]]
@@ -1263,7 +1284,7 @@ func compareKeepGroupRow(g KeepGroup, status map[string]string) Row {
 
 	return Row{
 		Cells: []string{
-			fmt.Sprintf("%s (%d packages)", g.Label, len(g.Members)),
+			fmt.Sprintf(opts.t(i18n.N("%s (%d packages)")), g.Label, len(g.Members)),
 			g.Local,
 			g.Remote,
 			shared,
@@ -1308,7 +1329,7 @@ func compareCategoryBreakdown(counts []CategoryCount) string {
 // which is what manifest_run.go and snapshot_run.go already do for the same
 // flag. A run with no groups gets no note: nothing was collapsed, so there is
 // nothing to say --all would expand.
-func compareKeepNotes(r CompareRun, listEvery bool) []string {
+func compareKeepNotes(r CompareRun, listEvery bool, opts SectionOptions) []string {
 	if len(r.KeepGroups) == 0 {
 		return nil
 	}
@@ -1320,12 +1341,12 @@ func compareKeepNotes(r CompareRun, listEvery bool) []string {
 
 	if listEvery {
 		return []string{fmt.Sprintf(
-			"%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead.",
+			opts.t(i18n.N("%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead.")),
 			members, len(r.Keep), len(r.KeepGroups))}
 	}
 
 	return []string{fmt.Sprintf(
-		"%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members.",
+		opts.t(i18n.N("%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members.")),
 		members, len(r.Keep), len(r.KeepGroups))}
 }
 
@@ -1336,24 +1357,24 @@ func compareKeepNotes(r CompareRun, listEvery bool) []string {
 // there is no decision for the number to support — and they do carry their
 // details, because the reason the run could not answer is the only thing an
 // entry here has to offer.
-func compareUnknownSection(r CompareRun) Section {
-	s := Section{Title: "Unknown — no recommendation"}
+func compareUnknownSection(r CompareRun, opts SectionOptions) Section {
+	s := Section{Title: opts.t(i18n.N("Unknown — no recommendation"))}
 
 	if r.Verdicts.Unknown == 0 && len(r.Unknown) == 0 {
-		s.Lead = []string{"Every package the run judged reached a recommendation, so nothing is listed here."}
+		s.Lead = []string{opts.t(i18n.N("Every package the run judged reached a recommendation, so nothing is listed here."))}
 		return s
 	}
 
 	if len(r.Unknown) == 0 {
-		s.Lead = []string{fmt.Sprintf("%d package(s) are counted as unknown.", r.Verdicts.Unknown)}
-		s.Notes = []string{"No per-package row reached this report, so the count above is stated without the list it was taken over."}
+		s.Lead = []string{fmt.Sprintf(opts.t(i18n.N("%d package(s) are counted as unknown.")), r.Verdicts.Unknown)}
+		s.Notes = []string{opts.t(i18n.N("No per-package row reached this report, so the count above is stated without the list it was taken over."))}
 		return s
 	}
 
 	s.Lead = []string{fmt.Sprintf(
-		"%d package(s) listed. Nothing on record describes them, so neither advice is supported.", len(r.Unknown))}
-	s.Rows = comparePkgTable(r, r.Unknown, false)
-	s.Notes = comparePkgNotes(r.Unknown)
+		opts.t(i18n.N("%d package(s) listed. Nothing on record describes them, so neither advice is supported.")), len(r.Unknown))}
+	s.Rows = comparePkgTable(r, r.Unknown, false, opts)
+	s.Notes = comparePkgNotes(r.Unknown, opts)
 
 	return s
 }
@@ -1377,7 +1398,7 @@ func compareUnknownSection(r CompareRun) Section {
 //
 // The needs-rebase column prints even at zero: dropping a zero would make
 // "no package needs a rebase" and "nobody counted" the same line.
-func compareSummarySection(r CompareRun) Section {
+func compareSummarySection(r CompareRun, opts SectionOptions) Section {
 	listed := len(r.Redundant) + len(r.NeedsRebase) + len(r.Keep) + len(r.Unknown)
 
 	unlisted := r.Scanned - listed
@@ -1386,12 +1407,12 @@ func compareSummarySection(r CompareRun) Section {
 	}
 
 	return Section{
-		Title: "Summary",
+		Title: opts.t(i18n.N("Summary")),
 		Lead: []string{
-			fmt.Sprintf("%d scanned · %d in both · %d only here", r.Scanned, r.InBoth, r.OnlyLocal),
-			fmt.Sprintf("keep %d · redundant %d · needs rebase %d · unknown %d",
+			fmt.Sprintf(opts.t(i18n.N("%d scanned · %d in both · %d only here")), r.Scanned, r.InBoth, r.OnlyLocal),
+			fmt.Sprintf(opts.t(i18n.N("keep %d · redundant %d · needs rebase %d · unknown %d")),
 				r.Verdicts.Keep, r.Verdicts.Redundant, r.Verdicts.NeedsRebase, r.Verdicts.Unknown),
-			fmt.Sprintf("Verdicts count every package scanned; %d of %d have no row above.", unlisted, r.Scanned),
+			fmt.Sprintf(opts.t(i18n.N("Verdicts count every package scanned; %d of %d have no row above.")), unlisted, r.Scanned),
 		},
 		// The run's own sentences go LAST, under the tally, and the last block
 		// is the only fixed position this payload has: `func (r Run) Sections`
@@ -1409,7 +1430,9 @@ func compareSummarySection(r CompareRun) Section {
 // compareFindingsLead introduces a block's package findings once, so a reader
 // meets a sentence rather than a list of loose strings under a table. It is
 // only ever emitted where at least one such finding follows it.
-const compareFindingsLead = "Beside the reason on each row, the run established more about these packages:"
+func compareFindingsLead(opts SectionOptions) string {
+	return opts.t(i18n.N("Beside the reason on each row, the run established more about these packages:"))
+}
 
 // comparePkgNotes is every further finding the packages of ONE block carry,
 // each said under a lead that explains what it is doing there.
@@ -1430,12 +1453,12 @@ const compareFindingsLead = "Beside the reason on each row, the run established 
 //
 // It returns nil when no package in the list has anything further, which is
 // most runs. A lead introducing an empty list would be a heading over nothing.
-func comparePkgNotes(pkgs []ComparePkg) []string {
+func comparePkgNotes(pkgs []ComparePkg, opts SectionOptions) []string {
 	var notes []string
 	for _, p := range pkgs {
 		for _, finding := range p.FurtherFindings {
 			if notes == nil {
-				notes = []string{compareFindingsLead}
+				notes = []string{compareFindingsLead(opts)}
 			}
 			notes = append(notes, p.Package+": "+finding)
 		}
@@ -1445,10 +1468,10 @@ func comparePkgNotes(pkgs []ComparePkg) []string {
 
 // comparePkgTable is a list of packages as a table, with the DIFF column only
 // where a difference is evidence for the section's recommendation.
-func comparePkgTable(r CompareRun, pkgs []ComparePkg, withDiff bool) Table {
-	t := Table{Headers: comparePkgHeaders(r, withDiff)}
+func comparePkgTable(r CompareRun, pkgs []ComparePkg, withDiff bool, opts SectionOptions) Table {
+	t := Table{Headers: comparePkgHeaders(r, withDiff, opts)}
 	for _, p := range pkgs {
-		t.Rows = append(t.Rows, comparePkgRow(p, withDiff))
+		t.Rows = append(t.Rows, comparePkgRow(p, withDiff, opts))
 	}
 	return t
 }
@@ -1470,10 +1493,10 @@ func comparePkgTable(r CompareRun, pkgs []ComparePkg, withDiff bool) Table {
 // renderer decorates it; this is a COLUMN HEADING rather than the value, every
 // heading in this package is upper-case, and doing it once here is what keeps
 // every renderer printing the same one.
-func comparePkgHeaders(r CompareRun, withDiff bool) []string {
-	headers := []string{"PACKAGE", "BENTOO", compareRemoteColumn(r), "STATE"}
+func comparePkgHeaders(r CompareRun, withDiff bool, opts SectionOptions) []string {
+	headers := []string{opts.t(i18n.N("PACKAGE")), "BENTOO", compareRemoteColumn(r, opts), opts.t(i18n.N("STATE"))}
 	if withDiff {
-		headers = append(headers, "DIFF")
+		headers = append(headers, opts.t(i18n.N("DIFF")))
 	}
 	return headers
 }
@@ -1486,12 +1509,12 @@ func comparePkgHeaders(r CompareRun, withDiff bool) []string {
 // particular is drawn from a closed vocabulary the adapter produces, and
 // re-wording it here would be a second implementation of the one thing that
 // vocabulary exists to guarantee.
-func comparePkgRow(p ComparePkg, withDiff bool) Row {
+func comparePkgRow(p ComparePkg, withDiff bool, opts SectionOptions) Row {
 	cells := []string{p.Package, p.Local, p.Remote, p.Status}
 	if withDiff {
 		cells = append(cells, p.Diff)
 	}
-	return Row{Cells: cells, Detail: compareDetail(p)}
+	return Row{Cells: cells, Detail: compareDetailIn(p, opts)}
 }
 
 // compareDetail is the row's own finding, in one line, with the failed-review
@@ -1510,6 +1533,12 @@ func comparePkgRow(p ComparePkg, withDiff bool) Row {
 // already folded string costs nothing, while trusting the producer is how one
 // unfolded string reaches a table.
 func compareDetail(p ComparePkg) string {
+	return compareDetailIn(p, SectionOptions{})
+}
+
+// compareDetailIn is compareDetail said in the language opts selects. The
+// cause is the review vocabulary compareReviewCauseOrder marks for translation.
+func compareDetailIn(p ComparePkg, opts SectionOptions) string {
 	reason := foldToOneLine(p.Reason)
 
 	if p.Reading != readingFailed {
@@ -1517,9 +1546,9 @@ func compareDetail(p ComparePkg) string {
 	}
 	// The marker names the review's cause when one was recorded,
 	// and stays the bare marker the scope note explains when none was.
-	mark := compareReadingFailedMark
+	mark := compareReadingFailedMark(opts)
 	if p.Cause != "" {
-		mark = "[reading failed: " + p.Cause + "]"
+		mark = fmt.Sprintf(opts.t(i18n.N("[reading failed: %s]")), opts.t(p.Cause))
 	}
 	if reason == "" {
 		return mark
@@ -1541,18 +1570,18 @@ func compareDetail(p ComparePkg) string {
 // meeting that would be looking at a bug rather than at an answer, which is the
 // same reason snapshot_run.go refuses to print a sentence trailing into an
 // empty list.
-func compareRepository(r CompareRun) string {
+func compareRepository(r CompareRun, opts SectionOptions) string {
 	if r.Repository == "" {
-		return "the compared repository"
+		return opts.t(i18n.N("the compared repository"))
 	}
 	return "::" + r.Repository
 }
 
 // compareRemoteColumn is the same name as a column heading, upper-cased, with
 // a neutral word when the run named no repository.
-func compareRemoteColumn(r CompareRun) string {
+func compareRemoteColumn(r CompareRun, opts SectionOptions) string {
 	if r.Repository == "" {
-		return "REMOTE"
+		return opts.t(i18n.N("REMOTE"))
 	}
 	return strings.ToUpper(r.Repository)
 }

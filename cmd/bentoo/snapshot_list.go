@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -20,13 +21,13 @@ func newSnapshotListCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "list",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "List local snapshots per subvolume",
+		Short:       i18n.N("List local snapshots per subvolume"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotList(cmd, args, d)
 		},
 	}
 	cmd.Flags().BoolVar(&snapshotListRemote, "remote", false,
-		"also list remote snapshots (btrbk targets, restic repository)")
+		i18n.N("also list remote snapshots (btrbk targets, restic repository)"))
 	return cmd
 }
 
@@ -55,7 +56,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 	for _, sv := range mgr.Subvolumes() {
 		output.PrintInfo("%s:", sv)
 		if len(snaps[sv]) == 0 {
-			fmt.Println("  (none)")
+			fmt.Println("  " + i18n.T("(none)"))
 			continue
 		}
 		for _, s := range snaps[sv] {
@@ -72,12 +73,12 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 		if g.Err != nil {
 			// Lenient: a failing remote source is reported but does not abort
 			// the other sources.
-			output.PrintWarning("remote %s unavailable: %v", g.Label, g.Err)
+			output.PrintWarning(i18n.T("remote %s unavailable: %v"), g.Label, g.Err)
 			continue
 		}
-		output.PrintInfo("remote %s:", g.Label)
+		output.PrintInfo(i18n.T("remote %s:"), g.Label)
 		if len(g.Snapshots) == 0 {
-			fmt.Println("  (none)")
+			fmt.Println("  " + i18n.T("(none)"))
 			continue
 		}
 		for _, s := range g.Snapshots {

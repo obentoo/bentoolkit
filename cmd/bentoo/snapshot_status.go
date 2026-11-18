@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/logging"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/snapshot"
@@ -19,7 +20,7 @@ func newSnapshotStatusCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:         "status",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
-		Short:       "Show the last run, timer state, and free space",
+		Short:       i18n.N("Show the last run, timer state, and free space"),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runSnapshotStatus(cmd, args, d)
 		},
@@ -41,14 +42,15 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 	// stage of the persisted RunResult with its subvolume, ship target when
 	// set, outcome, and the error text when it failed.
 	if last, err := snapshot.LoadLastRun(); err != nil {
-		output.PrintInfo("last run: none recorded")
+		output.PrintInfo("%s", i18n.T("last run: none recorded"))
 	} else {
-		status := "ok"
+		// One whole sentence per outcome, so a translation never has to agree
+		// with a status word spliced into it.
+		format := i18n.T("last run: ok at %s (%d stages)")
 		if last.Failed() {
-			status = "failed"
+			format = i18n.T("last run: failed at %s (%d stages)")
 		}
-		output.PrintInfo("last run: %s at %s (%d stages)",
-			status, last.StartedAt.Format(time.RFC3339), len(last.Stages))
+		output.PrintInfo(format, last.StartedAt.Format(time.RFC3339), len(last.Stages))
 		for _, st := range last.Stages {
 			fmt.Printf("  %s\n", stageLine(st))
 		}
@@ -56,12 +58,12 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 
 	// Timer state and next scheduled run. TimerNextRun is
 	// best-effort; an empty result maps to a clean "unknown".
-	output.PrintInfo("timer: %s", snapshot.TimerState(ctx, d.snapshotRunner))
+	output.PrintInfo(i18n.T("timer: %s"), snapshot.TimerState(ctx, d.snapshotRunner))
 	next := snapshot.TimerNextRun(ctx, d.snapshotRunner)
 	if next == "" {
-		next = "unknown"
+		next = i18n.T("unknown")
 	}
-	output.PrintInfo("next run: %s", next)
+	output.PrintInfo(i18n.T("next run: %s"), next)
 
 	// Free space on the snapshot filesystem (best-effort). The
 	// snapshot dir may not exist yet (apply never run), so report the nearest
@@ -71,7 +73,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 		dir = "/"
 	}
 	if avail, ok := availableSpace(nearestExisting(dir)); ok {
-		output.PrintInfo("free space on %s: %s", dir, humanBytes(avail))
+		output.PrintInfo(i18n.T("free space on %s: %s"), dir, humanBytes(avail))
 	}
 
 	// Free space of local ship target paths. A target containing
@@ -83,7 +85,7 @@ func runSnapshotStatus(cmd *cobra.Command, _ []string, d *deps) error {
 			continue
 		}
 		if avail, ok := availableSpace(target); ok {
-			output.PrintInfo("free space on %s: %s", target, humanBytes(avail))
+			output.PrintInfo(i18n.T("free space on %s: %s"), target, humanBytes(avail))
 		}
 	}
 	return nil

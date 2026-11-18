@@ -8,6 +8,7 @@ import (
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
 	"github.com/obentoo/bentoolkit/internal/common/git"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // FileType represents the type of file in an overlay
@@ -200,16 +201,6 @@ func StagedStatusWithExecutor(ctx context.Context, executor git.GitExecutor) ([]
 	return GroupStatusEntries(entries), nil
 }
 
-// statusCleanTree is what a working tree with nothing to report says.
-//
-// It is a CONSTANT so a test — and, later, a renderer — can name the sentence
-// without copying it, on the same argument that made baselineSkippedLead one.
-//
-// It also exists at all because this outcome may not render as silence: a clean
-// tree and a command that failed to look produce the same zero bytes, and only
-// a sentence tells them apart.
-const statusCleanTree = "No changes detected (working directory clean)"
-
 // FormatStatus renders package statuses as the lines a caller prints, and
 // chooses NO APPEARANCE.
 //
@@ -226,7 +217,11 @@ const statusCleanTree = "No changes detected (working directory clean)"
 // the library that just gave it up.
 func FormatStatus(statuses []PackageStatus) string {
 	if len(statuses) == 0 {
-		return statusCleanTree
+		// What a working tree with nothing to report says. This outcome may not
+		// render as silence: a clean tree and a command that failed to look
+		// produce the same zero bytes, and only a sentence tells them apart. It is
+		// written here, inside i18n.T, so the extractor sees the literal.
+		return i18n.T("No changes detected (working directory clean)")
 	}
 
 	var sb strings.Builder
