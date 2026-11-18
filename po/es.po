@@ -954,7 +954,8 @@ msgid_plural "About to write %d version pin(s) into packages.toml — %d pinned 
 msgstr[0] "A punto de escribir %d anclaje de versión en packages.toml — %d anclado por PRIMERA vez, %d anclaje obsoleto corregido."
 msgstr[1] "A punto de escribir %d fijaciones de versión en packages.toml — %d fijadas por PRIMERA vez, %d fijaciones obsoletas corregidas."
 
-#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
 msgstr "packages.toml está PUBLICADO: este overlay realiza confirmaciones y «push» automáticamente, por lo que esta escritura llega al repositorio de origen."
 
@@ -964,7 +965,8 @@ msgid_plural "--yes given: writing %d version pin(s) without a prompt."
 msgstr[0] "Se ha indicado --yes: se va a escribir %d anclaje de versión sin solicitar confirmación."
 msgstr[1] "Se ha indicado --yes: se van a escribir %d fijaciones de versión sin preguntar."
 
-#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Not an interactive terminal and --yes was not given: nothing written."
 msgstr "No es un terminal interactivo y no se ha especificado --yes: no se ha escrito nada."
 
@@ -1174,7 +1176,8 @@ msgstr "Nada que reactivar: ningún paquete huérfano tiene un upstream más rec
 msgid "Revivable Orphans"
 msgstr "Paquetes huérfanos recuperables"
 
-#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go
+#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go
+#: internal/common/report/compare_run.go internal/common/report/manifest_run.go
 msgid "PACKAGE"
 msgstr "PACKAGE"
 
@@ -1220,11 +1223,13 @@ msgstr "Con errores:  %d"
 msgid "The build budget has no history to read (qlop -a -M: %v); every package counts as expensive."
 msgstr "El presupuesto de compilación no tiene historial que leer (qlop -a -M: %v); cada paquete se considera costoso."
 
-#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+#: cmd/bentoo/overlay_autoupdate_check.go
+#: internal/common/report/autoupdate_check.go
 msgid "Validation Plan"
 msgstr "Plan de validación"
 
-#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+#: cmd/bentoo/overlay_autoupdate_check.go
+#: internal/common/report/autoupdate_check.go
 msgid "No pending update to validate."
 msgstr "No hay ninguna actualización pendiente de validar."
 
@@ -1408,7 +1413,8 @@ msgstr "etapa de corrección del registro %d"
 msgid "warning: could not restore packages.toml for %s: %v"
 msgstr "advertencia: no se ha podido restaurar packages.toml para %s: %v"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml was NOT modified."
 msgstr "packages.toml NO se ha modificado."
 
@@ -1416,7 +1422,8 @@ msgstr "packages.toml NO se ha modificado."
 msgid "Registry Repair"
 msgstr "Reparación del registro"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is unchanged."
 msgstr "packages.toml no se ha modificado."
 
@@ -1430,7 +1437,8 @@ msgid_plural "Repaired packages.toml: %d change(s) written."
 msgstr[0] "packages.toml reparado: %d cambio escrito."
 msgstr[1] "packages.toml reparado: %d cambios escritos."
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
 msgstr "Revísalo antes de publicarlo: 'bentoo overlay diff'"
 
@@ -3868,7 +3876,9 @@ msgstr "ACTUAL"
 msgid "CANDIDATE"
 msgstr "CANDIDATO"
 
-#: internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+#: internal/common/report/autoupdate_check.go
+#: internal/common/report/compare_run.go internal/common/report/manifest_run.go
+#: internal/common/report/snapshot_run.go
 msgid "STATE"
 msgstr "ESTADO"
 
@@ -4372,7 +4382,8 @@ msgstr "No se conserva lo que imprimió un objetivo que se completó correctamen
 msgid "regenerated"
 msgstr "regenerado"
 
-#: internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+#: internal/common/report/manifest_run.go
+#: internal/common/report/snapshot_run.go
 msgid "failed"
 msgstr "fallido"
 
@@ -5005,3 +5016,83 @@ msgid "%d day"
 msgid_plural "%d days"
 msgstr[0] "%d día"
 msgstr[1] "%d días"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "BLOCKED"
+msgstr "BLOQUEADO"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%ds to cancel (Ctrl-C or any key)..."
+msgstr "%d s para cancelar (Ctrl+C o cualquier tecla)..."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled."
+msgstr "Cancelado."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Wait for the countdown to finish before typing."
+msgstr "Espere a que termine la cuenta atrás antes de escribir."
+
+#: misc/safety/30-bentoo-safety.bash misc/safety/bentoo-secure-delete
+msgid "Type the code %s to confirm:"
+msgstr "Escriba el código %s para confirmar:"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled"
+msgstr "Cancelado"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "wrong code."
+msgstr "código incorrecto."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "critical target: %q"
+msgstr "destino crítico: %q"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "deleting HOME: %q"
+msgstr "eliminar HOME: %q"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "--no-preserve-root refused."
+msgstr "Se ha rechazado --no-preserve-root."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s -R on %s"
+msgstr "%s -R en %s"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s requested"
+msgstr "%s solicitado"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "emerge (removal): %s"
+msgstr "emerge (eliminación): %s"
+
+#: misc/safety/bentoo-secure-delete
+msgid "kdialog is missing; aborting."
+msgstr "Falta kdialog; abortando."
+
+#: misc/safety/bentoo-secure-delete
+msgid "Delete %d item(s) PERMANENTLY?"
+msgid_plural "Delete %d item(s) PERMANENTLY?"
+msgstr[0] "¿Eliminar %d elemento de forma PERMANENTE?"
+msgstr[1] "¿Eliminar %d elementos de forma PERMANENTE?"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Bentoo — Permanent deletion"
+msgstr "Bentoo — Eliminación permanente"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Wrong code. Nothing was deleted."
+msgstr "Código incorrecto. No se ha eliminado nada."
+
+#: misc/safety/bentoo-secure-delete
+msgid "Deleted %d item(s)."
+msgid_plural "Deleted %d item(s)."
+msgstr[0] "Se ha eliminado %d elemento."
+msgstr[1] "Se han eliminado %d elementos."
+
+#: misc/safety/bentoo-secure-delete.desktop.in
+msgid "Delete permanently (Bentoo code)"
+msgstr "Eliminar permanentemente (código Bentoo)"

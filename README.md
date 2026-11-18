@@ -227,6 +227,7 @@ Limits worth knowing:
 - [Snapshots](docs/snapshot.md): btrbk, snapper, cloud copies and rollback
 - [Desktop notifications](docs/tray.md): installing and configuring `bentoo-tray`
 - [Runtime behaviour](docs/behaviour.md): exit codes, live output, concurrency and timeouts
+- [Shell safety guards](docs/safety.md): the confirmation code before destructive commands
 - [Development](docs/development.md): the checks, the local CI gate and the project layout
 - [Architecture](ARCHITECTURE.md): how the code is put together, and why
 

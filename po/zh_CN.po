@@ -942,7 +942,8 @@ msgid "About to write %d version pin(s) into packages.toml — %d pinned for the
 msgid_plural "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
 msgstr[0] "即将向 packages.toml 中写入 %d 个版本锁定 — %d 个首次锁定，%d 个过时锁定已更正。"
 
-#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
 msgstr "packages.toml 已发布：此 overlay 会自动提交和推送，因此此写入会到达源仓库。"
 
@@ -951,7 +952,8 @@ msgid "--yes given: writing %d version pin(s) without a prompt."
 msgid_plural "--yes given: writing %d version pin(s) without a prompt."
 msgstr[0] "已指定 --yes：在不提示的情况下写入 %d 个版本锁定。"
 
-#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Not an interactive terminal and --yes was not given: nothing written."
 msgstr "这不是一个交互式终端，且未提供 --yes：未写入任何内容。"
 
@@ -1158,7 +1160,8 @@ msgstr "无需恢复 — 没有上游版本比 ::gentoo 更新的孤立软件包
 msgid "Revivable Orphans"
 msgstr "可恢复的孤立包"
 
-#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go
+#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go
+#: internal/common/report/compare_run.go internal/common/report/manifest_run.go
 msgid "PACKAGE"
 msgstr "软件包"
 
@@ -1203,11 +1206,13 @@ msgstr "失败： %d"
 msgid "The build budget has no history to read (qlop -a -M: %v); every package counts as expensive."
 msgstr "构建预算没有可读取的历史记录（qlop -a -M: %v）；每个软件包均被视为昂贵。"
 
-#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+#: cmd/bentoo/overlay_autoupdate_check.go
+#: internal/common/report/autoupdate_check.go
 msgid "Validation Plan"
 msgstr "验证计划"
 
-#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+#: cmd/bentoo/overlay_autoupdate_check.go
+#: internal/common/report/autoupdate_check.go
 msgid "No pending update to validate."
 msgstr "没有待验证的更新。"
 
@@ -1383,7 +1388,8 @@ msgstr "注册表修复阶段 %d"
 msgid "warning: could not restore packages.toml for %s: %v"
 msgstr "警告：无法还原 %s 的 packages.toml： %v"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml was NOT modified."
 msgstr "packages.toml 未被修改。"
 
@@ -1391,7 +1397,8 @@ msgstr "packages.toml 未被修改。"
 msgid "Registry Repair"
 msgstr "注册表修复"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is unchanged."
 msgstr "packages.toml 未发生变化。"
 
@@ -1404,7 +1411,8 @@ msgid "Repaired packages.toml: %d change(s) written."
 msgid_plural "Repaired packages.toml: %d change(s) written."
 msgstr[0] "已修复 packages.toml：已写入 %d 项更改。"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
 msgstr "在发布前进行审核：“bentoo overlay diff”"
 
@@ -3783,7 +3791,9 @@ msgstr "当前"
 msgid "CANDIDATE"
 msgstr "候选包"
 
-#: internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+#: internal/common/report/autoupdate_check.go
+#: internal/common/report/compare_run.go internal/common/report/manifest_run.go
+#: internal/common/report/snapshot_run.go
 msgid "STATE"
 msgstr "状态"
 
@@ -4253,7 +4263,8 @@ msgstr "成功的目标所打印的内容不会被保留：这些内容在运行
 msgid "regenerated"
 msgstr "已重新生成"
 
-#: internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+#: internal/common/report/manifest_run.go
+#: internal/common/report/snapshot_run.go
 msgid "failed"
 msgstr "失败"
 
@@ -4839,3 +4850,81 @@ msgstr "仓库 %s：%s 前已同步"
 msgid "%d day"
 msgid_plural "%d days"
 msgstr[0] "%d 天"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "BLOCKED"
+msgstr "已阻止"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%ds to cancel (Ctrl-C or any key)..."
+msgstr "%d 秒内可取消（Ctrl-C 或任意键）..."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled."
+msgstr "已取消。"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Wait for the countdown to finish before typing."
+msgstr "请等待倒计时结束后再输入。"
+
+#: misc/safety/30-bentoo-safety.bash misc/safety/bentoo-secure-delete
+msgid "Type the code %s to confirm:"
+msgstr "请输入代码 %s 以确认："
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled"
+msgstr "已取消"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "wrong code."
+msgstr "代码错误。"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "critical target: %q"
+msgstr "关键路径：%q"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "deleting HOME: %q"
+msgstr "删除 HOME：%q"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "--no-preserve-root refused."
+msgstr "--no-preserve-root 被拒绝。"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s -R on %s"
+msgstr "%s -R 作用于 %s"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s requested"
+msgstr "已请求 %s"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "emerge (removal): %s"
+msgstr "emerge（移除）：%s"
+
+#: misc/safety/bentoo-secure-delete
+msgid "kdialog is missing; aborting."
+msgstr "kdialog 缺失；正在中止。"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Delete %d item(s) PERMANENTLY?"
+msgid_plural "Delete %d item(s) PERMANENTLY?"
+msgstr[0] "是否永久删除 %d 个项目？"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Bentoo — Permanent deletion"
+msgstr "Bentoo — 永久删除"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Wrong code. Nothing was deleted."
+msgstr "代码有误。未删除任何内容。"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Deleted %d item(s)."
+msgid_plural "Deleted %d item(s)."
+msgstr[0] "已删除 %d 个项目。"
+
+#: misc/safety/bentoo-secure-delete.desktop.in
+msgid "Delete permanently (Bentoo code)"
+msgstr "永久删除（Bentoo 代码）"

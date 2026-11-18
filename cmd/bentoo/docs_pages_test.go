@@ -40,6 +40,7 @@ var docsPageMap = []struct {
 	{"docs/snapshot.md", []string{"Snapshot Management"}},
 	{"docs/tray.md", []string{"Desktop Notifications (bentoo-tray)"}},
 	{"docs/development.md", []string{"Security Audit", "Project Structure"}},
+	{"docs/safety.md", nil},
 }
 
 // docsRepoRoot is the repository root seen from this package's directory.

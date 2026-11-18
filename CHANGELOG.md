@@ -9,6 +9,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **The shell safety guards speak English, and translate like `bentoo`.**
+  The confirmation that `USE=secure` puts in front of `rm -r`, `dd`, `mkfs`,
+  `reboot` and similar commands was written in Portuguese only, and so was
+  the Dolphin "delete permanently" action of `USE=kde`. Both now live in
+  `misc/safety/`, read English by default and use the `bentoolkit` gettext
+  catalog for es, pt_BR, ru and zh_CN (pt_BR keeps the original wording).
+  The guard's decisions are unchanged. The refusal of `rm
+  --no-preserve-root` now shows its red label instead of the raw escape
+  codes. See [docs/safety.md](docs/safety.md).
+
 ## [0.44.0] - 2026-11-18
 
 ### Added

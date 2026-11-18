@@ -966,7 +966,8 @@ msgstr[0] "Собираемся записать %d привязку верси�
 msgstr[1] "Собираемся записать %d привязки версий в packages.toml — %d привязано ВПЕРВЫЕ, %d устаревших привязок исправлено."
 msgstr[2] "Собираемся записать %d привязок версий в packages.toml — %d привязано ВПЕРВЫЕ, %d устаревших привязок исправлено."
 
-#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
 msgstr "packages.toml ОПУБЛИКОВАН: этот оверлей автоматически выполняет коммит и пуш, поэтому эта запись попадает в origin."
 
@@ -977,7 +978,8 @@ msgstr[0] "--yes указан: запись %d привязки версий б�
 msgstr[1] "--yes указан: запись %d привязок версий без запроса."
 msgstr[2] "--yes указан: запись %d привязок версий без запроса."
 
-#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Not an interactive terminal and --yes was not given: nothing written."
 msgstr "Это не интерактивный терминал, и флаг --yes не был указан: ничего не записано."
 
@@ -1190,7 +1192,8 @@ msgstr "Восстанавливать нечего — ни один из бе�
 msgid "Revivable Orphans"
 msgstr "Осиротевшие пакеты, которые можно восстановить"
 
-#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go
+#: cmd/bentoo/overlay_autoupdate.go internal/common/report/autoupdate_check.go
+#: internal/common/report/compare_run.go internal/common/report/manifest_run.go
 msgid "PACKAGE"
 msgstr "PACKAGE"
 
@@ -1237,11 +1240,13 @@ msgstr "Сбой:  %d"
 msgid "The build budget has no history to read (qlop -a -M: %v); every package counts as expensive."
 msgstr "В бюджете сборки нет истории для чтения (qlop -a -M: %v); каждый пакет считается дорогостоящим."
 
-#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+#: cmd/bentoo/overlay_autoupdate_check.go
+#: internal/common/report/autoupdate_check.go
 msgid "Validation Plan"
 msgstr "План валидации"
 
-#: cmd/bentoo/overlay_autoupdate_check.go internal/common/report/autoupdate_check.go
+#: cmd/bentoo/overlay_autoupdate_check.go
+#: internal/common/report/autoupdate_check.go
 msgid "No pending update to validate."
 msgstr "Нет ожидающих проверки обновлений."
 
@@ -1433,7 +1438,8 @@ msgstr "этап исправления реестра %d"
 msgid "warning: could not restore packages.toml for %s: %v"
 msgstr "warning: не удалось восстановить packages.toml для %s: %v"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml was NOT modified."
 msgstr "Файл packages.toml НЕ был изменен."
 
@@ -1441,7 +1447,8 @@ msgstr "Файл packages.toml НЕ был изменен."
 msgid "Registry Repair"
 msgstr "Восстановление реестра"
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is unchanged."
 msgstr "packages.toml не изменен."
 
@@ -1456,7 +1463,8 @@ msgstr[0] "Исправлен файл packages.toml: записано %d изм
 msgstr[1] "Исправлен файл packages.toml: записано %d изменения."
 msgstr[2] "Исправлен файл packages.toml: записано %d изменений."
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
 msgstr "Просмотрите его перед публикацией: 'bentoo overlay diff'"
 
@@ -3953,7 +3961,9 @@ msgstr "ТЕКУЩИЙ"
 msgid "CANDIDATE"
 msgstr "КАНДИДАТ"
 
-#: internal/common/report/autoupdate_check.go internal/common/report/compare_run.go internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+#: internal/common/report/autoupdate_check.go
+#: internal/common/report/compare_run.go internal/common/report/manifest_run.go
+#: internal/common/report/snapshot_run.go
 msgid "STATE"
 msgstr "СОСТОЯНИЕ"
 
@@ -4491,7 +4501,8 @@ msgstr "Вывод успешной цели не сохраняется: он �
 msgid "regenerated"
 msgstr "перегенерировано"
 
-#: internal/common/report/manifest_run.go internal/common/report/snapshot_run.go
+#: internal/common/report/manifest_run.go
+#: internal/common/report/snapshot_run.go
 msgid "failed"
 msgstr "ошибка"
 
@@ -5171,3 +5182,85 @@ msgid_plural "%d days"
 msgstr[0] "%d день"
 msgstr[1] "%d дня"
 msgstr[2] "%d дней"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "BLOCKED"
+msgstr "ЗАБЛОКИРОВАНО"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%ds to cancel (Ctrl-C or any key)..."
+msgstr "%ds до отмены (Ctrl-C или любая клавиша)..."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled."
+msgstr "Отменено."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Wait for the countdown to finish before typing."
+msgstr "Дождитесь окончания обратного отсчёта, прежде чем вводить данные."
+
+#: misc/safety/30-bentoo-safety.bash misc/safety/bentoo-secure-delete
+msgid "Type the code %s to confirm:"
+msgstr "Введите код %s для подтверждения:"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled"
+msgstr "Отменено"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "wrong code."
+msgstr "неверный код."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "critical target: %q"
+msgstr "критический путь: %q"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "deleting HOME: %q"
+msgstr "удаление HOME: %q"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "--no-preserve-root refused."
+msgstr "Флаг --no-preserve-root отклонён."
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s -R on %s"
+msgstr "%s -R для %s"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s requested"
+msgstr "%s: запрошено"
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "emerge (removal): %s"
+msgstr "emerge (удаление): %s"
+
+#: misc/safety/bentoo-secure-delete
+msgid "kdialog is missing; aborting."
+msgstr "Отсутствует kdialog; выполнение прерывается."
+
+#: misc/safety/bentoo-secure-delete
+msgid "Delete %d item(s) PERMANENTLY?"
+msgid_plural "Delete %d item(s) PERMANENTLY?"
+msgstr[0] "Удалить %d элемент НАВСЕГДА?"
+msgstr[1] "Удалить %d элемента НАВСЕГДА?"
+msgstr[2] "Удалить %d элементов НАВСЕГДА?"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Bentoo — Permanent deletion"
+msgstr "Bentoo — Безвозвратное удаление"
+
+#: misc/safety/bentoo-secure-delete
+msgid "Wrong code. Nothing was deleted."
+msgstr "Неверный код. Ничего не было удалено."
+
+#: misc/safety/bentoo-secure-delete
+msgid "Deleted %d item(s)."
+msgid_plural "Deleted %d item(s)."
+msgstr[0] "Удалён %d элемент."
+msgstr[1] "Удалено %d элемента."
+msgstr[2] "Удалено %d элементов."
+
+#: misc/safety/bentoo-secure-delete.desktop.in
+msgid "Delete permanently (Bentoo code)"
+msgstr "Удалить безвозвратно (код Bentoo)"

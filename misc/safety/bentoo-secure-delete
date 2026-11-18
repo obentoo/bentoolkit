@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Bentoo: PERMANENT deletion with a confirmation code, from Dolphin's (KDE)
+# Service Menu. File managers use KIO/GIO and never call /bin/rm, so this
+# wrapper is the only way to add an extra confirmation step -- and it acts only
+# when the user picks this action from the context menu.
+#
+# Messages are translated through the bentoolkit gettext catalog, following
+# LANGUAGE, LC_ALL, LC_MESSAGES and LANG; without gettext or a catalog they
+# stay English.
+set -euo pipefail
+
+# _bentoo_t MSGID: the translation of MSGID, or MSGID itself.
+# _bentoo_tn MSGID N: the plural form of MSGID that agrees with N (MSGID reads
+# the same for every count in English). Both take single-quoted literals, so
+# misc/i18n-extract can collect them.
+_bentoo_t() {
+    if command -v gettext >/dev/null 2>&1; then
+        TEXTDOMAIN=bentoolkit TEXTDOMAINDIR=${BENTOO_LOCALEDIR:-/usr/share/locale} gettext -- "$1"
+    else
+        printf '%s' "$1"
+    fi
+}
+_bentoo_tn() {
+    if command -v ngettext >/dev/null 2>&1; then
+        TEXTDOMAIN=bentoolkit TEXTDOMAINDIR=${BENTOO_LOCALEDIR:-/usr/share/locale} ngettext -- "$1" "$1" "$2"
+    else
+        printf '%s' "$1"
+    fi
+}
+
+(( $# )) || exit 0
+
+# A 4-character alphanumeric code (no ambiguous characters)
+chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+code=''
+for ((i = 0; i < 4; i++)); do code+=${chars:RANDOM%${#chars}:1}; done
+
+count=$#
+list=$(printf '%s\n' "$@")
+
+if ! command -v kdialog >/dev/null 2>&1; then
+    printf '%s\n' "$(_bentoo_t 'kdialog is missing; aborting.')" >&2
+    exit 1
+fi
+
+# shellcheck disable=SC2059 # the formats are translated messages
+question=$(printf "$(_bentoo_tn 'Delete %d item(s) PERMANENTLY?' "$count")" "$count")
+# shellcheck disable=SC2059
+prompt=$(printf "$(_bentoo_t 'Type the code %s to confirm:')" "$code")
+
+answer=$(kdialog --title "$(_bentoo_t 'Bentoo — Permanent deletion')" \
+    --password "${question}
+
+${list}
+
+${prompt}") || exit 0
+
+answer=${answer^^}
+if [[ $answer != "$code" ]]; then
+    kdialog --title "Bentoo" --error "$(_bentoo_t 'Wrong code. Nothing was deleted.')"
+    exit 1
+fi
+
+rm -rf -- "$@"
+# shellcheck disable=SC2059
+kdialog --title "Bentoo" --passivepopup "$(printf "$(_bentoo_tn 'Deleted %d item(s).' "$count")" "$count")" 5

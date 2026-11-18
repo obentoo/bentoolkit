@@ -18,12 +18,99 @@ import (
 	"go/token"
 	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 )
+
+// sourceKind classifies a file Extract reads: "go" for a non-test Go file,
+// "shell" for a bash script (a .bash file, or one whose first line names
+// bash), "desktop" for a desktop entry template (.desktop.in), "" otherwise.
+func sourceKind(p string) string {
+	switch {
+	case strings.HasSuffix(p, "_test.go"):
+		return ""
+	case strings.HasSuffix(p, ".go"):
+		return "go"
+	case strings.HasSuffix(p, ".bash"):
+		return "shell"
+	case strings.HasSuffix(p, ".desktop.in"):
+		return "desktop"
+	case filepath.Ext(p) == "":
+		f, err := os.Open(p) //nolint:gosec // G304: a file of the checkout being extracted.
+		if err != nil {
+			return ""
+		}
+		defer func() { _ = f.Close() }() // read-only: a close error loses nothing
+		line, _ := bufio.NewReader(f).ReadString('\n')
+		if strings.HasPrefix(line, "#!") && strings.Contains(line, "bash") {
+			return "shell"
+		}
+	}
+	return ""
+}
+
+// shellCallRE matches a call of the scripts' translation helpers:
+// _bentoo_t 'msgid' and _bentoo_tn 'msgid' N.
+var shellCallRE = regexp.MustCompile(`\b(_bentoo_tn?)[ \t]+(\S)`)
+
+// extractShell collects the messages of a bash script. Its helpers take a
+// single-quoted literal only (no expansion can hide in it, and the text is
+// the msgid as written); any other argument is an error, as for i18n.N.
+// _bentoo_tn marks a message whose translation agrees with a count.
+func extractShell(path, rel string) ([]Message, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: a file of the checkout being extracted.
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var out []Message
+	for i, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "#") {
+			continue
+		}
+		for _, m := range shellCallRE.FindAllStringSubmatchIndex(line, -1) {
+			fn, rest := line[m[2]:m[3]], line[m[4]:]
+			if !strings.HasPrefix(rest, "'") {
+				return nil, fmt.Errorf("%s:%d: %s needs a single-quoted literal", rel, i+1, fn)
+			}
+			end := strings.IndexByte(rest[1:], '\'')
+			if end < 0 {
+				return nil, fmt.Errorf("%s:%d: %s: unterminated literal", rel, i+1, fn)
+			}
+			id := rest[1 : end+1]
+			if id == "" || strings.ContainsRune(id, '\r') {
+				return nil, fmt.Errorf("%s:%d: %s of an empty string or one with \\r", rel, i+1, fn)
+			}
+			msg := Message{ID: id}
+			if fn == "_bentoo_tn" {
+				msg.Plural = id
+			}
+			out = append(out, msg)
+		}
+	}
+	return out, nil
+}
+
+// extractDesktop collects the translatable keys of a desktop entry template:
+// Name, GenericName and Comment, which msgfmt --desktop fills in per language.
+func extractDesktop(path string) ([]Message, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // G304: a file of the checkout being extracted.
+	if err != nil {
+		return nil, fmt.Errorf("reading %s: %w", path, err)
+	}
+	var out []Message
+	for _, line := range strings.Split(string(data), "\n") {
+		for _, key := range []string{"Name=", "GenericName=", "Comment="} {
+			if v, ok := strings.CutPrefix(line, key); ok && v != "" {
+				out = append(out, Message{ID: v})
+			}
+		}
+	}
+	return out, nil
+}
 
 // merge adds the messages found in file rel to msgs, which index maps by
 // msgid, recording rel as a reference of each.
@@ -58,8 +145,10 @@ type Message struct {
 }
 
 // Extract walks the given directories under root and returns every message
-// marked with i18n.N, or passed as a literal to i18n.T, in non-test Go files, ordered by first
-// appearance (file path, then position).
+// marked with i18n.N, or passed as a literal to i18n.T, in non-test Go files,
+// ordered by first appearance (file path, then position). It also reads the
+// shell scripts and desktop entry templates there (see extractShell and
+// extractDesktop).
 func Extract(root string, dirs ...string) ([]Message, error) {
 	var files []string
 	for _, d := range dirs {
@@ -70,7 +159,7 @@ func Extract(root string, dirs ...string) ([]Message, error) {
 			if e.IsDir() && (e.Name() == "vendor" || e.Name() == "testdata") {
 				return filepath.SkipDir
 			}
-			if !e.IsDir() && strings.HasSuffix(p, ".go") && !strings.HasSuffix(p, "_test.go") {
+			if !e.IsDir() && sourceKind(p) != "" {
 				files = append(files, p)
 			}
 			return nil
@@ -90,7 +179,15 @@ func Extract(root string, dirs ...string) ([]Message, error) {
 			return nil, fmt.Errorf("relativising %s: %w", f, err)
 		}
 		rel = filepath.ToSlash(rel)
-		found, err := extractFile(fset, f)
+		var found []Message
+		switch sourceKind(f) {
+		case "go":
+			found, err = extractFile(fset, f)
+		case "shell":
+			found, err = extractShell(f, rel)
+		case "desktop":
+			found, err = extractDesktop(f)
+		}
 		if err != nil {
 			return nil, err
 		}

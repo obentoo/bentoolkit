@@ -136,6 +136,40 @@ msgstr[2] "%d дней"
 	}
 }
 
+func TestExtractShellAndDesktop(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "misc", "guard.bash"), `# _bentoo_t 'not in a comment'
+_bentoo_t() { gettext -- "$1"; }
+printf '%s' "$(_bentoo_t 'Cancelled.')" "$(_bentoo_t 'wrong code.')"
+x=$(_bentoo_tn 'Deleted %d item(s).' "$n")
+`)
+	writeFile(t, filepath.Join(root, "misc", "helper"), "#!/usr/bin/env bash\necho \"$(_bentoo_t 'kdialog is missing')\"\n")
+	writeFile(t, filepath.Join(root, "misc", "notes"), "_bentoo_t 'no shebang, not a script'\n")
+	writeFile(t, filepath.Join(root, "misc", "menu.desktop.in"), "[Desktop Action x]\nName=Delete permanently\nIcon=edit-delete\nComment=Asks for a code\n")
+	msgs, err := Extract(root, "misc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, m := range msgs {
+		got[m.ID] = m.Plural
+	}
+	want := map[string]string{"Cancelled.": "", "wrong code.": "", "Deleted %d item(s).": "Deleted %d item(s).", "kdialog is missing": "", "Delete permanently": "", "Asks for a code": ""}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("Extract = %v, want %v", got, want)
+	}
+}
+
+func TestExtractShellRejectsNonLiterals(t *testing.T) {
+	for _, line := range []string{`_bentoo_t "$msg"`, `_bentoo_t "double quoted"`, `_bentoo_tn $x 3`, `_bentoo_t 'unterminated`, `_bentoo_t ''`} {
+		root := t.TempDir()
+		writeFile(t, filepath.Join(root, "s.bash"), line+"\n")
+		if _, err := Extract(root, "."); err == nil {
+			t.Errorf("accepted %s", line)
+		}
+	}
+}
+
 func TestExtractRejectsComputedN(t *testing.T) {
 	for name, call := range map[string]string{
 		"variable":    `tr.N(s)`,
@@ -318,13 +352,21 @@ var templateActionRE = regexp.MustCompile(`\{\{[^}]*\}\}`)
 // in English) until a translator fills them in.
 func TestCatalogsInSync(t *testing.T) {
 	root := repoRoot(t)
-	msgs, err := Extract(root, "cmd", "internal")
+	msgs, err := Extract(root, "cmd", "internal", "misc/safety")
 	if err != nil {
 		t.Fatal(err)
 	}
 	source := make([]string, 0, len(msgs))
+	// fromShell marks the messages a bash script prints with printf, which
+	// has no %[n] argument index: their translations keep the verb order.
+	fromShell := map[string]bool{}
 	for _, m := range msgs {
 		source = append(source, m.ID)
+		for _, r := range m.Refs {
+			if sourceKind(filepath.Join(root, filepath.FromSlash(r))) == "shell" {
+				fromShell[m.ID] = true
+			}
+		}
 	}
 	slices.Sort(source)
 
@@ -363,6 +405,13 @@ func TestCatalogsInSync(t *testing.T) {
 			for _, e := range entries {
 				if e.Fuzzy {
 					continue
+				}
+				if fromShell[e.ID] {
+					for _, f := range append([]string{e.Str}, e.Forms...) {
+						if f != "" && !slices.Equal(Verbs(e.ID), Verbs(f)) {
+							t.Errorf("%q: a shell message keeps its verbs in order (bash printf has no %%[n]); got %q", e.ID, f)
+						}
+					}
 				}
 				if e.Plural != "" {
 					checkPluralEntry(t, e, nplurals)
