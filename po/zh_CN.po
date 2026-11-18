@@ -2046,6 +2046,18 @@ msgstr ""
 "\n"
 "候选声明 — 每个未声明的轴各一条，供维护者接受或编辑。此处没有任何内容被写入任何文件。\n"
 
+#: cmd/bentoo/overlay_compare_report.go
+msgid "content check could not read both ebuilds"
+msgstr "内容检查无法读取两个 ebuild"
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "versions differ; content check needs equal ones"
+msgstr "版本不同；内容检查需要相同的版本"
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "Nothing is deleted here: act on the recommendation to remove with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+msgstr "此处不会删除任何内容：请用 'bentoo overlay prune' 执行删除建议，它依据内容判断——两棵树共有的每个版本，加上整个 files/ 树——而绝不只依据判定结论。"
+
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Inspect and drive the autoupdate cooldown"
 msgstr "检查并驱动自动更新冷却期"

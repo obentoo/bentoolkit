@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/report"
 	"github.com/obentoo/bentoolkit/internal/common/report/render"
 	"github.com/obentoo/bentoolkit/internal/overlay"
@@ -260,9 +261,9 @@ func compareNotEvaluated(rep *overlay.CompareReport, results []overlay.CompareRe
 		case result.Reading == overlay.ReadingNotComparable:
 			// A pair of versions the content check refused: the recommendation
 			// stands on evidence nobody has.
-			why = "content check could not read both ebuilds"
+			why = i18n.N("content check could not read both ebuilds")
 			if result.LocalVersion != result.RemoteVersion {
-				why = "versions differ; content check needs equal ones"
+				why = i18n.N("versions differ; content check needs equal ones")
 			}
 		default:
 			continue
@@ -717,7 +718,7 @@ func compareRunNotes(rep *overlay.CompareReport, realignRan, judged, noReview bo
 	}
 
 	if compareRemovalRecommended(rep) {
-		notes = append(notes, comparePruneAdvice)
+		notes = append(notes, comparePruneAdvice())
 	}
 
 	return notes
@@ -823,12 +824,18 @@ func compareRealignNote(rep *overlay.CompareReport, realignRan, judged, noReview
 // — it re-reads content — and an operator who expects the two to agree row for
 // row would read any difference as a bug.
 //
+// It is marked with i18n.N rather than translated here: the payload keeps it
+// English, as every --export does, and the terminal renderer translates it
+// (compareSummarySection maps every run note through SectionOptions.t).
+//
 // It is written in this package and not in internal/common/report, where the
 // recommendation itself is built, because that package must not learn a command
 // name: `bentoo overlay prune` is this domain's vocabulary, and the guards on
 // internal/common/report exist to keep exactly that out. A run note from the
 // adapter is the nearest home that may spell it.
-const comparePruneAdvice = "Nothing is deleted here: act on the recommendation to remove with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+func comparePruneAdvice() string {
+	return i18n.N("Nothing is deleted here: act on the recommendation to remove with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone.")
+}
 
 // compareRemovalRecommended reports whether this run made a removal
 // recommendation at all, and so whether comparePruneAdvice has anything to

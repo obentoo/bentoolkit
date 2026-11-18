@@ -20,6 +20,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--delete-registry`; `--keep-registry` still leaves the file untouched, and
   the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
 
+### Fixed
+
+- **`overlay compare` translates its fixed sentences.** In a translated
+  terminal, the advice to act through `bentoo overlay prune` and the reasons
+  in "Left Without an Answer" ("versions differ; content check needs equal
+  ones", "content check could not read both ebuilds") were still printed in
+  English. They are now translated like the rest of the report. `--export`
+  and `--json` stay English, and a reason that carries an error's own text
+  stays English too, as errors do everywhere.
+- **"2 pacote" in the redundant block.** "%d package(s), of which %d carry a
+  reading" picked its plural form from the second number, so a two-package
+  list with one reading read "2 pacote" in Portuguese (and the same mistake
+  in Spanish and Russian). The translations now agree with the list's size.
+
 ## [0.45.0] - 2026-11-18
 
 ### Added

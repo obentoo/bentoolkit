@@ -1857,6 +1857,18 @@ msgid ""
 "Candidate declarations — one per undeclared axis, for a maintainer to accept or edit. Nothing here was written to any file.\n"
 msgstr ""
 
+#: cmd/bentoo/overlay_compare_report.go
+msgid "content check could not read both ebuilds"
+msgstr ""
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "versions differ; content check needs equal ones"
+msgstr ""
+
+#: cmd/bentoo/overlay_compare_report.go
+msgid "Nothing is deleted here: act on the recommendation to remove with 'bentoo overlay prune', which decides on content — every version the two trees share, plus the whole files/ tree — and never on the verdict alone."
+msgstr ""
+
 #: cmd/bentoo/overlay_cooldown.go
 msgid "Inspect and drive the autoupdate cooldown"
 msgstr ""
