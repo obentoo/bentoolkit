@@ -99,6 +99,6 @@ func runSnapshotPrune(cmd *cobra.Command, _ []string, d *deps) error {
 		return exitWith(1)
 	}
 
-	output.PrintSuccess("snapshot prune completed (%d stages)", len(result.Stages))
+	output.PrintSuccess(i18n.T("snapshot prune completed (%d stages)"), len(result.Stages))
 	return nil
 }

@@ -69,7 +69,7 @@ func loadSnapshotConfig(log *slog.Logger) (*snapshot.Config, string, error) {
 // frames them as a dry-run preview, so the wording stays consistent across verbs.
 func printDryRunPlan(lines []string) {
 	for _, line := range lines {
-		output.PrintInfo("dry-run: %s", line)
+		output.PrintInfo(i18n.T("dry-run: %s"), line)
 	}
 }
 

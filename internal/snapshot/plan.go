@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // plan.go — pure dry-run plan helpers.
@@ -29,10 +31,10 @@ func PlanApply(cfg *Config, configPath string) []string {
 	lines := planEngineConfig(cfg, configPath)
 	if cfg.Schedule.Backend == "systemd" {
 		lines = append(lines,
-			fmt.Sprintf("would write systemd unit %s", filepath.Join(systemdUnitDir, serviceUnitName)),
-			fmt.Sprintf("would write systemd unit %s", filepath.Join(systemdUnitDir, timerUnitName)),
-			"would run systemctl daemon-reload",
-			fmt.Sprintf("would run systemctl enable --now %s", timerUnitName),
+			fmt.Sprintf(i18n.T("would write systemd unit %s"), filepath.Join(systemdUnitDir, serviceUnitName)),
+			fmt.Sprintf(i18n.T("would write systemd unit %s"), filepath.Join(systemdUnitDir, timerUnitName)),
+			i18n.T("would run systemctl daemon-reload"),
+			fmt.Sprintf(i18n.T("would run systemctl enable --now %s"), timerUnitName),
 		)
 	}
 	return lines
@@ -45,9 +47,9 @@ func PlanApply(cfg *Config, configPath string) []string {
 func PlanRun(cfg *Config) []string {
 	var lines []string
 	for _, sv := range cfg.Engine.Subvolumes {
-		lines = append(lines, fmt.Sprintf("would snapshot %s via engine %s (create + prune)", sv, cfg.Engine.Driver))
+		lines = append(lines, fmt.Sprintf(i18n.T("would snapshot %s via engine %s (create + prune)"), sv, cfg.Engine.Driver))
 		for _, sh := range cfg.Ship {
-			lines = append(lines, fmt.Sprintf("would ship %s to %s (%s)", sv, shipDestination(sh), sh.Type))
+			lines = append(lines, fmt.Sprintf(i18n.T("would ship %s to %s (%s)"), sv, shipDestination(sh), sh.Type))
 		}
 	}
 	return lines
@@ -65,7 +67,7 @@ func PlanPrune(cfg *Config, shipScope string) []string {
 	var lines []string
 	if shipScope == "" {
 		for _, sv := range cfg.Engine.Subvolumes {
-			lines = append(lines, fmt.Sprintf("would prune %s via engine %s (%s)",
+			lines = append(lines, fmt.Sprintf(i18n.T("would prune %s via engine %s (%s)"),
 				sv, cfg.Engine.Driver, enginePruneCommand(cfg.Engine.Driver)))
 		}
 	}
@@ -76,7 +78,7 @@ func PlanPrune(cfg *Config, shipScope string) []string {
 		if shipScope != "" && shipName(sh) != shipScope {
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("would apply GFS retention to %s (ship %q, %s)",
+		lines = append(lines, fmt.Sprintf(i18n.T("would apply GFS retention to %s (ship %q, %s)"),
 			sh.Remote, shipName(sh), retentionSummary(cfg.Engine.Retention)))
 	}
 	return lines
@@ -101,9 +103,9 @@ func enginePruneCommand(driver string) string {
 // no granularity is configured (gfsSelect's all-zero short-circuit).
 func retentionSummary(r Retention) string {
 	if line := retentionLine(r); line != "" {
-		return "keep " + line
+		return fmt.Sprintf(i18n.T("keep %s"), line)
 	}
-	return "no GFS policy: keep everything"
+	return i18n.T("no GFS policy: keep everything")
 }
 
 // shipName resolves the effective name of a ship entry the way the built
@@ -136,16 +138,16 @@ func shipName(sh ShipConfig) string {
 func planEngineConfig(cfg *Config, configPath string) []string {
 	switch cfg.Engine.Driver {
 	case "btrbk":
-		return []string{fmt.Sprintf("would write engine config %s", BtrbkConfPath(configPath))}
+		return []string{fmt.Sprintf(i18n.T("would write engine config %s"), BtrbkConfPath(configPath))}
 	case "snapper":
 		lines := make([]string, 0, 2*len(cfg.Engine.Subvolumes))
 		for _, sv := range cfg.Engine.Subvolumes {
 			subvolume := filepath.Clean(sv)
 			name := snapperConfigName(subvolume)
 			lines = append(lines,
-				fmt.Sprintf("would run snapper -c %s create-config %s (if not already covered)",
+				fmt.Sprintf(i18n.T("would run snapper -c %s create-config %s (if not already covered)"),
 					name, subvolume),
-				fmt.Sprintf("would run snapper -c %s set-config %s",
+				fmt.Sprintf(i18n.T("would run snapper -c %s set-config %s"),
 					name, strings.Join(settableSnapperKeys(cfg.Engine, subvolume), " ")))
 		}
 		return lines

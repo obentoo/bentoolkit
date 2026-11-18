@@ -118,7 +118,7 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 		// Preview only — the ship is resolved (an unknown --ship still
 		// failed above) and so is the subvolume, but nothing runs: no
 		// snapshot.Restore, no subprocess, and the confirm gate is never consulted.
-		output.PrintInfo("dry-run: would restore snapshot %s into %s via ship %q (%s)",
+		output.PrintInfo(i18n.T("dry-run: would restore snapshot %s into %s via ship %q (%s)"),
 			id, snapshotRestoreTarget, ship.Name, ship.Type)
 		return nil
 	}
@@ -154,11 +154,11 @@ func runSnapshotRestore(cmd *cobra.Command, args []string, d *deps) error {
 	err = snapshot.Restore(ctx, id, snapshotRestoreTarget, opts)
 	switch {
 	case err == nil:
-		output.PrintSuccess("snapshot restored (%s → %s)", id, snapshotRestoreTarget)
+		output.PrintSuccess(i18n.T("snapshot restored (%s → %s)"), id, snapshotRestoreTarget)
 	case errors.Is(err, snapshot.ErrRestoreDeclined):
 		// Declining a destructive restore is a clean abort, not a failure: report
 		// it and return nil — no exit status — so the exit code stays 0.
-		output.PrintInfo("restore declined")
+		output.PrintInfo("%s", i18n.T("restore declined"))
 	default:
 		log.Error("snapshot restore: failed", "err", err)
 		return exitWith(1)

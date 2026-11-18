@@ -56,7 +56,7 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 	for _, sv := range mgr.Subvolumes() {
 		output.PrintInfo("%s:", sv)
 		if len(snaps[sv]) == 0 {
-			fmt.Println("  (none)")
+			fmt.Println("  " + i18n.T("(none)"))
 			continue
 		}
 		for _, s := range snaps[sv] {
@@ -73,12 +73,12 @@ func runSnapshotList(cmd *cobra.Command, _ []string, d *deps) error {
 		if g.Err != nil {
 			// Lenient: a failing remote source is reported but does not abort
 			// the other sources.
-			output.PrintWarning("remote %s unavailable: %v", g.Label, g.Err)
+			output.PrintWarning(i18n.T("remote %s unavailable: %v"), g.Label, g.Err)
 			continue
 		}
-		output.PrintInfo("remote %s:", g.Label)
+		output.PrintInfo(i18n.T("remote %s:"), g.Label)
 		if len(g.Snapshots) == 0 {
-			fmt.Println("  (none)")
+			fmt.Println("  " + i18n.T("(none)"))
 			continue
 		}
 		for _, s := range g.Snapshots {

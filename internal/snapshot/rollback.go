@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+
+	"github.com/obentoo/bentoolkit/internal/common/i18n"
 )
 
 // rollback.go is the snapshot ROLLBACK entry point.
@@ -61,7 +63,7 @@ func Rollback(ctx context.Context, cfg *Config, id string, opts RollbackOptions)
 		if confirm == nil {
 			confirm = defaultConfirmFunc
 		}
-		prompt := fmt.Sprintf("Roll the system back to snapshot %q? This boots the root filesystem from that snapshot on next reboot and is destructive.", id)
+		prompt := fmt.Sprintf(i18n.T("Roll the system back to snapshot %q? This boots the root filesystem from that snapshot on next reboot and is destructive."), id)
 		if !confirm(prompt) {
 			return ErrRollbackDeclined
 		}

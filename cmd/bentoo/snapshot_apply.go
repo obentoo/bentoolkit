@@ -51,6 +51,6 @@ func runSnapshotApply(cmd *cobra.Command, _ []string, d *deps) error {
 		return exitWith(1)
 	}
 
-	output.PrintSuccess("snapshot configuration applied (%s)", path)
+	output.PrintSuccess(i18n.T("snapshot configuration applied (%s)"), path)
 	return nil
 }

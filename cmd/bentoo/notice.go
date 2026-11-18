@@ -116,7 +116,7 @@ func runNoticeNew(cmd *cobra.Command, in notice.Input, bodyFile string) error {
 	if err != nil {
 		return err
 	}
-	printNoticeResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res, n.ID, app.OverlayPath, sitePath, "Wrote")
+	printNoticeResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res, n.ID, app.OverlayPath, sitePath, i18n.T("Wrote %s"))
 	return nil
 }
 
@@ -179,18 +179,19 @@ func runNoticeRevise(cmd *cobra.Command, id string, changes notice.Changes, body
 	if err != nil {
 		return err
 	}
-	printNoticeResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res, id, app.OverlayPath, sitePath, "Revised")
+	printNoticeResult(cmd.OutOrStdout(), cmd.ErrOrStderr(), res, id, app.OverlayPath, sitePath, i18n.T("Revised %s"))
 	return nil
 }
 
 // printNoticeResult prints what was written and what the operator does next.
-// The next steps are printed, never run.
-func printNoticeResult(out, errOut io.Writer, res notice.Result, id, overlay, sitePath, verb string) {
+// The next steps are printed, never run. wroteFormat is the translated line
+// printed for each written path, with one %s for the path.
+func printNoticeResult(out, errOut io.Writer, res notice.Result, id, overlay, sitePath, wroteFormat string) {
 	for _, w := range res.Warnings {
-		fmt.Fprintf(errOut, "warning: %s\n", w)
+		fmt.Fprintf(errOut, i18n.T("warning: %s")+"\n", w)
 	}
 	for _, p := range res.Paths {
-		fmt.Fprintf(out, "%s %s\n", verb, p)
+		fmt.Fprintf(out, wroteFormat+"\n", p)
 	}
 	siteFile := filepath.Join("src", "content", "notices", id+".yaml")
 	// Only `new` has a site document to show without a site path: `revise`
@@ -198,23 +199,23 @@ func printNoticeResult(out, errOut io.Writer, res notice.Result, id, overlay, si
 	printedYAML := sitePath == "" && len(res.YAML) > 0
 	switch {
 	case printedYAML:
-		fmt.Fprintf(out, "\nnotice.site_path is not configured; save this as %s in the site repository:\n\n", siteFile)
+		fmt.Fprintf(out, "\n"+i18n.T("notice.site_path is not configured; save this as %s in the site repository:")+"\n\n", siteFile)
 		_, _ = out.Write(res.YAML)
 	case sitePath == "":
-		fmt.Fprintf(out, "\nnotice.site_path is not configured, so the site notice was not updated; revise %s in the site repository by hand.\n", siteFile)
+		fmt.Fprintf(out, "\n"+i18n.T("notice.site_path is not configured, so the site notice was not updated; revise %s in the site repository by hand.")+"\n", siteFile)
 	}
 
 	newsDir := filepath.Join("metadata", "news", id)
-	fmt.Fprintf(out, "\nNext steps (bentoo performs no git operation):\n")
-	fmt.Fprintf(out, "  1. Review the files above.\n")
+	fmt.Fprint(out, "\n"+i18n.T("Next steps (bentoo performs no git operation):")+"\n")
+	fmt.Fprint(out, "  1. "+i18n.T("Review the files above.")+"\n")
 	fmt.Fprintf(out, "  2. git -C %s add %s && git -C %s commit\n", overlay, newsDir, overlay)
 	switch {
 	case sitePath != "":
 		fmt.Fprintf(out, "  3. git -C %s add %s && git -C %s commit\n", sitePath, siteFile, sitePath)
 	case printedYAML:
-		fmt.Fprintf(out, "  3. Add and commit the YAML above in the site repository.\n")
+		fmt.Fprint(out, "  3. "+i18n.T("Add and commit the YAML above in the site repository.")+"\n")
 	default:
-		fmt.Fprintf(out, "  3. Update, add and commit %s in the site repository.\n", siteFile)
+		fmt.Fprintf(out, "  3. "+i18n.T("Update, add and commit %s in the site repository.")+"\n", siteFile)
 	}
-	fmt.Fprintf(out, "  4. Push both repositories.\n")
+	fmt.Fprint(out, "  4. "+i18n.T("Push both repositories.")+"\n")
 }

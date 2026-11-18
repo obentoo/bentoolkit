@@ -58,7 +58,7 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 			log.Error("snapshot hook: failed", "err", err)
 			return exitWith(1)
 		}
-		output.PrintSuccess("Portage emerge hook removed")
+		output.PrintSuccess("%s", i18n.T("Portage emerge hook removed"))
 		return nil
 	}
 
@@ -81,6 +81,6 @@ func runSnapshotHook(cmd *cobra.Command, _ []string) error {
 		log.Error("snapshot hook: failed", "err", err)
 		return exitWith(1)
 	}
-	output.PrintSuccess("Portage emerge hook installed — snapper pre/post snapshots around each emerged package")
+	output.PrintSuccess("%s", i18n.T("Portage emerge hook installed — snapper pre/post snapshots around each emerged package"))
 	return nil
 }

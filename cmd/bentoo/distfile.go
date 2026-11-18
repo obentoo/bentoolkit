@@ -113,7 +113,7 @@ func runDistfileFetch(cmd *cobra.Command, args []string) error {
 
 	appCtx, err := loadAppContext(cmd)
 	if err != nil {
-		output.PrintError("loading config: %v", err)
+		output.PrintError(i18n.T("loading config: %v"), err)
 		return exitWith(1)
 	}
 
@@ -139,11 +139,11 @@ func runDistfileFetch(cmd *cobra.Command, args []string) error {
 		return exitWith(1)
 	}
 
-	output.PrintSuccess("%s-%s: wrote %s", res.Package, res.Version, res.Path)
+	output.PrintSuccess(i18n.T("%s-%s: wrote %s"), res.Package, res.Version, res.Path)
 	if res.SerialEnv != "" {
-		fmt.Printf("  serial read from $%s\n", res.SerialEnv)
+		fmt.Printf("  "+i18n.T("serial read from $%s")+"\n", res.SerialEnv)
 	}
-	fmt.Println("  emerge can now install it without downloading anything.")
+	fmt.Println("  " + i18n.T("emerge can now install it without downloading anything."))
 	return nil
 }
 
@@ -157,10 +157,10 @@ func reportDistfileFetchError(requested string, err error) {
 
 	switch {
 	case errors.Is(err, autoupdate.ErrNoAuthFetch):
-		fmt.Fprintln(os.Stderr, "  Nothing to do: emerge fetches this package's distfile from a mirror by itself.")
+		fmt.Fprintln(os.Stderr, "  "+i18n.T("Nothing to do: emerge fetches this package's distfile from a mirror by itself."))
 	case errors.Is(err, autoupdate.ErrPackageNotInRegistry):
-		fmt.Fprintf(os.Stderr, "  The overlay tracks no record named %s, so there is no download recorded for it.\n", requested)
+		fmt.Fprintf(os.Stderr, "  "+i18n.T("The overlay tracks no record named %s, so there is no download recorded for it.")+"\n", requested)
 	case errors.Is(err, fetch.ErrAuthFetchSecretMissing):
-		fmt.Fprintln(os.Stderr, "  The serial is read at runtime and never stored in the overlay: export it, or add it to the secrets file named above.")
+		fmt.Fprintln(os.Stderr, "  "+i18n.T("The serial is read at runtime and never stored in the overlay: export it, or add it to the secrets file named above."))
 	}
 }

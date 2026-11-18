@@ -57,7 +57,7 @@ func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 	if snapshotRollbackDryRun {
 		// Preview only — nothing runs: no snapshot.Rollback, no
 		// subprocess, and the confirm gate is never consulted.
-		output.PrintInfo("dry-run: would run snapper rollback to snapshot %s — the system boots from it on next reboot", id)
+		output.PrintInfo(i18n.T("dry-run: would run snapper rollback to snapshot %s — the system boots from it on next reboot"), id)
 		return nil
 	}
 
@@ -72,11 +72,11 @@ func runSnapshotRollback(cmd *cobra.Command, args []string, d *deps) error {
 	err = snapshot.Rollback(ctx, cfg, id, opts)
 	switch {
 	case err == nil:
-		output.PrintSuccess("rollback to snapshot %s started — reboot to complete", id)
+		output.PrintSuccess(i18n.T("rollback to snapshot %s started — reboot to complete"), id)
 	case errors.Is(err, snapshot.ErrRollbackDeclined):
 		// Declining a destructive rollback is a clean abort, not a failure: report
 		// it and return nil — no exit status — so the exit code stays 0.
-		output.PrintInfo("rollback declined")
+		output.PrintInfo("%s", i18n.T("rollback declined"))
 	default:
 		// Includes ErrRollbackUnsupported: a refused engine is a hard error.
 		log.Error("snapshot rollback: failed", "err", err)
