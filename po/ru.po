@@ -3552,7 +3552,7 @@ msgstr "Управление репозиторием оверлея Bentoo"
 
 #: cmd/bentoo/root.go
 msgid "Commands for managing the Bentoo overlay repository including adding files, checking status, committing changes, and pushing to remote."
-msgstr "Команды для управления репозиторием оверлея Bentoo, включая добавление файлов, проверку статуса, коммит изменений и пуш НА удалённый репозиторий."
+msgstr "Команды для управления репозиторием оверлея Bentoo, включая добавление файлов, проверку статуса, коммит изменений и пуш на удалённый репозиторий."
 
 #: cmd/bentoo/snapshot.go
 msgid "Manage btrfs snapshots (btrbk + systemd)"
