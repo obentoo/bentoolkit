@@ -391,6 +391,15 @@ locale:
 		cp "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(I18N_DOMAIN).mo" "$(LOCALE_BUILD_DIR)/$$lang/LC_MESSAGES/$(TRAY_I18N_DOMAIN).mo"; \
 	done
 
+# The Dolphin service menu with its translations merged in, for packagers:
+# build/safety/bentoo-secure-delete.desktop, its Exec pointing at LIBEXECDIR.
+LIBEXECDIR ?= $(PREFIX)/libexec/bentoo
+.PHONY: safety
+safety:
+	mkdir -p $(BUILD_DIR)/safety
+	$(MSGFMT) --desktop --template=misc/safety/bentoo-secure-delete.desktop.in -d $(PO_DIR) -o $(BUILD_DIR)/safety/bentoo-secure-delete.desktop
+	sed -i 's|@LIBEXECDIR@|$(LIBEXECDIR)|g' $(BUILD_DIR)/safety/bentoo-secure-delete.desktop
+
 # Regenerate po/bentoolkit.pot from the source and merge it into every .po:
 # new messages arrive untranslated, removed ones become obsolete (#~).
 .PHONY: i18n-update
@@ -433,5 +442,6 @@ help:
 	@echo "  tidy            Tidy dependencies"
 	@echo "  locale          Compile po/*.po into build/locale (needs msgfmt)"
 	@echo "  i18n-update     Re-extract po/bentoolkit.pot and merge it into po/*.po (needs msgmerge)"
+	@echo "  safety          Build the translated Dolphin service menu into build/safety (needs msgfmt)"
 	@echo "  check           Run lint, test, and audit"
 	@echo "  help            Show this help"

@@ -4421,3 +4421,83 @@ msgid "%d day"
 msgid_plural "%d days"
 msgstr[0] ""
 msgstr[1] ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "BLOCKED"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%ds to cancel (Ctrl-C or any key)..."
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled."
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Wait for the countdown to finish before typing."
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash misc/safety/bentoo-secure-delete
+msgid "Type the code %s to confirm:"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "Cancelled"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "wrong code."
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "critical target: %q"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "deleting HOME: %q"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "--no-preserve-root refused."
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s -R on %s"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "%s requested"
+msgstr ""
+
+#: misc/safety/30-bentoo-safety.bash
+msgid "emerge (removal): %s"
+msgstr ""
+
+#: misc/safety/bentoo-secure-delete
+msgid "kdialog is missing; aborting."
+msgstr ""
+
+#: misc/safety/bentoo-secure-delete
+msgid "Delete %d item(s) PERMANENTLY?"
+msgid_plural "Delete %d item(s) PERMANENTLY?"
+msgstr[0] ""
+msgstr[1] ""
+
+#: misc/safety/bentoo-secure-delete
+msgid "Bentoo — Permanent deletion"
+msgstr ""
+
+#: misc/safety/bentoo-secure-delete
+msgid "Wrong code. Nothing was deleted."
+msgstr ""
+
+#: misc/safety/bentoo-secure-delete
+msgid "Deleted %d item(s)."
+msgid_plural "Deleted %d item(s)."
+msgstr[0] ""
+msgstr[1] ""
+
+#: misc/safety/bentoo-secure-delete.desktop.in
+msgid "Delete permanently (Bentoo code)"
+msgstr ""

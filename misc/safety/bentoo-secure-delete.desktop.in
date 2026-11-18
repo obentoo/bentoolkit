@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Service
+ServiceTypes=KonqPopupMenu/Plugin
+MimeType=all/all;
+Actions=bentooSecureDelete;
+X-KDE-Priority=TopLevel
+X-KDE-StartupNotify=false
+
+[Desktop Action bentooSecureDelete]
+Name=Delete permanently (Bentoo code)
+Icon=edit-delete-shred
+Exec=@LIBEXECDIR@/bentoo-secure-delete %F

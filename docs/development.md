@@ -146,7 +146,12 @@ messages as `bentoo-tray.mo` (see "Installing" below). What a
 program reads stays English on purpose, so scripts and log searches do not
 depend on the reader's language: logs, `--json`, `--porcelain`, `--export`
 files (`report.SectionOptions.English`), generated files, commit messages,
-LLM prompts, and the answers a prompt accepts.
+LLM prompts, and the answers a prompt accepts. The shell safety guards in
+`misc/safety/` use the same catalog through `gettext` (see
+[safety.md](safety.md)): a script marks a message with `_bentoo_t 'text'`
+(`_bentoo_tn 'text' N` for a count), single-quoted so the extractor reads it
+literally. bash's `printf` has no `%[n]` index, so their translations keep
+the verbs in order; `TestCatalogsInSync` checks it.
 
 Errors stay English by design. A failure reaches the terminal as a log
 record (`level=ERROR msg=... err=...`) whose `err` is a chain of wrapped
