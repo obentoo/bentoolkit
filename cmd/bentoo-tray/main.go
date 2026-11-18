@@ -65,9 +65,12 @@ const newsPoll = time.Minute
 // logLevelEnv selects the log level.
 const logLevelEnv = "BENTOO_TRAY_LOG_LEVEL"
 
-// i18nDomain names the gettext catalog the tray shares with bentoo:
-// <dir>/<lang>/LC_MESSAGES/bentoolkit.mo.
-const i18nDomain = "bentoolkit"
+// i18nDomain names the tray's gettext catalog:
+// <dir>/<lang>/LC_MESSAGES/bentoo-tray.mo. It holds the same messages as
+// bentoo's bentoolkit.mo, under the tray's own name, because bentoo and
+// bentoo-tray are packaged separately and two packages cannot install one
+// file.
+const i18nDomain = "bentoo-tray"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr, os.Getenv))

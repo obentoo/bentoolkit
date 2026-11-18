@@ -25,13 +25,36 @@ import (
 	"strings"
 )
 
+// merge adds the messages found in file rel to msgs, which index maps by
+// msgid, recording rel as a reference of each.
+func merge(msgs []Message, index map[string]int, found []Message, rel string) ([]Message, error) {
+	for _, m := range found {
+		i, ok := index[m.ID]
+		if !ok {
+			index[m.ID] = len(msgs)
+			msgs = append(msgs, Message{ID: m.ID, Plural: m.Plural, Refs: []string{rel}})
+			continue
+		}
+		if msgs[i].Plural != m.Plural {
+			// gettext keys an entry by its msgid alone: one msgid cannot
+			// be both a plain and a plural message, or two plurals.
+			return nil, fmt.Errorf("%s: %q is used with two plural forms (%q and %q)", rel, m.ID, msgs[i].Plural, m.Plural)
+		}
+		if !slices.Contains(msgs[i].Refs, rel) {
+			msgs[i].Refs = append(msgs[i].Refs, rel)
+		}
+	}
+	return msgs, nil
+}
+
 // i18nImport is the import path whose N and T calls are extracted.
 const i18nImport = "github.com/obentoo/bentoolkit/internal/common/i18n"
 
 // Message is one msgid and the files that use it.
 type Message struct {
-	ID   string
-	Refs []string // repository-relative, slash-separated, sorted, unique
+	ID     string
+	Plural string   // msgid_plural; set for TCount, TPlural and NPlural
+	Refs   []string // repository-relative, slash-separated, sorted, unique
 }
 
 // Extract walks the given directories under root and returns every message
@@ -67,20 +90,12 @@ func Extract(root string, dirs ...string) ([]Message, error) {
 			return nil, fmt.Errorf("relativising %s: %w", f, err)
 		}
 		rel = filepath.ToSlash(rel)
-		ids, err := extractFile(fset, f)
+		found, err := extractFile(fset, f)
 		if err != nil {
 			return nil, err
 		}
-		for _, id := range ids {
-			i, ok := index[id]
-			if !ok {
-				index[id] = len(msgs)
-				msgs = append(msgs, Message{ID: id, Refs: []string{rel}})
-				continue
-			}
-			if !slices.Contains(msgs[i].Refs, rel) {
-				msgs[i].Refs = append(msgs[i].Refs, rel)
-			}
+		if msgs, err = merge(msgs, index, found, rel); err != nil {
+			return nil, err
 		}
 	}
 	for i := range msgs {
@@ -89,7 +104,7 @@ func Extract(root string, dirs ...string) ([]Message, error) {
 	return msgs, nil
 }
 
-func extractFile(fset *token.FileSet, path string) ([]string, error) {
+func extractFile(fset *token.FileSet, path string) ([]Message, error) {
 	file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
 	if err != nil {
 		return nil, fmt.Errorf("parsing %s: %w", path, err)
@@ -107,46 +122,83 @@ func extractFile(fset *token.FileSet, path string) ([]string, error) {
 		return nil, nil
 	}
 
-	var ids []string
+	var out []Message
 	var bad error
 	ast.Inspect(file, func(n ast.Node) bool {
 		call, ok := n.(*ast.CallExpr)
 		if !ok || bad != nil {
 			return bad == nil
 		}
-		sel, ok := call.Fun.(*ast.SelectorExpr)
-		if !ok || (sel.Sel.Name != "N" && sel.Sel.Name != "T") {
+		fun := call.Fun
+		if ix, ok := fun.(*ast.IndexExpr); ok { // an explicit type argument: TCount[int](...)
+			fun = ix.X
+		}
+		sel, ok := fun.(*ast.SelectorExpr)
+		if !ok {
 			return true
 		}
 		if x, ok := sel.X.(*ast.Ident); !ok || x.Name != local {
 			return true
 		}
-		if len(call.Args) != 1 {
-			bad = fmt.Errorf("%s: %s.%s takes one argument", fset.Position(call.Pos()), local, sel.Sel.Name)
+		m, err := extractCall(sel.Sel.Name, call.Args)
+		if err != nil {
+			bad = fmt.Errorf("%s: %s.%s %w", fset.Position(call.Pos()), local, sel.Sel.Name, err)
 			return false
 		}
-		s, ok := literal(call.Args[0])
-		if !ok && sel.Sel.Name == "T" {
-			// T of a variable translates text marked with N elsewhere.
-			return true
+		if m != nil {
+			out = append(out, *m)
 		}
+		return true
+	})
+	return out, bad
+}
+
+// extractCall returns the message one i18n call marks, nil for a call that
+// marks none (T of a variable, which translates text marked elsewhere, or a
+// function that is not a marker), or an error for a marker it cannot read.
+func extractCall(fn string, args []ast.Expr) (*Message, error) {
+	var nlit, want int // literals the call must carry, arguments it takes
+	switch fn {
+	case "N", "T":
+		nlit, want = 1, 1
+	case "TCount":
+		nlit, want = 1, 2
+	case "NPlural":
+		nlit, want = 2, 2
+	case "TPlural":
+		nlit, want = 2, 3
+	default:
+		return nil, nil
+	}
+	if len(args) != want {
+		return nil, fmt.Errorf("takes %d arguments", want)
+	}
+	lits := make([]string, nlit)
+	for i := range nlit {
+		s, ok := literal(args[i])
 		if !ok {
-			bad = fmt.Errorf("%s: %s.N needs a string literal, not a computed value", fset.Position(call.Pos()), local)
-			return false
+			if fn == "T" || fn == "TPlural" || fn == "TCount" {
+				return nil, nil // translates text marked elsewhere (N, NPlural)
+			}
+			return nil, errors.New("needs a string literal, not a computed value")
 		}
 		if s == "" {
-			bad = fmt.Errorf("%s: %s.%s of an empty string", fset.Position(call.Pos()), local, sel.Sel.Name)
-			return false
+			return nil, errors.New("of an empty string")
 		}
 		if strings.ContainsRune(s, '\r') {
 			// gettext refuses \r in a message; keep terminal control out of it.
-			bad = fmt.Errorf("%s: %s.%s of a string with \\r: write the \\r outside the message", fset.Position(call.Pos()), local, sel.Sel.Name)
-			return false
+			return nil, errors.New("of a string with \\r: write the \\r outside the message")
 		}
-		ids = append(ids, s)
-		return true
-	})
-	return ids, bad
+		lits[i] = s
+	}
+	m := &Message{ID: lits[0]}
+	switch fn {
+	case "TCount":
+		m.Plural = lits[0]
+	case "NPlural", "TPlural":
+		m.Plural = lits[1]
+	}
+	return m, nil
 }
 
 // literal evaluates a string literal or a + concatenation of them.
@@ -192,6 +244,12 @@ msgstr ""
 		fmt.Fprint(bw, "\n")
 		fmt.Fprintf(bw, "#: %s\n", strings.Join(m.Refs, " "))
 		writeField(bw, "msgid", m.ID)
+		if m.Plural != "" {
+			writeField(bw, "msgid_plural", m.Plural)
+			writeField(bw, "msgstr[0]", "")
+			writeField(bw, "msgstr[1]", "")
+			continue
+		}
 		writeField(bw, "msgstr", "")
 	}
 	return bw.Flush()
@@ -238,78 +296,122 @@ func quote(s string) string {
 	return b.String()
 }
 
-// Entry is one message of a .po file.
+// Entry is one message of a .po file. A plural entry has Plural set and its
+// translations in Forms (Str is then Forms[0]).
 type Entry struct {
-	ID    string
-	Str   string
-	Fuzzy bool
+	ID     string
+	Plural string
+	Str    string
+	Forms  []string
+	Fuzzy  bool
 }
 
 // Parse reads the messages of a .po or .pot file, skipping the header and
 // obsolete (#~) entries. It understands the subset bentoolkit's files use:
-// no msgctxt and no plural forms.
+// plural forms, but no msgctxt.
 func Parse(r io.Reader) ([]Entry, error) {
-	var (
-		out     []Entry
-		cur     Entry
-		field   *string
-		started bool
-		fuzzy   bool // a "#, fuzzy" flag seen for the entry about to start
-		lineNo  int
-	)
-	flush := func() {
-		if started && cur.ID != "" {
-			out = append(out, cur)
-		}
-		cur, field, started = Entry{}, nil, false
-	}
+	_, entries, err := ParseWithHeader(r)
+	return entries, err
+}
+
+// ParseWithHeader is Parse that also returns the header entry's msgstr
+// ("Language: ...\nPlural-Forms: ...").
+func ParseWithHeader(r io.Reader) (string, []Entry, error) {
+	var p poReader
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	lineNo := 0
 	for sc.Scan() {
 		lineNo++
-		line := strings.TrimSpace(sc.Text())
-		switch {
-		case line == "":
-			flush()
-			fuzzy = false
-		case strings.HasPrefix(line, "#"):
-			flush()
-			if strings.HasPrefix(line, "#,") && strings.Contains(line, "fuzzy") {
-				fuzzy = true
-			}
-		case strings.HasPrefix(line, "msgctxt") || strings.HasPrefix(line, "msgid_plural") || strings.HasPrefix(line, "msgstr["):
-			return nil, fmt.Errorf("line %d: msgctxt and plural forms are not supported", lineNo)
-		case strings.HasPrefix(line, "msgid "):
-			flush()
-			started, cur.Fuzzy, fuzzy = true, fuzzy, false
-			field = &cur.ID
-			if err := appendQuoted(field, strings.TrimPrefix(line, "msgid ")); err != nil {
-				return nil, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-		case strings.HasPrefix(line, "msgstr "):
-			if !started {
-				return nil, fmt.Errorf("line %d: msgstr without msgid", lineNo)
-			}
-			field = &cur.Str
-			if err := appendQuoted(field, strings.TrimPrefix(line, "msgstr ")); err != nil {
-				return nil, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-		case strings.HasPrefix(line, `"`):
-			if field == nil {
-				return nil, fmt.Errorf("line %d: string outside an entry", lineNo)
-			}
-			if err := appendQuoted(field, line); err != nil {
-				return nil, fmt.Errorf("line %d: %w", lineNo, err)
-			}
-		default:
-			return nil, fmt.Errorf("line %d: unexpected %q", lineNo, line)
+		if err := p.line(strings.TrimSpace(sc.Text())); err != nil {
+			return "", nil, fmt.Errorf("line %d: %w", lineNo, err)
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("reading: %w", err)
+		return "", nil, fmt.Errorf("reading: %w", err)
 	}
-	flush()
-	return out, nil
+	p.flush()
+	return p.header, p.out, nil
+}
+
+// poReader is the state of ParseWithHeader between lines.
+type poReader struct {
+	out     []Entry
+	header  string
+	cur     Entry
+	field   *string // where a continuation "..." line appends
+	started bool
+	fuzzy   bool // a "#, fuzzy" flag seen for the entry about to start
+}
+
+func (p *poReader) flush() {
+	if p.started && p.cur.ID != "" {
+		if p.cur.Plural != "" && len(p.cur.Forms) > 0 {
+			p.cur.Str = p.cur.Forms[0]
+		}
+		p.out = append(p.out, p.cur)
+	}
+	if p.started && p.cur.ID == "" {
+		p.header = p.cur.Str
+	}
+	p.cur, p.field, p.started = Entry{}, nil, false
+}
+
+// set points the continuation target at dst and appends q to it.
+func (p *poReader) set(dst *string, q string) error {
+	p.field = dst
+	return appendQuoted(dst, q)
+}
+
+func (p *poReader) line(line string) error {
+	switch {
+	case line == "":
+		p.flush()
+		p.fuzzy = false
+	case strings.HasPrefix(line, "#"):
+		p.flush()
+		if strings.HasPrefix(line, "#,") && strings.Contains(line, "fuzzy") {
+			p.fuzzy = true
+		}
+	case strings.HasPrefix(line, "msgctxt"):
+		return errors.New("msgctxt is not supported")
+	case strings.HasPrefix(line, "msgid_plural "):
+		if !p.started {
+			return errors.New("msgid_plural without msgid")
+		}
+		return p.set(&p.cur.Plural, strings.TrimPrefix(line, "msgid_plural "))
+	case strings.HasPrefix(line, "msgstr["):
+		return p.pluralForm(strings.TrimPrefix(line, "msgstr["))
+	case strings.HasPrefix(line, "msgid "):
+		p.flush()
+		p.started, p.cur.Fuzzy, p.fuzzy = true, p.fuzzy, false
+		return p.set(&p.cur.ID, strings.TrimPrefix(line, "msgid "))
+	case strings.HasPrefix(line, "msgstr "):
+		if !p.started {
+			return errors.New("msgstr without msgid")
+		}
+		return p.set(&p.cur.Str, strings.TrimPrefix(line, "msgstr "))
+	case strings.HasPrefix(line, `"`):
+		if p.field == nil {
+			return errors.New("string outside an entry")
+		}
+		return appendQuoted(p.field, line)
+	default:
+		return fmt.Errorf("unexpected %q", line)
+	}
+	return nil
+}
+
+// pluralForm reads `N] "..."`, the rest of a msgstr[N] line; forms must come
+// in order, after a msgid_plural.
+func (p *poReader) pluralForm(rest string) error {
+	idx, q, ok := strings.Cut(rest, "] ")
+	n, err := strconv.Atoi(idx)
+	if !ok || err != nil || p.cur.Plural == "" || n != len(p.cur.Forms) {
+		return fmt.Errorf("msgstr[%s] out of order or without msgid_plural", idx)
+	}
+	p.cur.Forms = append(p.cur.Forms, "")
+	return p.set(&p.cur.Forms[n], q)
 }
 
 func appendQuoted(dst *string, q string) error {

@@ -141,11 +141,20 @@ cosign verify-blob --key cosign.pub --insecure-ignore-tlog=true \
 What `bentoo` and `bentoo-tray` say to a person — help text, status lines,
 prompts, the terminal report, the tray's menu and notifications — is
 translated with GNU gettext into the languages listed in `po/LINGUAS` (es,
-pt_BR, ru, zh_CN); both binaries read the one `bentoolkit` catalog. What a
+pt_BR, ru, zh_CN): `bentoo` reads `bentoolkit.mo` and the tray the same
+messages as `bentoo-tray.mo` (see "Installing" below). What a
 program reads stays English on purpose, so scripts and log searches do not
 depend on the reader's language: logs, `--json`, `--porcelain`, `--export`
 files (`report.SectionOptions.English`), generated files, commit messages,
-LLM prompts, and the answers a prompt accepts. Errors are not translated yet.
+LLM prompts, and the answers a prompt accepts.
+
+Errors stay English by design. A failure reaches the terminal as a log
+record (`level=ERROR msg=... err=...`) whose `err` is a chain of wrapped
+errors that usually ends in the operating system's own text; the same record
+goes to the JSON log file. An English error can be searched for and pasted
+into an issue as is, and one sentence half-translated around an English
+cause helps nobody. Do not wrap `fmt.Errorf`, `errors.New` or log messages in
+`i18n.T`.
 
 - **Marking text.** Wrap a user-facing literal in `i18n.N("...")` where it is
   declared, and translate it with `i18n.T(...)` where it is shown. Command
@@ -153,6 +162,14 @@ LLM prompts, and the answers a prompt accepts. Errors are not translated yet.
   translates the whole tree once, before it runs. `N` takes only a string
   literal (or a `+` of literals): the extractor cannot see a computed message,
   and refuses it.
+- **Counts.** A message whose words depend on a number goes through
+  `i18n.TCount("%d package(s) checked", n)` — English stays as written, while
+  each language picks its plural form for `n` (Russian has three: 1 пакет,
+  3 пакета, 5 пакетов). A message with real English singular and plural forms
+  uses `i18n.TPlural("%d day", "%d days", n)`; to mark a pair declared before
+  `main`, use `i18n.NPlural(singular, plural)`. Each `.po` declares its
+  language's rule in the `Plural-Forms` header, and a plural entry carries one
+  `msgstr[i]` per form.
 - **After changing marked text,** run `make i18n-update`. It regenerates
   `po/bentoolkit.pot` from the source and merges it into every `.po`; a new
   message arrives untranslated and prints in English until it is translated.
@@ -172,8 +189,11 @@ LLM prompts, and the answers a prompt accepts. Errors are not translated yet.
   The language comes from `LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`, as in
   any gettext program; a `C` locale or an English one prints English.
 - **Installing.** `make install` installs each catalog as
-  `$(LOCALEDIR)/<lang>/LC_MESSAGES/bentoolkit.mo` (default
-  `$(PREFIX)/share/locale`) and builds the binary to read from there. A
+  `$(LOCALEDIR)/<lang>/LC_MESSAGES/bentoolkit.mo` for `bentoo` and again as
+  `bentoo-tray.mo` for the tray (default `$(PREFIX)/share/locale`), and builds
+  the binaries to read from there. The two names let a distribution package
+  `bentoo` and `bentoo-tray` separately: one catalog file cannot belong to two
+  packages. A
   package that builds with plain `go build` gets `/usr/share/locale`, or sets
   `-X github.com/obentoo/bentoolkit/internal/common/i18n.LocaleDir=...`.
   Gentoo installs only the languages enabled in `L10N`.

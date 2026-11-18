@@ -2722,7 +2722,7 @@ func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, p
 		a.logger().Info("manifest fix: distdir prepared",
 			"package", pkg, "version", version, "carried", carried, "copied", copied)
 		if carried+copied > 0 {
-			a.reporter.Log("info", fmt.Sprintf(i18n.T("reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"),
+			a.reporter.Log("info", fmt.Sprintf(i18n.TCount("reusing %d downloaded and %d cached distfile(s) for the %s-%s repair", copied),
 				carried, copied, pkg, version))
 		}
 	}

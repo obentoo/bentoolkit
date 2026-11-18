@@ -52,11 +52,11 @@ func TestParseMOBothByteOrders(t *testing.T) {
 			t.Fatalf("%v: parseMO: %v", order, err)
 		}
 		for k, v := range msgs {
-			if m[k] != v {
-				t.Errorf("%v: %q -> %q, want %q", order, k, m[k], v)
+			if m.msgs[k] != v {
+				t.Errorf("%v: %q -> %q, want %q", order, k, m.msgs[k], v)
 			}
 		}
-		if _, ok := m[""]; ok {
+		if _, ok := m.msgs[""]; ok {
 			t.Errorf("%v: header entry was kept", order)
 		}
 	}
@@ -70,11 +70,14 @@ func TestParseMOSkipsContextAndTakesSingular(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := m["Open"]; ok {
+	if _, ok := m.msgs["Open"]; ok {
 		t.Error("a msgctxt entry was loaded")
 	}
-	if got := m["one file"]; got != "um arquivo" {
+	if got := m.msgs["one file"]; got != "um arquivo" {
 		t.Errorf("plural entry -> %q, want the first form", got)
+	}
+	if got := m.plurals["one file"]; len(got) != 2 || got[1] != "%d arquivos" {
+		t.Errorf("plural forms = %q", got)
 	}
 }
 

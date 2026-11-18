@@ -18,7 +18,10 @@ msgstr "Вывод %s:"
 
 #: cmd/bentoo/apply_result_childrun.go
 msgid "… %d earlier line(s) omitted"
-msgstr "… %d предыдущая(-их) строка(-ок) пропущена(-ы)"
+msgid_plural "… %d earlier line(s) omitted"
+msgstr[0] "… %d предыдущая строка опущена"
+msgstr[1] "… %d предыдущие строки пропущены"
+msgstr[2] "… %d предыдущих строк пропущено"
 
 #: cmd/bentoo/apply_result_childrun.go
 msgid "(no output)"
@@ -550,9 +553,18 @@ msgstr "Ни одна схема не была успешно сгенериро
 msgid ""
 "\n"
 "%d schema(s) ready to save\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"%d схема(схем) готова(ы) к сохранению\n"
+"%d schema(s) ready to save\n"
+msgstr[0] ""
+"\n"
+"%d схема готова к сохранению\n"
+msgstr[1] ""
+"\n"
+"%d схемы готовы к сохранению\n"
+msgstr[2] ""
+"\n"
+"%d схем готовы к сохранению\n"
 
 #: cmd/bentoo/overlay_analyze.go
 msgid "Save all successful schemas?"
@@ -566,9 +578,18 @@ msgstr "Не удалось сохранить схему для %s: %v\n"
 msgid ""
 "\n"
 "✓ Saved %d schema(s) to packages.toml\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"✓ Сохранено %d схем(ы) в packages.toml\n"
+"✓ Saved %d schema(s) to packages.toml\n"
+msgstr[0] ""
+"\n"
+"✓ Сохранено %d схем в packages.toml\n"
+msgstr[1] ""
+"\n"
+"✓ Сохранено %d схемы в packages.toml\n"
+msgstr[2] ""
+"\n"
+"✓ Сохранено %d схем в packages.toml\n"
 
 #: cmd/bentoo/overlay_analyze.go
 msgid "Analysis Result"
@@ -872,7 +893,10 @@ msgstr "Реестр НЕ был обновлён: %v"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Wrote %d version pin(s) to packages.toml."
-msgstr "Записано %d привязок версий в packages.toml."
+msgid_plural "Wrote %d version pin(s) to packages.toml."
+msgstr[0] "Записано %d привязок версий в packages.toml."
+msgstr[1] "Записано %d привязки версий в packages.toml."
+msgstr[2] "Записано %d привязок версий в packages.toml."
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Review the diff before it is published: 'bentoo overlay diff'"
@@ -884,7 +908,10 @@ msgstr "Согласование реестра"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "The registry and the overlay disagree on %d point(s)."
-msgstr "Реестр и оверлей расходятся по %d пункту(ам)."
+msgid_plural "The registry and the overlay disagree on %d point(s)."
+msgstr[0] "Реестр и оверлей расходятся по %d пункту."
+msgstr[1] "The registry and the overlay disagree on %d points."
+msgstr[2] "Реестр и оверлей расходятся по %d пунктам."
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "%s (%d):"
@@ -920,15 +947,24 @@ msgstr "%s фиксирует %s"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
-msgstr "Собираюсь записать %d привязку(-и) версии в packages.toml — все %d привязаны ВПЕРВЫЕ."
+msgid_plural "About to write %d version pin(s) into packages.toml — all %d pinned for the FIRST time."
+msgstr[0] "Сейчас будет выполнена запись %d привязки версий в packages.toml — все %d привязаны ВПЕРВЫЕ."
+msgstr[1] "Собираемся записать %d привязки версий в packages.toml — все %d привязаны ВПЕРВЫЕ."
+msgstr[2] "Собираемся записать %d привязок версий в packages.toml — все %d привязаны ВПЕРВЫЕ."
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
-msgstr "Собираемся записать %d привязку(-и) версии в packages.toml — %d устаревшая(-их) привязка(-ок) исправлена(-ы)."
+msgid_plural "About to write %d version pin(s) into packages.toml — %d stale pin(s) corrected."
+msgstr[0] "Собираемся записать %d привязку версий в packages.toml — исправлено %d устаревших привязок."
+msgstr[1] "Собираемся записать %d привязки версий в packages.toml — %d устаревших привязок исправлено."
+msgstr[2] "Собираемся записать %d привязок версий в packages.toml — %d устаревших привязок исправлено."
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
-msgstr "Собираюсь записать %d привязку(-и) версии в packages.toml — %d привязано(-ы) ВПЕРВЫЕ, %d устаревшая(-их) привязка(-ок) исправлена(-ы)."
+msgid_plural "About to write %d version pin(s) into packages.toml — %d pinned for the FIRST time, %d stale pin(s) corrected."
+msgstr[0] "Собираемся записать %d привязку версий в packages.toml — %d привязано ВПЕРВЫЕ, %d устаревших привязок исправлено."
+msgstr[1] "Собираемся записать %d привязки версий в packages.toml — %d привязано ВПЕРВЫЕ, %d устаревших привязок исправлено."
+msgstr[2] "Собираемся записать %d привязок версий в packages.toml — %d привязано ВПЕРВЫЕ, %d устаревших привязок исправлено."
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "packages.toml is PUBLISHED: this overlay auto-commits and pushes, so this write reaches origin."
@@ -936,7 +972,10 @@ msgstr "packages.toml ОПУБЛИКОВАН: этот оверлей автом
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "--yes given: writing %d version pin(s) without a prompt."
-msgstr "Указан флаг --yes: запись %d привязок версий без запроса."
+msgid_plural "--yes given: writing %d version pin(s) without a prompt."
+msgstr[0] "--yes указан: запись %d привязки версий без запроса."
+msgstr[1] "--yes указан: запись %d привязок версий без запроса."
+msgstr[2] "--yes указан: запись %d привязок версий без запроса."
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Not an interactive terminal and --yes was not given: nothing written."
@@ -944,11 +983,17 @@ msgstr "Это не интерактивный терминал, и флаг --y
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Re-run with --yes to write these %d version pin(s) unattended."
-msgstr "Запустите повторно с флагом --yes, чтобы записать эти %d привязки версий без запроса подтверждения."
+msgid_plural "Re-run with --yes to write these %d version pin(s) unattended."
+msgstr[0] "Запустите повторно с флагом --yes, чтобы записать эти %d привязку версий в автоматическом режиме."
+msgstr[1] "Запустите повторно с флагом --yes, чтобы записать эти %d привязки версий без запроса подтверждения."
+msgstr[2] "Запустите повторно с флагом --yes, чтобы автоматически записать эти %d привязок версий."
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
-msgstr "Записать %d привязку(-и) версии в packages.toml? (%d расхождение(-ий) проверено(-ы))"
+msgid_plural "Write %d version pin(s) to packages.toml? (%d divergence(s) reviewed)"
+msgstr[0] "Записать %d привязку версий в packages.toml? (%d проверенных расхождений)"
+msgstr[1] "Записать %d привязки версий в packages.toml? (%d проверенных расхождений)"
+msgstr[2] "Записать %d привязок версий в packages.toml? (%d проверенных расхождений)"
 
 #: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "packages.toml: record model OK"
@@ -976,7 +1021,10 @@ msgstr "Обнаружено: %s"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Total: %d pending update(s)"
-msgstr "Всего: %d ожидающее(-их) обновление(-ий)"
+msgid_plural "Total: %d pending update(s)"
+msgstr[0] "Всего: %d ожидающее обновление"
+msgstr[1] "Total: %d pending updates"
+msgstr[2] "Всего: %d ожидающих обновлений"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Use 'bentoo overlay autoupdate --apply <package>' to apply an update"
@@ -1156,7 +1204,10 @@ msgstr "UPSTREAM"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Found %d revivable orphan(s)"
-msgstr "Найдено %d восстанавливаемых бесхозных пакетов"
+msgid_plural "Found %d revivable orphan(s)"
+msgstr[0] "Найдены %d восстанавливаемый \"сирота\""
+msgstr[1] "Найдены %d восстановимых осиротевших пакета"
+msgstr[2] "Найдено %d восстанавливаемых \"сирот\""
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Use 'bentoo overlay autoupdate --revive <package>' to revive one, or '--revive all' for every candidate"
@@ -1196,7 +1247,10 @@ msgstr "Нет ожидающих проверки обновлений."
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) to evaluate, deepest depth %s."
-msgstr "%d пакет(а/ов) для оценки, максимальная глубина %s."
+msgid_plural "%d package(s) to evaluate, deepest depth %s."
+msgstr[0] "%d пакет для оценки, максимальная глубина %s."
+msgstr[1] "%d пакета для оценки, максимальная глубина %s."
+msgstr[2] "%d пакетов для оценки, максимальная глубина %s."
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%s %s → %s at depth %s"
@@ -1212,7 +1266,10 @@ msgstr "Дистрибутивные файлы: до %d для загрузки
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Depth distribution (of %d package(s)): %s"
-msgstr "Распределение по глубине (из %d пакета(-ов)): %s"
+msgid_plural "Depth distribution (of %d package(s)): %s"
+msgstr[0] "Распределение по глубине (из %d пакета): %s"
+msgstr[1] "Распределение по глубине (из %d пакетов): %s"
+msgstr[2] "Распределение по глубине (из %d пакетов): %s"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "(nothing planned)"
@@ -1220,11 +1277,17 @@ msgstr "(ничего не запланировано)"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
-msgstr "Указан флаг --yes: выполняется оценка %d пакета(-ов) без запроса — %d из них проходят этап сборки, вплоть до %s."
+msgid_plural "--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s."
+msgstr[0] "--yes указан: выполняется оценка %d пакета без запроса — %d из них запускают гейт сборки, вплоть до %s."
+msgstr[1] "--yes указан: выполняется оценка %d пакетов без запроса — %d из них запускают гейт сборки, вплоть до %s."
+msgstr[2] "--yes указан: выполняется оценка %d пакетов без запроса — %d из них запускают гейт сборки, до %s."
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
-msgstr "Извлекается до %d distfile(ов), и прохождение самых глубоких гейтов может занять несколько часов. Ничего не публикуется."
+msgid_plural "Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published."
+msgstr[0] "Загружается до %d distfile, и прохождение самых глубоких гейтов может занять несколько часов. Ничего не публикуется."
+msgstr[1] "Загружается до %d distfiles, и прохождение самых глубоких гейтов может занять несколько часов. Ничего не публикуется."
+msgstr[2] "Загружается до %d distfile, и прохождение самых глубоких гейтов может занять несколько часов. Ничего не публикуется."
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Not an interactive terminal and --yes was not given: no gate ran and nothing was validated."
@@ -1232,11 +1295,17 @@ msgstr "Это не интерактивный терминал, и флаг --y
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
-msgstr "Запустите повторно с флагом --yes, чтобы оценить эти %d пакет(а) в автоматическом режиме — %d из них до %s, с загрузкой до %d distfile(ов)."
+msgid_plural "Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s)."
+msgstr[0] "Запустите повторно с флагом --yes, чтобы оценить эти %d пакет в автоматическом режиме — %d из них до %s, с загрузкой до %d distfiles."
+msgstr[1] "Запустите повторно с флагом --yes, чтобы оценить эти %d пакета в автоматическом режиме — %d из них до %s, с загрузкой до %d dist-файлов."
+msgstr[2] "Запустите повторно с флагом --yes, чтобы оценить эти %d пакетов в автоматическом режиме — %d из них до %s, с загрузкой до %d distfiles."
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
-msgstr "%d пакет(а) запускают гейт выше `options`, который распаковывает и собирает: при этом загружается до %d distfile(ов), и это может занять несколько часов."
+msgid_plural "%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours."
+msgstr[0] "%d пакет запускает гейт над `options`, который распаковывает и собирает: при этом загружается до %d distfile, и это может занять несколько часов."
+msgstr[1] "%d пакета выполняют гейт выше `options`, который распаковывает и собирает: при этом загружается до %d distfile, и это может занять несколько часов."
+msgstr[2] "%d пакетов выполняют гейт над `options`, который распаковывает и собирает: при этом загружается до %d distfiles, и это может занять несколько часов."
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Nothing is published either way — a check writes no ebuild and no version pin."
@@ -1244,7 +1313,10 @@ msgstr "Ни в одном из случаев ничего не публику�
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Evaluate %d package(s), %d of them up to depth %s?"
-msgstr "Оценить %d пакет(а), %d из них до уровня %s?"
+msgid_plural "Evaluate %d package(s), %d of them up to depth %s?"
+msgstr[0] "Оценить %d пакет, %d из них до уровня %s?"
+msgstr[1] "Оценить %d пакета, %d из них до глубины %s?"
+msgstr[2] "Проверить %d пакетов, %d из них до глубины %s?"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "Validating updates"
@@ -1256,7 +1328,10 @@ msgstr "Используйте команду 'bentoo overlay autoupdate --list'
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
-msgstr "%d пакет(а/ов) не имел(и) ebuild и был(и) отключен(ы) в packages.toml (enabled = false)"
+msgid_plural "%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)"
+msgstr[0] "%d пакет не имел ebuild и был отключен в packages.toml (enabled = false)"
+msgstr[1] "%d пакета не имели ebuild и были отключены в packages.toml (enabled = false)"
+msgstr[2] "%d пакетов не имели ebuild и были отключены в packages.toml (enabled = false)"
 
 #: cmd/bentoo/overlay_autoupdate_check.go
 msgid "%s: the reviewer raised this bump to %s, past the %s this run's plan confirmed."
@@ -1376,7 +1451,10 @@ msgstr "Реестр НЕ был восстановлен: %v"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Repaired packages.toml: %d change(s) written."
-msgstr "Исправлен файл packages.toml: записано %d изменение(й)."
+msgid_plural "Repaired packages.toml: %d change(s) written."
+msgstr[0] "Исправлен файл packages.toml: записано %d изменение."
+msgstr[1] "Исправлен файл packages.toml: записано %d изменения."
+msgstr[2] "Исправлен файл packages.toml: записано %d изменений."
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
@@ -1384,27 +1462,45 @@ msgstr "Просмотрите его перед публикацией: 'bentoo
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "%d finding(s) still need a human — --fix does not guess at them:"
-msgstr "%d проблема(ы) всё ещё требуют вмешательства человека — --fix не может их решить:"
+msgid_plural "%d finding(s) still need a human — --fix does not guess at them:"
+msgstr[0] "%d проблеме всё ещё требуется вмешательство человека — --fix не может их исправить самостоятельно:"
+msgstr[1] "%d проблемы всё ещё требуют вмешательства человека — --fix не может их исправить автоматически:"
+msgstr[2] "%d проблем по-прежнему требуют вмешательства человека — --fix не может их исправить автоматически:"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
-msgstr "Нет ничего, что требовало бы исправления: %d указанных выше проблем не имеют автоматического решения — --fix не пытается их угадать."
+msgid_plural "Nothing to repair: the %d finding(s) above have no mechanical fix — --fix does not guess at them."
+msgstr[0] "Исправлять нечего: %d указанный выше результат не имеет автоматического исправления — --fix не пытается их исправить."
+msgstr[1] "Исправлять нечего: для %d проблем, указанных выше, нет автоматического исправления — --fix не может их угадать."
+msgstr[2] "Исправлять нечего: %d указанных выше проблем не имеют автоматического решения — --fix не пытается их угадать."
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "--yes given: writing %d repair(s) without a prompt."
-msgstr "Указан флаг --yes: запись %d исправлений без запроса."
+msgid_plural "--yes given: writing %d repair(s) without a prompt."
+msgstr[0] "--yes указан: запись %d исправления без запроса."
+msgstr[1] "--yes указан: запись %d исправлений без запроса."
+msgstr[2] "--yes указан: запись %d исправлений без запроса."
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Re-run with --yes to write these %d repair(s) unattended."
-msgstr "Запустите повторно с флагом --yes, чтобы применить эти %d исправления без запроса подтверждения."
+msgid_plural "Re-run with --yes to write these %d repair(s) unattended."
+msgstr[0] "Запустите повторно с флагом --yes, чтобы автоматически применить эти %d исправление."
+msgstr[1] "Запустите повторно с флагом --yes, чтобы автоматически применить эти %d исправления."
+msgstr[2] "Запустите повторно с флагом --yes, чтобы автоматически применить эти %d исправлений."
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
-msgstr "Записать %d исправление(-ий) в packages.toml? (приведенный выше diff — это все изменение)"
+msgid_plural "Write %d repair(s) to packages.toml? (the diff above is the whole change)"
+msgstr[0] "Записать %d исправление в packages.toml? (приведённый выше diff — это все изменения)"
+msgstr[1] "Записать %d исправления в packages.toml? (приведённый выше diff представляет собой все изменения)"
+msgstr[2] "Записать %d исправлений в packages.toml? (приведённый выше diff — это все изменения)"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
 msgid "About to rewrite packages.toml with %d repair(s):"
-msgstr "Собираемся перезаписать файл packages.toml с %d исправлением(-ями):"
+msgid_plural "About to rewrite packages.toml with %d repair(s):"
+msgstr[0] "Сейчас будет выполнен перезапись файла packages.toml с %d исправлением:"
+msgstr[1] "Сейчас будет выполнен перезапись файла packages.toml с %d исправлениями:"
+msgstr[2] "Собираемся перезаписать packages.toml с %d исправлениями:"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Registry Migration — record the automatic disable origin"
@@ -1424,15 +1520,24 @@ msgstr "Файл packages.toml НЕ был изменён: %v"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Stamped %d entry(ies) with disabled_by = \"auto\":"
-msgstr "Помечено %d записей(ей) с disabled_by = \"auto\":"
+msgid_plural "Stamped %d entry(ies) with disabled_by = \"auto\":"
+msgstr[0] "Помечено %d записей с disabled_by = \"auto\":"
+msgstr[1] "Помечено %d записи с disabled_by = \"auto\":"
+msgstr[2] "Помечено %d записей с disabled_by = \"auto\":"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
-msgstr "%d из %d запланированных записей НЕ были помечены: их назначение со статусом «enabled» находилось не там, где редактор мог его переписать."
+msgid_plural "%d of the %d planned entry(ies) were NOT stamped: their enabled assignment was not where the editor could rewrite it."
+msgstr[0] "%d из %d запланированной записи НЕ были помечены: их присвоение значения enabled находилось не там, где редактор мог его переписать."
+msgstr[1] "%d из %d запланированных записей НЕ были помечены: их присвоение значения enabled находилось не там, где редактор мог его переписать."
+msgstr[2] "%d из %d запланированных записей НЕ были помечены: их присвоение значения enabled находилось не там, где редактор мог его переписать."
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
-msgstr "%d запись(и) будет (будут) помечена(ы) флагом disabled_by = \"auto\" — собственная система учета средства проверки, которую теперь можно согласовать:"
+msgid_plural "%d entry(ies) will be stamped disabled_by = \"auto\" — the checker's own bookkeeping, now free to reconcile:"
+msgstr[0] "%d записи будет присвоен флаг disabled_by = \"auto\" — собственная учётная информация инструмента проверки, которую теперь можно согласовать:"
+msgstr[1] "%d записи будут помечены как disabled_by = \"auto\" — собственная учётная информация проверяющего, которую теперь можно согласовывать:"
+msgstr[2] "%d записей будут помечены как disabled_by = \"auto\" — собственная учётная информация инструмента проверки, которую теперь можно согласовывать:"
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "%d excluded by --except — deliberate pins, left stating no origin so no scan may revoke them:"
@@ -1448,15 +1553,24 @@ msgstr "%d удерживается — удержание уже исключа
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "--yes given: stamping %d entry(ies) without a prompt."
-msgstr "Указан флаг --yes: проставление меток для %d записи(-ей) без запроса."
+msgid_plural "--yes given: stamping %d entry(ies) without a prompt."
+msgstr[0] "--yes указан: простановка меток для %d записи без запроса."
+msgstr[1] "--yes указан: проставление меток в %d записях без запроса."
+msgstr[2] "--yes указан: проставление меток в %d записях без запроса."
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Re-run with --yes to stamp these %d entry(ies) unattended."
-msgstr "Запустите повторно с флагом --yes, чтобы пометить эти %d запись(и) без запроса подтверждения."
+msgid_plural "Re-run with --yes to stamp these %d entry(ies) unattended."
+msgstr[0] "Запустите повторно с флагом --yes, чтобы пометить эти %d запись без запроса подтверждения."
+msgstr[1] "Запустите повторно с флагом --yes, чтобы пометить эти %d записи в автоматическом режиме."
+msgstr[2] "Запустите повторно с флагом --yes, чтобы пометить эти %d записей без запроса подтверждения."
 
 #: cmd/bentoo/overlay_autoupdate_markauto.go
 msgid "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
-msgstr "Пометить %d запись(и) флагом disabled_by = \"auto\"? (%d исключено, приведенный выше план представляет собой все изменение)"
+msgid_plural "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
+msgstr[0] "Пометить %d запись флагом disabled_by = \"auto\"? (%d исключено, приведенный выше план представляет собой все изменение)"
+msgstr[1] "Пометить %d записи как disabled_by = \"auto\"? (%d исключено, приведенный выше план представляет собой все изменение)"
+msgstr[2] "Пометить %d записей как disabled_by = \"auto\"? (%d исключено, приведённый выше план представляет собой все изменения)"
 
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "No session started; the bundle and the staged tree are unchanged."
@@ -1516,7 +1630,10 @@ msgstr "Сеансы восстановления"
 
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgstr "%d обновление(-ий) нуждается(-ются) в вашем внимании: для каждого предлагается интерактивная сессия восстановления, по одному за раз. Введите n, чтобы пропустить один."
+msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+msgstr[0] "%d обновлению требуется ваше внимание: для каждого предлагается интерактивная сессия исправления, по одному за раз. Введите n, чтобы пропустить один."
+msgstr[1] "%d проблемы ждут вашего внимания: для каждой предлагается интерактивная сессия исправления, по одной за раз. Введите n, чтобы пропустить один."
+msgstr[2] "%d обновлений ждут вашего внимания: для каждого предлагается интерактивная сессия исправления, по одному за раз. Введите n, чтобы пропустить один."
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
@@ -1536,7 +1653,10 @@ msgstr "Ни в одном каталоге пакетов нет ebuild, на �
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "To remove (%d ebuild(s) in %d director(ies)):"
-msgstr "Для удаления (%d ebuild(s) в %d director(ies)):"
+msgid_plural "To remove (%d ebuild(s) in %d director(ies)):"
+msgstr[0] "Чтобы удалить (%d ebuild в %d каталогах):"
+msgstr[1] "Чтобы удалить (%d ebuild-файла в %d каталогах):"
+msgstr[2] "Чтобы удалить (%d ebuild-файлов в %d каталогах):"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "keeps %s"
@@ -1584,7 +1704,10 @@ msgstr "%s — сохранено согласно правилу (актуал�
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "--yes given: removing %d ebuild(s) without a prompt."
-msgstr "Указан флаг --yes: удаление %d ebuild(s) без запроса."
+msgid_plural "--yes given: removing %d ebuild(s) without a prompt."
+msgstr[0] "--yes указан: удаление %d ebuild без запроса."
+msgstr[1] "--yes указан: удаление %d ebuild-файлов без запроса подтверждения."
+msgstr[2] "--yes указан: удаление %d ebuild-файлов без запроса подтверждения."
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Not an interactive terminal and --yes was not given: nothing removed."
@@ -1592,7 +1715,10 @@ msgstr "Это не интерактивный терминал, и параме
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Re-run with --yes to remove these %d ebuild(s) unattended."
-msgstr "Запустите повторно с параметром --yes, чтобы удалить эти %d ebuild(s) без запроса подтверждения."
+msgid_plural "Re-run with --yes to remove these %d ebuild(s) unattended."
+msgstr[0] "Запустите повторно с флагом --yes, чтобы удалить эти %d ebuild без запроса подтверждения."
+msgstr[1] "Запустите повторно с флагом --yes, чтобы удалить эти %d ebuild-файла без запроса подтверждения."
+msgstr[2] "Запустите повторно с параметром --yes, чтобы удалить эти %d ebuild-файлов без запроса подтверждения."
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "These ebuilds are deleted from the overlay, which auto-commits and publishes."
@@ -1600,7 +1726,10 @@ msgstr "Эти ebuild удаляются из оверлея, который а�
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Remove %d ebuild(s) from %d director(ies)?"
-msgstr "Удалить %d ebuild(s) из %d director(ies)?"
+msgid_plural "Remove %d ebuild(s) from %d director(ies)?"
+msgstr[0] "Удалить %d ebuild из %d каталогов?"
+msgstr[1] "Удалить %d ebuild из %d каталогов?"
+msgstr[2] "Удалить %d ebuild-файлов из %d каталогов?"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Sweep Result"
@@ -1612,15 +1741,24 @@ msgstr "Удалено: %s"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Swept %d director(ies), removed %d ebuild(s)."
-msgstr "Выполнена очистка %d каталога(-ов), удалено %d ebuild(-ов)."
+msgid_plural "Swept %d director(ies), removed %d ebuild(s)."
+msgstr[0] "Проверено %d каталогов, удалено %d ebuild-файлов."
+msgstr[1] "Проверено %d каталога, удалено %d ebuild-файлов."
+msgstr[2] "Проверено %d каталогов, удалено %d ebuild-файлов."
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "%d director(ies) blocked — see the plan above for the entry to fix."
-msgstr "%d каталог(а) заблокирован(ы) — см. план выше, чтобы узнать, какую запись нужно исправить."
+msgid_plural "%d director(ies) blocked — see the plan above for the entry to fix."
+msgstr[0] "%d каталог заблокирован — см. план выше, чтобы узнать, какую запись нужно исправить."
+msgstr[1] "%d каталога заблокированы — см. план выше, чтобы узнать, какую запись нужно исправить."
+msgstr[2] "%d каталогов заблокировано — см. план выше, чтобы узнать, какую запись нужно исправить."
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "%d director(ies) failed — nothing else was affected."
-msgstr "%d каталог(а) не прошел(-ли) проверку — больше ничего не было затронуто."
+msgid_plural "%d director(ies) failed — nothing else was affected."
+msgstr[0] "%d каталог не прошел проверку — больше ничего не было затронуто."
+msgstr[1] "%d каталога завершили работу с ошибкой — больше ничего не было затронуто."
+msgstr[2] "%d каталогов завершились с ошибкой — больше ни на что это не повлияло."
 
 #: cmd/bentoo/overlay_commit.go
 msgid "Commit staged changes with auto-generated message"
@@ -1866,7 +2004,10 @@ msgstr "Попробуйте вместо этого использовать ф
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
-msgstr "План перестройки: %d пакет(а) для сборки до глубины %s, каждый в промежуточном дереве вне оверлея."
+msgid_plural "Realignment plan: %d package(s) to be built to depth %s, each in a staged tree outside the overlay."
+msgstr[0] "План перестройки: %d пакет должен быть собран до глубины %s, каждый в промежуточном дереве вне оверлея."
+msgstr[1] "План перестройки: %d пакета должны быть собраны до глубины %s, каждый в промежуточном дереве вне оверлея."
+msgstr[2] "План перестройки: %d пакетов должны быть собраны до глубины %s, каждый в промежуточном дереве вне оверлея."
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Each is ::gentoo's own ebuild at our version. Building proves it still works; publishing is a separate per-package question, asked in a terminal only after that package's gates have spoken — declining any of them publishes nothing."
@@ -1874,7 +2015,10 @@ msgstr "  Каждый из них представляет собой собс�
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  --yes given: proving %d realignment(s) without a prompt.\n"
-msgstr "  Указан параметр --yes: проверка %d перенастройки(-ок) без запроса.\n"
+msgid_plural "  --yes given: proving %d realignment(s) without a prompt.\n"
+msgstr[0] "  --yes указан: проверка %d перенастройки без запроса.\n"
+msgstr[1] "  --yes указан: проверка %d перестроений без запроса.\n"
+msgstr[2] "  --yes указан: проверка %d перестроений без запроса.\n"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Not an interactive terminal and --yes was not given: nothing was built."
@@ -1882,7 +2026,10 @@ msgstr "  Это не интерактивный терминал, и флаг -
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
-msgstr "  Запустите повторно с флагом --yes, чтобы проверить эти %d перенастройки в автоматическом режиме. В любом случае ничего не публикуется.\n"
+msgid_plural "  Re-run with --yes to prove these %d realignment(s) unattended. Nothing is published either way.\n"
+msgstr[0] "  Запустите повторно с флагом --yes, чтобы проверить эти %d перенастройку в автоматическом режиме. Ни в том, ни в другом случае ничего не публикуется.\n"
+msgstr[1] "  Запустите повторно с флагом --yes, чтобы подтвердить эти %d перенастройки без участия пользователя. В любом случае ничего не публикуется.\n"
+msgstr[2] "  Запустите повторно с флагом --yes, чтобы подтвердить эти %d перестроений в автоматическом режиме. В любом случае ничего не публикуется.\n"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  Each package is staged outside the overlay and built to depth %s. This costs machine time; it publishes nothing.\n"
@@ -1890,7 +2037,10 @@ msgstr "  Каждый пакет помещается на промежуточ
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "Prove %d realignment(s) at depth %s?"
-msgstr "Подтвердить %d перенастройку(-и) на глубине %s?"
+msgid_plural "Prove %d realignment(s) at depth %s?"
+msgstr[0] "Доказать %d перевыравнивание на глубине %s?"
+msgstr[1] "Доказать %d перевыравнивания на глубине %s?"
+msgstr[2] "Доказать %d перестроений на глубине %s?"
 
 #: cmd/bentoo/overlay_compare_depth.go
 msgid "  %s: not in the plan — its ::gentoo baseline %s could not be read now, although the review read it: %v"
@@ -2324,7 +2474,10 @@ msgstr "Перед загрузкой выполняется обращение 
 
 #: cmd/bentoo/overlay_manifest.go
 msgid "Regenerating Manifest for %d package(s)"
-msgstr "Повторное создание манифеста для %d пакета(-ов)"
+msgid_plural "Regenerating Manifest for %d package(s)"
+msgstr[0] "Повторное создание манифеста для %d пакета"
+msgstr[1] "Повторное создание манифеста для %d пакетов"
+msgstr[2] "Повторное создание манифеста для %d пакетов"
 
 #: cmd/bentoo/overlay_manifest.go
 msgid "%d ok, %d failed"
@@ -2460,7 +2613,10 @@ msgstr "  не удается просканировать оверлей по �
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
-msgstr "  %d путь(ей) не удалось просканировать; возможно, указанный ниже отсутствующий пакет просто не был обнаружен.\n"
+msgid_plural "  %d path(s) could not be scanned; a package missing below may simply not have been seen.\n"
+msgstr[0] "  %d путь не удалось просканировать; возможно, указанный ниже отсутствующий пакет просто не был обнаружен.\n"
+msgstr[1] "  %d пути не удалось просканировать; указанного ниже отсутствующего пакета, возможно, просто не было видно.\n"
+msgstr[2] "  %d путей не удалось просканировать; отсутствующий ниже пакет, возможно, просто не был обнаружен.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Give a category (app-editors), a category/package (app-editors/zed), or no argument at all."
@@ -2476,11 +2632,17 @@ msgstr "  сравнение пакетов: %v\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
-msgstr "  Ничего не было удалено: это план. Запустите повторно с флагом --apply, чтобы выполнить %d удаление(-ий).\n"
+msgid_plural "  Nothing was removed: this is a plan. Re-run with --apply to carry out %d removal(s).\n"
+msgstr[0] "  Ничего не было удалено: это план. Запустите повторно с флагом --apply, чтобы выполнить %d удаление.\n"
+msgstr[1] "  Ничего не было удалено: это план. Запустите повторно с флагом --apply, чтобы выполнить %d удаления.\n"
+msgstr[2] "  Ничего не было удалено: это план. Запустите повторно с флагом --apply, чтобы выполнить %d удалений.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
-msgstr "  Указан флаг --keep-registry: файл .autoupdate/packages.toml не был изменен и по-прежнему содержит записи о %d удаленном(-ых) пакете(-ах).\n"
+msgid_plural "  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n"
+msgstr[0] "  Указан флаг --keep-registry: файл .autoupdate/packages.toml не был изменён, и в нём по-прежнему хранятся записи о %d удалённом пакете.\n"
+msgstr[1] "  Указан флаг --keep-registry: файл .autoupdate/packages.toml не был изменён и по-прежнему содержит записи о %d удалённых пакетах.\n"
+msgstr[2] "  --keep-registry указан: файл .autoupdate/packages.toml не был изменён, и в нём по-прежнему хранятся записи о %d удалённых пакетах.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Review the diff before it is published: 'bentoo overlay diff'"
@@ -2492,11 +2654,17 @@ msgstr "  %s/%s был запланирован к удалению, но нах
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
-msgstr "  Указан флаг --yes: удаление %d пакета(-ов), которые уже предоставляет ::gentoo, без запроса подтверждения.\n"
+msgid_plural "  --yes given: removing %d package(s) ::gentoo already provides, without a prompt.\n"
+msgstr[0] "  --yes указан: удаление %d пакета, которые уже предоставляет ::gentoo, без запроса подтверждения.\n"
+msgstr[1] "  Указан флаг --yes: удаление %d пакетов, которые уже предоставляет ::gentoo, без запроса подтверждения.\n"
+msgstr[2] "  Указан флаг --yes: удаление %d пакетов, которые уже предоставляет ::gentoo, без запроса подтверждения.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
-msgstr "  Это не интерактивный терминал, и флаг --yes не был указан: %d запланированное(-ых) удаление(-ий) НЕ было(-и) выполнено(-ы).\n"
+msgid_plural "  Not an interactive terminal and --yes was not given: %d planned removal(s) were NOT carried out.\n"
+msgstr[0] "  Не интерактивный терминал, и флаг --yes не был указан: %d запланированное удаление НЕ было выполнено.\n"
+msgstr[1] "  Не интерактивный терминал, и флаг --yes не указан: %d запланированных удаления НЕ были выполнены.\n"
+msgstr[2] "  Не интерактивный терминал, и флаг --yes не указан: %d запланированных удалений НЕ были выполнены.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Re-run with --yes to carry them out unattended."
@@ -2508,11 +2676,17 @@ msgstr "  Эти каталоги пакетов удаляются из ове�
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Remove %d package(s) ::gentoo already provides?"
-msgstr "Удалить %d пакет(а), который(е) уже предоставляется(ются) ::gentoo?"
+msgid_plural "Remove %d package(s) ::gentoo already provides?"
+msgstr[0] "Удалить %d пакет, которые уже предоставляет ::gentoo?"
+msgstr[1] "Удалить %d пакета, которые уже предоставляет ::gentoo?"
+msgstr[2] "Удалить %d пакетов, которые уже предоставляет ::gentoo?"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
-msgstr "  Не интерактивный терминал: %d расходящихся пакета(-ов) НЕ было удалено.\n"
+msgid_plural "  Not an interactive terminal: %d diverging package(s) were NOT removed.\n"
+msgstr[0] "  Не интерактивный терминал: %d отличающийся пакет НЕ был удалён.\n"
+msgstr[1] "  Не интерактивный терминал: %d различающихся пакета НЕ были удалены.\n"
+msgstr[2] "  Не интерактивный терминал: %d различающихся пакетов НЕ были удалены.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  --yes does not answer this one. It exists so a scripted run can proceed unattended, and discarding local work is not a decision a script may take on its own: somebody has to read what is being thrown away."
@@ -2530,21 +2704,39 @@ msgstr "  В указанных ниже пакетах содержатся и�
 msgid ""
 "\n"
 "  Discarding local work in %d package(s):\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"  Отмена локальных изменений в %d пакете(-ах):\n"
+"  Discarding local work in %d package(s):\n"
+msgstr[0] ""
+"\n"
+"  Отмена локальных изменений в %d пакете:\n"
+msgstr[1] ""
+"\n"
+"  Отмена локальных изменений в %d пакетах:\n"
+msgstr[2] ""
+"\n"
+"  Отмена локальных изменений в %d пакетах:\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      loses %d version(s) (%s) and %d file(s)\n"
-msgstr "      теряет %d версию(-ий) (%s) и %d файл(-а)\n"
+msgid_plural "      loses %d version(s) (%s) and %d file(s)\n"
+msgstr[0] "      теряет %d версию (%s) и %d файла(-ов)\n"
+msgstr[1] "      теряет %d версии (%s) и %d файлов\n"
+msgstr[2] "      теряет %d версий (%s) и %d файлов\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      loses %d file(s)\n"
-msgstr "      теряет %d файл(а)\n"
+msgid_plural "      loses %d file(s)\n"
+msgstr[0] "      теряет %d файл\n"
+msgstr[1] "      теряет %d файла\n"
+msgstr[2] "      теряет %d файлов\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Discard that work and remove these %d package(s)?"
-msgstr "  Отменить эти изменения и удалить следующие пакеты (%d)?"
+msgid_plural "  Discard that work and remove these %d package(s)?"
+msgstr[0] "  Отменить эту работу и удалить эти %d пакет?"
+msgstr[1] "  Отменить эту работу и удалить эти %d пакета?"
+msgstr[2] "  Отменить эту работу и удалить эти %d пакетов?"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Prune Result"
@@ -2552,7 +2744,10 @@ msgstr "Результат очистки"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %s removed (%d file(s))\n"
-msgstr "  %s удалено (%d файл(а/ов))\n"
+msgid_plural "  %s removed (%d file(s))\n"
+msgstr[0] "  %s удалено (%d файл)\n"
+msgstr[1] "  %s удалено (%d файла)\n"
+msgstr[2] "  %s удалено (%d файлов)\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %s NOT removed: %v\n"
@@ -2560,23 +2755,38 @@ msgstr "  %s НЕ удалено: %v\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Removed %d package director(ies) from the overlay.\n"
-msgstr "  Удалено %d каталогов пакетов из оверлея.\n"
+msgid_plural "  Removed %d package director(ies) from the overlay.\n"
+msgstr[0] "  Удалены %d каталога пакетов из оверлея.\n"
+msgstr[1] "  Удалены %d каталога пакетов из оверлея.\n"
+msgstr[2] "  Удалено %d каталогов пакетов из оверлея.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
-msgstr "  %d удаление(-й) не выполнено(-ы) и указано(-ы) выше; эти пакеты по-прежнему находятся в оверлее, записях реестра и т. д.\n"
+msgid_plural "  %d removal(s) failed and are listed above; those packages are still in the overlay, registry entries and all.\n"
+msgstr[0] "  %d операция удаления не выполнена и указана выше; эти пакеты по-прежнему находятся в оверлее, включая записи реестра и всё остальное.\n"
+msgstr[1] "  %d удаления не выполнены и перечислены выше; эти пакеты по-прежнему находятся в оверлее, вместе с записями реестра и прочим.\n"
+msgstr[2] "  %d операций удаления не выполнены и перечислены выше; эти пакеты по-прежнему находятся в оверлее, записи реестра и всё остальное.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
-msgstr "  %d запланированное(-ых) удаление(-ий) было(-и) отклонено(-ы) при запросе и оставлено(-ы) без изменений.\n"
+msgid_plural "  %d planned removal(s) were declined at the prompt and left exactly as they were.\n"
+msgstr[0] "  %d запланированное удаление было отклонено при запросе и оставлено в точности в прежнем виде.\n"
+msgstr[1] "  %d запланированных удаления были отклонены при запросе и оставлены в точности такими, какими они были.\n"
+msgstr[2] "  %d запланированных удалений были отклонены при запросе подтверждения и оставлены в точности такими, какими они были.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
-msgstr "  %d запланированное(-ых) удаление(-ий) не было(-и) подтверждено(-ы) и не было(-и) выполнено(-ы) — см. причину выше. Из-за них этот запуск завершается с ненулевым кодом.\n"
+msgid_plural "  %d planned removal(s) had no confirmation and were not carried out — see the reason above. This run exits non-zero because of them.\n"
+msgstr[0] "  %d запланированное удаление не было подтверждено и не было выполнено — см. причину выше. Из-за них этот запуск завершается с ненулевым кодом.\n"
+msgstr[1] "  %d запланированных удаления не были подтверждены и не были выполнены — см. причину выше. Из-за них этот запуск завершается с ненулевым кодом.\n"
+msgstr[2] "  %d запланированных удалений не были подтверждены и не были выполнены — см. причину выше. Из-за них этот запуск завершается с ненулевым кодом.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
-msgstr "  Ничего не было удалено: ни одно из %d запланированных удалений не было подтверждено — см. причину выше.\n"
+msgid_plural "  Nothing was removed: no confirmation covered the %d planned removal(s) — see the reason above.\n"
+msgstr[0] "  Ничего не было удалено: ни одно из %d запланированного удаления не было подтверждено — см. причину выше.\n"
+msgstr[1] "  Ничего не было удалено: ни одно подтверждение не охватывало %d запланированных удаления — см. причину выше.\n"
+msgstr[2] "  Ничего не было удалено: ни одно из %d запланированных удалений не было подтверждено — см. причину выше.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was removed: the confirmation was declined. The overlay and .autoupdate/packages.toml are exactly as they were."
@@ -2592,7 +2802,10 @@ msgstr "  Каталоги пакетов отсутствуют, но они в
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
-msgstr "  Удалены записи в .autoupdate/packages.toml для %d удалённого(-ых) пакета(-ов).\n"
+msgid_plural "  Deleted the .autoupdate/packages.toml entries of %d removed package(s).\n"
+msgstr[0] "  Удалены записи в .autoupdate/packages.toml для %d удалённого пакета.\n"
+msgstr[1] "  Удалены записи в .autoupdate/packages.toml для %d удалённых пакетов.\n"
+msgstr[2] "  Удалены записи в .autoupdate/packages.toml для %d удалённых пакетов.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "Identical to ::gentoo — our copy holds nothing of ours"
@@ -2628,7 +2841,10 @@ msgstr "      registry: ни одна запись не отслеживает �
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry: %d entr(ies) kept by --keep-registry: %s\n"
-msgstr "      registry: %d запись(ей) сохранено с помощью --keep-registry: %s\n"
+msgid_plural "      registry: %d entr(ies) kept by --keep-registry: %s\n"
+msgstr[0] "      registry: %d запись сохранена с помощью --keep-registry: %s\n"
+msgstr[1] "      registry: %d записи сохранены с помощью --keep-registry: %s\n"
+msgstr[2] "      registry: %d записей сохранены с помощью --keep-registry: %s\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "      registry entries (%d):\n"
@@ -2640,7 +2856,10 @@ msgstr "  Отклонено — ни один флаг этой команды 
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
-msgstr "  Ничто не подлежит удалению: было проверено %d пакетов, и ни один из них нельзя удалить.\n"
+msgid_plural "  Nothing qualified for removal: %d package(s) were examined and none of them may be removed.\n"
+msgstr[0] "  Ничто не подлежит удалению: было проверено %d пакетов, и ни один из них нельзя удалить.\n"
+msgstr[1] "  Ничего не подлежит удалению: было проверено %d пакета, и ни один из них нельзя удалить.\n"
+msgstr[2] "  Ничто не подлежит удалению: было проверено %d пакетов, и ни один из них нельзя удалить.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  %d of them diverge from ::gentoo; --include-patched would consider them, discarding that work.\n"
@@ -2648,7 +2867,10 @@ msgstr "  %d из них отличаются от ::gentoo; --include-patched �
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
-msgstr "  Ничего не было проверено: поставщик %s не предоставляет локальное дерево ::gentoo, поэтому ни один из %d пакетов в области действия не удалось сравнить.\n"
+msgid_plural "  Nothing was examined: the %s provider exposes no local ::gentoo tree, so none of the %d package(s) in scope could be compared.\n"
+msgstr[0] "  Ничего не было проверено: провайдер %s не предоставляет локальное дерево ::gentoo, поэтому ни один из %d пакета в области действия не подлежал сравнению.\n"
+msgstr[1] "  Ничего не было проверено: поставщик %s не предоставляет локальное дерево ::gentoo, поэтому ни один из %d пакетов в области действия не подлежал сравнению.\n"
+msgstr[2] "  Ничего не было проверено: провайдер %s не предоставляет локальное дерево ::gentoo, поэтому ни один из %d пакетов в области действия не удалось сравнить.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Every package is refused: no local ::gentoo tree; re-run with --clone or a local provider."
@@ -2664,7 +2886,10 @@ msgstr "  Укажите bentoo на находящийся на диске ::ge
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
-msgstr "  Ничего не было проверено: реестр автоматического обновления не удалось прочитать, поэтому ни один из %d пакетов в области действия не имеет известного состояния расхождения.\n"
+msgid_plural "  Nothing was examined: the autoupdate registry could not be read, so none of the %d package(s) in scope has a known divergence state.\n"
+msgstr[0] "  Ничего не было проверено: реестр автообновлений не удалось прочитать, поэтому ни для одного из %d пакета в области действия не известно состояние расхождения.\n"
+msgstr[1] "  Ничего не было проверено: реестр автоматического обновления не удалось прочитать, поэтому ни один из %d пакетов в области действия не имеет известного состояния расхождения.\n"
+msgstr[2] "  Ничего не было проверено: реестр автоматического обновления не удалось прочитать, поэтому ни для одного из %d пакетов в области действия не известно состояние расхождения.\n"
 
 #: cmd/bentoo/overlay_prune.go
 msgid "  Every package is refused: %v.\n"
@@ -2964,7 +3189,10 @@ msgstr "  Удалять нечего: под этим корнем нет пр�
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  --yes given: removing %d staged tree(s) without a prompt.\n"
-msgstr "  Указан флаг --yes: удаление %d промежуточного(-ых) дерева(-ев) без запроса.\n"
+msgid_plural "  --yes given: removing %d staged tree(s) without a prompt.\n"
+msgstr[0] "  --yes указан: удаление %d подготовленного дерева без запроса.\n"
+msgstr[1] "  --yes указан: удаление %d подготовленных деревьев без запроса подтверждения.\n"
+msgstr[2] "  --yes указан: удаление %d подготовленных деревьев без запроса.\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Not an interactive terminal and --yes was not given: nothing removed."
@@ -2972,7 +3200,10 @@ msgstr "  Это не интерактивный терминал, и флаг -
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
-msgstr "  Запустите повторно с флагом --yes, чтобы удалить эти %d промежуточные дерево(-а) без запроса.\n"
+msgid_plural "  Re-run with --yes to remove these %d staged tree(s) unattended.\n"
+msgstr[0] "  Запустите повторно с флагом --yes, чтобы автоматически удалить эти %d зафиксированное дерево.\n"
+msgstr[1] "  Запустите повторно с флагом --yes, чтобы автоматически удалить эти %d зафиксированных дерева.\n"
+msgstr[2] "  Запустите повторно с флагом --yes, чтобы удалить эти %d зафиксированных деревьев в автоматическом режиме.\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  These directories are deleted from disk. Nothing in the overlay is read, written or removed."
@@ -2980,7 +3211,10 @@ msgstr "  Эти каталоги удаляются с диска. Ничто �
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Remove %d staged tree(s) from %s?"
-msgstr "Удалить %d подготовленное(-ых) дерево(-ев) из %s?"
+msgid_plural "Remove %d staged tree(s) from %s?"
+msgstr[0] "Удалить %d зафиксированное дерево из %s?"
+msgstr[1] "Удалить %d зафиксированных дерева из %s?"
+msgstr[2] "Удалить %d зафиксированных деревьев из %s?"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Staged Tree Clean Result"
@@ -3000,11 +3234,17 @@ msgstr "      причина: %s\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
-msgstr "  Удалено %d из %d деревьев, указанных в плане. %d оставшихся деревьев перечислены выше с указанием причины, по которой каждое из них было сохранено.\n"
+msgid_plural "  Removed %d of the %d tree(s) the plan named — the %d still there are listed above, each with the reason it stayed.\n"
+msgstr[0] "  Удалено %d из %d дерева, указанного в плане — %d оставшихся перечислены выше с указанием причины, по которой каждое из них было сохранено.\n"
+msgstr[1] "  Удалено %d из %d деревьев, указанных в плане — %d оставшихся перечислены выше, для каждого указана причина, по которой оно не было удалено.\n"
+msgstr[2] "  Удалено %d из %d деревьев, указанных в плане — оставшиеся %d перечислены выше, для каждого указана причина, по которой оно не было удалено.\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "  Removed %d of the %d tree(s) the plan named.\n"
-msgstr "  Удалено %d из %d деревьев, указанных в плане.\n"
+msgid_plural "  Removed %d of the %d tree(s) the plan named.\n"
+msgstr[0] "  Удалено %d из %d дерева, указанного в плане.\n"
+msgstr[1] "  Удалено %d из %d деревьев, указанных в плане.\n"
+msgstr[2] "  Удалено %d из %d деревьев, указанных в плане.\n"
 
 #: cmd/bentoo/overlay_staged.go
 msgid "Staged Tree Clean"
@@ -3086,7 +3326,10 @@ msgstr "    overtaken: в оверлее содержится %s; обновит
 
 #: cmd/bentoo/overlay_targets.go
 msgid "%d package(s) lack a required implementation.\n"
-msgstr "%d пакет(а/ов) не имеет(имеют) требуемую реализацию.\n"
+msgid_plural "%d package(s) lack a required implementation.\n"
+msgstr[0] "%d пакету не хватает требуемой реализации.\n"
+msgstr[1] "%d пакетам не хватает требуемой реализации.\n"
+msgstr[2] "%d пакетам не хватает требуемой реализации.\n"
 
 #: cmd/bentoo/overlay_validate.go
 msgid "Check that each ebuild still matches the source it points at"
@@ -3238,7 +3481,10 @@ msgstr ""
 
 #: cmd/bentoo/overlay_validate.go
 msgid "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
-msgstr "      %s %d параметр(а/ов) объявляется(ются) в исходном коде, а этот ebuild не проходит проверку — см. --json\n"
+msgid_plural "      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"
+msgstr[0] "      %s %d опцию объявляет апстрим, а этот ebuild их не передаёт — см. --json\n"
+msgstr[1] "      %s %d опции, объявленные разработчиками, и этот ebuild не проходит проверку — см. --json\n"
+msgstr[2] "      %s %d параметров, объявленных выше по цепочке, и этот ebuild не проходит — см. --json\n"
 
 #: cmd/bentoo/overlay_validate.go
 msgid "      read: %s\n"
@@ -3306,7 +3552,7 @@ msgstr "Управление репозиторием оверлея Bentoo"
 
 #: cmd/bentoo/root.go
 msgid "Commands for managing the Bentoo overlay repository including adding files, checking status, committing changes, and pushing to remote."
-msgstr "Команды для управления репозиторием оверлея Bentoo, включая добавление файлов, проверку статуса, коммит изменений и пуш НА удалённый репозиторий."
+msgstr "Команды для управления репозиторием оверлея Bentoo, включая добавление файлов, проверку статуса, коммит изменений и пуш на удалённый репозиторий."
 
 #: cmd/bentoo/snapshot.go
 msgid "Manage btrfs snapshots (btrbk + systemd)"
@@ -3632,7 +3878,10 @@ msgstr "::gentoo также поставляет %s, и его копия отл
 
 #: internal/autoupdate/applier.go
 msgid "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
-msgstr "повторное использование %d загруженных и %d кэшированных distfile(ов) для восстановления %s-%s"
+msgid_plural "reusing %d downloaded and %d cached distfile(s) for the %s-%s repair"
+msgstr[0] "повторное использование %d загруженных и %d кэшированных дистрибутивов для восстановления %s-%s"
+msgstr[1] "повторное использование %d загруженных и %d кэшированных distfile для восстановления %s-%s"
+msgstr[2] "повторное использование %d загруженных и %d кэшированных distfile для восстановления %s-%s"
 
 #: internal/autoupdate/applier.go
 msgid "manifest failed for %s-%s; invoking LLM fixer to repair the ebuild"
@@ -3664,7 +3913,10 @@ msgstr "помещён в карантин непроверяемый файл �
 
 #: internal/autoupdate/sweep.go
 msgid "reused %d distfile(s) from %s while manifesting %s"
-msgstr "повторно использовано %d дистрибутивов из %s при создании манифеста %s"
+msgid_plural "reused %d distfile(s) from %s while manifesting %s"
+msgstr[0] "повторно использовано %d дистрибутивов из %s при создании манифеста %s"
+msgstr[1] "повторно использовано %d дистрибутива из %s при создании манифеста %s"
+msgstr[2] "повторно использовано %d distfiles из %s при создании манифеста %s"
 
 #: internal/autoupdate/sweep.go
 msgid "removed the incomplete distfile %s the failed manifest step for %s left in %s"
@@ -3684,7 +3936,10 @@ msgstr "Ни один пакет не настроен для автоматич
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) checked, %d with a pending update."
-msgstr "Проверено %d пакетов, %d с ожидающим обновления."
+msgid_plural "%d package(s) checked, %d with a pending update."
+msgstr[0] "%d пакет проверен, %d с ожидающим обновления."
+msgstr[1] "%d пакета проверено, %d с ожидающим обновления."
+msgstr[2] "%d пакетов проверено, %d с ожидающим обновления."
 
 #: internal/common/report/autoupdate_check.go
 msgid "TYPE"
@@ -3704,39 +3959,66 @@ msgstr "СОСТОЯНИЕ"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) are up to date and are listed above."
-msgstr "%d пакет(а/ов) обновлён(ы) и указан(ы) выше."
+msgid_plural "%d package(s) are up to date and are listed above."
+msgstr[0] "%d пакет обновлён и перечислен выше."
+msgstr[1] "%d пакета обновлены и перечислены выше."
+msgstr[2] "%d пакетов обновлены и перечислены выше."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) are up to date and are not listed; pass --all to list them."
-msgstr "%d пакетов обновлены и не указаны в списке; используйте флаг --all, чтобы вывести их."
+msgid_plural "%d package(s) are up to date and are not listed; pass --all to list them."
+msgstr[0] "%d пакет обновлён и не указан в списке; используйте флаг --all, чтобы вывести их."
+msgstr[1] "%d пакета обновлены и не указаны в списке; используйте флаг --all, чтобы вывести их."
+msgstr[2] "%d пакетов обновлены и не указаны в списке; используйте флаг --all, чтобы вывести их."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) have no ebuild in the overlay."
-msgstr "%d пакет(а/ов) не имеет(имеют) ebuild в оверлее."
+msgid_plural "%d package(s) have no ebuild in the overlay."
+msgstr[0] "%d пакетам не соответствует ebuild в оверлее."
+msgstr[1] "%d пакета не имеют ebuild в оверлее."
+msgstr[2] "%d пакетов не имеют ebuild в оверлее."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) left their series upstream and need a manual promotion."
-msgstr "%d пакет(а/ов) покинул(-и) свою ветку в основном репозитории и требует(-ют) ручного повышения."
+msgid_plural "%d package(s) left their series upstream and need a manual promotion."
+msgstr[0] "%d пакет вышел из своей серии в апстриме и нуждается в ручном повышении."
+msgstr[1] "%d пакета вышли из своих серий в основной ветке разработки и требуют ручного повышения."
+msgstr[2] "%d пакетов вышли из своих серий в основной репозиторий и требуют ручного повышения."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) could not be checked."
-msgstr "%d пакет(а/ов) не удалось проверить."
+msgid_plural "%d package(s) could not be checked."
+msgstr[0] "%d пакет не удалось проверить."
+msgstr[1] "%d пакета не удалось проверить."
+msgstr[2] "%d пакетов не удалось проверить."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) reported a version that could not be ordered against the current one."
-msgstr "%d пакет(а/ов) сообщил(и) о версии, которую невозможно сравнить с текущей."
+msgid_plural "%d package(s) reported a version that could not be ordered against the current one."
+msgstr[0] "%d пакет сообщил о версии, которую невозможно сравнить с текущей."
+msgstr[1] "%d пакета сообщили о версии, которую невозможно сравнить с текущей."
+msgstr[2] "%d пакетов сообщили о версии, которую невозможно сравнить с текущей."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) have an update held by min_age_days."
-msgstr "%d пакет(а/ов) имеет (имеют) обновление, удерживаемое параметром min_age_days."
+msgid_plural "%d package(s) have an update held by min_age_days."
+msgstr[0] "%d пакету отложено обновление из-за min_age_days."
+msgstr[1] "%d пакета имеют обновление, удерживаемое параметром min_age_days."
+msgstr[2] "%d пакетов имеют обновление, удерживаемое параметром min_age_days."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) to evaluate."
-msgstr "%d пакет(а/ов) для оценки."
+msgid_plural "%d package(s) to evaluate."
+msgstr[0] "%d пакет для оценки."
+msgstr[1] "%d пакета для оценки."
+msgstr[2] "%d пакетов для оценки."
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) to evaluate, %d of them excluded by policy."
-msgstr "%d пакет(а/ов) для оценки, %d из них исключены в соответствии с политикой."
+msgid_plural "%d package(s) to evaluate, %d of them excluded by policy."
+msgstr[0] "%d пакет для оценки, %d из них исключены политикой."
+msgstr[1] "%d пакета для оценки, %d из них исключены в соответствии с политикой."
+msgstr[2] "%d пакетов для оценки, %d из них исключены в соответствии с политикой."
 
 #: internal/common/report/autoupdate_check.go
 msgid "BUMP"
@@ -3768,7 +4050,10 @@ msgstr "Сводка результатов проверки"
 
 #: internal/common/report/autoupdate_check.go
 msgid "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
-msgstr "%d пакет(а/ов) проверено: %d подтверждено, %d с ошибками, %d с неопределённым результатом, %d пропущено."
+msgid_plural "%d package(s) evaluated: %d proved, %d errored, %d inconclusive, %d skipped."
+msgstr[0] "%d пакет проанализирован: %d проверено, %d с ошибками, %d с неопределённым результатом, %d пропущено."
+msgstr[1] "%d пакета проанализировано: %d подтверждено, %d с ошибками, %d с неопределённым результатом, %d пропущено."
+msgstr[2] "%d пакетов проанализировано: %d подтверждено, %d с ошибками, %d с неопределённым результатом, %d пропущено."
 
 #: internal/common/report/autoupdate_check.go
 msgid "Next: %d ready to apply, %d waiting, %d for the maintainer, %d excluded."
@@ -3780,7 +4065,10 @@ msgstr "Ничего не было опубликовано: проверка н
 
 #: internal/common/report/autoupdate_check.go
 msgid "Checked %d source, %d bin; %d package(s) resolved to neither tier."
-msgstr "Проверено %d source, %d bin; %d пакетов не отнесено ни к одному уровню."
+msgid_plural "Checked %d source, %d bin; %d package(s) resolved to neither tier."
+msgstr[0] "Проверено %d source, %d bin; %d пакет не отнесен ни к одному из уровней."
+msgstr[1] "Checked %d source, %d bin; %d packages resolved to neither tier."
+msgstr[2] "Checked %d source, %d bin; %d packages resolved to neither tier."
 
 #: internal/common/report/autoupdate_check.go
 msgid "Checked %d source, %d bin."
@@ -3872,7 +4160,10 @@ msgstr "Оставлено без ответа"
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
-msgstr "%d пакет(а/ов) достигнуто, но оставлено без ответа: единицы, которые учитываются в уведомлении о незавершённом выполнении."
+msgid_plural "%d package(s) reached but left without an answer: the units the incomplete-run notice counts."
+msgstr[0] "%d пакет был достигнут, но остался без ответа: именно эти единицы учитываются в уведомлении о незавершённом выполнении."
+msgstr[1] "%d пакета были достигнуты, но остались без ответа: это те единицы, которые учитываются в уведомлении о незавершённом выполнении."
+msgstr[2] "%d пакетов были достигнуты, но остались без ответа: именно эти единицы учитываются в уведомлении о незавершённом выполнении."
 
 #: internal/common/report/compare_run.go
 msgid "A pair whose versions differ is refused by design: the content check reads our changes only against the same version upstream, so it cannot say whether they carry over to a newer one."
@@ -3912,15 +4203,17 @@ msgstr "%d также присутствуют в %s и сравниваются
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) scanned in the Bentoo overlay."
-msgstr "%d пакет(а/ов) просканировано в оверлее Bentoo."
+msgid_plural "%d package(s) scanned in the Bentoo overlay."
+msgstr[0] "%d пакет просканирован в оверлее Bentoo."
+msgstr[1] "%d пакета просканировано в оверлее Bentoo."
+msgstr[2] "%d пакетов просканировано в оверлее Bentoo."
 
 #: internal/common/report/compare_run.go
 msgid "%d comparison(s) was never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
-msgstr "%d сравнение(-я) никогда не было(-и) прочитано(-ы): проверка, которую никто не запрашивал, проверка, которую пытались выполнить, но она завершилась неудачей, или пара версий, которую проверка содержимого отклонила. Строка, проверка которой не пройдена, отмечена как %s — различие действительно существует, отсутствует пояснение, и ни одна из строк ниже не была незаметно понижена в статусе, чтобы скрыть его."
-
-#: internal/common/report/compare_run.go
-msgid "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
-msgstr "%d сравнение(-я) никогда не было(-и) прочитано(-ы): проверка, которую никто не запрашивал, проверка, которая была предпринята и не удалась, или пара версий, которую проверка содержимого отклонила. Строка, проверка которой не пройдена, отмечена как %s — различие действительно существует, отсутствует объяснение, и ни одна из строк ниже не была незаметно понижена в статусе, чтобы скрыть его."
+msgid_plural "%d comparison(s) were never read: a review nobody requested, a review that was attempted and failed, or a version pair the content check refused. A row whose review failed is marked %s — the difference is real, the explanation is missing, and no row below was quietly downgraded to hide it."
+msgstr[0] "%d сравнение так и не было прочитано: проверка, которую никто не запрашивал, проверка, которую пытались выполнить, но она завершилась неудачей, или пара версий, которую проверка содержимого отклонила. Строка, проверка которой не пройдена, помечается как %s — разница реальна, отсутствует объяснение, и ни одна строка ниже не была незаметно понижена в статусе, чтобы скрыть это."
+msgstr[1] "%d сравнения так и не были прочитаны: проверка, которую никто не запрашивал, проверка, которую пытались выполнить, но она завершилась неудачей, или пара версий, которую проверка содержимого отклонила. Строка, проверка которой не пройдена, отмечена как %s — различие действительно существует, отсутствует пояснение, и ни одна из строк ниже не была незаметно понижена в статусе, чтобы скрыть его."
+msgstr[2] "%d сравнений так и не были прочитаны: проверка, которую никто не запрашивал, проверка, которую пытались выполнить, но она завершилась неудачей, или пара версий, которую проверка содержимого отклонила. Строка, проверка которой не пройдена, помечена как %s — различие действительно существует, отсутствует пояснение, и ни одна из строк ниже не была незаметно понижена в статусе, чтобы скрыть его."
 
 #: internal/common/report/compare_run.go
 msgid "The failed reviews, by cause: %s."
@@ -3936,7 +4229,10 @@ msgstr "Ни один пакет не считается избыточным, �
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as redundant."
-msgstr "%d пакет(а/ов) считаются избыточными."
+msgid_plural "%d package(s) are counted as redundant."
+msgstr[0] "%d пакет считается избыточным."
+msgstr[1] "%d пакета считаются избыточными."
+msgstr[2] "%d пакетов считаются избыточными."
 
 #: internal/common/report/compare_run.go
 msgid "No per-package row reached this report, so the count above is stated without the list it was taken over."
@@ -3948,19 +4244,17 @@ msgstr "Различие не является доказательством а
 
 #: internal/common/report/compare_run.go
 msgid "%d was never compared at all, because the check refuses to diff two different versions"
-msgstr "%d вообще никогда не сравнивался, поскольку проверка отказывается выполнять diff для двух разных версий"
-
-#: internal/common/report/compare_run.go
-msgid "%d were never compared at all, because the check refuses to diff two different versions"
-msgstr "%d вообще никогда не сравнивались, поскольку проверка отказывается выполнять diff для двух разных версий"
+msgid_plural "%d were never compared at all, because the check refuses to diff two different versions"
+msgstr[0] "%d никогда не сравнивались, поскольку проверка отказывается выполнять diff для двух разных версий"
+msgstr[1] "%d вообще никогда не сравнивались, поскольку проверка отказывается выполнять diff для двух разных версий"
+msgstr[2] "%d вообще никогда не сравнивались, поскольку проверка отказывается выполнять diff для двух разных версий"
 
 #: internal/common/report/compare_run.go
 msgid "%d was never compared at all, and this run did not record why"
-msgstr "%d вообще никогда не сравнивался, и в этом запуске не было зафиксировано, почему"
-
-#: internal/common/report/compare_run.go
-msgid "%d were never compared at all, and this run did not record why"
-msgstr "%d вообще никогда не сравнивались, и в этом запуске не было зафиксировано, почему"
+msgid_plural "%d were never compared at all, and this run did not record why"
+msgstr[0] "%d никогда не сравнивались, и в этом запуске не было зафиксировано, почему."
+msgstr[1] "%d вообще никогда не сравнивались, и в этом запуске не было зафиксировано, почему."
+msgstr[2] "%d вообще никогда не сравнивались, и в этом запуске не было зафиксировано, почему."
 
 #: internal/common/report/compare_run.go
 msgid "the review died on the other %d"
@@ -3972,35 +4266,38 @@ msgstr "Для %d была предпринята попытка проверк�
 
 #: internal/common/report/compare_run.go
 msgid "%d was never submitted for review"
-msgstr "%d никогда не отправлялся на проверку"
-
-#: internal/common/report/compare_run.go
-msgid "%d were never submitted for review"
-msgstr "%d никогда не отправлялись на проверку"
+msgid_plural "%d were never submitted for review"
+msgstr[0] "%d никогда не были отправлены на проверку"
+msgstr[1] "%d никогда не были отправлены на проверку"
+msgstr[2] "%d так и не были отправлены на проверку"
 
 #: internal/common/report/compare_run.go
 msgid "%d carries changes proved ours, so removing it would discard work of our own — declare it instead."
-msgstr "%d содержит изменения, признанные нашими, поэтому удаление его привело бы к потере нашей собственной работы — вместо этого объявите его."
-
-#: internal/common/report/compare_run.go
-msgid "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
-msgstr "%d содержат изменения, признанные нашими, поэтому их удаление привело бы к потере нашей собственной работы — вместо этого объявите их."
+msgid_plural "%d carry changes proved ours, so removing them would discard work of our own — declare them instead."
+msgstr[0] "%d переносимых изменения было доказано, что они наши, поэтому их удаление привело бы к потере нашей собственной работы — вместо этого объявите их."
+msgstr[1] "%d содержат изменения, которые оказались нашими, поэтому их удаление привело бы к потере нашей собственной работы — вместо этого объявите их."
+msgstr[2] "%d содержат изменения, признанные нашими, поэтому их удаление привело бы к потере нашей собственной работы — вместо этого объявите их."
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), and not one of them carries a reading."
-msgstr "%d пакет(а/ов), и ни один из них не содержит показаний."
+msgid_plural "%d package(s), and not one of them carries a reading."
+msgstr[0] "%d пакет, и ни в одном из них нет показаний."
+msgstr[1] "%d пакета, и ни в одном из них нет чтения."
+msgstr[2] "%d пакетов, и ни в одном из них нет чтения."
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), and every one of them carries a reading."
-msgstr "%d пакет(а/ов), и каждый из них содержит показания."
+msgid_plural "%d package(s), and every one of them carries a reading."
+msgstr[0] "%d пакет, и каждый из них содержит чтение."
+msgstr[1] "%d пакета, и каждый из них содержит чтение."
+msgstr[2] "%d пакетов, и каждый из них содержит показания."
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s), of which %d carries a reading."
-msgstr "%d пакет(а/ов), из которых %d содержит показания."
-
-#: internal/common/report/compare_run.go
-msgid "%d package(s), of which %d carry a reading."
-msgstr "%d пакет(а), из которых %d содержат показания."
+msgid_plural "%d package(s), of which %d carry a reading."
+msgstr[0] "%d пакет, из которых %d содержат показания."
+msgstr[1] "%d пакета, из которых %d содержат показания."
+msgstr[2] "%d пакетов, из которых %d содержат показания."
 
 #: internal/common/report/compare_run.go
 msgid "No removal advice follows from either."
@@ -4036,11 +4333,17 @@ msgstr "Ни один пакет не нуждается в rebase: здесь �
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as needing a rebase."
-msgstr "%d пакет(а/ов) считаются нуждающимися в перебазировании."
+msgid_plural "%d package(s) are counted as needing a rebase."
+msgstr[0] "%d пакет считается нуждающимся в ребейзе."
+msgstr[1] "%d пакета считаются требующими перебазирования."
+msgstr[2] "%d пакетов считаются требующими выполнения rebase."
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
-msgstr "%d перечисленных пакетов: каждый из них содержит наши изменения поверх версии, которую %s с тех пор обогнал, поэтому требуются как обновление версии, так и повторное применение."
+msgid_plural "%d package(s) listed: each carries changes of ours on top of a version %s has since moved past, so both a bump and a re-application are owed."
+msgstr[0] "%d пакет в списке: каждый из них содержит наши изменения поверх версии, которую %s с тех пор уже обновил, поэтому требуется как обновление версии, так и повторное применение изменений."
+msgstr[1] "%d пакета в списке: каждый из них содержит наши изменения поверх версии, которую %s с тех пор уже обошла, поэтому требуется как обновление версии, так и повторное применение изменений."
+msgstr[2] "%d пакетов в списке: каждый из них содержит наши изменения поверх версии, которую %s с тех пор уже обновил, поэтому требуется как обновление версии, так и повторное применение изменений."
 
 #: internal/common/report/compare_run.go
 msgid "Keep — the overlay copy is ahead"
@@ -4052,11 +4355,17 @@ msgstr "Ни один пакет не считается заслуживающ�
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as worth keeping."
-msgstr "%d пакет(а/ов) считаются достойными сохранения."
+msgid_plural "%d package(s) are counted as worth keeping."
+msgstr[0] "%d пакет считается достойным сохранения."
+msgstr[1] "%d пакета считаются достойными сохранения."
+msgstr[2] "%d пакетов считаются достойными сохранения."
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed, and the run recommends keeping every one of them."
-msgstr "Перечислено %d пакетов, и выполнение команды рекомендует сохранить каждый из них."
+msgid_plural "%d package(s) listed, and the run recommends keeping every one of them."
+msgstr[0] "%d пакет в списке, и выполнение рекомендует сохранить каждый из них."
+msgstr[1] "%d пакета в списке, и выполнение команды рекомендует сохранить каждый из них."
+msgstr[2] "%d пакетов в списке, и выполнение команды рекомендует сохранить каждый из них."
 
 #: internal/common/report/compare_run.go
 msgid "%s (%d packages)"
@@ -4064,11 +4373,17 @@ msgstr "%s (%d пакетов)"
 
 #: internal/common/report/compare_run.go
 msgid "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
-msgstr "%d из %d имеют общую пару версий и объединились бы в %d группу(ы); вместо этого с помощью --all выше перечислены все элементы."
+msgid_plural "%d of the %d share a version pair and would collapse into %d group(s); --all listed every member above instead."
+msgstr[0] "%d из %d имеют одну и ту же пару версий и объединились бы в %d группу; вместо этого с флагом --all выше перечислены все элементы."
+msgstr[1] "%d из %d имеют одинаковую пару версий и объединились бы в %d группы; вместо этого с помощью флага --all выше перечислены все элементы."
+msgstr[2] "%d из %d имеют общую пару версий и объединились бы в %d групп; вместо этого с помощью флага --all выше перечислены все участники."
 
 #: internal/common/report/compare_run.go
 msgid "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
-msgstr "%d из %d имеют общую пару версий и перечислены выше как %d группа(групп); укажите --all, чтобы вывести список их элементов."
+msgid_plural "%d of the %d share a version pair and are listed above as %d group(s); pass --all to list their members."
+msgstr[0] "%d из %d имеют общую пару версий и перечислены выше как %d группа; укажите --all, чтобы вывести список их участников."
+msgstr[1] "%d из %d имеют одинаковую пару версий и перечислены выше как %d группы; укажите --all, чтобы вывести список их элементов."
+msgstr[2] "%d из %d имеют одинаковую пару версий и перечислены выше как %d групп; укажите --all, чтобы вывести список их элементов."
 
 #: internal/common/report/compare_run.go
 msgid "Unknown — no recommendation"
@@ -4080,11 +4395,17 @@ msgstr "Для каждого пакета, оцененного в ходе в�
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) are counted as unknown."
-msgstr "%d пакет(а/ов) считаются неизвестными."
+msgid_plural "%d package(s) are counted as unknown."
+msgstr[0] "%d пакет считается неизвестным."
+msgstr[1] "%d пакета считаются неизвестными."
+msgstr[2] "%d пакетов считаются неизвестными."
 
 #: internal/common/report/compare_run.go
 msgid "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
-msgstr "Перечислено %d пакетов. Их ничто не описывает в имеющихся данных, поэтому ни одна из рекомендаций не поддерживается."
+msgid_plural "%d package(s) listed. Nothing on record describes them, so neither advice is supported."
+msgstr[0] "%d пакет в списке. Ничто в записях их не описывает, поэтому ни одна из рекомендаций не поддерживается."
+msgstr[1] "%d пакета в списке. Ничто в записях их не описывает, поэтому ни одна из рекомендаций не поддерживается."
+msgstr[2] "%d пакетов в списке. Ничто в записях их не описывает, поэтому ни одна из рекомендаций не поддерживается."
 
 #: internal/common/report/compare_run.go
 msgid "Summary"
@@ -4128,7 +4449,10 @@ msgstr "Ни одна цель не имеет результата для от�
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) processed: %d regenerated, %d failed."
-msgstr "%d цель(ей) обработано: %d регенерировано, %d с ошибкой."
+msgid_plural "%d target(s) processed: %d regenerated, %d failed."
+msgstr[0] "%d цель обработана: %d восстановлено, %d не выполнено."
+msgstr[1] "%d цели обработаны: %d регенерировано, %d не выполнено."
+msgstr[2] "%d целей обработано: %d регенерировано, %d не выполнено."
 
 #: internal/common/report/manifest_run.go
 msgid "No per-target row reached this report, so the counts above are stated without the list they were taken over."
@@ -4136,7 +4460,10 @@ msgstr "В этот отчет не попала ни одна строка по
 
 #: internal/common/report/manifest_run.go
 msgid "Dry run: %d target(s) would have their Manifest regenerated."
-msgstr "Прогон в тестовом режиме: для %d целевого объекта (целевых объектов) будет выполнен повторный сбор Manifest."
+msgid_plural "Dry run: %d target(s) would have their Manifest regenerated."
+msgstr[0] "Прогон в режиме проверки: для %d целевого объекта был бы выполнен повторный генерации манифеста."
+msgstr[1] "Прогон в режиме проверки: для %d целей был бы выполнен повторный генерации их манифестов."
+msgstr[2] "Прогон в режиме проверки: для %d целей был бы выполнен повторный генерации их манифестов."
 
 #: internal/common/report/manifest_run.go
 msgid "Nothing ran: no command was invoked and no Manifest was written, so no target above is counted as regenerated or as failed."
@@ -4144,11 +4471,17 @@ msgstr "Ничего не было выполнено: не было вызва�
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) were regenerated and are listed above."
-msgstr "%d цель(-ей) была(-и) повторно сгенерирована(-ы) и указана(-ы) выше."
+msgid_plural "%d target(s) were regenerated and are listed above."
+msgstr[0] "%d цель была сгенерирована заново и указана выше."
+msgstr[1] "%d цели были сгенерированы заново и перечислены выше."
+msgstr[2] "%d целей были сгенерированы заново и перечислены выше."
 
 #: internal/common/report/manifest_run.go
 msgid "%d target(s) were regenerated and are not listed; pass --all to list them."
-msgstr "%d цель(-ей) была(-и) сгенерирована(-ы) заново и не указана(-ы) в списке; используйте флаг --all, чтобы вывести их."
+msgid_plural "%d target(s) were regenerated and are not listed; pass --all to list them."
+msgstr[0] "%d цель была сгенерирована заново и не указана в списке; используйте флаг --all, чтобы вывести их."
+msgstr[1] "%d цели были сгенерированы заново и не указаны; используйте флаг --all, чтобы вывести их список."
+msgstr[2] "%d целей были сгенерированы заново и не указаны; используйте флаг --all, чтобы вывести их список."
 
 #: internal/common/report/manifest_run.go
 msgid "What a target that succeeded printed is not kept: it was shown while the run was live, and holding a verbatim copy of every worker's output would grow with the overlay. A target that failed carries its own, in full."
@@ -4184,11 +4517,17 @@ msgstr "q/esc выход · ctrl+c прерывание · при выходе �
 
 #: internal/common/report/render/fullscreen.go
 msgid "… %d more line(s) not shown — press q for the whole report"
-msgstr "… %d строка(и) не показана(ы) — нажмите q, чтобы просмотреть весь отчёт"
+msgid_plural "… %d more line(s) not shown — press q for the whole report"
+msgstr[0] "… Еще %d строка не показана — нажмите q, чтобы просмотреть весь отчет"
+msgstr[1] "… Еще %d строки не показаны — нажмите q, чтобы просмотреть весь отчет"
+msgstr[2] "… Еще %d строк не показаны — нажмите q, чтобы просмотреть весь отчет"
 
 #: internal/common/report/render/fullscreen.go
 msgid "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
-msgstr "… %d строка(-и) и %d раздел(-ы) не показаны — нажмите q, чтобы просмотреть весь отчет"
+msgid_plural "… %d more line(s) and %d whole section(s) not shown — press q for the whole report"
+msgstr[0] "… Еще %d строка и %d целых разделов не показаны — нажмите q, чтобы увидеть весь отчет"
+msgstr[1] "… ещё %d строки и %d целых раздела не показаны — нажмите q, чтобы увидеть весь отчёт"
+msgstr[2] "… Еще %d строк и %d целых разделов не показаны — нажмите q, чтобы просмотреть весь отчет"
 
 #: internal/common/report/render/fullscreen.go
 msgid "this section could not be rendered: %v"
@@ -4200,7 +4539,10 @@ msgstr "Выполнение не завершено"
 
 #: internal/common/report/run.go
 msgid "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
-msgstr "Этот отчет неполный: выполнение достигло всех юнитов, но %d запланированных юнитов остались без ответа."
+msgid_plural "This report is incomplete: the run reached every unit, but %d planned unit(s) were left without an answer."
+msgstr[0] "Этот отчет неполный: выполнение достигло каждого блока, но %d запланированный блок остался без ответа."
+msgstr[1] "Этот отчет неполный: выполнение достигло каждого блока, но %d запланированных блока остались без ответа."
+msgstr[2] "Этот отчет неполный: выполнение достигло всех модулей, но %d запланированных модулей остались без ответа."
 
 #: internal/common/report/run.go
 msgid "The counts below cover only what the run established; the rest are counted in no column."
@@ -4208,7 +4550,10 @@ msgstr "Приведенные ниже значения охватывают т
 
 #: internal/common/report/run.go
 msgid "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
-msgstr "Этот отчет является неполным: выполнение было прервано, и %d запланированных единиц не были оценены."
+msgid_plural "This report is incomplete: the run was interrupted, and %d planned unit(s) were not evaluated."
+msgstr[0] "Этот отчет неполный: выполнение было прервано, и %d запланированная единица не была оценена."
+msgstr[1] "Этот отчет является неполным: выполнение было прервано, и %d запланированных модуля не были оценены."
+msgstr[2] "Этот отчет неполный: выполнение было прервано, и %d запланированных единиц не были оценены."
 
 #: internal/common/report/run.go
 msgid "The counts below cover only what the run reached; the rest are counted in no column."
@@ -4240,11 +4585,17 @@ msgstr "Запуску не был указан подтом, с которым 
 
 #: internal/common/report/snapshot_run.go
 msgid "The run operated on %d subvolume(s): %s."
-msgstr "Запуск выполнялся на %d подтоме(-ах): %s."
+msgid_plural "The run operated on %d subvolume(s): %s."
+msgstr[0] "Выполнение затронуло %d подтом: %s."
+msgstr[1] "Выполнение затронуло %d подтома: %s."
+msgstr[2] "Выполнение осуществлялось на %d подтомах: %s."
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) ran: %d succeeded, %d failed."
-msgstr "Выполнено %d шагов: %d завершено(ы) успешно, %d завершено(ы) с ошибкой."
+msgid_plural "%d step(s) ran: %d succeeded, %d failed."
+msgstr[0] "Выполнено %d шагов: %d завершились успешно, %d завершились с ошибкой."
+msgstr[1] "Выполнено %d шага: %d успешно, %d с ошибкой."
+msgstr[2] "Выполнено %d шагов: %d успешно, %d с ошибкой."
 
 #: internal/common/report/snapshot_run.go
 msgid "succeeded"
@@ -4252,11 +4603,17 @@ msgstr "успешно"
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) succeeded and are listed above."
-msgstr "%d шаг(а/ов) выполнен(о/ы) успешно и указан(ы/ы) выше."
+msgid_plural "%d step(s) succeeded and are listed above."
+msgstr[0] "%d шаг выполнен успешно и перечислен выше."
+msgstr[1] "%d шага выполнены успешно и перечислены выше."
+msgstr[2] "%d шагов выполнены успешно и перечислены выше."
 
 #: internal/common/report/snapshot_run.go
 msgid "%d step(s) succeeded and are not listed; pass --all to list them."
-msgstr "%d шаг(ов) выполнен(ы) успешно и не указан(ы); используйте флаг --all, чтобы вывести их список."
+msgid_plural "%d step(s) succeeded and are not listed; pass --all to list them."
+msgstr[0] "%d шаг выполнен успешно и не указан в списке; используйте флаг --all, чтобы вывести их."
+msgstr[1] "%d шага выполнены успешно и не указаны; используйте флаг --all, чтобы вывести их список."
+msgstr[2] "%d шагов выполнены успешно и не указаны; используйте флаг --all, чтобы вывести их список."
 
 #: internal/common/report/snapshot_run.go
 msgid "How long each step took is not carried here: the run's own result file keeps the timings, and 'snapshot status' is what reads them back."
@@ -4268,11 +4625,17 @@ msgstr "Применение обновлений"
 
 #: internal/common/tui/model.go
 msgid "%d earlier package(s) finished"
-msgstr "%d предыдущий(-их) пакет(-ов) завершён(-ы)"
+msgid_plural "%d earlier package(s) finished"
+msgstr[0] "%d предыдущий пакет завершён"
+msgstr[1] "%d предыдущих пакета завершены"
+msgstr[2] "%d предыдущих пакетов завершено"
 
 #: internal/common/tui/model.go
 msgid "%d earlier log line(s)"
-msgstr "%d более ранняя(-их) строка(-ок) журнала"
+msgid_plural "%d earlier log line(s)"
+msgstr[0] "%d предыдущая строка журнала"
+msgstr[1] "%d предыдущие строки журнала"
+msgstr[2] "%d более ранних строк журнала"
 
 #: internal/overlay/pull.go
 msgid "Already up to date with %s."
@@ -4314,8 +4677,17 @@ msgstr ""
 msgid ""
 "Found %d ebuild(s) to rename:\n"
 "\n"
-msgstr ""
-"Найдено %d ebuild(ов) для переименования:\n"
+msgid_plural ""
+"Found %d ebuild(s) to rename:\n"
+"\n"
+msgstr[0] ""
+"Найдено %d ebuild для переименования:\n"
+"\n"
+msgstr[1] ""
+"Найдено %d ebuild-файла для переименования:\n"
+"\n"
+msgstr[2] ""
+"Найдено %d ebuild-файлов для переименования:\n"
 "\n"
 
 #: internal/overlay/rename.go
@@ -4326,9 +4698,18 @@ msgstr "    (суффикс ревизии будет удалён)\n"
 msgid ""
 "\n"
 "⚠ Warning: %d version-specific file(s) detected:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"⚠ Предупреждение: обнаружено %d файлов, относящихся к конкретной версии:\n"
+"⚠ Warning: %d version-specific file(s) detected:\n"
+msgstr[0] ""
+"\n"
+"⚠ Предупреждение: обнаружено %d файлов, привязанных к конкретной версии:\n"
+msgstr[1] ""
+"\n"
+"⚠ Предупреждение: обнаружено %d файла, привязанных к версии:\n"
+msgstr[2] ""
+"\n"
+"⚠ Предупреждение: обнаружено %d файлов, привязанных к конкретной версии:\n"
 
 #: internal/overlay/rename.go
 msgid ""
@@ -4342,9 +4723,18 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Warning: %d target file(s) already exist:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"⚠ Предупреждение: %d целевой(-ых) файл(а) уже существует(-ют):\n"
+"⚠ Warning: %d target file(s) already exist:\n"
+msgstr[0] ""
+"\n"
+"⚠ Предупреждение: %d целевой файл уже существует:\n"
+msgstr[1] ""
+"\n"
+"⚠ Предупреждение: %d целевых файла уже существуют:\n"
+msgstr[2] ""
+"\n"
+"⚠ Предупреждение: %d целевых файлов уже существуют:\n"
 
 #: internal/overlay/rename.go
 msgid ""
@@ -4358,9 +4748,18 @@ msgstr ""
 msgid ""
 "\n"
 "⚠ Error: %d target file(s) would receive more than one ebuild:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"⚠ Ошибка: %d целевой(-ых) файл(-а) получит(-ят) более одного ebuild:\n"
+"⚠ Error: %d target file(s) would receive more than one ebuild:\n"
+msgstr[0] ""
+"\n"
+"⚠ Ошибка: %d целевой файл получит более одного ebuild:\n"
+msgstr[1] ""
+"\n"
+"⚠ Ошибка: %d целевых файла получат более одного ebuild:\n"
+msgstr[2] ""
+"\n"
+"⚠ Ошибка: %d целевых файлов получат более одного ebuild:\n"
 
 #: internal/overlay/rename.go
 msgid ""
@@ -4374,57 +4773,120 @@ msgstr ""
 msgid ""
 "\n"
 "Warning: %d version-specific file(s) detected:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"Предупреждение: обнаружено %d файлов, относящихся к конкретной версии:\n"
+"Warning: %d version-specific file(s) detected:\n"
+msgstr[0] ""
+"\n"
+"Warning: %d version-specific files detected:\n"
+msgstr[1] ""
+"\n"
+"Warning: %d version-specific files detected:\n"
+msgstr[2] ""
+"\n"
+"Warning: %d version-specific files detected:\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Conflicts: %d target file(s) already exist:\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"Конфликты: %d целевой(-ых) файл(а) уже существует(-ют):\n"
+"Conflicts: %d target file(s) already exist:\n"
+msgstr[0] ""
+"\n"
+"Конфликты: %d целевой файл уже существует:\n"
+msgstr[1] ""
+"\n"
+"Конфликты: %d целевых файла уже существуют:\n"
+msgstr[2] ""
+"\n"
+"Конфликты: %d целевых файлов уже существуют:\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "Dry run: %d ebuild(s) would be renamed\n"
 "\n"
-msgstr ""
-"Пробный запуск: %d ebuild(s) будут переименованы\n"
+msgid_plural ""
+"Dry run: %d ebuild(s) would be renamed\n"
+"\n"
+msgstr[0] ""
+"Пробный запуск: %d ebuild будет переименован\n"
+"\n"
+msgstr[1] ""
+"Прогон в тестовом режиме: %d ebuild-файла будут переименованы\n"
+"\n"
+msgstr[2] ""
+"Прогон в тестовом режиме: %d ebuild-файлов будут переименованы\n"
 "\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "Renamed %d ebuild(s):\n"
 "\n"
-msgstr ""
-"Переименовано %d ebuild(ов):\n"
+msgid_plural ""
+"Renamed %d ebuild(s):\n"
+"\n"
+msgstr[0] ""
+"Переименовано %d ebuild:\n"
+"\n"
+msgstr[1] ""
+"Переименовано %d ebuild-файла:\n"
+"\n"
+msgstr[2] ""
+"Переименовано %d ebuild-файлов:\n"
 "\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Failed %d ebuild(s):\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"Сбой %d ebuild(ов):\n"
+"Failed %d ebuild(s):\n"
+msgstr[0] ""
+"\n"
+"Не удалось выполнить сборку %d ebuild:\n"
+msgstr[1] ""
+"\n"
+"Не выполнено %d ebuild:\n"
+msgstr[2] ""
+"\n"
+"Не выполнено %d ebuild-сборок:\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Manifest updated for %d package(s)\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"Файл Manifest обновлён для %d пакета(-ов)\n"
+"Manifest updated for %d package(s)\n"
+msgstr[0] ""
+"\n"
+"Manifest updated for %d packages\n"
+msgstr[1] ""
+"\n"
+"Файл manifest обновлён для %d пакетов\n"
+msgstr[2] ""
+"\n"
+"Манифест обновлён для %d пакетов\n"
 
 #: internal/overlay/rename.go
 msgid ""
 "\n"
 "Manifest update failed for %d package(s):\n"
-msgstr ""
+msgid_plural ""
 "\n"
-"Не удалось обновить манифест для %d пакета(-ов):\n"
+"Manifest update failed for %d package(s):\n"
+msgstr[0] ""
+"\n"
+"Не удалось обновить манифест для %d пакета:\n"
+msgstr[1] ""
+"\n"
+"Не удалось обновить манифест для %d пакетов:\n"
+msgstr[2] ""
+"\n"
+"Не удалось обновить манифест для %d пакетов:\n"
 
 #: internal/overlay/status.go
 msgid "No changes detected (working directory clean)"
@@ -4488,11 +4950,10 @@ msgstr "Вернуть систему к снимку %q? При следующ�
 
 #: internal/tray/messages/messages.go
 msgid "%d unread notice"
-msgstr "%d непрочитанное уведомление"
-
-#: internal/tray/messages/messages.go
-msgid "%d unread notices"
-msgstr "%d непрочитанных уведомлений"
+msgid_plural "%d unread notices"
+msgstr[0] "%d непрочитанное уведомление"
+msgstr[1] "%d непрочитанных уведомления"
+msgstr[2] "%d непрочитанных уведомлений"
 
 #: internal/tray/messages/messages.go
 msgid "%d more…"
@@ -4532,7 +4993,10 @@ msgstr "Отметить как прочитанное"
 
 #: internal/tray/messages/messages.go
 msgid "%d new notices"
-msgstr "%d новых уведомлений"
+msgid_plural "%d new notices"
+msgstr[0] "%d новое уведомление"
+msgstr[1] "%d новых уведомления"
+msgstr[2] "%d новых уведомлений"
 
 #: internal/tray/messages/messages.go
 msgid "Low disk space on %s"
@@ -4588,11 +5052,10 @@ msgstr "Сеть: не работает"
 
 #: internal/tray/messages/messages.go
 msgid "%d system alert"
-msgstr "%d системное оповещение"
-
-#: internal/tray/messages/messages.go
-msgid "%d system alerts"
-msgstr "%d системных оповещений"
+msgid_plural "%d system alerts"
+msgstr[0] "%d системное оповещение"
+msgstr[1] "%d системных оповещения"
+msgstr[2] "%d системных оповещений"
 
 #: internal/tray/messages/messages.go
 msgid "Package build failed"
@@ -4704,8 +5167,7 @@ msgstr "Репозиторий %s: синхронизирован %s назад"
 
 #: internal/tray/messages/messages.go
 msgid "%d day"
-msgstr "%d день"
-
-#: internal/tray/messages/messages.go
-msgid "%d days"
-msgstr "%d дн."
+msgid_plural "%d days"
+msgstr[0] "%d день"
+msgstr[1] "%d дня"
+msgstr[2] "%d дней"

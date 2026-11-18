@@ -6,7 +6,9 @@
 // shown. The two are separate because much of the text is declared before
 // main runs: cobra commands, for instance, are built by package-level
 // initialisers, before the catalog can be loaded. misc/i18n-extract collects
-// every literal passed to N or T into po/bentoolkit.pot.
+// every literal passed to N or T into po/bentoolkit.pot. A message that
+// depends on a count goes through TCount or TPlural (NPlural to mark a pair
+// declared early), which pick the plural form the language needs.
 //
 // Translations are compiled .mo files under LocaleDir, one per language:
 // <LocaleDir>/<lang>/LC_MESSAGES/<domain>.mo. They live outside the binary so
@@ -39,7 +41,12 @@ const localeDirEnv = "BENTOO_LOCALEDIR"
 // catalog is the loaded translation table; nil means English. It is written
 // by Init, normally once before any goroutine starts, and read by every T;
 // the atomic keeps a late Init safe all the same.
-var catalog atomic.Pointer[map[string]string]
+var catalog atomic.Pointer[moCatalog]
+
+// Integer is any integer type a count can have.
+type Integer interface {
+	~int | ~int8 | ~int16 | ~int32 | ~int64 | ~uint | ~uint8 | ~uint16 | ~uint32 | ~uint64 | ~uintptr
+}
 
 // N marks s for extraction and returns it unchanged. Use it where text is
 // declared before the catalog is loaded; translate it later with T.
@@ -48,14 +55,56 @@ func N(s string) string { return s }
 // T returns the translation of msgid in the loaded catalog, or msgid itself
 // when there is no catalog, no entry, or an empty translation.
 func T(msgid string) string {
-	m := catalog.Load()
-	if m == nil {
+	c := catalog.Load()
+	if c == nil {
 		return msgid
 	}
-	if s, ok := (*m)[msgid]; ok && s != "" {
+	if s, ok := c.msgs[msgid]; ok && s != "" {
 		return s
 	}
 	return msgid
+}
+
+// NPlural marks a singular/plural pair for extraction, like N, and returns
+// the singular; translate it later with TPlural(singular, plural, n).
+func NPlural(singular, plural string) string {
+	_ = plural
+	return singular
+}
+
+// TPlural is gettext's ngettext: the form of singular/plural the loaded
+// catalog's plural rule picks for n, or in English singular when n is 1 and
+// plural otherwise. The result is usually a format string that takes n.
+func TPlural[N Integer](singular, plural string, n N) string {
+	c := catalog.Load()
+	if c != nil {
+		if forms, ok := c.plurals[singular]; ok {
+			if s := forms[min(c.rule(abs(n)), len(forms)-1)]; s != "" {
+				return s
+			}
+		}
+	}
+	if n == 1 {
+		return singular
+	}
+	return plural
+}
+
+// TCount translates a message whose English reads the same for every count
+// ("%d package(s) checked") but whose translation must agree with n — in
+// Russian "1 пакет", "2 пакета", "5 пакетов". It is TPlural with msgid as
+// both forms, so English output is unchanged.
+func TCount[N Integer](msgid string, n N) string {
+	return TPlural(msgid, msgid, n)
+}
+
+// abs returns |n| as the unsigned value plural rules take; a negative count
+// takes the form of its magnitude.
+func abs[N Integer](n N) uint64 {
+	if n < 0 {
+		return uint64(-int64(n)) //nolint:gosec // G115: n < 0, so -n is positive; only MinInt64 wraps, to itself, still a valid magnitude for a plural rule.
+	}
+	return uint64(n)
 }
 
 // Init loads the catalog of domain for the language the environment selects
@@ -83,11 +132,11 @@ func initWith(domain string, getenv func(string) string) (string, error) {
 		if err != nil {
 			return "", fmt.Errorf("reading catalog %s: %w", path, err)
 		}
-		m, err := parseMO(data)
+		c, err := parseMO(data)
 		if err != nil {
 			return "", fmt.Errorf("parsing catalog %s: %w", path, err)
 		}
-		catalog.Store(&m)
+		catalog.Store(c)
 		return lang, nil
 	}
 	return "", nil

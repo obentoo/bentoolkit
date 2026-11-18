@@ -385,7 +385,7 @@ func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDi
 
 	fmt.Println()
 	output.Header.Println(i18n.T("Repair sessions"))
-	fmt.Printf(i18n.T("%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one.")+"\n",
+	fmt.Printf(i18n.TCount("%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one.", len(offered))+"\n",
 		len(offered))
 	for i, pkg := range offered {
 		if ctx.Err() != nil {

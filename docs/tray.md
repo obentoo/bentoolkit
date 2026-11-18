@@ -116,8 +116,9 @@ the [README](../README.md#bentoo-tray-health-monitors).
 
 The menu, the tooltip and the notifications the tray writes itself (unread
 counts, health alerts, the Open and Mark as read actions) follow
-`LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`, like `bentoo`, and use the
-same installed catalog (`bentoolkit.mo`; see "Translations" in
+`LANGUAGE`, `LC_ALL`, `LC_MESSAGES` and `LANG`, like `bentoo`. The tray reads
+`bentoo-tray.mo`, the same messages as bentoo's `bentoolkit.mo` under its own
+name, so the two can be packaged separately (see "Translations" in
 [development.md](development.md#translations)). A notice's own title and
 summary are shown as published: they are not translated. Logs stay in English.
 When the tray runs as the systemd user unit, it gets the locale of the user

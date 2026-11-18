@@ -29,7 +29,7 @@ func displayChildRuns(err error) {
 		lines, omitted := childRunTail(run.Output)
 		output.Info.Printf("    "+i18n.T("%s output:")+"\n", run.Label)
 		if omitted > 0 {
-			output.Info.Printf("      "+i18n.T("… %d earlier line(s) omitted")+"\n", omitted)
+			output.Info.Printf("      "+i18n.TCount("… %d earlier line(s) omitted", omitted)+"\n", omitted)
 		}
 		if len(lines) == 0 {
 			output.Info.Println("      " + i18n.T("(no output)"))

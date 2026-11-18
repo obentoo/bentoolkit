@@ -226,7 +226,7 @@ func snapshotScope(r SnapshotRun, opts SectionOptions) string {
 	if len(r.Subvolumes) == 0 {
 		return opts.t(i18n.N("The run was given no subvolume to operate on, so no step below is attributed to one."))
 	}
-	return fmt.Sprintf(opts.t(i18n.N("The run operated on %d subvolume(s): %s.")),
+	return fmt.Sprintf(opts.count(i18n.NPlural("The run operated on %d subvolume(s): %s.", "The run operated on %d subvolume(s): %s."), len(r.Subvolumes)),
 		len(r.Subvolumes), strings.Join(r.Subvolumes, ", "))
 }
 
@@ -236,7 +236,7 @@ func snapshotScope(r SnapshotRun, opts SectionOptions) string {
 // gives — the counts are what the run established, and a total taken over a
 // different field could disagree with the two numbers it introduces.
 func snapshotTally(r SnapshotRun, opts SectionOptions) string {
-	return fmt.Sprintf(opts.t(i18n.N("%d step(s) ran: %d succeeded, %d failed.")), r.Ok+r.Failed, r.Ok, r.Failed)
+	return fmt.Sprintf(opts.count(i18n.NPlural("%d step(s) ran: %d succeeded, %d failed.", "%d step(s) ran: %d succeeded, %d failed."), r.Ok+r.Failed), r.Ok+r.Failed, r.Ok, r.Failed)
 }
 
 // snapshotStepLabel is the word the STEP column prints: the stage, and the ship
@@ -306,9 +306,9 @@ func snapshotNotes(r SnapshotRun, opts SectionOptions) []string {
 			// reason the check's own up-to-date note is: a count never depends
 			// on which rows were listed, so the sentence keeps its shape in
 			// both directions and only its tail changes.
-			notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d step(s) succeeded and are listed above.")), r.Ok))
+			notes = append(notes, fmt.Sprintf(opts.count(i18n.NPlural("%d step(s) succeeded and are listed above.", "%d step(s) succeeded and are listed above."), r.Ok), r.Ok))
 		} else {
-			notes = append(notes, fmt.Sprintf(opts.t(i18n.N("%d step(s) succeeded and are not listed; pass --all to list them.")), r.Ok))
+			notes = append(notes, fmt.Sprintf(opts.count(i18n.NPlural("%d step(s) succeeded and are not listed; pass --all to list them.", "%d step(s) succeeded and are not listed; pass --all to list them."), r.Ok), r.Ok))
 		}
 	}
 

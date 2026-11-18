@@ -512,7 +512,7 @@ func renderValidateText(report validate.Report) {
 			fmt.Println(f.Detail)
 		}
 		if line.infos > 0 {
-			output.Dim.Printf(i18n.T("      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n"),
+			output.Dim.Printf(i18n.TCount("      %s %d option(s) upstream declares and this ebuild does not pass — see --json\n", line.infos),
 				padColumn(infoCountLabel, severityWidth), line.infos)
 		}
 		// The evidence, printed even on a PASS. A pass whose sources are not

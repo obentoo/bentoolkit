@@ -303,7 +303,7 @@ func printValidationPrice(plan validationPlan) {
 		return
 	}
 
-	output.Info.Printf("  "+i18n.T("%d package(s) to evaluate, deepest depth %s.")+"\n\n", len(plan.Entries), plan.deepest())
+	output.Info.Printf("  "+i18n.TCount("%d package(s) to evaluate, deepest depth %s.", len(plan.Entries))+"\n\n", len(plan.Entries), plan.deepest())
 
 	for _, entry := range plan.Entries {
 		line := i18n.T("%s %s → %s at depth %s")
@@ -323,7 +323,7 @@ func printValidationPrice(plan validationPlan) {
 	// (report.AutoupdateCheck.DistfilesToFetch) so the export carries it too.
 	output.Info.Printf("  "+i18n.T("Distfiles: up to %d to fetch — one per package validated above depth none or by a binary record's fetch gate; anything already in DISTDIR is not fetched again.")+"\n",
 		plan.DistfilesToFetch)
-	output.Info.Printf("  "+i18n.T("Depth distribution (of %d package(s)): %s")+"\n", len(plan.Entries), depthDistributionLine(plan))
+	output.Info.Printf("  "+i18n.TCount("Depth distribution (of %d package(s)): %s", len(plan.Entries))+"\n", len(plan.Entries), depthDistributionLine(plan))
 }
 
 // depthDistributionLine renders the distribution along the ladder, shallowest
@@ -388,26 +388,26 @@ func (ar *autoupdateRun) confirmValidationRun(plan validationPlan) bool {
 	deepest := plan.deepest()
 
 	if ar.opts.yes {
-		output.Warning.Printf("  "+i18n.T("--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s.")+"\n",
+		output.Warning.Printf("  "+i18n.TCount("--yes given: evaluating %d package(s) without a prompt — %d of them run a build gate, up to %s.", len(plan.Entries))+"\n",
 			len(plan.Entries), builds, deepest)
-		output.Warning.Printf("  "+i18n.T("Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published.")+"\n",
+		output.Warning.Printf("  "+i18n.TCount("Up to %d distfile(s) are fetched and the deepest gates can take hours. Nothing is published.", plan.DistfilesToFetch)+"\n",
 			plan.DistfilesToFetch)
 		return true
 	}
 
 	if !ar.deps.registryPromptIsInteractive() {
 		output.Warning.Println("  " + i18n.T("Not an interactive terminal and --yes was not given: no gate ran and nothing was validated."))
-		output.Info.Printf("  "+i18n.T("Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s).")+"\n",
+		output.Info.Printf("  "+i18n.TCount("Re-run with --yes to evaluate these %d package(s) unattended — %d of them up to %s, fetching up to %d distfile(s).", len(plan.Entries))+"\n",
 			len(plan.Entries), builds, deepest, plan.DistfilesToFetch)
 		return false
 	}
 
 	fmt.Println()
-	output.Warning.Printf("  "+i18n.T("%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours.")+"\n",
+	output.Warning.Printf("  "+i18n.TCount("%d package(s) run a gate above `options`, which unpacks and builds: this fetches up to %d distfile(s) and can take hours.", builds)+"\n",
 		builds, plan.DistfilesToFetch)
 	output.Info.Println("  " + i18n.T("Nothing is published either way — a check writes no ebuild and no version pin."))
 	return ar.deps.confirmSweep(fmt.Sprintf(
-		i18n.T("Evaluate %d package(s), %d of them up to depth %s?"), len(plan.Entries), builds, deepest))
+		i18n.TCount("Evaluate %d package(s), %d of them up to depth %s?", len(plan.Entries)), len(plan.Entries), builds, deepest))
 }
 
 // runPendingValidation puts every bump a check recorded as pending through the
@@ -686,7 +686,7 @@ func (ar *autoupdateRun) presentCheckReport(run report.Run, planPrinted bool) {
 		// overlay_autoupdate.go and returns before reaching here, so the two
 		// cannot both fire.
 		if orphans := scanDisabledOrphans(r.Scanned); orphans > 0 {
-			output.Warning.Printf(i18n.T("%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)")+"\n", orphans)
+			output.Warning.Printf(i18n.TCount("%d package(s) had no ebuild and were disabled in packages.toml (enabled = false)", orphans)+"\n", orphans)
 		}
 	}
 

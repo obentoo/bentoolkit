@@ -748,7 +748,7 @@ func (s *sweeper) reportPrepopulated(pkg, cacheDir string, reused int) {
 	if reused <= 0 {
 		return
 	}
-	msg := fmt.Sprintf(i18n.T("reused %d distfile(s) from %s while manifesting %s"), reused, cacheDir, pkg)
+	msg := fmt.Sprintf(i18n.TCount("reused %d distfile(s) from %s while manifesting %s", reused), reused, cacheDir, pkg)
 	s.log.Info("reused distfile(s) from the cache while manifesting",
 		"count", reused, "cache_dir", cacheDir, "package", pkg)
 	s.reporter.Log("info", msg)

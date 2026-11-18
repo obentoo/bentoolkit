@@ -115,6 +115,6 @@ func formatTargetFindings(findings []targets.Finding) string {
 			fmt.Fprintf(&b, i18n.T("    overtaken: the overlay holds %s; bump its mirror to %s\n"), f.OverlayVersion, f.Version)
 		}
 	}
-	fmt.Fprintf(&b, i18n.T("%d package(s) lack a required implementation.\n"), len(findings))
+	fmt.Fprintf(&b, i18n.TCount("%d package(s) lack a required implementation.\n", len(findings)), len(findings))
 	return b.String()
 }
