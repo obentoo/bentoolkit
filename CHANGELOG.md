@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **`overlay prune --apply` disables a removed package's registry entries
+  instead of deleting them.** Each entry gets `enabled = false` and
+  `disabled_by = "auto"`, the pair `--check` writes when an ebuild vanishes.
+  The overlay's own rule is that a removed package's record is never deleted:
+  it is the probe somebody already verified, and with `"auto"` it is
+  re-enabled on its own if the package comes back. The old behaviour is
+  `--delete-registry`; `--keep-registry` still leaves the file untouched, and
+  the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
+
 ### Fixed
 
 - **`overlay compare` translates its fixed sentences.** In a translated

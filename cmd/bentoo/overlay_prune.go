@@ -88,6 +88,14 @@ var (
 
 // newPruneCmd builds `overlay prune`.
 func newPruneCmd(d *deps) *cobra.Command {
+	// deleteRegistry is --delete-registry: delete the removed packages' records
+	// instead of disabling them. Disabling is the default because the overlay's
+	// own contract says a removed package's record becomes `enabled = false`
+	// and is never deleted: the record is the probe somebody already verified,
+	// and deleting it means re-deriving it the day the package returns. It is
+	// local to the command, not a package-level flag like the others: a new
+	// global in cmd/bentoo is a lint failure (gochecknoglobals).
+	var deleteRegistry bool
 	cmd := &cobra.Command{
 		Use:         "prune [category[/package]]",
 		Annotations: map[string]string{cancellableAnnotation: "true"},
@@ -103,7 +111,13 @@ carry real local changes, so a removal driven by the verdict alone deletes work.
 
 Without --apply nothing is removed, modified or disabled: the plan is printed
 and the run ends. The plan lists, per package, every file that would go and
-every .autoupdate/packages.toml entry that would go with it.
+every .autoupdate/packages.toml entry that would be disabled with it.
+
+A removed package's registry entries are DISABLED, not deleted: each gets
+enabled = false and disabled_by = "auto", the same pair --check writes when an
+ebuild vanishes, so the verified probe survives and is re-enabled on its own if
+the package ever returns. --delete-registry deletes them instead, and
+--keep-registry leaves the file untouched.
 
 Packages carrying an UNDECLARED difference — one the byte comparison found and
 nobody wrote down — are printed under their own heading and left alone unless
@@ -137,15 +151,18 @@ Examples:
   bentoo overlay prune app-editors/zed          # plan one package
   bentoo overlay prune --include-patched        # consider the diverging ones too
   bentoo overlay prune --apply                  # carry the plan out
-  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry`),
+  bentoo overlay prune --apply --keep-registry  # remove the files, keep the registry as is
+  bentoo overlay prune --apply --delete-registry  # remove the files and their registry entries`),
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runPruneCmd(cmd, args, d)
+			return runPruneCmd(cmd, args, d, pruneRegistryModeFor(pruneKeepRegistry, deleteRegistry))
 		},
 	}
 	cmd.Flags().BoolVar(&pruneApply, "apply", false, i18n.N("Carry out the plan (default: plan only, remove nothing)"))
 	cmd.Flags().BoolVar(&pruneIncludePatched, "include-patched", false, i18n.N("Also remove packages carrying an UNDECLARED difference, discarding that work (refused regardless: a declared 'patched' entry, or a difference the content proves originates here)"))
 	cmd.Flags().BoolVar(&pruneKeepRegistry, "keep-registry", false, i18n.N("Leave .autoupdate/packages.toml untouched"))
+	cmd.Flags().BoolVar(&deleteRegistry, "delete-registry", false, i18n.N("Delete the removed packages' .autoupdate/packages.toml entries instead of disabling them"))
+	cmd.MarkFlagsMutuallyExclusive("keep-registry", "delete-registry")
 	cmd.Flags().BoolVar(&pruneYes, "yes", false, i18n.N("Skip the identical batch's confirmation (never the diverging one)"))
 	return cmd
 }
@@ -154,7 +171,7 @@ Examples:
 // can be decided without them lives in runPrune, which takes both as parameters
 // so the whole flow is drivable from a test — the same split runRevive and
 // runSweep use.
-func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
+func runPruneCmd(cmd *cobra.Command, args []string, d *deps, mode pruneRegistryMode) error {
 	// The process-wide context (func commandContext): overlay prune is
 	// annotated cancellable, so the first SIGINT, SIGTERM or SIGHUP reaches the
 	// comparison and an interrupted run stops looking at packages instead of
@@ -167,7 +184,7 @@ func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
 		return exitWith(1)
 	}
 
-	return runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config, d)
+	return runPrune(ctx, appCtx.OverlayPath, args, appCtx.Config, d, mode)
 }
 
 // runPrune plans what may leave the overlay, prints it, and with --apply does it.
@@ -189,7 +206,7 @@ func runPruneCmd(cmd *cobra.Command, args []string, d *deps) error {
 // removal failed, no confirmation could be obtained, or the registry edit after
 // the removals failed — a refusal is not a decline, and a script reading 0
 // would record the removals as done.
-func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config, d *deps) error {
+func runPrune(ctx context.Context, overlayPath string, args []string, cfg *config.Config, d *deps, mode pruneRegistryMode) error {
 	log := logging.FromContext(ctx)
 	fmt.Println()
 	output.Header.Println(i18n.T("Overlay Prune"))
@@ -310,7 +327,7 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	}
 
 	batch := d.prunePlanner(report.Results, prov, opts)
-	displayPrunePlan(batch, pruneKeepRegistry)
+	displayPrunePlan(batch, mode)
 
 	eligible := pruneEligibleCount(batch)
 	if eligible == 0 {
@@ -349,13 +366,16 @@ func runPrune(ctx context.Context, overlayPath string, args []string, cfg *confi
 	// entries, so the file never claims a removal that did not happen.
 	var registryErr error
 	if atoms := prunedRegistryAtoms(results); len(atoms) > 0 {
-		if pruneKeepRegistry {
+		switch mode {
+		case pruneRegistryKeep:
 			// Untouched, not rewritten identically. The overlay auto-commits, so
 			// a rewrite that happens to produce the same bytes is still a file the next
 			// run has to explain.
 			output.Info.Printf(i18n.TCount("  --keep-registry given: .autoupdate/packages.toml was not touched, and it still holds the entries of %d removed package(s).\n", len(atoms)), len(atoms))
-		} else {
+		case pruneRegistryDelete:
 			registryErr = removePruneRegistryEntries(overlayPath, atoms)
+		default:
+			registryErr = disablePruneRegistryEntries(overlayPath, prunedRegistryKeys(results), len(atoms))
 		}
 	}
 
@@ -795,6 +815,71 @@ func removePruneRegistryEntries(overlayPath string, atoms []string) error {
 	return nil
 }
 
+// pruneRegistryMode is what --apply does to a removed package's registry
+// entries. The zero value is the default, so a caller that never thought about
+// it gets the overlay's contract rather than a deletion.
+type pruneRegistryMode int
+
+const (
+	// pruneRegistryDisable writes the disabled pair on every entry.
+	pruneRegistryDisable pruneRegistryMode = iota
+	// pruneRegistryKeep is --keep-registry: the file is not touched.
+	pruneRegistryKeep
+	// pruneRegistryDelete is --delete-registry: every entry is deleted.
+	pruneRegistryDelete
+)
+
+// pruneRegistryModeFor reads the two flags. cobra refuses both together;
+// should both be set anyway (a test, a caller bypassing cobra), keeping the
+// file wins, because it is the one choice that cannot lose anything.
+func pruneRegistryModeFor(keep, del bool) pruneRegistryMode {
+	switch {
+	case keep:
+		return pruneRegistryKeep
+	case del:
+		return pruneRegistryDelete
+	default:
+		return pruneRegistryDisable
+	}
+}
+
+// prunedRegistryKeys returns every registry key of the packages whose
+// directory went: the same population prunedRegistryAtoms names, spelled as
+// the keys DisablePackagesInConfig matches sections by. An atom carries one key
+// per entry ("net-libs/webkit-gtk", "…:4.1", "…@stable"), and every one is
+// disabled, for the reason every one is deleted under --delete-registry: a
+// survivor keeps updating a package that is gone.
+func prunedRegistryKeys(results []overlay.PruneResult) []string {
+	var keys []string
+	for _, res := range results {
+		if !prunePackageWentAway(res) {
+			continue
+		}
+		keys = append(keys, res.Plan.RegistryKeys...)
+	}
+	return keys
+}
+
+// disablePruneRegistryEntries writes `enabled = false` and
+// `disabled_by = "auto"` on every entry of the removed packages, in ONE edit
+// after all the removals, and says what it did. "auto" is the origin --check
+// writes when an ebuild vanishes, which is exactly what happened, so the
+// reconciliation re-enables the entry by itself if the package comes back.
+//
+// A failure is reported and returned, like a failed deletion: the directories
+// are gone and the registry still lists them as enabled.
+func disablePruneRegistryEntries(overlayPath string, keys []string, packages int) error {
+	if err := registry.DisablePackagesInConfig(overlayPath, keys); err != nil {
+		wrapped := fmt.Errorf("disabling %d entr(ies) in .autoupdate/packages.toml: %w", len(keys), err)
+		output.Error.Fprintf(os.Stderr, "  %v\n", wrapped)
+		output.Warning.Fprintln(os.Stderr, i18n.T("  The package directories are gone and the registry still lists them as enabled; the next --check disables them on its own."))
+		return wrapped
+	}
+
+	output.Success.Printf(i18n.TCount("  Disabled the .autoupdate/packages.toml entries of %d removed package(s) (enabled = false, disabled_by = \"auto\").\n", packages), packages)
+	return nil
+}
+
 // selectPrunePackages narrows the scan to the operator's target: a bare category
 // ("app-editors") or one package ("app-editors/zed"). An empty target selects
 // everything.
@@ -921,22 +1006,22 @@ func pruneEligibleCount(batch overlay.PruneBatch) int {
 // by far (240 of the overlay's 314 packages are not redundant) and the least
 // actionable; what the run would actually do is at the top, where the operator
 // starts reading.
-func displayPrunePlan(batch overlay.PruneBatch, keepRegistry bool) {
-	printPrunePlanGroup(i18n.T("Identical to ::gentoo — our copy holds nothing of ours"), batch.Identical, keepRegistry)
-	printPrunePlanGroup(i18n.T("Diverging — something of ours is in these"), batch.Diverging, keepRegistry)
+func displayPrunePlan(batch overlay.PruneBatch, mode pruneRegistryMode) {
+	printPrunePlanGroup(i18n.T("Identical to ::gentoo — our copy holds nothing of ours"), batch.Identical, mode)
+	printPrunePlanGroup(i18n.T("Diverging — something of ours is in these"), batch.Diverging, mode)
 	printPruneRefusals(batch.Refused)
 }
 
 // printPrunePlanGroup prints one bucket with the inventory of each package in
 // it: what would go, and what this run may do about it.
-func printPrunePlanGroup(title string, plans []overlay.PrunePlan, keepRegistry bool) {
+func printPrunePlanGroup(title string, plans []overlay.PrunePlan, mode pruneRegistryMode) {
 	if len(plans) == 0 {
 		return
 	}
 
 	fmt.Printf("  %s (%d):\n", title, len(plans))
 	for _, plan := range plans {
-		printPrunePlanEntry(plan, keepRegistry)
+		printPrunePlanEntry(plan, mode)
 	}
 	fmt.Println()
 }
@@ -948,7 +1033,7 @@ func printPrunePlanGroup(title string, plans []overlay.PrunePlan, keepRegistry b
 // named on the heading line — and are never joined back into a path. They are a
 // report of what a removal costs; the path a removal uses is built and proven by
 // the executor.
-func printPrunePlanEntry(plan overlay.PrunePlan, keepRegistry bool) {
+func printPrunePlanEntry(plan overlay.PrunePlan, mode pruneRegistryMode) {
 	atom := plan.Category + "/" + plan.Package
 
 	if plan.Eligible {
@@ -976,14 +1061,19 @@ func printPrunePlanEntry(plan overlay.PrunePlan, keepRegistry bool) {
 	switch {
 	case len(plan.RegistryKeys) == 0:
 		output.Info.Println(i18n.T("      registry: no entry tracks this package"))
-	case keepRegistry:
+	case mode == pruneRegistryKeep:
 		// --keep-registry makes "these entries would be deleted" false, so the plan
 		// says the other thing instead. A plan that describes a run other than the
 		// one requested is worse than no plan.
 		output.Info.Printf(i18n.TCount("      registry: %d entr(ies) kept by --keep-registry: %s\n", len(plan.RegistryKeys)),
 			len(plan.RegistryKeys), strings.Join(plan.RegistryKeys, ", "))
-	default:
+	case mode == pruneRegistryDelete:
 		fmt.Printf(i18n.T("      registry entries (%d):\n"), len(plan.RegistryKeys))
+		for _, key := range plan.RegistryKeys {
+			fmt.Printf("        %s\n", key)
+		}
+	default:
+		fmt.Printf(i18n.T("      registry entries to disable (%d):\n"), len(plan.RegistryKeys))
 		for _, key := range plan.RegistryKeys {
 			fmt.Printf("        %s\n", key)
 		}

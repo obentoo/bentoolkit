@@ -178,6 +178,25 @@ func setOverlayPruneFlags(t *testing.T, apply, includePatched, keepRegistry, yes
 	pruneApply, pruneIncludePatched, pruneKeepRegistry, pruneYes = apply, includePatched, keepRegistry, yes
 }
 
+// pruneTestDeleteRegistry stands in for --delete-registry, which is local to
+// newPruneCmd; tests drive runPrune directly and pass the mode it would build.
+var pruneTestDeleteRegistry bool
+
+// pruneTestMode is the registry mode the command would pass for the flags a
+// test pinned.
+func pruneTestMode() pruneRegistryMode {
+	return pruneRegistryModeFor(pruneKeepRegistry, pruneTestDeleteRegistry)
+}
+
+// setOverlayPruneDeleteRegistry pins --delete-registry for one test and
+// restores it after.
+func setOverlayPruneDeleteRegistry(t *testing.T, v bool) {
+	t.Helper()
+	old := pruneTestDeleteRegistry
+	t.Cleanup(func() { pruneTestDeleteRegistry = old })
+	pruneTestDeleteRegistry = v
+}
+
 // setOverlayPruneExecutor replaces the removal seam.
 func setOverlayPruneExecutor(t *testing.T, d *deps, fn func(overlay.PruneBatch, overlay.PruneOptions) []overlay.PruneResult) {
 	t.Helper()
@@ -226,7 +245,7 @@ func TestPruneWithoutApplyRemovesNothing(t *testing.T) {
 	}
 
 	out := captureStdout(t, func() {
-		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td, pruneTestMode())
 	})
 
 	if _, err := os.Stat(pkgDir); err != nil {
@@ -268,7 +287,7 @@ func TestPruneAPIOnlyProviderRefusesEverythingWithReason(t *testing.T) {
 
 	var code int
 	out := captureStdout(t, func() {
-		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, td))
+		code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, td, pruneTestMode()))
 	})
 
 	if code > 0 {
@@ -309,7 +328,7 @@ func TestPruneUnknownTargetFailsNamingIt(t *testing.T) {
 	var errOut string
 	_ = captureStdout(t, func() {
 		errOut = captureStderr(t, func() {
-			code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}, td))
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, []string{typo}, &config.Config{}, td, pruneTestMode()))
 		})
 	})
 
@@ -342,7 +361,7 @@ func TestPrunePlanListsFilesAndRegistryKeys(t *testing.T) {
 	forbidOverlayPruneRemoval(t, td)
 
 	out := captureStdout(t, func() {
-		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td, pruneTestMode())
 	})
 
 	for _, want := range []string{
@@ -408,7 +427,7 @@ func TestPruneUnreadableRegistryRefusesEverythingAndSaysSo(t *testing.T) {
 	forbidOverlayPruneRemoval(t, td)
 
 	out := captureStdout(t, func() {
-		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
+		_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td, pruneTestMode())
 	})
 
 	if strings.Contains(out, "would be removed") {
@@ -458,7 +477,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 		setOverlayPruneFlags(t, false, false, false, false)
 		forbidOverlayPruneRemoval(t, td)
 		return captureStdout(t, func() {
-			_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td)
+			_ = runPrune(context.Background(), overlayPath, nil, &config.Config{}, td, pruneTestMode())
 		})
 	}
 
@@ -501,7 +520,7 @@ func TestPruneEmptyBatchDistinguishesNothingQualifiedFromNothingExamined(t *test
 
 		var code int
 		empty = captureStdout(t, func() {
-			code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, td))
+			code = exitCodeFor(runPrune(context.Background(), overlayPath, nil, &config.Config{}, td, pruneTestMode()))
 		})
 
 		if code > 0 {
