@@ -1435,6 +1435,10 @@ msgid "could not build checker for re-check"
 msgstr "не удалось создать средство проверки для повторной проверки"
 
 #: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "registry fix reverted"
+msgstr "исправление реестра отменено"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
 msgid "registry fix stage %d"
 msgstr "этап исправления реестра %d"
 

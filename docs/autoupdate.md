@@ -1020,6 +1020,20 @@ every known secret masked, JSON-escaped forms included. bentoo never writes it
 through a symlink. The registry fixer still uses plain JSON output and reports
 no lines.
 
+The registry fixer reads upstream pages, so its edit is checked against its
+task in code rather than trusted. Before the re-check, the whole `.autoupdate`
+directory is compared with a snapshot taken before the agent ran. The edit is
+reverted, and the package is reported with "registry fix reverted: edit
+outside the failed package's entry" and what changed, when it:
+
+- adds, removes or changes any other entry of `packages.toml` (values are
+  compared, so a comment or blank line elsewhere is not a change);
+- changes the failed entry's `meta` block, whose `fetch_url` receives the
+  operator's secrets;
+- adds or changes a header of the failed entry whose value expands `${VAR}`;
+- creates, changes or deletes any other file under `.autoupdate`, `scripts/`
+  included.
+
 #### Repairing a failed bump
 
 When `--check --llm` leaves a bump to the maintainer (HUMAN), the staged tree

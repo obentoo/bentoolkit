@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/fixer"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
@@ -50,6 +51,10 @@ const (
 	RegistryFixStageFixer
 	// RegistryFixStageChecker: the re-check checker could not be built → Reverted.
 	RegistryFixStageChecker
+	// RegistryFixStageScope: the fix touched another entry, the entry's meta or
+	// a ${VAR} header, or a file other than packages.toml → Reverted. Err wraps
+	// ErrRegistryFixOutOfScope and names what changed.
+	RegistryFixStageScope
 )
 
 // RegistryFixAttempt is the data record of one snapshot-guarded registry fix.
@@ -77,10 +82,12 @@ type RegistryFixAttempt struct {
 	// RestoreErr is set when the automatic restore of a Reverted attempt failed.
 	RestoreErr error
 
-	// configPath, snapshot and mode are the pre-attempt state Revert restores.
+	// configPath, snapshot and mode are the pre-attempt packages.toml state;
+	// dir is the whole .autoupdate directory, which Revert restores when set.
 	configPath string
 	snapshot   []byte
 	mode       os.FileMode
+	dir        *dirSnapshot
 }
 
 // AttemptRegistryFix runs one snapshot-guarded fix for pkg: it captures the raw
@@ -113,6 +120,11 @@ func AttemptRegistryFix(ctx context.Context, overlayPath, pkg string, fetchErr e
 		return a.skip(RegistryFixStageSnapshot, fmt.Errorf("failed to stat packages.toml: %w", err))
 	}
 	a.snapshot, a.mode = data, info.Mode()
+	// The agent can write anywhere under the config directory, scripts/
+	// included, so the whole directory is captured, not only the registry.
+	if a.dir, err = snapshotDir(configDir); err != nil {
+		return a.skip(RegistryFixStageSnapshot, err)
+	}
 
 	// Load the current (broken) config to seed the fix request. No edit has
 	// happened yet, so a load failure just skips the package.
@@ -136,6 +148,13 @@ func AttemptRegistryFix(ctx context.Context, overlayPath, pkg string, fetchErr e
 	a.Result = &res
 	if err != nil {
 		return a.revertAfter(RegistryFixStageFixer, err)
+	}
+
+	// Enforce the scope before the re-check: the re-check would otherwise
+	// fetch from whatever url the edit introduced, and a passing re-check
+	// says nothing about the other entries the edit may have touched.
+	if err := a.checkScope(pkg); err != nil {
+		return a.revertAfter(RegistryFixStageScope, err)
 	}
 
 	c, err := newChecker()
@@ -177,18 +196,43 @@ func (a *RegistryFixAttempt) revertAfter(stage RegistryFixStage, err error) *Reg
 	return a
 }
 
-// Revert restores the pre-attempt packages.toml bytes and permission bits
-// atomically, through the shared fileutil.WriteFileAtomic — the helper every
-// other registry writer uses — so the restored registry carries exactly the
-// captured mode whatever the umask and whatever stale temporary file sits beside
-// it. A Skipped attempt (the zero Status) never edited the file and may hold no
-// snapshot, so reverting it is a no-op rather than a write of empty bytes.
+// checkScope fails when the fix changed any file under .autoupdate other than
+// packages.toml, or changed packages.toml outside pkg's own extraction config
+// (see checkRegistryFixScope).
+func (a *RegistryFixAttempt) checkScope(pkg string) error {
+	others, err := a.dir.changedFiles(registryConfigFile)
+	if err != nil {
+		return fmt.Errorf("compare .autoupdate after the fix: %w", err)
+	}
+	if len(others) > 0 {
+		return fmt.Errorf("%w: changed %s", ErrRegistryFixOutOfScope, strings.Join(others, ", "))
+	}
+	after, err := os.ReadFile(a.configPath)
+	if err != nil {
+		return fmt.Errorf("failed to read packages.toml after the fix: %w", err)
+	}
+	return checkRegistryFixScope(a.snapshot, after, pkg)
+}
+
+// Revert restores the pre-attempt state atomically, through the shared
+// fileutil.WriteFileAtomic — the helper every other registry writer uses — so
+// a restored file carries exactly the captured mode whatever the umask and
+// whatever stale temporary file sits beside it. packages.toml is restored
+// first; with a directory snapshot every other file under .autoupdate is then
+// restored and any file the fix created is removed. A Skipped attempt (the zero
+// Status) never edited anything and may hold no snapshot, so reverting it is a
+// no-op rather than a write of empty bytes.
 func (a *RegistryFixAttempt) Revert() error {
 	if a.Status == RegistryFixSkipped {
 		return nil
 	}
 	if err := fileutil.WriteFileAtomic(a.configPath, a.snapshot, a.mode.Perm()); err != nil {
+		// The directory itself is unusable: restoring the rest would only
+		// repeat the same failure under another name.
 		return fmt.Errorf("failed to restore %s: %w", a.configPath, err)
+	}
+	if a.dir != nil {
+		return a.dir.restore(registryConfigFile)
 	}
 	return nil
 }
