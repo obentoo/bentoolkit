@@ -91,6 +91,11 @@ type BuildDeps struct {
 	// namespace, returning the answer and, when it is no, the reason. It defaults
 	// to ProbeIsolation and is consumed by the compile gate.
 	IsolationProbe func() (bool, string)
+
+	// SandboxProbe answers whether the bubblewrap sandbox can run here, and
+	// why not. It defaults to ProbeHostSandbox and is read only when a
+	// BuildRequest asks for HostSandbox.
+	SandboxProbe func() (bool, string)
 }
 
 // commandFactory is the command builder a call must use: the injected seam when
@@ -125,6 +130,15 @@ func (d BuildDeps) isolationProbe() func() (bool, string) {
 		return d.IsolationProbe
 	}
 	return ProbeIsolation
+}
+
+// sandboxProbe is the sandbox measurement a build must use, normalised like
+// isolationProbe.
+func (d BuildDeps) sandboxProbe() func() (bool, string) {
+	if d.SandboxProbe != nil {
+		return d.SandboxProbe
+	}
+	return ProbeHostSandbox
 }
 
 // attachedRunner is the runner a build must use, normalised the same way again.

@@ -254,6 +254,7 @@ func runValidate(cmd *cobra.Command, args []string, d *deps) error {
 		StagingRoot:      stagingRoot,
 		LogDir:           logDir,
 		RequireIsolation: requireIsolation,
+		HostSandbox:      true,
 		DistNames:        distNames,
 		StagedManifest:   stagedManifest,
 	})

@@ -413,6 +413,10 @@ type Applier struct {
 	// arrives through that option, so this field stays the single input the
 	// gate reads.
 	requireIsolation bool
+	// hostSandbox, when true, runs a build on the host backend inside the
+	// bubblewrap sandbox and refuses it when the sandbox is missing; see
+	// validate.BuildRequest.HostSandbox. Set via WithApplierHostSandbox.
+	hostSandbox bool
 	// clean, when true, makes a successful Apply remove the previous version's
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
@@ -664,6 +668,22 @@ func WithApplierRequireIsolation(require bool) ApplierOption {
 		a.requireIsolation = require
 	}
 }
+
+// WithApplierHostSandbox makes a build on the host backend run inside the
+// bubblewrap sandbox, which hides the user's files and secrets from the code
+// the bump brings in and cuts its network, and refuses the build when the
+// sandbox cannot run. The bentoo command always sets it; the zero value, for
+// library callers and tests, runs the build as it is. A container or VM
+// backend is already a separate machine and is never wrapped.
+func WithApplierHostSandbox(enabled bool) ApplierOption {
+	return func(a *Applier) {
+		a.hostSandbox = enabled
+	}
+}
+
+// HostSandboxed reports whether a build on the host backend runs inside the
+// bubblewrap sandbox. The command reads it to prove it turned the sandbox on.
+func (a *Applier) HostSandboxed() bool { return a.hostSandbox }
 
 // WithExecCommand sets a custom context-aware exec.Command function for testing.
 // The function mirrors exec.CommandContext so injected commands also observe

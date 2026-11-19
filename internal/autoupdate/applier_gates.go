@@ -766,6 +766,7 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 		Version:          version,
 		Depth:            depth,
 		RequireIsolation: a.requireIsolation,
+		HostSandbox:      a.sandboxHostBuild(),
 		LogDir:           a.logsDir,
 		// The SAME directory the static gate reads, resolved by the same helper.
 		// The question staticGateDistdir answers is "which distdir
@@ -779,6 +780,11 @@ func (a *Applier) runBuildGates(ctx context.Context, cand candidatePaths, pkg, v
 		// read.
 		Distdir: a.staticGateDistdir(cand),
 	}
+	if req.HostSandbox {
+		// Asked only when a sandbox is built: it is a portageq round trip.
+		req.SandboxTmpRoot = fixSandboxRoot(ctx)
+	}
+
 	gates, err := validate.RunBuildGates(ctx, req, deps)
 	if err != nil {
 		// The REQUEST could not be attempted — a malformed atom, no version, no

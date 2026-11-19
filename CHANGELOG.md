@@ -20,6 +20,21 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--delete-registry`; `--keep-registry` still leaves the file untouched, and
   the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
 
+### Security
+
+- **Host builds run in a bubblewrap sandbox.** The build gates of
+  `overlay autoupdate`, `overlay validate` and `overlay compare` ran a bump's
+  configure scripts and build system as your user, able to read `~/.ssh`,
+  bentoo's secrets and any signing key in your home, use the host's sockets
+  (`docker.sock` among them) and reach the network. On the host backend
+  `ebuild` now runs inside `bwrap`: the system read-only, `/home`, `/tmp`,
+  `/var/tmp`, `/run` and `/etc/bentoo` empty, no network, and only a private
+  build directory writable. A sandboxed pass counts as network-isolated.
+  **Building on the host now needs `sys-apps/bubblewrap`**: without it, or
+  without unprivileged user namespaces, the build gates are skipped with the
+  reason instead of running unsandboxed. The container and VM backends are
+  unchanged. See [docs/autoupdate.md](docs/autoupdate.md).
+
 ### Fixed
 
 - **`overlay compare` translates its fixed sentences.** In a translated

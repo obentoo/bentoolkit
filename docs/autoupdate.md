@@ -785,6 +785,40 @@ build gates of `--check --llm`, `--revive` and `--repair` run:
 A run never falls back to the host in silence. The backend that proved a bump
 is written into its stage record.
 
+##### The host backend's sandbox
+
+A build runs code the bump brought in: configure scripts, build systems,
+test suites. On the host backend, bentoo runs `ebuild` inside
+[bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`, from
+`sys-apps/bubblewrap`), so that code cannot read your files or reach your
+network. Inside the sandbox:
+
+- the system is visible read-only;
+- `/home`, `/root`, `/tmp`, `/var/tmp`, `/run` and `/etc/bentoo` are empty,
+  which hides your files and keys, other builds, and the host's sockets
+  (ssh-agent, D-Bus, `docker.sock`, the DNS resolver's);
+- the network holds only loopback, and IPC and process IDs are separate;
+- the staged tree and the distdir are readable, and a private
+  `PORTAGE_TMPDIR`, created under the host's own and removed after the build,
+  is the only writable place;
+- Portage runs as your user and group (`PORTAGE_USERNAME`,
+  `PORTAGE_GRPNAME`), and `ccache` is off, because a build that could write
+  the shared cache could plant objects a later, real build links.
+
+Because the network is cut, a sandboxed pass counts as isolated, and
+`--require-isolation` is satisfied on a host whose Portage cannot create a
+network namespace by itself.
+
+When `bwrap` is missing, or the kernel does not let it create user
+namespaces, the build is not run: every build gate is SKIPPED with the reason,
+as a host cause, and nothing runs unsandboxed. Install `sys-apps/bubblewrap`,
+or use the `container` or `vm` backend. The container and VM backends are
+separate machines and are not wrapped.
+
+The sandbox covers the build gates of `overlay autoupdate`, `overlay validate`
+and `overlay compare`. It does not cover `pkgdev manifest` (which fetches the
+distfiles and needs the network) or the generation of a Go vendor tarball.
+
 ##### The container backend
 
 ```yaml
