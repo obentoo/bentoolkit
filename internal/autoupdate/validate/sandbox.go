@@ -119,35 +119,45 @@ func sandboxTmpRoot(ctx context.Context, root string) string {
 	return "/var/tmp"
 }
 
-var (
-	sandboxProbeOnce   sync.Once
-	sandboxProbeOK     bool
-	sandboxProbeReason string
-)
+// sandboxProbes caches the probe's answer per resolved bwrap path, so a run
+// probes once, while a PATH that names another bwrap (or none) is asked again
+// instead of inheriting an answer about a different binary.
+var sandboxProbes sync.Map // string → sandboxProbeResult
 
-// ProbeHostSandbox reports whether this host can run a build in the sandbox,
-// and why not when it cannot. It runs bubblewrap once per process with the
-// same namespaces a build uses, because bwrap being installed says nothing
-// about whether unprivileged user namespaces are allowed here.
-func ProbeHostSandbox() (bool, string) {
-	sandboxProbeOnce.Do(func() {
-		sandboxProbeOK, sandboxProbeReason = probeHostSandbox()
-	})
-	return sandboxProbeOK, sandboxProbeReason
+type sandboxProbeResult struct {
+	ok     bool
+	reason string
 }
 
-func probeHostSandbox() (bool, string) {
-	if _, err := exec.LookPath(sandboxBinary); err != nil {
+// ProbeHostSandbox reports whether this host can run a build in the sandbox,
+// and why not when it cannot. It runs bubblewrap with the same namespaces a
+// build uses, because bwrap being installed says nothing about whether
+// unprivileged user namespaces are allowed here. An absent bwrap is not
+// cached: looking it up is cheap and it may be installed mid-run.
+func ProbeHostSandbox() (bool, string) {
+	path, err := exec.LookPath(sandboxBinary)
+	if err != nil {
 		return false, "bubblewrap (bwrap) is not installed"
 	}
-	// SAFE: a once-per-process probe whose answer is cached; bound by its own
+	if r, ok := sandboxProbes.Load(path); ok {
+		res, _ := r.(sandboxProbeResult)
+		return res.ok, res.reason
+	}
+	ok, reason := probeSandboxAt(path)
+	sandboxProbes.Store(path, sandboxProbeResult{ok: ok, reason: reason})
+	return ok, reason
+}
+
+// probeSandboxAt runs the bwrap at path once with a build's namespaces.
+func probeSandboxAt(path string) (bool, string) {
+	// SAFE: a probe whose answer is cached for the run; bound by its own
 	// timeout, never by one request's context, whose cancellation would cache a
 	// false "no sandbox" for the rest of the run.
 	ctx, cancel := context.WithTimeout(context.Background(), sandboxProbeTimeout) // SAFE: see above
 	defer cancel()
 	args := append(append([]string(nil), sandboxBaseArgs...), "--", "true")
-	//nolint:gosec // G204: a constant binary and a fixed argument list, never a shell
-	out, err := exec.CommandContext(ctx, sandboxBinary, args...).CombinedOutput()
+	//nolint:gosec // G204: the bwrap PATH resolves and a fixed argument list, never a shell
+	out, err := exec.CommandContext(ctx, path, args...).CombinedOutput()
 	if err != nil {
 		return false, fmt.Sprintf("bubblewrap could not create its namespaces: %v: %s", err, strings.TrimSpace(string(out)))
 	}

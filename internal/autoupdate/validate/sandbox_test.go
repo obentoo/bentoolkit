@@ -173,7 +173,7 @@ func TestRunBuildGates_SandboxSatisfiesRequireIsolation(t *testing.T) {
 // only the private directory is writable, and loopback is the only network
 // interface. It is skipped where bwrap cannot create its namespaces.
 func TestSandbox_RealBubblewrapHidesFilesAndNetwork(t *testing.T) {
-	if ok, why := probeHostSandbox(); !ok {
+	if ok, why := ProbeHostSandbox(); !ok {
 		t.Skipf("bubblewrap sandbox unavailable here: %s", why)
 	}
 	base := t.TempDir() // under /tmp, which the sandbox hides

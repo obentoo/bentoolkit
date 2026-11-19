@@ -60,6 +60,7 @@ func s092CheckFixture(t *testing.T, auOpts *autoupdateOptions, n int) (pkgs []st
 	for _, tool := range []string{"claude", "pkgdev", "pkgcheck", "emerge", "ebuild", "egencache", "portageq"} {
 		writeStub(t, toolDir, tool, "exit 1\n")
 	}
+	writeBwrapStub(t, toolDir)
 	t.Setenv("PATH", toolDir+":/usr/bin:/bin")
 	// The live region is drawn only when nothing opts out of it.
 	for _, env := range []string{"NO_COLOR", "BENTOO_NO_TUI", "BENTOO_UI"} {
