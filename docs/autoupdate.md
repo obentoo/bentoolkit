@@ -1014,6 +1014,11 @@ them can lose some, and bentoo then logs one warning with the package, the
 stage and how many were dropped. No line is added once the agent's run has
 returned. In plain mode they are `[<cat/pkg>] …` lines on stderr.
 
+The manifest fixer's only shell command is `pkgdev manifest`. It reads text it
+cannot trust (pkgdev's output quoting upstream URLs, upstream pages), so the
+rest of pkgdev is refused: an injected `pkgdev commit` or `pkgdev push` would
+publish its edit. The CLI checks each part of a compound command on its own.
+
 The whole event stream is kept in
 `<logs>/<category>/<package>/<version>/<stage>-agent.jsonl` (mode 0600), with
 every known secret masked, JSON-escaped forms included. bentoo never writes it

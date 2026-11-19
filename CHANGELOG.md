@@ -20,6 +20,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--delete-registry`; `--keep-registry` still leaves the file untouched, and
   the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
 
+### Security
+
+- **The manifest fixer can run `pkgdev manifest` and nothing else from
+  pkgdev.** The agent that repairs a failed Manifest was allowed `pkgdev` with
+  any subcommand. It reads pkgdev's output, which quotes upstream URLs, and
+  upstream pages, so injected text could have steered it into `pkgdev commit`
+  or `pkgdev push` and published its edit. Its only shell rule is now
+  `pkgdev manifest`. See [docs/autoupdate.md](docs/autoupdate.md).
+
 ### Fixed
 
 - **`overlay compare` translates its fixed sentences.** In a translated
