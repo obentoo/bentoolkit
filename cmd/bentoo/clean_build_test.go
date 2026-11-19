@@ -25,5 +25,8 @@ func cleanBuildOptions() []autoupdate.ApplierOption {
 			return err
 		}),
 		autoupdate.WithApplierIsolationProbe(func() (bool, string) { return true, "" }),
+		// The command turns the host sandbox on; whether this machine has
+		// bwrap must not decide a fixture's verdict.
+		autoupdate.WithApplierSandboxProbe(func() (bool, string) { return true, "" }),
 	}
 }

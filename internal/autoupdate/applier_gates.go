@@ -1024,6 +1024,7 @@ func (a *Applier) buildDeps(runAttached func(cmd *exec.Cmd) ([]byte, error)) val
 		RunAttached:    runAttached,
 		LookPath:       a.lookPath,
 		IsolationProbe: a.isolationProbe,
+		SandboxProbe:   a.sandboxProbe,
 	}
 }
 

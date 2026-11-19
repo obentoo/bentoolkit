@@ -417,6 +417,9 @@ type Applier struct {
 	// bubblewrap sandbox and refuses it when the sandbox is missing; see
 	// validate.BuildRequest.HostSandbox. Set via WithApplierHostSandbox.
 	hostSandbox bool
+	// sandboxProbe answers whether the sandbox can run here; it defaults to
+	// validate.ProbeHostSandbox. Set via WithApplierSandboxProbe.
+	sandboxProbe func() (bool, string)
 	// clean, when true, makes a successful Apply remove the previous version's
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
@@ -678,6 +681,17 @@ func WithApplierRequireIsolation(require bool) ApplierOption {
 func WithApplierHostSandbox(enabled bool) ApplierOption {
 	return func(a *Applier) {
 		a.hostSandbox = enabled
+	}
+}
+
+// WithApplierSandboxProbe replaces the measurement of whether the bubblewrap
+// sandbox can run here, so a test's verdict does not depend on whether the
+// machine running the suite has bwrap. nil keeps the real probe.
+func WithApplierSandboxProbe(fn func() (bool, string)) ApplierOption {
+	return func(a *Applier) {
+		if fn != nil {
+			a.sandboxProbe = fn
+		}
 	}
 }
 
@@ -1021,6 +1035,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
 		// tests so both answers are reachable without privilege.
 		isolationProbe: validate.ProbeIsolation,
+		sandboxProbe:   validate.ProbeHostSandbox,
 		// SAFE: the real PATH lookup the build gates ask before spawning;
 		// replaced together with execCommand (see WithExecCommand).
 		lookPath: exec.LookPath,
