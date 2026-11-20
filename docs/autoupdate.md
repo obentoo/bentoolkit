@@ -712,6 +712,26 @@ every check that reads ::gentoo: this warning, the distfile digest
 cross-check below, and the requirement and target lookups that consult the
 master.
 
+#### When ::gentoo already digested the same archive
+
+The Manifest the manifest step writes describes whatever the upstream URL
+served at that moment, so a compromised release or download host would get
+its archive digested and published. When ::gentoo's Manifest for the same
+package lists a file of the same name, bentoo compares the two after the
+manifest step, on `--check`, `--apply` and `--revive` alike. A different size,
+or a different digest of a type both record (BLAKE2B, SHA512), stops the bump:
+
+```text
+a distfile's digest differs from ::gentoo's Manifest (/var/db/repos/gentoo/app-misc/hello/Manifest): hello-2.12.3.tar.gz: BLAKE2B 0bad… here, 649c… in ::gentoo; …
+```
+
+One of the two downloads is not the upstream release: verify the archive by
+hand before trusting either. The LLM manifest fixer is not called for it,
+since no ebuild edit can make a mismatched archive genuine. A file ::gentoo
+does not list is not compared, which is the common case for a package the
+overlay carries ahead of ::gentoo. The tree is the one `BENTOO_GENTOO_REPO`
+names, else `/var/db/repos/gentoo`.
+
 #### What `--check --llm` reports
 
 Each planned bump ends in one of four states, shown in the STATE column of

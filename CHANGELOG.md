@@ -22,6 +22,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Security
 
+- **A bump's distfile is checked against ::gentoo's digest.** The Manifest a
+  bump writes recorded whatever the upstream URL served, so a compromised
+  release or download host would have its archive digested and published.
+  When ::gentoo's Manifest for the same package lists a file of the same name,
+  `overlay autoupdate --check`, `--apply` and `--revive` now compare the size
+  and every digest type both record, and stop the bump on any difference. The
+  LLM manifest fixer is not asked to edit around it. Files ::gentoo does not
+  list are not compared. See [docs/autoupdate.md](docs/autoupdate.md).
+
 - **Host builds run in a bubblewrap sandbox.** The build gates of
   `overlay autoupdate`, `overlay validate` and `overlay compare` ran a bump's
   configure scripts and build system as your user, able to read `~/.ssh`,
