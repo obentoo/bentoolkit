@@ -9,7 +9,14 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.46.0] - 2026-11-20
+
 ### Changed
+
+- **Dependencies refreshed.** chromedp 0.24.0 and cdproto 0.160.7 (the
+  `chromedp` build tag's browser driver), goquery 1.14.0, x/net 0.63.0,
+  x/ansi 0.11.10 and go-udiff 0.4.2. No advisory is involved: govulncheck was
+  already clean.
 
 - **`overlay prune --apply` disables a removed package's registry entries
   instead of deleting them.** Each entry gets `enabled = false` and
@@ -2305,7 +2312,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.45.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.46.0...HEAD
+[0.46.0]: https://github.com/obentoo/bentoolkit/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/obentoo/bentoolkit/compare/v0.44.1...v0.45.0
 [0.44.1]: https://github.com/obentoo/bentoolkit/compare/v0.44.0...v0.44.1
 [0.44.0]: https://github.com/obentoo/bentoolkit/compare/v0.43.0...v0.44.0
