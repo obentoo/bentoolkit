@@ -707,8 +707,10 @@ files, for example:
 It is advisory: it never blocks or changes the bump. It stays silent when
 ::gentoo does not ship that version (most of the overlay is ahead by design) and
 when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
-set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
-check off.
+set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch off
+every check that reads ::gentoo: this warning, the distfile digest
+cross-check below, and the requirement and target lookups that consult the
+master.
 
 #### What `--check --llm` reports
 
@@ -1048,11 +1050,30 @@ them can lose some, and bentoo then logs one warning with the package, the
 stage and how many were dropped. No line is added once the agent's run has
 returned. In plain mode they are `[<cat/pkg>] …` lines on stderr.
 
+The manifest fixer's only shell command is `pkgdev manifest`. It reads text it
+cannot trust (pkgdev's output quoting upstream URLs, upstream pages), so the
+rest of pkgdev is refused: an injected `pkgdev commit` or `pkgdev push` would
+publish its edit. The CLI checks each part of a compound command on its own.
+
 The whole event stream is kept in
 `<logs>/<category>/<package>/<version>/<stage>-agent.jsonl` (mode 0600), with
 every known secret masked, JSON-escaped forms included. bentoo never writes it
 through a symlink. The registry fixer still uses plain JSON output and reports
 no lines.
+
+The registry fixer reads upstream pages, so its edit is checked against its
+task in code rather than trusted. Before the re-check, the whole `.autoupdate`
+directory is compared with a snapshot taken before the agent ran. The edit is
+reverted, and the package is reported with "registry fix reverted: edit
+outside the failed package's entry" and what changed, when it:
+
+- adds, removes or changes any other entry of `packages.toml` (values are
+  compared, so a comment or blank line elsewhere is not a change);
+- changes the failed entry's `meta` block, whose `fetch_url` receives the
+  operator's secrets;
+- adds or changes a header of the failed entry whose value expands `${VAR}`;
+- creates, changes or deletes any other file under `.autoupdate`, `scripts/`
+  included.
 
 #### Repairing a failed bump
 

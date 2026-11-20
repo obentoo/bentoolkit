@@ -35,7 +35,30 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   reason instead of running unsandboxed. The container and VM backends are
   unchanged. See [docs/autoupdate.md](docs/autoupdate.md).
 
+- **The manifest fixer can run `pkgdev manifest` and nothing else from
+  pkgdev.** The agent that repairs a failed Manifest was allowed `pkgdev` with
+  any subcommand. It reads pkgdev's output, which quotes upstream URLs, and
+  upstream pages, so injected text could have steered it into `pkgdev commit`
+  or `pkgdev push` and published its edit. Its only shell rule is now
+  `pkgdev manifest`. See [docs/autoupdate.md](docs/autoupdate.md).
+
+- **The registry fixer can no longer change anything but the failed entry.**
+  The agent that repairs a broken registry entry reads upstream pages, and its
+  rule to touch only that entry was a line in its prompt: an injected page
+  could have it rewrite another entry's `fetch_url`, plant a `${VAR}` header or
+  drop a script under `.autoupdate/scripts/`, and the edit was kept as soon as
+  the failed package re-checked. bentoo now compares the whole `.autoupdate`
+  directory with a snapshot before the re-check and reverts any edit outside
+  the failed entry's extraction config, including a change to its `meta` block
+  or to a header that expands an environment variable. See
+  [docs/autoupdate.md](docs/autoupdate.md).
+
 ### Fixed
+
+- **`BENTOO_GENTOO_REPO=` (set, empty) switches the ::gentoo checks off, as
+  documented.** An empty value was treated like an unset one and fell back to
+  `/var/db/repos/gentoo`, so the documented way to switch the checks off did
+  nothing. Unset still means `/var/db/repos/gentoo`.
 
 - **`overlay compare` translates its fixed sentences.** In a translated
   terminal, the advice to act through `bentoo overlay prune` and the reasons

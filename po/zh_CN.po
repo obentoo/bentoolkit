@@ -1385,6 +1385,10 @@ msgid "could not build checker for re-check"
 msgstr "无法构建用于重新检查的检查器"
 
 #: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "registry fix reverted"
+msgstr "注册表修复已还原"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
 msgid "registry fix stage %d"
 msgstr "注册表修复阶段 %d"
 
