@@ -22,6 +22,11 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **`BENTOO_GENTOO_REPO=` (set, empty) switches the ::gentoo checks off, as
+  documented.** An empty value was treated like an unset one and fell back to
+  `/var/db/repos/gentoo`, so the documented way to switch the checks off did
+  nothing. Unset still means `/var/db/repos/gentoo`.
+
 - **`overlay compare` translates its fixed sentences.** In a translated
   terminal, the advice to act through `bentoo overlay prune` and the reasons
   in "Left Without an Answer" ("versions differ; content check needs equal
