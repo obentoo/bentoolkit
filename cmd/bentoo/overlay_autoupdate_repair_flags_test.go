@@ -92,8 +92,18 @@ func repairFixture(t *testing.T, auOpts *autoupdateOptions, toolExit int) *repai
 		markers = "echo '>>> Source prepared.'\necho '>>> Source configured.'\n"
 	}
 	writeStub(t, f.toolDir, "ebuild", fmt.Sprintf("%sexit %d\n", markers, toolExit))
+	writeBwrapStub(t, f.toolDir)
 	t.Setenv("PATH", f.toolDir+":/usr/bin:/bin")
 	return f
+}
+
+// writeBwrapStub puts a bwrap on dir that runs the command after `--` with no
+// sandbox. A fixture whose stub tools stand in for Portage needs it: the
+// command turns the host sandbox on, and the machine's own bwrap (or its
+// absence, on the CI VM) must not decide whether the stub ebuild runs.
+func writeBwrapStub(t *testing.T, dir string) {
+	t.Helper()
+	writeStub(t, dir, "bwrap", "while [ \"$#\" -gt 0 ]; do a=$1; shift; [ \"$a\" = -- ] && break; done\nexec \"$@\"\n")
 }
 
 func writeStub(t *testing.T, dir, name, body string) {

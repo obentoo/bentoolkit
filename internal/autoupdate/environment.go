@@ -28,6 +28,13 @@ type buildEnvironment interface {
 	Identity() string
 }
 
+// sandboxHostBuild reports whether a build runs in the bubblewrap sandbox:
+// only on the host backend, and only when the command turned it on. A
+// container or VM is already a separate machine, and its commands run there.
+func (a *Applier) sandboxHostBuild() bool {
+	return a.hostSandbox && a.environment() == nil
+}
+
 // environment is the build backend when it is a separate machine, nil on the
 // host.
 func (a *Applier) environment() buildEnvironment {

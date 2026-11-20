@@ -1811,6 +1811,9 @@ func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.A
 		autoupdate.WithApplierLogger(ar.log()),
 		autoupdate.WithApplierValidatePolicy(ar.validate.Policy),
 		autoupdate.WithApplierRequireIsolation(ar.validate.RequireIsolation),
+		// Always on: the code a bump brings in never builds next to the
+		// operator's files and secrets.
+		autoupdate.WithApplierHostSandbox(true),
 		autoupdate.WithApplierRequireProof(ar.validate.RequireProof),
 		autoupdate.WithApplierBuildBackend(ar.validate.Backend),
 		autoupdate.WithApplierBuildBudget(ar.validate.Budget),
