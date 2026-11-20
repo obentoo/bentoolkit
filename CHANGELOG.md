@@ -32,6 +32,7 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   checked as written, at each redirect and, without a proxy, at connect time.
   **A registry record with an `http://` url must move to https** (the overlay's
   only one, `media-libs/libffado`, is fixed in obentoo/bentoo#90). See
+  [docs/autoupdate.md](docs/autoupdate.md).
 
 - **Upstream values are bounded where they are read.** A detected version
   longer than 128 characters is no longer a valid version, so an upstream
