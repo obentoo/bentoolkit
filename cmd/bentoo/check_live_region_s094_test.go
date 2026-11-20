@@ -167,6 +167,7 @@ printf '{"type":"result","subtype":"success","is_error":false,"result":"tried a 
 	for _, tool := range []string{"pkgcheck", "emerge", "ebuild", "egencache", "portageq"} {
 		writeStub(t, toolDir, tool, "exit 1\n")
 	}
+	writeBwrapStub(t, toolDir)
 	t.Setenv("PATH", toolDir+":/usr/bin:/bin")
 	return pkgs, overlay, configDir, checked
 }

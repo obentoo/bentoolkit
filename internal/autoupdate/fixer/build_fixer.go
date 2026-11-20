@@ -45,7 +45,7 @@ import (
 // copied, and an unused capability to CREATE files is only a liability.
 //
 // This is strictly narrower than `var manifestFixAllowedTools`, whose `Write`
-// and `Bash(pkgdev *)` suit a fixer whose job is running `pkgdev manifest` on
+// and `Bash(pkgdev manifest *)` suit a fixer whose job is running `pkgdev manifest` on
 // the overlay. Here the staged tree is the last boundary before the published
 // overlay, so build_fixer_test.go asserts this list rather than trusting this
 // comment. Anything outside it is denied by the CLI without a prompt, which

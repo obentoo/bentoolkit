@@ -340,3 +340,29 @@ func TestRealignProofCarriesEvidence(t *testing.T) {
 		})
 	}
 }
+
+// TestRealignProofRunsInTheHostSandbox: a realignment proof builds on the
+// host, so the options it hands the prover must turn the sandbox on.
+func TestRealignProofRunsInTheHostSandbox(t *testing.T) {
+	realignSetup(t, true, true)
+	realignFlags(t, true, true)
+	realignDepthFlags(t, "configure", true)
+	td := defaultDeps()
+	var seen []realign.Options
+	td.realignProve = func(ctx context.Context, p realign.Proposal, opts realign.Options) (realign.Proof, error) {
+		seen = append(seen, opts)
+		return realignProofWithEvidence(), nil
+	}
+	stubRealignPublishSeams(td, true, false)
+
+	realignRunWith(t, nil, td)
+
+	if len(seen) == 0 {
+		t.Fatal("the prover was never called")
+	}
+	for _, opts := range seen {
+		if !opts.HostSandbox {
+			t.Errorf("realign.Options.HostSandbox = false for %+v; the proof would build unsandboxed", opts.Depth)
+		}
+	}
+}

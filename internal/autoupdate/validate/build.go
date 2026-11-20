@@ -67,6 +67,18 @@ type BuildRequest struct {
 	// Portage answers from its own configuration — the honest answer for a run
 	// that resolved no directory of its own.
 	Distdir string
+
+	// HostSandbox runs `ebuild` inside the bubblewrap sandbox (see sandbox.go).
+	// Set it when the build runs on this host; a container or VM backend is
+	// already a separate machine. The zero value runs `ebuild` as it is, for
+	// library callers and tests; the bentoo command sets it on every host
+	// build. When it is set and the sandbox is unavailable the build is
+	// refused, never run without it.
+	HostSandbox bool
+
+	// SandboxTmpRoot is where the sandbox's private PORTAGE_TMPDIR is created;
+	// empty means the host's PORTAGE_TMPDIR, else /var/tmp.
+	SandboxTmpRoot string
 }
 
 // The phase markers `ebuild` prints, START and DONE for each phase, measured on
@@ -187,10 +199,9 @@ var privilegeTools = []string{"doas", "sudo"}
 // dies before prepare finished proved nothing about the patches and reports
 // SKIPPED. Every covered gate carries its own outcome, never silence.
 //
-// The build runs AS THE INVOKING USER, with an allow-listed environment (see
-// buildEnvAllowed): escalation would stop a sweep at a password prompt. When
-// isolation is REQUIRED and unavailable nothing is spawned and every gate
-// reports SKIPPED; otherwise every PASS says `unverified isolation`.
+// It runs AS THE INVOKING USER with an allow-listed environment, in bubblewrap
+// when HostSandbox is set (sandbox.go). A missing sandbox, or REQUIRED isolation
+// that is unavailable, spawns nothing: every gate reports SKIPPED.
 //
 // The error is about the REQUEST (a malformed atom, no version, no staged
 // tree), never the build: a failed build, or a host with no `ebuild`, returns
@@ -244,7 +255,20 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// --require-isolation will refuse must not first cost this host a lookup, a
 	// fetch or a question. The answer is needed on both paths —
 	// it refuses the run on one and labels the pass on the other.
+	if req.HostSandbox {
+		if ok, why := deps.sandboxProbe()(); !ok {
+			// DeclineHost: the missing sandbox is this machine's, not the
+			// candidate's, so it must not withdraw the bump.
+			return declinedGates(req.Depth, label.clean(sandboxRefusedReason(label.pv, why)), DeclineHost), nil
+		}
+	}
 	isolated, isolationReason := deps.isolationProbe()()
+	if req.HostSandbox {
+		// The sandbox has its own network namespace holding only loopback, so
+		// the build is network-isolated whatever Portage's own
+		// network-sandbox could do for an unprivileged user.
+		isolated, isolationReason = true, ""
+	}
 	if !isolated && req.RequireIsolation {
 		refused := isolationRefusedReason(label.pv, isolationReason, availablePrivilegeTool(deps.binaryLookup()))
 		// DeclineHost: an isolation refusal is this machine saying it
@@ -274,8 +298,17 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// `ebuild` discovers the repository from the path it is given and from its
 	// working directory, so Dir is what decides which tree is built: the staged
 	// one, never the published overlay.
-	cmd := deps.commandFactory()(ctx, "ebuild",
-		filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild"), "clean", phase.String())
+	name, args := "ebuild", []string{filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild"), "clean", phase.String()}
+	var sandbox *buildSandbox
+	if req.HostSandbox {
+		sandbox, err = newBuildSandbox(ctx, req.SandboxTmpRoot)
+		if err != nil {
+			return declinedGates(req.Depth, label.clean(sandboxRefusedReason(label.pv, err.Error())), DeclineHost), nil
+		}
+		defer sandbox.remove()
+		name, args = sandboxBinary, sandboxArgs([]string{stagedRoot, req.Distdir}, sandbox.tmpdir, stagedRoot, name, args)
+	}
+	cmd := deps.commandFactory()(ctx, name, args...)
 	cmd.Dir = stagedRoot
 
 	// The build runs in its OWN process group, so a cancelled
@@ -331,6 +364,9 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// directory, which is a value this package made up.
 	if req.Distdir != "" {
 		cmd.Env = append(cmd.Env, "DISTDIR="+req.Distdir)
+	}
+	if sandbox != nil {
+		cmd.Env = sandboxEnv(cmd.Env, sandbox.tmpdir, sandbox.user, sandbox.group)
 	}
 
 	output, runErr := deps.attachedRunner()(cmd)
@@ -463,6 +499,12 @@ func allowedBuildEnv(parent []string) []string {
 // composing from an earlier duplicate would disable src_test in a value the
 // child never sees.
 func withSrcTestDisabled(env []string) []string {
+	return withFeatureDisabled(env, "test")
+}
+
+// withFeatureDisabled returns env with feature subtracted from FEATURES, as
+// exactly one assignment; see withSrcTestDisabled for why it is composed.
+func withFeatureDisabled(env []string, feature string) []string {
 	const key = "FEATURES="
 
 	value, found := "", false
@@ -474,7 +516,7 @@ func withSrcTestDisabled(env []string) []string {
 
 	// TrimSpace so a parent carrying no value yields `FEATURES=-test` rather
 	// than `FEATURES= -test`, whose empty first token is a value nobody wrote.
-	composed := key + strings.TrimSpace(value+" -test")
+	composed := key + strings.TrimSpace(value+" -"+feature)
 
 	out := make([]string, 0, len(env)+1)
 	if !found {

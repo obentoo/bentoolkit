@@ -4,7 +4,7 @@ package fixer
 // sandboxed ClaudeCodeClient (claude_code.go). Where that client runs the local
 // `claude` CLI tool-free (--allowedTools "") and feeds it page content on stdin,
 // the fixer drives the CLI as a working agent: it is scoped to a single package
-// directory (--add-dir), allowed to read/edit the ebuild, to run `pkgdev` as its
+// directory (--add-dir), allowed to read/edit the ebuild, to run `pkgdev manifest` as its
 // only shell command and to probe upstream with WebFetch on named hosts, and
 // asked to repair a SRC_URI/manifest breakage in place. The agent's edits ARE the side effect; the function returns
 // only a short human-readable summary.
@@ -49,8 +49,13 @@ const manifestFixWaitDelay = 10 * time.Second
 
 // manifestFixAllowedTools is the tool set handed to the agent. Read/Edit/Write
 // let it rewrite the ebuild; `func agentPermissionArgs` scopes all three to the
-// package directory. Bash is granted for pkgdev alone, so the agent can
-// self-verify the manifest without an open shell, and WebFetch — scoped there to
+// package directory. Bash is granted for `pkgdev manifest` alone, so the agent
+// can self-verify the manifest without an open shell; the rest of pkgdev
+// (commit, push, mask, ...) stays out of reach, because the agent reads
+// untrusted text (pkgdev's own output quoting upstream URLs, upstream pages)
+// and an injected `pkgdev commit` or `pkgdev push` would publish its edit. The
+// CLI checks each part of a compound command on its own, so
+// `pkgdev manifest . && pkgdev push` is refused too. WebFetch — scoped there to
 // the package's upstream hosts — is how it confirms a real asset name. There
 // is no curl, wget, cat or ls: the
 // agent reaches the network only through WebFetch's host rules. Anything
@@ -61,7 +66,7 @@ var manifestFixAllowedTools = []string{
 	"Read",
 	"Edit",
 	"Write",
-	"Bash(pkgdev *)",
+	"Bash(pkgdev manifest *)",
 	"WebFetch",
 }
 

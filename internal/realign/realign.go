@@ -152,6 +152,9 @@ type Options struct {
 	// request carries it; hardcoding a true here would refuse every build on a
 	// host that cannot create the namespace, which is the ordinary case.
 	RequireIsolation bool
+	// HostSandbox runs the build in the bubblewrap sandbox; see
+	// validate.BuildRequest.HostSandbox. The bentoo command sets it.
+	HostSandbox bool
 
 	// LogDir is where the build's whole transcript is kept for whoever has to go
 	// past the summary. Empty is still accepted — the gate's own reason then
@@ -234,6 +237,7 @@ func Prove(ctx context.Context, p Proposal, opts Options) (Proof, error) {
 		Depth:            opts.Depth,
 		StagedManifest:   opts.StagedManifest,
 		RequireIsolation: opts.RequireIsolation,
+		HostSandbox:      opts.HostSandbox,
 		LogDir:           opts.LogDir,
 		Distdir:          opts.Distdir,
 		Deps:             opts.Deps,
