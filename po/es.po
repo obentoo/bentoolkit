@@ -1410,6 +1410,10 @@ msgid "could not build checker for re-check"
 msgstr "no se ha podido crear el verificador para volver a comprobar"
 
 #: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "registry fix reverted"
+msgstr "corrección del registro revertida"
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
 msgid "registry fix stage %d"
 msgstr "etapa de corrección del registro %d"
 
