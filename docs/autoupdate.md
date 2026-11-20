@@ -707,8 +707,10 @@ files, for example:
 It is advisory: it never blocks or changes the bump. It stays silent when
 ::gentoo does not ship that version (most of the overlay is ahead by design) and
 when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
-set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
-check off.
+set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch off
+every check that reads ::gentoo: this warning, the distfile digest
+cross-check below, and the requirement and target lookups that consult the
+master.
 
 #### What `--check --llm` reports
 
