@@ -24,7 +24,7 @@ func genPackageName() gopter.Gen {
 
 // genVersion generates valid version strings
 func genVersion() gopter.Gen {
-	return gen.RegexMatch(`^[0-9]+\.[0-9]+(\.[0-9]+)?$`)
+	return gen.RegexMatch(`^[0-9]{1,9}\.[0-9]{1,9}(\.[0-9]{1,9})?$`)
 }
 
 // genGitStatus generates valid git status codes

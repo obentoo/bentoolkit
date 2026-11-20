@@ -27,19 +27,19 @@ func genCommitPackageName() gopter.Gen {
 
 // genVersion generates valid version strings
 func genCommitVersion() gopter.Gen {
-	return gen.RegexMatch(`^[1-9][0-9]?\.[0-9]+(\.[0-9]+)?$`)
+	return gen.RegexMatch(`^[1-9][0-9]?\.[0-9]{1,9}(\.[0-9]{1,9})?$`)
 }
 
 // genHigherVersion generates a version that is higher than the input
 func genHigherVersion(baseVersion string) gopter.Gen { //nolint:unused // PBT helpers for future tests
-	return gen.RegexMatch(`^[1-9][0-9]?\.[0-9]+(\.[0-9]+)?$`).SuchThat(func(v string) bool {
+	return gen.RegexMatch(`^[1-9][0-9]?\.[0-9]{1,9}(\.[0-9]{1,9})?$`).SuchThat(func(v string) bool {
 		return ebuild.CompareVersions(v, baseVersion) > 0
 	})
 }
 
 // genLowerVersion generates a version that is lower than the input
 func genLowerVersion(baseVersion string) gopter.Gen { //nolint:unused // PBT helpers for future tests
-	return gen.RegexMatch(`^[1-9][0-9]?\.[0-9]+(\.[0-9]+)?$`).SuchThat(func(v string) bool {
+	return gen.RegexMatch(`^[1-9][0-9]?\.[0-9]{1,9}(\.[0-9]{1,9})?$`).SuchThat(func(v string) bool {
 		return ebuild.CompareVersions(v, baseVersion) < 0
 	})
 }

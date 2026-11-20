@@ -20,6 +20,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--delete-registry`; `--keep-registry` still leaves the file untouched, and
   the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
 
+### Security
+
+- **Upstream values are bounded where they are read.** A detected version
+  longer than 128 characters is no longer a valid version, so an upstream
+  answering with megabytes of digits cannot reach a file name. An `aux_var`
+  value or a commit hash that the apply would refuse (anything but a plain
+  token, or a 40-character hex hash) now fails `--check` itself, instead of
+  being queued as a bump the apply then refuses. Error messages quote at most
+  64 characters of such a value.
+
 ### Fixed
 
 - **`overlay compare` translates its fixed sentences.** In a translated
