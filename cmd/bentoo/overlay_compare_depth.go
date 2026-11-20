@@ -388,6 +388,7 @@ func proveRealignments(ctx context.Context, report *overlay.CompareReport, overl
 			// for the same reason.
 			StagedManifest:   publishedManifestBytes,
 			RequireIsolation: requireIsolation,
+			HostSandbox:      true,
 			LogDir:           logDir,
 			// Distdir is left EMPTY, and that is a decision rather than an
 			// oversight. `overlay compare` registers no --distdir

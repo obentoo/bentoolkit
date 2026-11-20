@@ -295,7 +295,7 @@ func genVersion() gopter.Gen {
 		// Simple version: 1.0, 2.1, etc.
 		gen.RegexMatch(`[1-9]\.[0-9]`),
 		// Three-part version: 1.0.0, 2.1.3, etc.
-		gen.RegexMatch(`[1-9]\.[0-9]+\.[0-9]+`),
+		gen.RegexMatch(`[1-9]\.[0-9]{1,9}\.[0-9]{1,9}`),
 		// Version with patch: 1.24.11
 		gen.RegexMatch(`[1-9]\.[0-9]{1,2}\.[0-9]{1,2}`),
 	)

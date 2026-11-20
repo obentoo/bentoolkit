@@ -134,6 +134,8 @@ func registryFixStageLine(stage autoupdate.RegistryFixStage) string {
 		return i18n.T("registry fix failed")
 	case autoupdate.RegistryFixStageChecker:
 		return i18n.T("could not build checker for re-check")
+	case autoupdate.RegistryFixStageScope:
+		return i18n.T("registry fix reverted")
 	default:
 		return fmt.Sprintf(i18n.T("registry fix stage %d"), int(stage))
 	}

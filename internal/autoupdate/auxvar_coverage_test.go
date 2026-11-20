@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -231,6 +232,58 @@ func TestOptionSetters(t *testing.T) {
 		WithAnalyzerOpTimeout(2*time.Second),
 		WithAnalyzerLLMTimeout(3*time.Second),
 	)
+}
+
+// TestResolveAux_RefusesHostileValuesAtCapture: an upstream that answers
+// with a value no ebuild variable may hold is refused by --check itself, not
+// first queued as a bump the apply then refuses.
+func TestResolveAux_RefusesHostileValuesAtCapture(t *testing.T) {
+	body := `{"sha":"0123456789abcdef0123456789abcdef01234567","bad_sha":"abc$(id)","build":"esr-bb12","bad_build":"esr-bb12;rm -rf"}`
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	c := newAuxTestChecker(t)
+
+	cases := []struct {
+		name    string
+		cfg     registry.PackageConfig
+		sha     bool
+		want    string
+		wantErr bool
+	}{
+		{"40-hex sha", registry.PackageConfig{URL: server.URL, CommitSHAPath: "sha"}, true, "0123456789abcdef0123456789abcdef01234567", false},
+		{"shell in sha", registry.PackageConfig{URL: server.URL, CommitSHAPath: "bad_sha"}, true, "", true},
+		{"plain aux token", registry.PackageConfig{URL: server.URL, AuxPattern: `"build":"([^"]+)"`}, false, "esr-bb12", false},
+		{"shell in aux", registry.PackageConfig{URL: server.URL, AuxPattern: `"bad_build":"([^"]+)"`}, false, "", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &CheckResult{}
+			var got string
+			if tc.sha {
+				got = c.resolveAuxSHA(t.Context(), &tc.cfg, result)
+			} else {
+				got = c.resolveAuxValue(t.Context(), &tc.cfg, result)
+			}
+			if got != tc.want {
+				t.Errorf("value = %q, want %q", got, tc.want)
+			}
+			if (result.Error != nil) != tc.wantErr {
+				t.Errorf("error = %v, want error=%v", result.Error, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestClipUpstream(t *testing.T) {
+	long := strings.Repeat("9", 1<<20)
+	if got := clipUpstream(long); len(got) > 70 {
+		t.Errorf("clipUpstream kept %d bytes of a 1 MiB value", len(got))
+	}
+	if got := clipUpstream("1.2.3"); got != "1.2.3" {
+		t.Errorf("clipUpstream(%q) = %q, want it unchanged", "1.2.3", got)
+	}
 }
 
 // TestFetchContent_RefusesPlainHTTPBeforeAnyRequest: every probe of a version

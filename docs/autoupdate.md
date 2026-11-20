@@ -478,7 +478,7 @@ from https to http is refused too, with or without a credential. Only loopback
 |-------|-------------|
 | `mirrors` | List of URLs serving the same content as `url`, tried in order when the one before fails and before `fallback_url`. Each is probed with the whole record (parser, `script`, `series`, `select`…) with `url` swapped. Credential headers are never sent to a mirror. A mirror that repeats `url` or an earlier mirror is refused, comparing scheme and host case-insensitively and ignoring one trailing `/`. Only the version fetch uses them: `base_url`, `commit_sha_path`, `aux_pattern` and `track = "commit"` still read `url`. A failure counts as a network failure (no registry repair offered) only when every source failed in transport. |
 | `requires` | Packages this record pins at a version upstream publishes beside its own, as one inline table keyed by `category/package` (no version, slot or label): `requires = { "dev-lang/dart" = { pattern = '"version": "{version}",\s+"dart_sdk_version": "([^"]+)"', pin = "~" } }`. `pattern` has exactly one capture group; `{version}` is replaced by the detected version, which anchors the capture to the same release object. An optional `url` (with `{version}` only in the path or query; no credential header is sent) is read instead of the record's own. `pin` is `~`, `=` or `>=`. `--check` records the captured version and reports it as `present`, `pending` or `missing` (`waits for …`). `--apply` rewrites every atom of that package carrying that operator in the new ebuild — other operators and comments are left alone, and an ebuild with no such atom fails the bump — and waits, keeping the pending entry, while neither the overlay nor ::gentoo (`BENTOO_GENTOO_REPO`) holds the version. `--apply all` applies a required pending bump before the bump that needs it. |
-| `aux_url` | Where `aux_pattern` reads `aux_var`'s value when it is not on the version page (a `latest.txt`, the release's `Cargo.lock` or `package.json`, a tag's commit). `{version}` is replaced by the detected upstream version and may appear only in the path or query. Credential headers are not sent to it. Requires `aux_var` and `aux_pattern`. |
+| `aux_url` | Where `aux_pattern` reads `aux_var`'s value when it is not on the version page (a `latest.txt`, the release's `Cargo.lock` or `package.json`, a tag's commit). `{version}` is replaced by the detected upstream version and may appear only in the path or query. Credential headers are not sent to it. Requires `aux_var` and `aux_pattern`. The value `aux_pattern` captures, from either page, must be a plain token (letters, digits, `.`, `_`, `+`, `-`; at most 128 characters), and a `commit_sha_path` value a 40-character hex hash; anything else is the package's check error, never written into an ebuild. |
 | `fallback_url` | Secondary URL to try if the primary fails. It keeps the record's `timeout`, `series`, `suffix`, `suffix_when` and non-credential headers |
 | `fallback_parser` | Parser type for the fallback URL |
 | `fallback_pattern` | Pattern/path for the fallback parser |
@@ -719,8 +719,30 @@ files, for example:
 It is advisory: it never blocks or changes the bump. It stays silent when
 ::gentoo does not ship that version (most of the overlay is ahead by design) and
 when the two copies are identical. The tree is read from `/var/db/repos/gentoo`;
-set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch the
-check off.
+set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch off
+every check that reads ::gentoo: this warning, the distfile digest
+cross-check below, and the requirement and target lookups that consult the
+master.
+
+#### When ::gentoo already digested the same archive
+
+The Manifest the manifest step writes describes whatever the upstream URL
+served at that moment, so a compromised release or download host would get
+its archive digested and published. When ::gentoo's Manifest for the same
+package lists a file of the same name, bentoo compares the two after the
+manifest step, on `--check`, `--apply` and `--revive` alike. A different size,
+or a different digest of a type both record (BLAKE2B, SHA512), stops the bump:
+
+```text
+a distfile's digest differs from ::gentoo's Manifest (/var/db/repos/gentoo/app-misc/hello/Manifest): hello-2.12.3.tar.gz: BLAKE2B 0bad… here, 649c… in ::gentoo; …
+```
+
+One of the two downloads is not the upstream release: verify the archive by
+hand before trusting either. The LLM manifest fixer is not called for it,
+since no ebuild edit can make a mismatched archive genuine. A file ::gentoo
+does not list is not compared, which is the common case for a package the
+overlay carries ahead of ::gentoo. The tree is the one `BENTOO_GENTOO_REPO`
+names, else `/var/db/repos/gentoo`.
 
 #### What `--check --llm` reports
 
@@ -796,6 +818,40 @@ build gates of `--check --llm`, `--revive` and `--repair` run:
 
 A run never falls back to the host in silence. The backend that proved a bump
 is written into its stage record.
+
+##### The host backend's sandbox
+
+A build runs code the bump brought in: configure scripts, build systems,
+test suites. On the host backend, bentoo runs `ebuild` inside
+[bubblewrap](https://github.com/containers/bubblewrap) (`bwrap`, from
+`sys-apps/bubblewrap`), so that code cannot read your files or reach your
+network. Inside the sandbox:
+
+- the system is visible read-only;
+- `/home`, `/root`, `/tmp`, `/var/tmp`, `/run` and `/etc/bentoo` are empty,
+  which hides your files and keys, other builds, and the host's sockets
+  (ssh-agent, D-Bus, `docker.sock`, the DNS resolver's);
+- the network holds only loopback, and IPC and process IDs are separate;
+- the staged tree and the distdir are readable, and a private
+  `PORTAGE_TMPDIR`, created under the host's own and removed after the build,
+  is the only writable place;
+- Portage runs as your user and group (`PORTAGE_USERNAME`,
+  `PORTAGE_GRPNAME`), and `ccache` is off, because a build that could write
+  the shared cache could plant objects a later, real build links.
+
+Because the network is cut, a sandboxed pass counts as isolated, and
+`--require-isolation` is satisfied on a host whose Portage cannot create a
+network namespace by itself.
+
+When `bwrap` is missing, or the kernel does not let it create user
+namespaces, the build is not run: every build gate is SKIPPED with the reason,
+as a host cause, and nothing runs unsandboxed. Install `sys-apps/bubblewrap`,
+or use the `container` or `vm` backend. The container and VM backends are
+separate machines and are not wrapped.
+
+The sandbox covers the build gates of `overlay autoupdate`, `overlay validate`
+and `overlay compare`. It does not cover `pkgdev manifest` (which fetches the
+distfiles and needs the network) or the generation of a Go vendor tarball.
 
 ##### The container backend
 
@@ -1026,11 +1082,30 @@ them can lose some, and bentoo then logs one warning with the package, the
 stage and how many were dropped. No line is added once the agent's run has
 returned. In plain mode they are `[<cat/pkg>] …` lines on stderr.
 
+The manifest fixer's only shell command is `pkgdev manifest`. It reads text it
+cannot trust (pkgdev's output quoting upstream URLs, upstream pages), so the
+rest of pkgdev is refused: an injected `pkgdev commit` or `pkgdev push` would
+publish its edit. The CLI checks each part of a compound command on its own.
+
 The whole event stream is kept in
 `<logs>/<category>/<package>/<version>/<stage>-agent.jsonl` (mode 0600), with
 every known secret masked, JSON-escaped forms included. bentoo never writes it
 through a symlink. The registry fixer still uses plain JSON output and reports
 no lines.
+
+The registry fixer reads upstream pages, so its edit is checked against its
+task in code rather than trusted. Before the re-check, the whole `.autoupdate`
+directory is compared with a snapshot taken before the agent ran. The edit is
+reverted, and the package is reported with "registry fix reverted: edit
+outside the failed package's entry" and what changed, when it:
+
+- adds, removes or changes any other entry of `packages.toml` (values are
+  compared, so a comment or blank line elsewhere is not a change);
+- changes the failed entry's `meta` block, whose `fetch_url` receives the
+  operator's secrets;
+- adds or changes a header of the failed entry whose value expands `${VAR}`;
+- creates, changes or deletes any other file under `.autoupdate`, `scripts/`
+  included.
 
 #### Repairing a failed bump
 

@@ -9,7 +9,7 @@ stream-json
 --tools
 Read,Edit,Write,Bash,WebFetch
 --allowedTools
-Bash(pkgdev *)
+Bash(pkgdev manifest *)
 Read(/<PKG>/**)
 Edit(/<PKG>/**)
 WebFetch(domain:codeload.github.com)

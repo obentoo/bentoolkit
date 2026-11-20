@@ -1637,11 +1637,13 @@ func applierGentooPathOption() autoupdate.ApplierOption {
 	return autoupdate.WithApplierGentooPath(gentooRepoPath())
 }
 
-// gentooRepoPath is the ::gentoo tree: BENTOO_GENTOO_REPO, else where Portage
-// puts it. The check report reads it too, to tell a required version that
-// ::gentoo already ships from one nothing provides.
+// gentooRepoPath is the ::gentoo tree: BENTOO_GENTOO_REPO when it is set,
+// else where Portage puts it. Set and empty means no ::gentoo tree, which every
+// consumer reads as "skip the master" — the documented way to switch the
+// ::gentoo checks off. The check report reads it too, to tell a required
+// version that ::gentoo already ships from one nothing provides.
 func gentooRepoPath() string {
-	if path := os.Getenv("BENTOO_GENTOO_REPO"); path != "" {
+	if path, set := os.LookupEnv("BENTOO_GENTOO_REPO"); set {
 		return path
 	}
 	return "/var/db/repos/gentoo"
@@ -1809,6 +1811,9 @@ func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.A
 		autoupdate.WithApplierLogger(ar.log()),
 		autoupdate.WithApplierValidatePolicy(ar.validate.Policy),
 		autoupdate.WithApplierRequireIsolation(ar.validate.RequireIsolation),
+		// Always on: the code a bump brings in never builds next to the
+		// operator's files and secrets.
+		autoupdate.WithApplierHostSandbox(true),
 		autoupdate.WithApplierRequireProof(ar.validate.RequireProof),
 		autoupdate.WithApplierBuildBackend(ar.validate.Backend),
 		autoupdate.WithApplierBuildBudget(ar.validate.Budget),
