@@ -413,6 +413,13 @@ type Applier struct {
 	// arrives through that option, so this field stays the single input the
 	// gate reads.
 	requireIsolation bool
+	// hostSandbox, when true, runs a build on the host backend inside the
+	// bubblewrap sandbox and refuses it when the sandbox is missing; see
+	// validate.BuildRequest.HostSandbox. Set via WithApplierHostSandbox.
+	hostSandbox bool
+	// sandboxProbe answers whether the sandbox can run here; it defaults to
+	// validate.ProbeHostSandbox. Set via WithApplierSandboxProbe.
+	sandboxProbe func() (bool, string)
 	// clean, when true, makes a successful Apply remove the previous version's
 	// ebuild and regenerate the Manifest so only the freshly created version
 	// remains. Set via WithApplierClean (the --clean / -c CLI flag).
@@ -664,6 +671,33 @@ func WithApplierRequireIsolation(require bool) ApplierOption {
 		a.requireIsolation = require
 	}
 }
+
+// WithApplierHostSandbox makes a build on the host backend run inside the
+// bubblewrap sandbox, which hides the user's files and secrets from the code
+// the bump brings in and cuts its network, and refuses the build when the
+// sandbox cannot run. The bentoo command always sets it; the zero value, for
+// library callers and tests, runs the build as it is. A container or VM
+// backend is already a separate machine and is never wrapped.
+func WithApplierHostSandbox(enabled bool) ApplierOption {
+	return func(a *Applier) {
+		a.hostSandbox = enabled
+	}
+}
+
+// WithApplierSandboxProbe replaces the measurement of whether the bubblewrap
+// sandbox can run here, so a test's verdict does not depend on whether the
+// machine running the suite has bwrap. nil keeps the real probe.
+func WithApplierSandboxProbe(fn func() (bool, string)) ApplierOption {
+	return func(a *Applier) {
+		if fn != nil {
+			a.sandboxProbe = fn
+		}
+	}
+}
+
+// HostSandboxed reports whether a build on the host backend runs inside the
+// bubblewrap sandbox. The command reads it to prove it turned the sandbox on.
+func (a *Applier) HostSandboxed() bool { return a.hostSandbox }
 
 // WithExecCommand sets a custom context-aware exec.Command function for testing.
 // The function mirrors exec.CommandContext so injected commands also observe
@@ -1001,6 +1035,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		// SAFE: the real measurement; replaced by WithApplierIsolationProbe in
 		// tests so both answers are reachable without privilege.
 		isolationProbe: validate.ProbeIsolation,
+		sandboxProbe:   validate.ProbeHostSandbox,
 		// SAFE: the real PATH lookup the build gates ask before spawning;
 		// replaced together with execCommand (see WithExecCommand).
 		lookPath: exec.LookPath,
@@ -2643,6 +2678,18 @@ func literalReplacement(value string) string {
 // caller then removes. When the fixer runs, the directory the AGENT downloaded
 // into becomes that path, and the first distdir is removed when superseded.
 func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
+	distdir, err := a.runManifestAndFix(ctx, cand, pkg, version, result)
+	if err == nil {
+		// After the fixer, never before it: a digest that disagrees with
+		// ::gentoo is not a broken ebuild for an agent to edit around.
+		err = a.crossCheckGentooDigests(cand.pkgDir, pkg)
+	}
+	return distdir, err
+}
+
+// runManifestAndFix is runManifestWithFix without the ::gentoo digest
+// cross-check: the manifest step and its one agentic repair.
+func (a *Applier) runManifestAndFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	sw := a.sweeperFor(result)
 	distdir, firstErr := a.runManifestFor(ctx, sw, cand, pkg, version)
 	if firstErr == nil {

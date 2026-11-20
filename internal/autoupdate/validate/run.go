@@ -89,6 +89,9 @@ type Options struct {
 	// is labelled "unverified isolation" rather than refused, because creating
 	// the namespace needs privilege an ordinary user does not have.
 	RequireIsolation bool
+	// HostSandbox runs the build in the bubblewrap sandbox; see
+	// BuildRequest.HostSandbox. The bentoo command sets it.
+	HostSandbox bool
 
 	// DistNames answers, for ONE package directory, which upstream archives the
 	// option gate may look for. It is the seam for a directory that cannot name
@@ -604,6 +607,7 @@ func buildDepthGates(ctx context.Context, target ebuildTarget, depth Depth, opts
 		manifest:         manifest,
 		manifestSupplied: supplied,
 		requireIsolation: opts.RequireIsolation,
+		hostSandbox:      opts.HostSandbox,
 		logDir:           opts.LogDir,
 		// The run's own --distdir, unresolved: Options.Distdir is what the
 		// operator typed, and empty means the run named no directory — which the
@@ -662,6 +666,9 @@ type preparedBuild struct {
 	// the bypass: the same gates honour it under `overlay autoupdate`, and a
 	// policy that applies to one of the two commands that build is not a policy.
 	requireIsolation bool
+
+	// hostSandbox is carried like requireIsolation.
+	hostSandbox bool
 
 	// logDir is the whole transcript, kept for whoever has to go past the summary.
 	// Empty is still accepted and the gate's reason still says so.
@@ -815,6 +822,7 @@ func runPreparedBuildGates(ctx context.Context, req preparedBuild) PreparedBuild
 		Version:          req.target.version,
 		Depth:            req.depth,
 		RequireIsolation: req.requireIsolation,
+		HostSandbox:      req.hostSandbox,
 		LogDir:           req.logDir,
 		Distdir:          req.distdir,
 	}, req.deps)
@@ -930,6 +938,9 @@ type PreparedBuildRequest struct {
 	// RunBuildGates fires only when the request carries it, and a policy that
 	// applies to one of the two commands that build is not a policy.
 	RequireIsolation bool
+	// HostSandbox runs the build in the bubblewrap sandbox; see
+	// BuildRequest.HostSandbox. The bentoo command sets it.
+	HostSandbox bool
 
 	// LogDir is where the whole transcript is kept for whoever has to go past
 	// the summary — the run that needs one is exactly the run that FAILED.
@@ -1023,6 +1034,7 @@ func RunPreparedBuild(ctx context.Context, req PreparedBuildRequest) PreparedBui
 		manifest:         manifest,
 		manifestSupplied: supplied,
 		requireIsolation: req.RequireIsolation,
+		hostSandbox:      req.HostSandbox,
 		logDir:           req.LogDir,
 		distdir:          req.Distdir,
 		deps:             req.Deps,

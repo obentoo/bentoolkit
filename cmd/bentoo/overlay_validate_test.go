@@ -814,3 +814,28 @@ func TestOptionGate_ANoDistfilePackageIsReportedAsTheClass(t *testing.T) {
 			gate.Reason)
 	}
 }
+
+// TestOverlayValidate_RunsBuildsInTheHostSandbox: every build this command
+// starts on the host goes through the bubblewrap sandbox. The library leaves
+// it off for its own callers, so this command is where it must be turned on.
+func TestOverlayValidate_RunsBuildsInTheHostSandbox(t *testing.T) {
+	td := defaultDeps()
+	xdg := t.TempDir()
+	dir := filepath.Join(xdg, "bentoo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("laying out the config dir: %v", err)
+	}
+	body := "overlay:\n  path: " + t.TempDir() + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatalf("writing the config: %v", err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+
+	seen := stubValidateRunner(td, validate.Report{})
+	_ = runValidate(newValidateCmd(td), []string{"--depth=configure", "media-plugins/gst-plugins-qt6"}, td)
+
+	if !seen.HostSandbox {
+		t.Error("overlay validate handed the runner HostSandbox=false: a host build would run the bump's code " +
+			"with the operator's files, secrets and network in reach")
+	}
+}

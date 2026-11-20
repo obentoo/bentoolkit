@@ -273,9 +273,10 @@ func TestPromptRegistryFixes_PrintsHEADLines(t *testing.T) {
 			},
 			want: "Fix registry for app-misc/aaa with LLM? [y/N/a/q] " +
 				"Fix registry for app-misc/bbb with LLM? [y/N/a/q] " +
-				"  app-misc/bbb still failing after fix using model alias \"sonnet\": path repaired (agent was refused: WebFetch(example.com))\n" +
-				"  error: package not found in configuration: app-misc/bbb\n" +
-				linesKeep +
+				// The shared fake fixer rewrites linesPkg's entry while
+				// "repairing" app-misc/bbb: an edit outside the failed entry,
+				// reverted before any re-check.
+				"  app-misc/bbb: registry fix reverted: edit outside the failed package's entry: changed entry \"" + linesPkg + "\"\n" +
 				"✔ " + linesPkg + " fixed using model alias \"sonnet\": path repaired (resolved upstream 2.0.0)\n" +
 				"fixed 1 · reverted 1 · skipped 1\n",
 		},

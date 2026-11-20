@@ -4,7 +4,7 @@ package autoupdate
 //
 // D7 IS A SECURITY PROPERTY, SO IT GETS AN ASSERTION RATHER THAN A COMMENT.
 // `--add-dir` scopes the agent's FILE writes; it does not scope `Bash`. The
-// manifest fixer may hold `Write` and `Bash(pkgdev *)` because the manifest step
+// manifest fixer may hold `Write` and `Bash(pkgdev manifest *)` because the manifest step
 // is its whole job (manifest_fixer.go:53). The build fixer may not: the staged
 // tree is the only thing standing between a bad agent edit and an overlay that
 // auto-commits and pushes, and a shell steps straight over it. The fixer only
