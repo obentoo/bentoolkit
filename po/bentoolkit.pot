@@ -1231,6 +1231,10 @@ msgid "could not build checker for re-check"
 msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_fixregistry.go
+msgid "registry fix reverted"
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_fixregistry.go
 msgid "registry fix stage %d"
 msgstr ""
 
