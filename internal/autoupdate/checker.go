@@ -2381,6 +2381,9 @@ func (c *Checker) evaluateLive(ctx context.Context, cfg *registry.PackageConfig,
 // key carries no scope term; a done ctx then ends the read before the cache, so
 // a retained body never answers a cancelled call (errors.Is holds on ctx errors).
 func (c *Checker) fetchContent(ctx context.Context, rawURL string, headers map[string]string, scope fetch.CredentialScope, opTimeout time.Duration) ([]byte, error) {
+	if err := fetch.RequireHTTPS(rawURL); err != nil {
+		return nil, err
+	}
 	if err := fetch.CheckCredentialBinding(rawURL, headers, scope); err != nil {
 		return nil, err
 	}

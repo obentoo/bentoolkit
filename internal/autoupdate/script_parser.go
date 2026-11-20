@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 )
 
 // ErrScriptSupportNotBuilt is returned when a parser="script" package is checked
@@ -54,6 +56,9 @@ type ScriptParser struct {
 func (p *ScriptParser) ParseLive(ctx context.Context) (string, error) {
 	if p.eval == nil {
 		return "", ErrScriptSupportNotBuilt
+	}
+	if err := fetch.RequireHTTPS(p.URL); err != nil {
+		return "", err
 	}
 	out, err := p.eval.Evaluate(ctx, p.URL, p.Script, p.Headers)
 	if err != nil {

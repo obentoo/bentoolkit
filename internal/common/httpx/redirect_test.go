@@ -1,6 +1,7 @@
 package httpx
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -248,14 +249,17 @@ func TestCredentialRedirectPolicy_RefusesHTTPSDowngrade(t *testing.T) {
 		t.Errorf("the http target received %d request(s); want 0", n)
 	}
 
-	// Converse: the same downgrade with no credential is followed.
+	// The same downgrade with no credential is refused too: the cleartext
+	// hop could still have its answer forged.
 	resp, err = client.Do(origin(t, srvTLS.URL+"/start", false))
-	if err != nil {
-		t.Fatalf("a credential-free https -> http redirect must be followed, got %v", err)
+	if resp != nil {
+		_ = resp.Body.Close()
 	}
-	_ = resp.Body.Close()
-	if n := plain.hits.Load(); n != 1 {
-		t.Errorf("the http target received %d request(s) for the credential-free request; want 1", n)
+	if !errors.Is(err, ErrInsecureRedirect) {
+		t.Errorf("a credential-free https -> http redirect: err = %v; want ErrInsecureRedirect", err)
+	}
+	if n := plain.hits.Load(); n != 0 {
+		t.Errorf("the http target received %d request(s) for the credential-free request; want 0", n)
 	}
 
 	// Decided on the ORIGINAL request: refused even when the hop also changes

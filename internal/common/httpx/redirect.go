@@ -18,17 +18,18 @@ const maxRedirects = 10
 // GitHub, GitLab and LLM clients authenticate with.
 var CredentialHeaders = []string{"Authorization", "X-Api-Key", "X-Auth-Token", "Private-Token"}
 
-// ErrInsecureRedirect is returned by CredentialRedirectPolicy when following a
-// redirect would send a credential from https to plain http.
+// ErrInsecureRedirect is returned by CredentialRedirectPolicy when a redirect
+// would take an https request to plain http.
 var ErrInsecureRedirect = errors.New("insecure redirect")
 
 // CredentialRedirectPolicy is an http.Client.CheckRedirect policy that never
 // lets a credential header follow a redirect somewhere it was not sent to:
 //
 //  1. A chain stops after 10 redirects, as net/http's default policy does.
-//  2. An https request that carried a credential header refuses a redirect to
-//     an http URL with an error wrapping ErrInsecureRedirect that names the
-//     target host. It reads the ORIGINAL request, so it holds even when an
+//  2. An https request refuses a redirect to an http URL with an error
+//     wrapping ErrInsecureRedirect that names the target host. With a
+//     credential the cleartext hop would leak it; without one, anyone on the
+//     path could still forge the answer (a version, a download URL). It reads the ORIGINAL request, so it holds even when an
 //     earlier hop already changed host and dropped the headers.
 //  3. Once the chain has left the original hostname, on this hop or an earlier
 //     one, every credential header is deleted and the redirect followed.
@@ -48,9 +49,13 @@ func CredentialRedirectPolicy(req *http.Request, via []*http.Request) error {
 	}
 
 	orig := via[0]
-	if orig.URL.Scheme == "https" && req.URL.Scheme == "http" && carriesCredential(orig.Header) {
-		return fmt.Errorf("%w: redirect from https to http://%s would send a credential in cleartext",
-			ErrInsecureRedirect, req.URL.Host)
+	if orig.URL.Scheme == "https" && req.URL.Scheme == "http" {
+		what := "an answer anyone on the path could forge"
+		if carriesCredential(orig.Header) {
+			what = "a credential in cleartext"
+		}
+		return fmt.Errorf("%w: redirect from https to http://%s would send %s",
+			ErrInsecureRedirect, req.URL.Host, what)
 	}
 
 	if leftHost(orig.URL.Hostname(), req, via[1:]) {

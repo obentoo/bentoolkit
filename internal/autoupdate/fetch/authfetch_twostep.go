@@ -186,7 +186,7 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 	// Redirects are FOLLOWED here, unlike on the form leg: this is already a GET
 	// with no body, so nothing can be dropped, and a CDN edge redirecting to a
 	// region is ordinary. The shared policy still applies.
-	client := &http.Client{Timeout: s.timeout, CheckRedirect: httpx.CredentialRedirectPolicy}
+	client := downloadClient(req.URL, s.timeout, guardedDownloadRedirect)
 	defer client.CloseIdleConnections()
 	resp, err := client.Do(req)
 	if err != nil {
@@ -201,6 +201,16 @@ func (s *authFetchSpec) followDownloadURL(ctx context.Context, first *http.Respo
 			ErrAuthFetchFailed, resp.StatusCode)
 	}
 	return resp, nil
+}
+
+// guardedDownloadRedirect applies the shared redirect policy and then the
+// download guard to every hop, so a public URL cannot redirect into a private
+// network.
+func guardedDownloadRedirect(req *http.Request, via []*http.Request) error {
+	if err := httpx.CredentialRedirectPolicy(req, via); err != nil {
+		return err
+	}
+	return downloadGuard.checkURL(req.URL)
 }
 
 // parseDownloadURL turns the first reply's body into the address to fetch.
@@ -222,6 +232,9 @@ func parseDownloadURL(body, contentType string) (string, error) {
 	if err != nil || !parsed.IsAbs() || (parsed.Scheme != "http" && parsed.Scheme != "https") {
 		return "", fmt.Errorf("%w: %s=%q but the response (content-type %q) is not an absolute http(s) URL: %s",
 			ErrAuthFetchFailed, metaFetchResponse, FetchResponseURL, contentType, firstChars(raw, 120))
+	}
+	if err := downloadGuard.checkURL(parsed); err != nil {
+		return "", err
 	}
 	return raw, nil
 }

@@ -22,6 +22,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Security
 
+- **Version sources must be https, and a vendor's download URL must be
+  public.** A plain `http://` version source let anyone on the network path
+  choose the version a bump went to; it now fails that package's check
+  (loopback excepted). A redirect from https to http is refused whether or not
+  it carries a credential. The download URL a vendor endpoint answers with
+  (`fetch_response = "url"`) must be https and may not lead to loopback, a
+  private network or a link-local address such as the cloud metadata service,
+  checked as written, at each redirect and, without a proxy, at connect time.
+  **A registry record with an `http://` url must move to https** (the overlay's
+  only one, `media-libs/libffado`, is fixed in obentoo/bentoo#90). See
+
 - **Upstream values are bounded where they are read.** A detected version
   longer than 128 characters is no longer a valid version, so an upstream
   answering with megabytes of digits cannot reach a file name. An `aux_var`
