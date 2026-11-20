@@ -20,6 +20,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--delete-registry`; `--keep-registry` still leaves the file untouched, and
   the two flags cannot be combined. See [docs/overlay.md](docs/overlay.md).
 
+### Security
+
+- **A bump's distfile is checked against ::gentoo's digest.** The Manifest a
+  bump writes recorded whatever the upstream URL served, so a compromised
+  release or download host would have its archive digested and published.
+  When ::gentoo's Manifest for the same package lists a file of the same name,
+  `overlay autoupdate --check`, `--apply` and `--revive` now compare the size
+  and every digest type both record, and stop the bump on any difference. The
+  LLM manifest fixer is not asked to edit around it. Files ::gentoo does not
+  list are not compared. See [docs/autoupdate.md](docs/autoupdate.md).
+
 ### Fixed
 
 - **`overlay compare` translates its fixed sentences.** In a translated

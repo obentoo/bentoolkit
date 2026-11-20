@@ -2643,6 +2643,18 @@ func literalReplacement(value string) string {
 // caller then removes. When the fixer runs, the directory the AGENT downloaded
 // into becomes that path, and the first distdir is removed when superseded.
 func (a *Applier) runManifestWithFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
+	distdir, err := a.runManifestAndFix(ctx, cand, pkg, version, result)
+	if err == nil {
+		// After the fixer, never before it: a digest that disagrees with
+		// ::gentoo is not a broken ebuild for an agent to edit around.
+		err = a.crossCheckGentooDigests(cand.pkgDir, pkg)
+	}
+	return distdir, err
+}
+
+// runManifestAndFix is runManifestWithFix without the ::gentoo digest
+// cross-check: the manifest step and its one agentic repair.
+func (a *Applier) runManifestAndFix(ctx context.Context, cand candidatePaths, pkg, version string, result *ApplyResult) (string, error) {
 	sw := a.sweeperFor(result)
 	distdir, firstErr := a.runManifestFor(ctx, sw, cand, pkg, version)
 	if firstErr == nil {
