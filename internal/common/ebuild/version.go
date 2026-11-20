@@ -156,8 +156,15 @@ var validVersionRegex = regexp.MustCompile(`^[0-9]+(\.[0-9]+)*[a-z]?(_(alpha|bet
 // non-comparable inputs up front rather than treat them as "no update
 // available".
 func IsValidVersion(v string) bool {
-	return validVersionRegex.MatchString(strings.TrimSpace(v))
+	v = strings.TrimSpace(v)
+	return len(v) <= MaxVersionLen && validVersionRegex.MatchString(v)
 }
+
+// MaxVersionLen bounds a version string. The grammar alone accepts a digit
+// chain of any length, and an upstream that answers with megabytes of
+// "1.1.1…" would otherwise reach file names and ebuild edits. Real versions,
+// snapshot dates included, stay far below it.
+const MaxVersionLen = 128
 
 // CompareVersions compares two Gentoo-style version strings by the ordering
 // of PMS section 3.3 and returns -1 if v1 < v2, 0 if v1 == v2, 1 if v1 > v2.

@@ -1558,7 +1558,16 @@ func (c *Checker) resolveAuxSHA(ctx context.Context, cfg *registry.PackageConfig
 		}
 		return ""
 	}
-	return strings.TrimSpace(sha)
+	sha = strings.TrimSpace(sha)
+	if !commitHashRe.MatchString(sha) {
+		// Refused here, not only at apply, so --check reports it instead of
+		// queueing a bump the apply would refuse.
+		if result.Error == nil {
+			result.Error = fmt.Errorf("commit sha at %q is not a 40-character hex hash: %q", cfg.CommitSHAPath, clipUpstream(sha))
+		}
+		return ""
+	}
+	return sha
 }
 
 // resolveAuxValue captures the free-text auxiliary value for a package that
@@ -1600,7 +1609,26 @@ func (c *Checker) resolveAuxValue(ctx context.Context, cfg *registry.PackageConf
 		}
 		return ""
 	}
-	return strings.TrimSpace(string(m[1]))
+	value := strings.TrimSpace(string(m[1]))
+	if !auxValueRe.MatchString(value) {
+		// Same reason as resolveAuxSHA: refuse at check, not at apply.
+		if result.Error == nil {
+			result.Error = fmt.Errorf("aux value captured by %q from %s is not a plain token (letters, digits, . _ + -, at most 128): %q",
+				cfg.AuxPattern, source, clipUpstream(value))
+		}
+		return ""
+	}
+	return value
+}
+
+// clipUpstream shortens an upstream-supplied value for an error message, so a
+// hostile response cannot flood the terminal or the log through it.
+func clipUpstream(v string) string {
+	const limit = 64
+	if len(v) <= limit {
+		return v
+	}
+	return v[:limit] + "…"
 }
 
 // resolveRequirements captures the version of every package record pkg

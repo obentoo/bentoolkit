@@ -1,6 +1,7 @@
 package ebuild
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/leanovate/gopter"
@@ -321,5 +322,20 @@ func TestIsValidVersion(t *testing.T) {
 				t.Errorf("IsValidVersion(%q) = %v, want %v", tt.version, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestIsValidVersion_BoundsTheLength: the grammar accepts any digit chain, so
+// the length cap is what keeps a hostile megabyte "version" out of file names.
+func TestIsValidVersion_BoundsTheLength(t *testing.T) {
+	atCap := strings.Repeat("1", MaxVersionLen)
+	if !IsValidVersion(atCap) {
+		t.Errorf("a %d-character version is refused; the cap is inclusive", MaxVersionLen)
+	}
+	if IsValidVersion(atCap + "1") {
+		t.Errorf("a %d-character version is accepted", MaxVersionLen+1)
+	}
+	if IsValidVersion(strings.Repeat("1.", 1<<19) + "1") {
+		t.Error("a 1 MiB digit chain is accepted as a version")
 	}
 }
