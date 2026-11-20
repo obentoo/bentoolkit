@@ -22,6 +22,13 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Security
 
+- **The manifest fixer can run `pkgdev manifest` and nothing else from
+  pkgdev.** The agent that repairs a failed Manifest was allowed `pkgdev` with
+  any subcommand. It reads pkgdev's output, which quotes upstream URLs, and
+  upstream pages, so injected text could have steered it into `pkgdev commit`
+  or `pkgdev push` and published its edit. Its only shell rule is now
+  `pkgdev manifest`. See [docs/autoupdate.md](docs/autoupdate.md).
+
 - **The registry fixer can no longer change anything but the failed entry.**
   The agent that repairs a broken registry entry reads upstream pages, and its
   rule to touch only that entry was a line in its prompt: an injected page

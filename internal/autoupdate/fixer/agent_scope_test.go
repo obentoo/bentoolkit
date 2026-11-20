@@ -121,7 +121,7 @@ func TestFixManifest_PermissionArgvIsScoped(t *testing.T) {
 	}
 	args := spy.args
 	assertExactTools(t, "manifest fixer", args, "Read", "Edit", "Write", "Bash", "WebFetch")
-	want := append([]string{dirRule("Read", req.PkgDir), dirRule("Edit", req.PkgDir), "Bash(pkgdev *)"},
+	want := append([]string{dirRule("Read", req.PkgDir), dirRule("Edit", req.PkgDir), "Bash(pkgdev manifest *)"},
 		webFetchRules("dl.example.org", "mirror.example.net", "github.com", "codeload.github.com", "objects.githubusercontent.com")...)
 	assertExactRuleSet(t, "manifest fixer", ruleList(t, "manifest fixer", args, "allow"), want)
 	assertPinnedPermissions(t, "manifest fixer", args, true)
