@@ -1,12 +1,14 @@
 package autoupdate
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/obentoo/bentoolkit/internal/autoupdate/fetch"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 )
 
@@ -229,4 +231,20 @@ func TestOptionSetters(t *testing.T) {
 		WithAnalyzerOpTimeout(2*time.Second),
 		WithAnalyzerLLMTimeout(3*time.Second),
 	)
+}
+
+// TestFetchContent_RefusesPlainHTTPBeforeAnyRequest: every probe of a version
+// source goes through fetchContent, so an http:// url, mirror, aux_url or
+// base_url is refused there, before the rate limiter or the network.
+func TestFetchContent_RefusesPlainHTTPBeforeAnyRequest(t *testing.T) {
+	c := newAuxTestChecker(t)
+	_, err := c.fetchContent(t.Context(), "http://example.invalid/releases", nil, fetch.CredentialScope{}, time.Second)
+	if !errors.Is(err, fetch.ErrInsecureURL) {
+		t.Fatalf("fetchContent(http://example.invalid) = %v, want fetch.ErrInsecureURL", err)
+	}
+	cfg := &registry.PackageConfig{URL: "http://example.invalid/", AuxPattern: `(x)`}
+	result := &CheckResult{}
+	if got := c.resolveAuxValue(t.Context(), cfg, result); got != "" || !errors.Is(result.Error, fetch.ErrInsecureURL) {
+		t.Errorf("resolveAuxValue over http = %q, %v; want the package's error to be ErrInsecureURL", got, result.Error)
+	}
 }

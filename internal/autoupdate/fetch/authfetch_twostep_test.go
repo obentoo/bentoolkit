@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +41,9 @@ type twoStepServer struct {
 
 func newTwoStepServer(t *testing.T) *twoStepServer {
 	t.Helper()
+	// The fixture CDN is plain http on loopback, which the production guard
+	// refuses; download_target_test.go covers that guard.
+	allowLoopbackDownloads(t)
 	s := &twoStepServer{cdnCT: "application/zip", cdnPayload: twoStepPayload, urlReplyCT: "text/plain; charset=utf-8"}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -468,4 +473,19 @@ func TestWrittenDistfileIsReadableByTheMergingUser(t *testing.T) {
 	if mode := info.Mode().Perm(); mode != distfileMode {
 		t.Errorf("distfile mode = %#o, want %#o — uid portage must be able to read it", mode, distfileMode)
 	}
+}
+
+// loopbackGuard admits any download target, for fixture servers on loopback.
+type loopbackGuard struct{}
+
+func (loopbackGuard) checkURL(*url.URL) error { return nil }
+func (loopbackGuard) checkIP(net.IP) error    { return nil }
+
+// allowLoopbackDownloads replaces downloadGuard for the rest of the test. Not
+// parallel-safe, like every test that swaps a package variable.
+func allowLoopbackDownloads(t *testing.T) {
+	t.Helper()
+	old := downloadGuard
+	downloadGuard = loopbackGuard{}
+	t.Cleanup(func() { downloadGuard = old })
 }

@@ -204,6 +204,12 @@ short-lived — three hours on the endpoint this was built against — so the tw
 legs always run back to back; a refusal from the CDN says so rather than
 blaming the serial.
 
+The address in the reply is the vendor's word, so it must be `https://` and
+must not lead to this machine, a private network or a link-local address
+(`169.254.169.254`, the cloud metadata service, among them). The URL is checked
+as written, again at every redirect, and, without a proxy, against the address
+its name resolves to when the connection opens.
+
 ##### When the endpoint id changes every release
 
 A vendor that mints a fresh download id per release makes a hardcoded
@@ -434,6 +440,12 @@ ebuild instead.
 Valid values are the Gentoo suffixes, optionally numbered: `_alpha`, `_beta`,
 `_pre`, `_rc`, `_p`. The ebuild must be able to strip the suffix when building
 `SRC_URI`, since upstream's filenames do not carry it.
+
+**Every version source is `https://`.** A `url`, mirror, `fallback_url`,
+`aux_url` or `base_url` that is plain `http://` fails that package's check:
+anyone on the network path could answer it and choose the version. A redirect
+from https to http is refused too, with or without a credential. Only loopback
+(`localhost`, `127.0.0.1`, `::1`) may be http.
 
 **Supported parsers:**
 
