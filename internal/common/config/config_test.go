@@ -2475,3 +2475,26 @@ ui:
 		t.Error("ResolveMode accepted the unknown mode the config carried (R3.9)")
 	}
 }
+
+// TestGetOverlayPathCleansTrailingSlash pins that a configured path with a
+// trailing slash or redundant elements comes back in its canonical form, the
+// form llm.CheckAgentDir requires: without it every --repair session was
+// refused for an overlay.path ending in "/".
+func TestGetOverlayPathCleansTrailingSlash(t *testing.T) {
+	tmpDir := createTempOverlay(t)
+	for _, spelled := range []string{tmpDir + "/", tmpDir + "//", tmpDir + "/./"} {
+		cfg := &Config{Overlay: OverlayConfig{Path: spelled}}
+		for name, get := range map[string]func() (string, error){
+			"GetOverlayPath":             cfg.GetOverlayPath,
+			"GetOverlayPathNoValidation": cfg.GetOverlayPathNoValidation,
+		} {
+			path, err := get()
+			if err != nil {
+				t.Fatalf("%s(%q): %v", name, spelled, err)
+			}
+			if path != tmpDir {
+				t.Errorf("%s(%q) = %q, want %q", name, spelled, path, tmpDir)
+			}
+		}
+	}
+}

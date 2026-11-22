@@ -718,6 +718,10 @@ func (c *Config) getOverlayPathWithValidation(validate bool) (string, error) {
 		}
 		path = filepath.Join(home, path[1:])
 	}
+	// Every consumer receives the canonical spelling: a trailing slash in the
+	// config made llm.CheckAgentDir refuse the path and so every --repair
+	// session, and two spellings of one overlay compare unequal.
+	path = filepath.Clean(path)
 
 	// Check if path exists
 	info, err := os.Stat(path)

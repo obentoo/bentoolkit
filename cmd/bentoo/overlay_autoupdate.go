@@ -2212,6 +2212,18 @@ func displayApplyFailure(result *autoupdate.ApplyResult) {
 // directory: every version it removed, and every version it kept together with
 // the registry entry that claims it.
 //
+// ebuildBaseName is the package name an ebuild file of key is named after:
+// the key's base with any ":slot" or "@label" dropped, so the line
+// app-editors/zed@stable names zed-1.27.0.ebuild, the file on disk, and never
+// zed@stable-1.27.0.ebuild, which does not exist. A key that is not an atom
+// falls back to its base as it stands.
+func ebuildBaseName(key string) string {
+	if atom := autoupdate.PackageAtom(key); atom != "" {
+		return filepath.Base(atom)
+	}
+	return filepath.Base(key)
+}
+
 // Naming the claiming entry is the point. "Kept 1.28.5" invites the question
 // the report exists to answer — kept by whom, and may I delete it? — while
 // "kept 1.28.5, claimed by media-plugins/gst-plugins-vpx@stable" says which
@@ -2222,7 +2234,7 @@ func displayApplyFailure(result *autoupdate.ApplyResult) {
 //
 // It prints nothing when --clean did not run, since every field is then empty.
 func displayCleanReport(result *autoupdate.ApplyResult) {
-	pkgName := filepath.Base(result.Package)
+	pkgName := ebuildBaseName(result.Package)
 
 	switch {
 	case len(result.CleanRemoved) > 1:
