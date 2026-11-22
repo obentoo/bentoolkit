@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.46.1] - 2026-11-22
+
 ### Fixed
 
 - **A bump past ::gentoo no longer ships ::gentoo's keywords.** When
@@ -2344,7 +2346,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.46.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.46.1...HEAD
+[0.46.1]: https://github.com/obentoo/bentoolkit/compare/v0.46.0...v0.46.1
 [0.46.0]: https://github.com/obentoo/bentoolkit/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/obentoo/bentoolkit/compare/v0.44.1...v0.45.0
 [0.44.1]: https://github.com/obentoo/bentoolkit/compare/v0.44.0...v0.44.1
