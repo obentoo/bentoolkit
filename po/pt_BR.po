@@ -1550,6 +1550,18 @@ msgid_plural "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the
 msgstr[0] "Marcar %d entrada com disabled_by = \"auto\"? (%d excluídas, o plano acima é a alteração completa)"
 msgstr[1] "Marcar %d entradas com disabled_by = \"auto\"? (%d excluídas, o plano acima é a alteração completa)"
 
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Mirror:  this bump is past ::gentoo; its header comment and registry `patched` text still describe a same-version mirror — rewrite them"
+msgstr "Espelho: este bump passou do ::gentoo; o comentário de cabeçalho e o texto `patched` do registro ainda descrevem um espelho da mesma versão — reescreva-os"
+
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Mirror:  KEYWORDS not rewritten (not a single-line value) — set it to ~amd64 by hand"
+msgstr "Espelho: KEYWORDS não reescrito (não é um valor de uma linha) — defina ~amd64 à mão"
+
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Note: no local ::gentoo tree could be read (set BENTOO_GENTOO_REPO), so no bump was checked for leaving ::gentoo behind"
+msgstr "Nota: nenhuma árvore local do ::gentoo pôde ser lida (defina BENTOO_GENTOO_REPO), então nenhum bump foi verificado quanto a deixar o ::gentoo para trás"
+
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "No session started; the bundle and the staged tree are unchanged."
 msgstr "Nenhuma sessão iniciada; o pacote e a árvore preparada permanecem inalterados."

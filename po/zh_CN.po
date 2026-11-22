@@ -1512,6 +1512,18 @@ msgid "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan a
 msgid_plural "Stamp %d entry(ies) with disabled_by = \"auto\"? (%d excluded, the plan above is the whole change)"
 msgstr[0] "是否为 %d 个条目加上 disabled_by = \"auto\" 标记？（%d 个已排除，上述计划是全部变更）"
 
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Mirror:  this bump is past ::gentoo; its header comment and registry `patched` text still describe a same-version mirror — rewrite them"
+msgstr "镜像：  此次升级已超过 ::gentoo；其头部注释和注册表中的 `patched` 文本仍描述为同版本镜像 — 请改写"
+
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Mirror:  KEYWORDS not rewritten (not a single-line value) — set it to ~amd64 by hand"
+msgstr "镜像：  未改写 KEYWORDS（不是单行值）— 请手动设为 ~amd64"
+
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Note: no local ::gentoo tree could be read (set BENTOO_GENTOO_REPO), so no bump was checked for leaving ::gentoo behind"
+msgstr "注意：无法读取本地 ::gentoo 树（请设置 BENTOO_GENTOO_REPO），因此未检查任何升级是否超过 ::gentoo"
+
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "No session started; the bundle and the staged tree are unchanged."
 msgstr "未启动会话；捆绑包和暂存树未发生变化。"

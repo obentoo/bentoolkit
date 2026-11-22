@@ -724,6 +724,33 @@ every check that reads ::gentoo: this warning, the distfile digest
 cross-check below, and the requirement and target lookups that consult the
 master.
 
+#### When a bump leaves ::gentoo behind
+
+Many overlay ebuilds are same-version mirrors of ::gentoo that only widen
+`PYTHON_COMPAT`, and they keep ::gentoo's `KEYWORDS`. When a bump moves such a
+copy from a version ::gentoo carries to one it does not (revisions ignored on
+both sides), the copy is no longer a mirror, so the applier converts its
+mechanical half:
+
+- a single-line `KEYWORDS="…"` becomes `KEYWORDS="~amd64"`, the overlay
+  baseline;
+- a `# BENTOO-DIVERGENCE: KEYWORDS - ~amd64 only: …` tag is added beside the
+  other divergence tags, unless a KEYWORDS tag is already there.
+
+The prose half is left to you, and the apply summary says so:
+
+```text
+    Mirror:  this bump is past ::gentoo; its header comment and registry `patched` text still describe a same-version mirror — rewrite them
+```
+
+A multi-line or computed `KEYWORDS` is never edited; the summary adds
+"KEYWORDS not rewritten" for it. A bump to a version ::gentoo also carries, a
+package ::gentoo does not carry at all, and a live `9999` ebuild are left
+alone. The decision needs the local ::gentoo tree (`BENTOO_GENTOO_REPO`); when
+it cannot be read, nothing is converted and the run says so once.
+`bentoo overlay compare` reports copies already in this state (see
+[Compare with Upstream](overlay.md#compare-with-upstream)).
+
 #### When ::gentoo already digested the same archive
 
 The Manifest the manifest step writes describes whatever the upstream URL
