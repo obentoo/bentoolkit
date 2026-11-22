@@ -265,6 +265,9 @@ const (
 	// is commentary and nothing that decides a verdict or an exit code may read
 	// it.
 	FindingRealignVerdict
+	// FindingMirrorAhead is an overlay version ahead of ::gentoo that still
+	// carries ::gentoo's keywords or the mirror header. It informs only.
+	FindingMirrorAhead
 )
 
 // String returns the finding's stable word, used in a report and in an export.
@@ -278,6 +281,8 @@ func (k FindingKind) String() string {
 		return "compared"
 	case FindingStaleDeclaration:
 		return "stale-declaration"
+	case FindingMirrorAhead:
+		return "mirror-ahead"
 	case FindingUndeclaredDivergence:
 		return "undeclared-divergence"
 	case FindingDeclaredDivergence:
