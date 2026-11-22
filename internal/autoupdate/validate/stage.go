@@ -744,6 +744,16 @@ func PromotionDecision(gates []GateResult, stageErr error) (bool, string) {
 // gate", "the patches, configure gates". It exists so the refusal and the
 // promotion statement cannot drift into two spellings of the same list.
 func gateList(names []string) string {
+	// A gate the build fixer re-ran is recorded once per run; name it once.
+	unique := make([]string, 0, len(names))
+	seen := make(map[string]bool, len(names))
+	for _, n := range names {
+		if !seen[n] {
+			seen[n] = true
+			unique = append(unique, n)
+		}
+	}
+	names = unique
 	if len(names) == 1 {
 		return "the " + names[0] + " gate"
 	}

@@ -393,7 +393,7 @@ func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDi
 		}
 		fmt.Printf("\n[%d/%d] %s\n", i+1, len(offered), pkg)
 		if err := ar.runRepairFor(ctx, pkg, overlayPath, configDir, auCfg); err != nil {
-			output.Warning.Printf("  %s: %v\n", pkg, err)
+			output.Warning.Printf("  %s: %s\n", pkg, failureDiagnostic(err))
 		}
 	}
 }

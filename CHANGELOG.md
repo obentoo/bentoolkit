@@ -9,6 +9,24 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **Repair sessions start when `overlay.path` ends in a slash.** The
+  configured path is now cleaned (`filepath.Clean`) before any command uses
+  it. A trailing `/` made the session's permission check refuse the overlay,
+  so every `--repair` and every repair session offered after `--check`
+  failed.
+
+- **A refused repair session says why.** The offer after `--check` printed
+  only `exit status 1`; it now prints the cause.
+
+- **The clean report names the ebuild file on disk.** A labelled line such
+  as `app-editors/zed@stable` printed `zed@stable-1.27.0.ebuild`; it now
+  prints `zed-1.27.0.ebuild`.
+
+- **A gate is named once in a verdict.** A gate the build fixer re-ran read
+  "the configure, configure gates FAILED".
+
 ## [0.46.0] - 2026-11-20
 
 ### Changed
