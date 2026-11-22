@@ -310,6 +310,14 @@ type ApplyResult struct {
 	// depths differ — why validation stopped short, naming the atoms or the host
 	// condition that stopped it. It is never empty on a staged apply.
 	DepthReason string
+	// MirrorConversion is set when the bump left ::gentoo behind: the copy was
+	// a ::gentoo mirror, and its header comment and registry `patched` text
+	// still say so. Nil when the bump stays a mirror or ::gentoo is unknown.
+	MirrorConversion *MirrorConversion
+	// GentooTreeUnknown is true when no local ::gentoo tree could be read, so
+	// whether this bump left ::gentoo behind was not decided.
+	GentooTreeUnknown bool
+
 	// ValidationSource says which of the two validation paths this bump took:
 	// "staged" when a retained tree that had already been proved was promoted as
 	// it stood, "this-run" when the gates ran here. It states per package which
@@ -1667,6 +1675,7 @@ func (r *applyRun) promoteRetained(ctx context.Context, reuse stagedReuse) (*App
 	r.rollbackPublished = promoted
 
 	r.result.Success = true
+	r.a.noteMirrorConversion(r.pkg, r.result)
 	// Retention's other direction, exactly as on the validating path: the
 	// retained tree is a failure's evidence, and there is no failure here.
 	r.result.StagedPath = ""
@@ -1770,6 +1779,7 @@ func (r *applyRun) gateAndPromote(ctx context.Context) (*ApplyResult, error) {
 	}
 
 	result.Success = true
+	a.noteMirrorConversion(pkg, result)
 
 	// Retention, the other direction: the retained tree is a FAILURE's evidence, so the
 	// path is dropped the moment there is no failure to explain. Cleared here and
@@ -2172,6 +2182,9 @@ func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpda
 		if err := substituteAuxVar(ebuildPath, a.configs[pkg].AuxVar, update.AuxValue); err != nil {
 			return fmt.Errorf("failed to substitute aux var: %w", err)
 		}
+	}
+	if err := a.convertMirrorBump(ebuildPath, pkg, update); err != nil {
+		return err
 	}
 	return a.rewriteRequirementPins(ebuildPath, pkg, update)
 }

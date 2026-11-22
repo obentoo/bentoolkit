@@ -1588,6 +1588,18 @@ msgstr[0] "Пометить %d запись флагом disabled_by = \"auto\"?
 msgstr[1] "Пометить %d записи как disabled_by = \"auto\"? (%d исключено, приведенный выше план представляет собой все изменение)"
 msgstr[2] "Пометить %d записей как disabled_by = \"auto\"? (%d исключено, приведённый выше план представляет собой все изменения)"
 
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Mirror:  this bump is past ::gentoo; its header comment and registry `patched` text still describe a same-version mirror — rewrite them"
+msgstr "Зеркало: это обновление опережает ::gentoo; комментарий в заголовке и текст `patched` в реестре всё ещё описывают зеркало той же версии — перепишите их"
+
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Mirror:  KEYWORDS not rewritten (not a single-line value) — set it to ~amd64 by hand"
+msgstr "Зеркало: KEYWORDS не переписан (значение не в одну строку) — установите ~amd64 вручную"
+
+#: cmd/bentoo/overlay_autoupdate_mirror.go
+msgid "Note: no local ::gentoo tree could be read (set BENTOO_GENTOO_REPO), so no bump was checked for leaving ::gentoo behind"
+msgstr "Примечание: не удалось прочитать локальное дерево ::gentoo (задайте BENTOO_GENTOO_REPO), поэтому ни одно обновление не проверено на опережение ::gentoo"
+
 #: cmd/bentoo/overlay_autoupdate_repair.go
 msgid "No session started; the bundle and the staged tree are unchanged."
 msgstr "Сессия не запущена; набор и промежуточное дерево остаются без изменений."

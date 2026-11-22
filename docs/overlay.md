@@ -234,6 +234,15 @@ Total: 2 outdated packages
 
 **Note:** Live ebuilds (versions containing `9999`) are automatically ignored, as they represent bleeding-edge/git versions and not stable releases.
 
+**Copies ahead of ::gentoo still shaped as mirrors.** With a local ::gentoo
+tree (`provider: local` or `--clone`), compare reads every overlay version
+::gentoo does not carry, of a package ::gentoo does carry, and adds a
+`mirror-ahead` finding to its row when its `KEYWORDS` is not exactly `~amd64`
+or it still carries the "Mirrored from ::gentoo" header. The finding names
+the version and the condition, in the terminal and in the `--export` JSON. It
+is a finding only: the verdict, the schema and the exit status are unchanged.
+An API provider has no content to read and never produces it.
+
 **Options:**
 
 | Flag | Description | Default |

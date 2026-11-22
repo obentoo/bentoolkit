@@ -183,6 +183,9 @@ type CompareResult struct {
 	// locally available repositories — something AnnotateBaseline is not given
 	// and deliberately does not go looking for.
 	Others []OtherRepo
+	// MirrorAhead lists the overlay versions ahead of ::gentoo still shaped as
+	// ::gentoo mirrors. Read only by EstablishFindings; it decides nothing.
+	MirrorAhead []MirrorAhead
 }
 
 // CompareStatus indicates the comparison result
@@ -886,6 +889,7 @@ func EstablishFindings(report *CompareReport) {
 	findings := baselineRunFindings(report)
 	findings = append(findings, compareFindings(report.Results)...)
 	findings = append(findings, baselineResultsFindings(report.Results)...)
+	findings = append(findings, mirrorAheadFindings(report.Results)...)
 	report.Findings = findings
 }
 
@@ -912,6 +916,7 @@ func comparePackageWithProvider(ctx context.Context, pkg repo.PackageInfo, prov 
 	// comparePackageVersions has no opts, so the text it recorded is scrubbed
 	// here, before anything else can read it.
 	result.FailureText = redactFailure(result.FailureText, opts.Redact)
+	result.MirrorAhead = mirrorAheadVersions(pkg, prov, opts.OverlayPath)
 
 	// Content verification runs HERE, on a result that so far carries only the
 	// version comparison, and it is deliberately placed above the annotation

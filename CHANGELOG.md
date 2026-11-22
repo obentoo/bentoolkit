@@ -11,6 +11,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **A bump past ::gentoo no longer ships ::gentoo's keywords.** When
+  autoupdate moves a same-version ::gentoo mirror to a version ::gentoo does
+  not carry, it rewrites a single-line `KEYWORDS` to `~amd64` and adds the
+  KEYWORDS divergence tag; the apply summary warns that the header comment and
+  the registry `patched` text still describe a mirror. Before, libcbor,
+  libblockdev and grpc went out with ::gentoo's stable keywords for versions
+  ::gentoo never reviewed. See
+  [docs/autoupdate.md](docs/autoupdate.md#when-a-bump-leaves-gentoo-behind).
+
+- **`overlay compare` flags copies already in that state.** A new
+  `mirror-ahead` finding names each overlay version ahead of ::gentoo whose
+  `KEYWORDS` is not `~amd64` or that still carries the "Mirrored from
+  ::gentoo" header. See [docs/overlay.md](docs/overlay.md#compare-with-upstream).
+
 - **Repair sessions start when `overlay.path` ends in a slash.** The
   configured path is now cleaned (`filepath.Clean`) before any command uses
   it. A trailing `/` made the session's permission check refuse the overlay,
