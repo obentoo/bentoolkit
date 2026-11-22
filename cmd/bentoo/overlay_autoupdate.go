@@ -182,6 +182,9 @@ type autoupdateOptions struct {
 // (containedctx): the run context is a parameter of each mode that needs one.
 type autoupdateRun struct {
 	opts *autoupdateOptions
+	// gentooNoticeShown keeps the "no local ::gentoo tree" notice to one line
+	// per run, however many bumps could not be decided.
+	gentooNoticeShown bool
 	// deps is the tree's dependencies: every seam a mode reaches is read
 	// through it, never through a package variable.
 	deps        *deps
@@ -2095,6 +2098,7 @@ func (ar *autoupdateRun) displayApplyResult(result *autoupdate.ApplyResult) {
 	if result == nil {
 		return
 	}
+	ar.noteUnknownGentooTree(result)
 
 	fmt.Println()
 	output.Header.Println(i18n.T("Apply Result"))
@@ -2175,6 +2179,7 @@ func (ar *autoupdateRun) displayApplySuccess(result *autoupdate.ApplyResult) {
 	if result.MetadataCacheWarning != "" {
 		output.Warning.Printf("    "+i18n.T("Cache:   %s")+"\n", result.MetadataCacheWarning)
 	}
+	displayMirrorConversion(result)
 	output.Success.Println("\n" + i18n.T("✓ Update applied successfully"))
 	output.Info.Println(i18n.T("Don't forget to commit the changes with 'bentoo overlay commit'"))
 }
