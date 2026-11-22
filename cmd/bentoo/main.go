@@ -95,6 +95,18 @@ func (e *exitStatus) Unwrap() error {
 	return e.cause
 }
 
+// failureDiagnostic is the text to show for err when a caller reports it
+// itself instead of returning it to func execute: the cause a failWith status
+// carries, since its own Error() is only "exit status <code>" and would hide
+// the reason. Any other error is shown as it stands.
+func failureDiagnostic(err error) string {
+	var st *exitStatus
+	if errors.As(err, &st) && st.cause != nil {
+		return st.cause.Error()
+	}
+	return err.Error()
+}
+
 // failWith reports a code together with the diagnostic func execute prints
 // once. failWith(0, err) returns nil, as exitWith(0) does, and a nil err is a
 // bare status.
