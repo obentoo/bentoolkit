@@ -291,7 +291,7 @@ func buildUserCanRead(path string) bool {
 
 	// Following the link, not lstat: what a build reads is the target, and the
 	// target's mode is what refuses it.
-	info, err := os.Stat(path)
+	info, err := os.Stat(path) //nolint:gosec // G703: a stat only, to learn whether the build user could read a path the build names; nothing is opened
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return false
@@ -321,7 +321,7 @@ func buildUserCanRead(path string) bool {
 // the feature simply does not help there, which is where it started. Getting the
 // other direction wrong is not recoverable by anything the operator can see.
 func buildUserCanTraverse(dir string, gid int) bool {
-	info, err := os.Stat(dir)
+	info, err := os.Stat(dir) //nolint:gosec // G703: a stat only, of the parent directory of the path above; nothing is opened
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
 		return false

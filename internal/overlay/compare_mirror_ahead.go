@@ -55,7 +55,7 @@ func mirrorAheadVersions(pkg repo.PackageInfo, prov provider.Provider, overlayPa
 		if carried[base] || strings.HasSuffix(base, "9999") {
 			continue
 		}
-		body, err := os.ReadFile(filepath.Join(overlayPath, pkg.Category, pkg.Package, pkg.Package+"-"+v+".ebuild"))
+		body, err := os.ReadFile(filepath.Join(overlayPath, pkg.Category, pkg.Package, pkg.Package+"-"+v+".ebuild")) //nolint:gosec // G304: an ebuild the overlay scan itself listed under overlayPath
 		if err != nil {
 			continue
 		}

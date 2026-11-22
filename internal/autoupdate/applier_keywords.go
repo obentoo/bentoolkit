@@ -131,7 +131,7 @@ func (a *Applier) convertMirrorBump(ebuildPath, pkg string, update *PendingUpdat
 	if past, known := pastGentoo(a.gentooPath, category, pn, update.CurrentVersion, update.NewVersion); !past || !known {
 		return nil
 	}
-	body, err := os.ReadFile(ebuildPath)
+	body, err := os.ReadFile(ebuildPath) //nolint:gosec // G304: ebuildPath is the candidate applySubstitutions was handed, inside the overlay or its staged tree
 	if err != nil {
 		return fmt.Errorf("reading %s to convert its mirror KEYWORDS: %w", ebuildPath, err)
 	}
@@ -172,7 +172,7 @@ func (a *Applier) noteMirrorConversion(pkg string, result *ApplyResult) {
 	}
 	conv := &MirrorConversion{}
 	path := a.EbuildPath(pkg, result.NewVersion)
-	body, err := os.ReadFile(path)
+	body, err := os.ReadFile(path) //nolint:gosec // G304: path is EbuildPath of the package just published in this applier's overlay
 	if err != nil {
 		// The bump is published either way; only the "KEYWORDS not rewritten"
 		// note is lost, so this degrades the summary rather than the apply.
