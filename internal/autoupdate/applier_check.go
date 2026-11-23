@@ -256,8 +256,22 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 
 	a.reporter.TaskStage(pkg, "build gates")
 	buildGates, buildErr := a.runBuildGates(ctx, cand, pkg, newVersion, depth.Depth, local)
-	gates = append(gates, buildGates...)
-	if buildErr != nil {
+	if !errors.Is(buildErr, ErrBuildEnvironment) {
+		// On a machine fault the first run's gates are replaced below, not
+		// kept: a FAILED one among them would still read as the candidate's.
+		gates = append(gates, buildGates...)
+	}
+	if errors.Is(buildErr, ErrBuildEnvironment) {
+		// Attributed to this machine (a missing precondition, a full disk, a
+		// death before src_prepare): the check reports it as the host's, the
+		// way the next run declines it on the recorded precondition. Reported
+		// as a failure it carried no cause and read HUMAN (edk2 202611 on
+		// 2026-11-23, a signing key the portage user could not read). Only
+		// the check does this: the apply keeps failing the bump, because a
+		// host-declined build gate would let PromotionDecision publish it.
+		gates = append(gates, hostDeclinedGates(depth.Depth,
+			fmt.Sprintf("the build of %s-%s did not complete: %v", pkg, newVersion, buildErr))...)
+	} else if buildErr != nil {
 		// The build CHILD failed in a way no gate could attribute. On the apply
 		// path that fails the bump; here there is no bump to fail, so it is
 		// reported as the failing gate it belongs to — the operator asked what
