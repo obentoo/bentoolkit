@@ -9,6 +9,17 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **`--apply` no longer publishes a bump its check reported as WAIT.** A
+  retained tree was promoted when one gate passed and the rest were SKIPPED,
+  even when the check that wrote the record had called the bump WAIT or HUMAN:
+  on 2026-11-23 mesa, vulkan-layers, obscura and qtcanvaspainter went out with
+  no build phase run (obscura had passed only `required-use`). The record's own
+  state now decides first; only READY is promoted. Records written before the
+  state field existed keep the previous rule. See
+  [docs/autoupdate.md](docs/autoupdate.md#what---check---llm-reports).
+
 ## [0.46.1] - 2026-11-22
 
 ### Fixed

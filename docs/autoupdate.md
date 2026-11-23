@@ -796,7 +796,9 @@ retained staged tree, with the backend (`host`), the `::gentoo` sync time the
 gates ran against, and when they answered.
 
 `--apply` publishes only what such a record proves: the retained tree must
-match the bump byte for byte, prove the depth the policy asks for, and be no
+match the bump byte for byte, carry the state READY (a record the check
+reported as WAIT, HUMAN or EXCLUDED is never promoted, even beside a passing
+gate), prove the depth the policy asks for, and be no
 older than `autoupdate.proof.max_age_days` (7 by default). The published
 Manifest must also record the same digests for the archives the candidate
 uses; pruning another version (`--clean`) does not invalidate a proof, a
