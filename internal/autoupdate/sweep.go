@@ -213,6 +213,10 @@ func (s *sweeper) execute(ctx context.Context, pkg string, plan sweepPlan, manif
 				len(removed), len(planned), pkg, path, err)
 		}
 		removed = append(removed, version)
+		if err := removeMetadataCacheEntry(s.overlayPath, pkg, version); err != nil {
+			plan.Remove = removed
+			return plan, fmt.Errorf("removed %s-%s but not its md5-cache entry: %w", pkg, version, err)
+		}
 	}
 	plan.Remove = removed
 

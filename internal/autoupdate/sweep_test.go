@@ -989,3 +989,35 @@ func TestOverlaySweepIntegration(t *testing.T) {
 		t.Error("the sweep modified packages.toml")
 	}
 }
+
+// TestSweeperExecuteRemovesTheMd5CacheEntryOfEachSweptEbuild is the standalone
+// --clean of 2026-11-23, which left seven md5-cache entries for ebuilds it had
+// deleted: only the apply path regenerated the cache after a sweep.
+func TestSweeperExecuteRemovesTheMd5CacheEntryOfEachSweptEbuild(t *testing.T) {
+	overlayDir := filepath.Join(t.TempDir(), "overlay")
+	pkg := "test-cat/test-pkg"
+	cacheDir := filepath.Join(overlayDir, "metadata", "md5-cache", "test-cat")
+	if err := os.MkdirAll(cacheDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range []string{"1.0.0", "2.0.0"} {
+		createTestEbuildFile(t, overlayDir, pkg, v)
+		if err := os.WriteFile(filepath.Join(cacheDir, "test-pkg-"+v), []byte("EAPI=8\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	var runs atomic.Int64
+	s := newSweeper(overlayDir, withSweeperExec(countingManifestSeam(&runs)))
+	plan := sweepPlan{Keep: map[string]string{"2.0.0": pkg}, Remove: []string{"1.0.0"}}
+	if _, err := s.execute(t.Context(), pkg, plan, "2.0.0"); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	if _, err := os.Stat(filepath.Join(cacheDir, "test-pkg-1.0.0")); !os.IsNotExist(err) {
+		t.Errorf("the md5-cache entry of the swept 1.0.0 is still on disk (stat err %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "test-pkg-2.0.0")); err != nil {
+		t.Errorf("the md5-cache entry of the kept 2.0.0 was touched: %v", err)
+	}
+}
