@@ -11,6 +11,23 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ### Fixed
 
+- **A repair that drops an obsolete patch can be adopted.** Adoption refused a
+  staged tree whose `files/` lacked a file the overlay still carries for older
+  ebuilds (edk2 202611 and its merged-upstream patch). A removal is now
+  accepted; a changed or added file still refuses, and so does a removal when
+  the candidate picks patches up by a `${FILESDIR}` glob.
+- **A standalone `--clean` removes the md5-cache entry of each ebuild it
+  removes.** Only `--apply --clean` did, so the 2026-11-23 clean left seven
+  entries naming ebuilds that no longer existed.
+- **The check reports a build the attribution put on the machine as WAIT.** A
+  failure before `src_prepare`, a full disk or an unreadable precondition was
+  reported as a FAILED gate with no cause, which read HUMAN. `--apply` still
+  fails such a bump.
+- **A repair that ends WAIT says what would prove it** (install what is
+  missing, or prove it where it is installed) instead of "run --repair again".
+
+### Fixed
+
 - **`--apply` no longer publishes a bump its check reported as WAIT.** A
   retained tree was promoted when one gate passed and the rest were SKIPPED,
   even when the check that wrote the record had called the bump WAIT or HUMAN:
