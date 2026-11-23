@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
@@ -59,7 +60,11 @@ func (r *applyRun) adoptCandidate(root string) error {
 	if err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: %w", root, r.pkg, r.newVersion, err)
 	}
-	rel, err := firstPackageFileDifference(cand.pkgDir, published.pkgDir)
+	candidate, err := os.ReadFile(cand.ebuildPath)
+	if err != nil {
+		return fmt.Errorf("adopting the staged tree %s for %s-%s: reading the candidate: %w", root, r.pkg, r.newVersion, err)
+	}
+	rel, err := firstPackageFileDifference(cand.pkgDir, published.pkgDir, !filesDirGlob.Match(candidate))
 	if err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: comparing its package files with the published overlay: %w", root, r.pkg, r.newVersion, err)
 	}
@@ -112,6 +117,11 @@ func (r *applyRun) raiseDepthToRecord(root string) error {
 	return nil
 }
 
+// filesDirGlob matches a FILESDIR path holding a glob ("${FILESDIR}"/*.patch,
+// ${FILESDIR}/${PV}/*): an ebuild that names its files that way would apply a
+// file left in the published directory that the gates never saw.
+var filesDirGlob = regexp.MustCompile(`\$\{?FILESDIR\}?"?/[^\s"']*[*?\[]`)
+
 // packageMetadataFile is the one file beside files/ that a staged package
 // directory may carry and promotion would not publish.
 const packageMetadataFile = "metadata.xml"
@@ -124,7 +134,14 @@ const packageMetadataFile = "metadata.xml"
 // files/ is compared in both directions, recursively: staging copies it, so any
 // difference is an edit. metadata.xml only counts when the staged directory has
 // one, because staging never copies it.
-func firstPackageFileDifference(stagedPkgDir, publishedPkgDir string) (string, error) {
+//
+// allowRemovals lets a file the published directory carries be absent from the
+// staged one. A bump routinely drops a patch upstream merged (edk2 202611 and
+// its fix-gic-hvf patch, 2026-11-23), and the published copy must stay for the
+// older ebuilds that still name it. The gates built the candidate without the
+// file, so the file left behind changes nothing for it, unless the candidate
+// picks patches up by glob, which is why the caller passes false then.
+func firstPackageFileDifference(stagedPkgDir, publishedPkgDir string, allowRemovals bool) (string, error) {
 	staged, err := packageFileEntries(stagedPkgDir)
 	if err != nil {
 		return "", err
@@ -142,7 +159,7 @@ func firstPackageFileDifference(stagedPkgDir, publishedPkgDir string) (string, e
 		paths = append(paths, rel)
 	}
 	for rel := range published {
-		if _, ok := staged[rel]; !ok {
+		if _, ok := staged[rel]; !ok && !allowRemovals {
 			paths = append(paths, rel)
 		}
 	}
