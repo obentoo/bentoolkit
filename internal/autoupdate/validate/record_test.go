@@ -65,6 +65,48 @@ func TestStageRecord_ProvesStillAcceptsARealMeasurement(t *testing.T) {
 	}
 }
 
+// TestStageRecord_ProvesRefusesARecordTheCheckDidNotCallReady is the apply
+// that published four WAIT bumps on 2026-11-23: obscura's record held one
+// PASS (required-use) beside a configure gate SKIPPED for a missing build
+// dependency, the check reported WAIT, and the tally alone promoted it.
+func TestStageRecord_ProvesRefusesARecordTheCheckDidNotCallReady(t *testing.T) {
+	for _, state := range []string{"WAIT", "HUMAN", "EXCLUDED"} {
+		record := StageRecord{
+			Depth: DepthConfigure,
+			State: state,
+			Gates: append([]GateResult{{Gate: GateRequiredUse, Outcome: OutcomePass}},
+				SkippedGates(DepthConfigure, "this host does not hold the build dependencies")...),
+		}
+
+		proved, why := record.Proves(DepthConfigure)
+
+		if proved {
+			t.Errorf("state %s: a record its own check did not call READY was accepted as proof (%q)", state, why)
+			continue
+		}
+		if !strings.Contains(why, state) {
+			t.Errorf("state %s: the refusal %q does not name the state that caused it", state, why)
+		}
+	}
+}
+
+// TestStageRecord_ProvesAcceptsAReadyRecord keeps the reuse path alive: the
+// state check refuses only what the check itself declined.
+func TestStageRecord_ProvesAcceptsAReadyRecord(t *testing.T) {
+	record := StageRecord{
+		Depth: DepthConfigure,
+		State: "READY",
+		Gates: []GateResult{
+			{Gate: GateRequiredUse, Outcome: OutcomePass},
+			{Gate: GateConfigure, Outcome: OutcomePass},
+		},
+	}
+
+	if proved, why := record.Proves(DepthConfigure); !proved {
+		t.Errorf("a READY record with passing gates was rejected (%q)", why)
+	}
+}
+
 // ===== Story 041, task 2.1 — R5.2 =====
 
 // stageRecordTreeFor gives WriteStageRecord the directory it insists on: it

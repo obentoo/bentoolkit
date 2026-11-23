@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/obentoo/bentoolkit/internal/common/report"
 )
 
 // Beside every retained staged tree sits one record: per gate, what it answered
@@ -359,6 +361,16 @@ func ReadStageRecord(stagedRoot string) (StageRecord, error) {
 // The QA gate never decides (pre-existing pkgcheck findings must not stop every
 // bump), and an empty gate list proves nothing.
 func (r StageRecord) Proves(want Depth) (bool, string) {
+	// The verdict the check itself reached outranks the gate tally below. A
+	// skip beside a pass is READY only when the skipped gates did not stand
+	// between the bump and the depth the policy asked for; when they did, the
+	// check reported WAIT or HUMAN, and promoting on that record published
+	// what the same run had just told the operator was not proven. A record
+	// written before the field existed carries no state and keeps the tally.
+	if r.State != "" && r.State != string(report.Ready) {
+		return false, fmt.Sprintf("the retained tree's own record states %s, not %s: the check that wrote it did not "+
+			"prove this bump at the depth it asked for", r.State, report.Ready)
+	}
 	if r.Depth < want {
 		return false, fmt.Sprintf("the retained tree was proved at depth %s and this run selected %s, so the proof stops short of the question",
 			r.Depth, want)
