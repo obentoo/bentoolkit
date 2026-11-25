@@ -94,6 +94,11 @@ func repairFixture(t *testing.T, auOpts *autoupdateOptions, toolExit int) *repai
 	writeStub(t, f.toolDir, "ebuild", fmt.Sprintf("%sexit %d\n", markers, toolExit))
 	writeBwrapStub(t, f.toolDir)
 	t.Setenv("PATH", f.toolDir+":/usr/bin:/bin")
+	// No live region: none of these tests reads it, and its program could
+	// still draw "Re-validating the repair" on the process's stdout after the
+	// test ended, into the next test's capture (TestS060FailWithSite... failed
+	// that way under shuffle, 2026-11-25).
+	t.Setenv("BENTOO_NO_TUI", "1")
 	return f
 }
 
