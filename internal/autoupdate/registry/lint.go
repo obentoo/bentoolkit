@@ -46,7 +46,7 @@ var CanonicalFieldOrder = []string{
 	// The age gate follows select: select picks the candidate, the gate decides
 	// whether it may be taken.
 	"transform", "select", "min_age_days", "published_path",
-	"cooldown_with", "cooldown_exempt", "cooldown_days", "suffix", "suffix_when",
+	"cooldown_with", "cooldown_days", "cooldown_reason", "suffix", "suffix_when",
 	"commit_sha_path", "commit_message_path", "commit_version_pattern",
 	"base_from", "base_url", "base_pattern", "base_tag_pattern",
 	"headers", "timeout", "meta", "type", "patched", "series",

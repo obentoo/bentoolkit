@@ -242,13 +242,16 @@ type PackageConfig struct {
 	// hplip-plugin). The relation is a clique — every member lists every other
 	// member, sorted, never itself — so every member derives the same group.
 	CooldownWith []string `toml:"cooldown_with,omitempty"`
-	// CooldownExempt takes the package out of the autoupdate cooldown: its
-	// promotions land unmasked. The value is the reason, and it must say one;
-	// the pointer tells an absent key from an empty one, which is an error.
-	CooldownExempt *string `toml:"cooldown_exempt,omitempty"`
 	// CooldownDays overrides, for this record's release line, the days=N of
-	// the overlay's cooldown block (1 to 3650). Zero means the block's.
-	CooldownDays int `toml:"cooldown_days,omitempty"`
+	// the overlay's cooldown block: 1 to 3650 days, or 0 to take the record out
+	// of the cooldown (its promotions land unmasked). The pointer tells an
+	// absent key — the block's days — from 0. It replaced cooldown_exempt on
+	// 2026-11-25: one knob for the wait instead of two that could contradict.
+	CooldownDays *int `toml:"cooldown_days,omitempty"`
+	// CooldownReason says why the record overrides the block's wait. Required
+	// with any CooldownDays: a shorter or no wait trades away the protection
+	// the cooldown gives users, and the registry records who decided that and why.
+	CooldownReason *string `toml:"cooldown_reason,omitempty"`
 
 	// Suffix is the Gentoo version suffix (_alpha, _beta, _pre, _rc, _p, each
 	// optionally numbered) appended to the detected version, declaring that what
@@ -629,6 +632,14 @@ var retiredKeys = map[string]string{
 	"binary": `replaced by type = "bin"`,
 }
 
+// replacedKeys are registry keys renamed with no automatic migration, mapped to
+// what replaced them. Unlike retiredKeys they still FAIL the load — no registry
+// carried them when they were renamed, so there is nothing for --lint --fix to
+// rescue — but the error names the replacement instead of calling it a typo.
+var replacedKeys = map[string]string{
+	"cooldown_exempt": `cooldown_days = 0 with cooldown_reason = "why"`,
+}
+
 // UnknownKey is one packages.toml key that neither a PackageConfig field nor
 // retiredKeys claims.
 type UnknownKey struct {
@@ -638,16 +649,24 @@ type UnknownKey struct {
 	// Key is the key path relative to the record ("serie"), dotted when the key
 	// is nested inside an unclaimed sub-table ("metaa.foo").
 	Key string
+	// ReplacedBy is what a renamed key became (replacedKeys), or empty.
+	ReplacedBy string
 }
 
 // String names the key the way both the load error and the linter need it:
 // record first, because the maintainer's next move is to open that one record
 // out of 411.
 func (k UnknownKey) String() string {
+	var s string
 	if k.Package == "" {
-		return fmt.Sprintf("%q (outside any record)", k.Key)
+		s = fmt.Sprintf("%q (outside any record)", k.Key)
+	} else {
+		s = fmt.Sprintf("[%s] %q", k.Package, k.Key)
 	}
-	return fmt.Sprintf("[%s] %q", k.Package, k.Key)
+	if k.ReplacedBy != "" {
+		s += " (renamed: write " + k.ReplacedBy + ")"
+	}
+	return s
 }
 
 // UnknownKeysError is returned by LoadPackagesConfig when packages.toml holds
@@ -698,7 +717,7 @@ func unknownRegistryKeys(undecoded []toml.Key) []UnknownKey {
 		if _, retired := retiredKeys[field]; retired {
 			continue
 		}
-		keys = append(keys, UnknownKey{Package: pkg, Key: field})
+		keys = append(keys, UnknownKey{Package: pkg, Key: field, ReplacedBy: replacedKeys[field]})
 	}
 	if len(keys) == 0 {
 		return nil

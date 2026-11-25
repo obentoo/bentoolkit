@@ -68,7 +68,7 @@ func TestCooldownSweepClean_KeepsThePredecessorWhileMasked(t *testing.T) {
 		cfg  registry.PackageConfig
 	}{
 		"no block: swept as today":      {"", registry.PackageConfig{Version: "1.5"}},
-		"exempt record: swept as today": {cooldownEmptyBlock, registry.PackageConfig{Version: "1.5", CooldownExempt: &reason}},
+		"exempt record: swept as today": {cooldownEmptyBlock, registry.PackageConfig{Version: "1.5", CooldownDays: cooldownDaysOf(0), CooldownReason: &reason}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := newCooldownFixture(t, bump, extra, map[string]registry.PackageConfig{pkg: c.cfg}, c.mask, WithApplierClean(true))

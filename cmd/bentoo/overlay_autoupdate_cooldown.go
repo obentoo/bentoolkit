@@ -11,6 +11,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/cooldown"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
+	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/common/i18n"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 )
@@ -34,8 +35,9 @@ func ebuildExistsFn(overlayPath string) func(pkg, ver string) bool {
 	}
 }
 
-// sweepCooldown loads the block of overlayPath and applies every release rule:
-// elapsed, installed under pkgdbRoot, stale. It logs one Warn per
+// sweepCooldown loads the block of overlayPath, reconciles its entries with the
+// registry as it stands now (cooldownReconcile), and applies every release
+// rule: elapsed, installed under pkgdbRoot, stale. It logs one Warn per
 // entry dated in the future and per stale lift, one Info per lift, and one
 // Warn when the installed-package database cannot be read. It does not
 // save. A nil block with a nil error is cooldown disabled.
@@ -54,9 +56,35 @@ func sweepCooldown(ctx context.Context, log *slog.Logger, overlayPath, pkgdbRoot
 		log.Warn("cooldown: entry dated in the future, read as now", "package", e.Package, "version", e.Version,
 			"since", e.Since.Format(time.RFC3339))
 	}
+	reconciled := cooldownReconcile(log, block, overlayPath)
 	lifts, rest := cooldown.Sweep(block, now, inst, confirms, ebuildExistsFn(overlayPath))
+	lifts = append(reconciled, lifts...)
 	logCooldownLifts(log, lifts)
 	return rest, lifts, nil
+}
+
+// cooldownReconcile applies the registry's current cooldown_days to the
+// entries already masked: an entry froze the policy of the day it was masked,
+// so a record taken out of the cooldown kept its version masked until the old
+// clock ran out. A registry that cannot be read is warned about and skipped:
+// the time rules need no registry, and refusing them would keep every entry
+// masked over an unrelated typo.
+func cooldownReconcile(log *slog.Logger, block *cooldown.Block, overlayPath string) []cooldown.Lift {
+	cfg, err := registry.LoadPackagesConfig(overlayPath)
+	if err != nil {
+		log.Warn("cooldown: the registry cannot be read; masked entries keep the cooldown_days they were masked with this run", "err", err)
+		return nil
+	}
+	policy := make(map[string]cooldown.LinePolicy, len(cfg.Packages))
+	for key, rec := range cfg.Packages {
+		policy[key] = cooldown.LinePolicy{Off: rec.CooldownOff(), Days: rec.CooldownDaysOverride()}
+	}
+	lifts, retimed := block.Reconcile(policy)
+	for _, r := range retimed {
+		log.Info("cooldown: entry retimed to the registry's cooldown_days", "package", r.Package, "version", r.Version,
+			"from_days", r.From, "to_days", r.To)
+	}
+	return lifts
 }
 
 // logCooldownLifts logs one Info per lift, and a Warn for a stale one.
