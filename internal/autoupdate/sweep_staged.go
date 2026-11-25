@@ -123,8 +123,10 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	// already where pkgdev looks, so it re-digests rather than re-fetches.
 	// Here it would be a demand to redo work pkgdev has correctly decided is
 	// already done, so the ordinary path's argv stays exactly what it was.
+	// An adopted repair tree is the other complete Manifest: forced too, or
+	// pkgdev fetches nothing and the gates read no archive of the candidate.
 	args := []string{"manifest"}
-	if supplied {
+	if supplied || s.forceManifest {
 		args = append(args, "--force")
 	}
 	args = append(args, "--distdir", distdir)

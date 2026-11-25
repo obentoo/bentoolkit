@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strings"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 )
@@ -64,17 +65,51 @@ func (r *applyRun) adoptCandidate(root string) error {
 	if err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: reading the candidate: %w", root, r.pkg, r.newVersion, err)
 	}
-	rel, err := firstPackageFileDifference(cand.pkgDir, published.pkgDir, !filesDirGlob.Match(candidate))
+	diffs, err := packageFileDifferences(cand.pkgDir, published.pkgDir, !filesDirGlob.Match(candidate))
 	if err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: comparing its package files with the published overlay: %w", root, r.pkg, r.newVersion, err)
 	}
-	if rel != "" {
-		return fmt.Errorf("adopting the staged tree %s for %s-%s: %s differs from the published package directory %s, "+
+	if len(diffs) > 0 {
+		return fmt.Errorf("adopting the staged tree %s for %s-%s: %s from the published package directory %s, "+
 			"and promotion publishes only the ebuild and its Manifest, so the gates would pass on files the overlay "+
-			"does not carry; copy that change into the published package directory by hand, then repair again",
-			root, r.pkg, r.newVersion, rel, published.pkgDir)
+			"does not carry; copy the change into the published package directory by hand (%s), then repair again",
+			root, r.pkg, r.newVersion, describeDifferences(diffs), published.pkgDir,
+			copyInstructions(cand.pkgDir, published.pkgDir, diffs))
 	}
 	return nil
+}
+
+// describeDifferences names every differing path: breakpad's refusal of
+// 2026-11-24 named one patch, and a second one would only have surfaced after
+// the operator copied the first and repaired again.
+func describeDifferences(diffs []string) string {
+	if len(diffs) == 1 {
+		return diffs[0] + " differs"
+	}
+	return fmt.Sprintf("%d paths differ (%s)", len(diffs), strings.Join(diffs, ", "))
+}
+
+// copyInstructions spells out, per differing path, what the operator runs: a
+// cp for a regular file the staged tree carries, a note for anything else (a
+// directory, a file only the published tree has, a metadata.xml to merge).
+func copyInstructions(stagedPkgDir, publishedPkgDir string, diffs []string) string {
+	steps := make([]string, 0, len(diffs))
+	for _, rel := range diffs {
+		src := filepath.Join(stagedPkgDir, filepath.FromSlash(rel))
+		dst := filepath.Join(publishedPkgDir, filepath.FromSlash(rel))
+		info, err := os.Lstat(src)
+		switch {
+		case err != nil:
+			steps = append(steps, fmt.Sprintf("%s is only in the published directory: restore it in the staged tree or drop it from the overlay", rel))
+		case info.IsDir():
+			steps = append(steps, fmt.Sprintf("mkdir -p %s", dst))
+		case info.Mode().IsRegular():
+			steps = append(steps, fmt.Sprintf("cp %s %s", src, dst))
+		default:
+			steps = append(steps, fmt.Sprintf("%s is not a regular file: reproduce it in the overlay by hand", rel))
+		}
+	}
+	return strings.Join(steps, "; ")
 }
 
 // adoptedTreeRoot returns root cleaned when it is the staged tree path of this
@@ -126,10 +161,10 @@ var filesDirGlob = regexp.MustCompile(`\$\{?FILESDIR\}?"?/[^\s"']*[*?\[]`)
 // directory may carry and promotion would not publish.
 const packageMetadataFile = "metadata.xml"
 
-// firstPackageFileDifference compares what a staged package directory carries
+// packageFileDifferences compares what a staged package directory carries
 // beside its ebuild and Manifest with the published package directory, and
-// returns the first relative path whose presence, kind or content differs; ""
-// when none does.
+// returns every relative path whose presence, kind or content differs, sorted;
+// nil when none does.
 //
 // files/ is compared in both directions, recursively: staging copies it, so any
 // difference is an edit. metadata.xml only counts when the staged directory has
@@ -141,14 +176,14 @@ const packageMetadataFile = "metadata.xml"
 // older ebuilds that still name it. The gates built the candidate without the
 // file, so the file left behind changes nothing for it, unless the candidate
 // picks patches up by glob, which is why the caller passes false then.
-func firstPackageFileDifference(stagedPkgDir, publishedPkgDir string, allowRemovals bool) (string, error) {
+func packageFileDifferences(stagedPkgDir, publishedPkgDir string, allowRemovals bool) ([]string, error) {
 	staged, err := packageFileEntries(stagedPkgDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	published, err := packageFileEntries(publishedPkgDir)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if _, ok := staged[packageMetadataFile]; !ok {
 		delete(published, packageMetadataFile)
@@ -164,12 +199,13 @@ func firstPackageFileDifference(stagedPkgDir, publishedPkgDir string, allowRemov
 		}
 	}
 	slices.Sort(paths)
+	var diffs []string
 	for _, rel := range paths {
 		if staged[rel] != published[rel] {
-			return rel, nil
+			diffs = append(diffs, rel)
 		}
 	}
-	return "", nil
+	return diffs, nil
 }
 
 // packageFileEntries describes every entry under pkgDir's files/ and its

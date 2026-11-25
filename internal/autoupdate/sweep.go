@@ -97,6 +97,12 @@ type sweeper struct {
 	// log receives the sweeper's diagnostics. newSweeper makes it discarding
 	// when withSweeperLogger is absent.
 	log *slog.Logger
+	// forceManifest re-manifests a COMPLETE Manifest: a tree a --repair session
+	// left is adopted with every digest already written, and pkgdev does not
+	// re-manifest such a package, so it fetched nothing and the revalidation's
+	// gates found no archive of the candidate (ai-jail, amd-gaia and liborcus on
+	// 2026-11-24). Set only for an adopted tree.
+	forceManifest bool
 }
 
 // sweeperOption configures a sweeper at construction.

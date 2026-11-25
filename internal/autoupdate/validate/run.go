@@ -1561,6 +1561,10 @@ func selectDistfile(names []string, source distNameSource, distdir, version stri
 			present = append(present, name)
 		}
 	}
+	// A detached signature travels beside its archive and is never an archive
+	// itself: parallel's parallel-20261122.tar.bz2.sig once made the pick
+	// "cannot tell which of 2 distfiles" for a release with one archive.
+	present = withoutSignatures(present)
 
 	switch len(present) {
 	case 0:
@@ -1636,6 +1640,29 @@ func mainArchive(names []string, goarch string) (string, bool) {
 // bundledDistfileMarkers are the name parts of archives that travel beside a
 // release rather than being it.
 var bundledDistfileMarkers = []string{"-vendor.", "-crates.", "-deps.", "-node_modules.", "-go-mod."}
+
+// signatureSuffixes are the extensions of detached signatures and checksums
+// published beside a release archive.
+var signatureSuffixes = []string{".sig", ".asc", ".sign", ".minisig", ".sha256", ".sha512", ".sha256sum", ".sha512sum"}
+
+func isSignatureDistfile(name string) bool {
+	for _, suffix := range signatureSuffixes {
+		if strings.HasSuffix(name, suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+func withoutSignatures(names []string) []string {
+	kept := names[:0:0]
+	for _, name := range names {
+		if !isSignatureDistfile(name) {
+			kept = append(kept, name)
+		}
+	}
+	return kept
+}
 
 func isBundledDistfile(name string) bool {
 	if strings.HasSuffix(name, ".crate") {

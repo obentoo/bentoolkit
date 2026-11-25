@@ -9,6 +9,25 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A repair's re-validation fetches the candidate's distfiles.** The kept tree
+  arrives with a complete Manifest, and `pkgdev manifest` does not re-manifest
+  one, so nothing was fetched and the gates found no archive of the candidate:
+  the 2026-11-24 repairs of ai-jail, amd-gaia and liborcus could not be proven.
+  The re-validation now runs the manifest step with `--force`.
+- **A detached signature is never taken for the release archive.**
+  `parallel-20261122.tar.bz2.sig` beside its tarball made the options gate
+  answer "cannot tell which of 2 distfiles". `.sig`, `.asc`, `.sign`,
+  `.minisig` and checksum files are passed over when the archive is chosen.
+- **A refused repair adoption names every differing file with its `cp`.** The
+  refusal named only the first path, so a second rebased patch surfaced only on
+  the next repair. The repair session is also told up front that a new or
+  changed file under `files/` is not published.
+- **A searched directory is listed once.** `--distdir` and the distfiles cache
+  are often the same directory, which printed "searched /var/cache/distfiles,
+  /var/cache/distfiles".
+
 ## [0.46.2] - 2026-11-24
 
 ### Fixed

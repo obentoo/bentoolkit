@@ -2363,6 +2363,7 @@ func (a *Applier) sweeperFor(result *ApplyResult) *sweeper {
 	if result != nil {
 		s.vendorSink = &result.Vendor
 	}
+	s.forceManifest = a.adoptedRoot != ""
 	return s
 }
 

@@ -528,10 +528,19 @@ func (a *Applier) previousReviewArchive(ctx context.Context, pkg, version string
 // nobody asked about.
 func findReviewArchive(pkgDir, version string, dirs []string) (string, archiveSearch) {
 	var searched archiveSearch
+	seen := make(map[string]bool, len(dirs))
 	for _, dir := range dirs {
 		if dir == "" {
 			continue
 		}
+		// --distdir and the distfiles cache are often one directory: searching
+		// it twice changes nothing and printed "searched /var/cache/distfiles,
+		// /var/cache/distfiles".
+		clean := filepath.Clean(dir)
+		if seen[clean] {
+			continue
+		}
+		seen[clean] = true
 		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
 			continue
 		}
