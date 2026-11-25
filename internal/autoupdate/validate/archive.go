@@ -8,12 +8,15 @@
 package validate
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os/exec"
+	"path"
+	"slices"
 	"strings"
 	"time"
 )
@@ -44,24 +47,88 @@ const maxArchiveBytes = 4 << 20
 // hostile" apart from "this archive is broken" and report each honestly.
 var ErrArchiveTooLarge = errors.New("archive output exceeds the read cap")
 
-// listArchiveMembers returns the member names inside archive, in the order tar
-// reports them.
+// listArchiveMembers returns the member names inside archive that a gate can
+// read, in the order tar reports them: see listingRelevant.
 //
 // It runs `tar -tf`, which only reads the archive's index — the archive is
 // never unpacked, so listing the 5.7 MB gst tarball costs one pass and no disk.
+//
+// The listing is filtered while it streams, and the read cap counts only the
+// names kept. Counting every name tripped the cap on a large tree whose gates
+// read five files: thunderbird-161.0.source.tar.xz lists more than 4 MiB of
+// names (2026-11-25), and every gate SKIPPED on it.
 func listArchiveMembers(ctx context.Context, archive string) ([]string, error) {
-	out, err := runTar(ctx, archive, "listing", "-tf", archive)
+	ctx, cancel := context.WithTimeout(ctx, archiveTimeout)
+	defer cancel()
+
+	cmd := execCommand(ctx, "tar", "-tf", archive)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("listing %s: opening tar stdout: %w", archive, err)
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("listing %s: starting tar: %w", archive, err)
 	}
 
 	var members []string
-	for _, line := range strings.Split(string(out), "\n") {
-		if name := strings.TrimRight(line, "\r"); name != "" {
-			members = append(members, name)
+	kept := 0
+	heads := map[string]bool{}
+	scanner := bufio.NewScanner(stdout)
+	// A member name is bounded by PATH_MAX (4096) in every tar format a source
+	// archive uses; 64 KiB per line leaves room without trusting the archive.
+	scanner.Buffer(make([]byte, 0, 4096), 64<<10)
+	for scanner.Scan() {
+		name := strings.TrimRight(scanner.Text(), "\r")
+		if name == "" || !listingRelevant(name, heads) {
+			continue
 		}
+		if kept += len(name) + 1; kept > maxArchiveBytes {
+			cancel()
+			_ = cmd.Wait()
+			return nil, fmt.Errorf("listing %s: %w (%d bytes of relevant names)", archive, ErrArchiveTooLarge, maxArchiveBytes)
+		}
+		members = append(members, name)
+	}
+	if err := scanner.Err(); err != nil {
+		cancel()
+		_ = cmd.Wait()
+		return nil, fmt.Errorf("listing %s: reading tar output: %w", archive, err)
+	}
+	if err := cmd.Wait(); err != nil {
+		if diag := flattenDiagnostic(stderr.String()); diag != "" {
+			return nil, fmt.Errorf("listing %s: tar failed: %w: %s", archive, err, diag)
+		}
+		return nil, fmt.Errorf("listing %s: tar failed: %w", archive, err)
 	}
 	return members, nil
+}
+
+// listingRelevant reports whether a gate can read the member: a Meson file
+// (meson.build, an option file), a CMake source (CMakeLists.txt, *.cmake), a
+// build-system marker, or the first member under each top-level entry, which
+// is all archiveRoot needs to tell a wrapper directory from several entries.
+// heads records the top-level entries seen so far.
+func listingRelevant(name string, heads map[string]bool) bool {
+	head, _, _ := strings.Cut(strings.TrimSuffix(name, "/"), "/")
+	if head != "" && !heads[head] {
+		heads[head] = true
+		return true
+	}
+	if strings.HasSuffix(name, "/") {
+		return false
+	}
+	base := path.Base(name)
+	if base == "meson.build" || strings.HasSuffix(base, ".cmake") || slices.Contains(mesonOptionFiles, base) {
+		return true
+	}
+	for _, marker := range buildSystemMarkers {
+		if base == marker.file {
+			return true
+		}
+	}
+	return false
 }
 
 // extractArchiveMember returns the bytes of one member of archive.
