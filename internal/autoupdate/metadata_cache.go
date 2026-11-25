@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,4 +115,22 @@ func layoutMasters(overlayPath string) ([]string, error) {
 		return nil, fmt.Errorf("reading metadata/layout.conf: %w", err)
 	}
 	return nil, errors.New("metadata/layout.conf declares no masters")
+}
+
+// removeMetadataCacheEntry deletes metadata/md5-cache/<category>/<pkg>-<version>.
+//
+// The sweep removes ebuilds for both --apply and a standalone --clean, but only
+// the apply regenerated the cache afterwards: the 2026-11-23 standalone clean
+// left seven entries naming ebuilds that no longer existed. An absent entry, or
+// an overlay that keeps no cache, is the goal already met.
+func removeMetadataCacheEntry(overlayPath, pkg, version string) error {
+	category, pkgName, ok := ebuilds.SplitPkgAtom(pkg)
+	if !ok {
+		return fmt.Errorf("cannot address the md5-cache entry of %q: not a category/package atom", pkg)
+	}
+	entry := filepath.Join(overlayPath, "metadata", "md5-cache", category, pkgName+"-"+version)
+	if err := os.Remove(entry); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return fmt.Errorf("removing %s: %w", entry, err)
+	}
+	return nil
 }

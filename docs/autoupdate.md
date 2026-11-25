@@ -1211,9 +1211,17 @@ SIGTERM or SIGHUP during the session (run `--repair` again), or the run was
 interrupted before it.
 
 `--apply` publishes only the ebuild and its Manifest. A repair that changes
-`files/` or `metadata.xml` in the staged tree is refused, naming the first
-differing path: carry that change into the overlay by hand, then run
-`--repair` again.
+or adds a file under `files/`, or changes `metadata.xml`, in the staged tree is
+refused, naming the first differing path: carry that change into the overlay by
+hand, then run `--repair` again. A repair that only REMOVES a file (a patch
+upstream merged) is adopted: the overlay keeps its copy for the older ebuilds
+that name it, and the candidate was proven without it. The exception is a
+candidate that applies patches by a `${FILESDIR}` glob, which would pick the
+kept file up; that removal is refused like a change.
+
+A re-validation that ends WAIT says so and names what would prove it: only the
+host stood in the way, so install what the gates name, or prove the tree where
+it is installed (a lab VM), before running `--repair` again.
 
 #### Vendor tarballs
 

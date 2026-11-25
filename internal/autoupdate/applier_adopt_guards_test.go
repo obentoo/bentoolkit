@@ -21,6 +21,23 @@ func writeTestFile(t *testing.T, path, body string) {
 	}
 }
 
+// appendCandidateLine appends line to the one candidate ebuild under staged.
+func appendCandidateLine(t *testing.T, staged, line string) {
+	t.Helper()
+	matches, err := filepath.Glob(filepath.Join(staged, "media-plugins", "gst-plugins-qt6", "*.ebuild"))
+	if err != nil || len(matches) != 1 {
+		t.Fatalf("want one candidate ebuild under %s, found %v (%v)", staged, matches, err)
+	}
+	f, err := os.OpenFile(matches[0], os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = f.Close() }()
+	if _, err := f.WriteString("\n" + line + "\n"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // assertAdoptRefused checks a refused adopted apply: it failed naming the
 // root and want, published nothing, and rewrote the bundle in stage "adopt".
 func assertAdoptRefused(t *testing.T, a *Applier, overlayDir, pkg, staged, want string) {
@@ -54,13 +71,15 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 		name      string
 		published map[string]string
 		staged    map[string]string
+		globs     bool   // the candidate applies "${FILESDIR}"/*.patch
 		want      string // "" means the apply must promote
 	}{
 		{name: "identical files promote", published: map[string]string{patch: "same\n"}, staged: map[string]string{patch: "same\n"}},
 		{name: "published metadata.xml alone promotes", published: map[string]string{"metadata.xml": "<pkgmetadata/>\n"}},
 		{name: "patch only in the staged tree", staged: map[string]string{"files/sub/fix.patch": "new\n"}, want: "files/sub"},
 		{name: "patch edited in the staged tree", published: map[string]string{patch: "old\n"}, staged: map[string]string{patch: "new\n"}, want: patch},
-		{name: "patch removed from the staged tree", published: map[string]string{patch: "old\n"}, want: patch},
+		{name: "patch removed from the staged tree promotes", published: map[string]string{patch: "old\n"}},
+		{name: "patch removed while the candidate globs FILESDIR", published: map[string]string{patch: "old\n"}, globs: true, want: patch},
 		{name: "metadata.xml edited in the staged tree", published: map[string]string{"metadata.xml": "<a/>\n"}, staged: map[string]string{"metadata.xml": "<b/>\n"}, want: "metadata.xml"},
 	}
 	for _, tt := range tests {
@@ -71,6 +90,9 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 			}
 			for rel, body := range tt.staged {
 				writeTestFile(t, filepath.Join(staged, "media-plugins", "gst-plugins-qt6", rel), body)
+			}
+			if tt.globs {
+				appendCandidateLine(t, staged, `PATCHES=( "${FILESDIR}"/*.patch )`)
 			}
 			if tt.want != "" {
 				assertAdoptRefused(t, a, overlayDir, pkg, staged, tt.want)

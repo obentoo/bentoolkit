@@ -259,6 +259,14 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 
 	state := repairState(result)
 	printRepairVerdict(b.Package, state, result)
+	if state == report.Wait {
+		// Another repair cannot change the host: the liborcus (slot conflict)
+		// and amd-gaia (no python3_15 dependency) repairs of 2026-11-23 both
+		// ended WAIT and were told to repair again.
+		return failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s: only this host stood in the way (the gates above name what it lacks); "+
+			"the bundle is kept: install what is missing, or prove it where it is installed (a lab VM), then run --repair %s again",
+			b.Package, state, b.Package))
+	}
 	if state != report.Ready {
 		return failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s, not proven; the bundle is kept: run --repair %s again", b.Package, state, b.Package))
 	}

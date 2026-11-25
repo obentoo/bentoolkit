@@ -256,23 +256,45 @@ func (a *Applier) Validate(ctx context.Context, pkg string, ceiling validate.Dep
 
 	a.reporter.TaskStage(pkg, "build gates")
 	buildGates, buildErr := a.runBuildGates(ctx, cand, pkg, newVersion, depth.Depth, local)
-	gates = append(gates, buildGates...)
-	if buildErr != nil {
-		// The build CHILD failed in a way no gate could attribute. On the apply
-		// path that fails the bump; here there is no bump to fail, so it is
-		// reported as the failing gate it belongs to — the operator asked what
-		// would survive an apply, and "this would not have" is the answer.
-		gates = append(gates, validate.GateResult{
-			Gate:     gateForDepth(depth.Depth),
-			Outcome:  validate.OutcomeFailed,
-			Reason:   fmt.Sprintf("the build of %s-%s did not complete: %v", pkg, newVersion, buildErr),
-			Findings: []validate.Finding{{Gate: gateForDepth(depth.Depth), Severity: validate.SeverityError, Detail: buildErr.Error()}},
-		})
-	}
+	gates = appendBuildGates(gates, buildGates, buildErr, pkg, newVersion, depth.Depth)
 
 	a.recordDepthReached(local, gates, depth.Depth)
 	gatesPassed, _ = validate.PromotionDecision(gates, nil)
 	return checkResult(pkg, newVersion, local, depth, gates)
+}
+
+// appendBuildGates adds what the build gates reported to gates, turning a build
+// error into the gate it belongs to: declined over the host when the
+// attribution put it on the machine, FAILED otherwise.
+func appendBuildGates(gates, buildGates []validate.GateResult, buildErr error, pkg, newVersion string, depth validate.Depth) []validate.GateResult {
+	reason := fmt.Sprintf("the build of %s-%s did not complete: %v", pkg, newVersion, buildErr)
+	switch {
+	case errors.Is(buildErr, ErrBuildEnvironment):
+		// Attributed to this machine (a missing precondition, a full disk, a
+		// death before src_prepare): the first run's gates are REPLACED, since a
+		// FAILED one among them would still read as the candidate's, and the
+		// build gates are declined over the host, the way the next run declines
+		// them on the recorded precondition. Reported as a failure it carried no
+		// cause and read HUMAN (edk2 202611 on 2026-11-23, a signing key the
+		// portage user could not read). Only the check does this: the apply
+		// keeps failing the bump, because a host-declined build gate would let
+		// PromotionDecision publish it.
+		return append(gates, hostDeclinedGates(depth, reason)...)
+	case buildErr != nil:
+		// The build CHILD failed in a way no gate could attribute. On the apply
+		// path that fails the bump; here there is no bump to fail, so it is
+		// reported as the failing gate it belongs to — the operator asked what
+		// would survive an apply, and "this would not have" is the answer.
+		gates = append(gates, buildGates...)
+		return append(gates, validate.GateResult{
+			Gate:     gateForDepth(depth),
+			Outcome:  validate.OutcomeFailed,
+			Reason:   reason,
+			Findings: []validate.Finding{{Gate: gateForDepth(depth), Severity: validate.SeverityError, Detail: buildErr.Error()}},
+		})
+	default:
+		return append(gates, buildGates...)
+	}
 }
 
 // holdAtConfirmedDepth applies the confirmed-depth ceiling to a depth a reviewer
