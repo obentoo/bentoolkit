@@ -136,7 +136,7 @@ func TestCooldownApply_AutomaticExemptions(t *testing.T) {
 // cooldown_days reaches the entry as days=N.
 func TestCooldownApply_CooldownDaysIsWrittenOnTheEntry(t *testing.T) {
 	const pkg = "app-misc/cooldown-days"
-	cfgs := map[string]registry.PackageConfig{pkg: {CooldownDays: 3}}
+	cfgs := map[string]registry.PackageConfig{pkg: {CooldownDays: cooldownDaysOf(3), CooldownReason: &cooldownTestReason}}
 	f := newCooldownFixture(t, []cooldownBump{{pkg, "1.0", "1.1"}}, nil, cfgs, cooldownEmptyBlock)
 	if r := applyOne(t, f, pkg); !r.Success {
 		t.Fatalf("the apply failed: %v", r.Error)
@@ -172,3 +172,11 @@ func TestEbuildHasKeywords(t *testing.T) {
 		t.Error("an unreadable ebuild must count as keyworded, so a read error never skips the cooldown")
 	}
 }
+
+// cooldownTestReason is the cooldown_reason every override in these tests
+// carries: the registry refuses a cooldown_days without one.
+var cooldownTestReason = "test override"
+
+// cooldownDaysOf returns a cooldown_days value; the field is a pointer so 0
+// (no cooldown) differs from absent (the block's days).
+func cooldownDaysOf(n int) *int { return &n }

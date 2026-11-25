@@ -100,7 +100,7 @@ func CooldownGroup(pkg string, cfg registry.PackageConfig) string {
 // unreadable block fails closed.
 func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyResult) error {
 	cfg := a.configs[key]
-	if cfg.CooldownExempt != nil {
+	if cfg.CooldownOff() {
 		return nil // even under a malformed block: no entry is needed
 	}
 	category, name, ok := ebuilds.SplitPkgAtom(key)
@@ -145,7 +145,7 @@ func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyRes
 		Group:   CooldownGroup(pkg, cfg),
 		Line:    key,
 		First:   cooldown.LineStart(line),
-		Days:    cfg.CooldownDays,
+		Days:    cfg.CooldownDaysOverride(),
 	}
 	if !entry.First.IsZero() && entry.First.After(entry.Since) {
 		entry.First = entry.Since

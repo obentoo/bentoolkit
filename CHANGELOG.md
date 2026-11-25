@@ -9,6 +9,26 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **`cooldown_days = 0` takes a package out of the cooldown, and every
+  override says why.** `cooldown_exempt` read as jargon and duplicated
+  `cooldown_days` (the two could contradict), so the wait now has one knob:
+  `0` is no cooldown, `1`–`3650` is the record's own wait, and either needs
+  `cooldown_reason`. `cooldown_exempt` fails the load naming its replacement;
+  no registry used it. A `cooldown_with` group must share one `cooldown_days`,
+  and cannot be at `0`, because it is released whole.
+
+### Fixed
+
+- **Changing a record's cooldown reaches the versions already masked.** An
+  entry kept the policy of the day it was masked, so setting `cooldown_days = 0`
+  left the current candidate masked for the rest of its week, and a shorter
+  `cooldown_days` only applied to the next one. The apply-start sweep and
+  `bentoo overlay cooldown sweep` now read the registry first: a line at `0` is
+  lifted (reason `registry`), a changed wait is written on its entries. An
+  unreadable registry skips only this step, with a warning.
+
 ## [0.46.3] - 2026-11-25
 
 ### Fixed

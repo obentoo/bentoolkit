@@ -19,18 +19,39 @@ func keyAtom(key string) string {
 	return atom
 }
 
-// validateCooldownFields checks one record's cooldown fields: a non-empty
-// cooldown_exempt reason, and a cooldown_with of sorted, distinct, bare
-// cat/pkg atoms that never names the record's own package.
+// CooldownOff reports whether the record is out of the cooldown
+// (cooldown_days = 0): its promotions land unmasked.
+func (c *PackageConfig) CooldownOff() bool {
+	return c.CooldownDays != nil && *c.CooldownDays == 0
+}
+
+// CooldownDaysOverride is the record's own wait in days, or 0 when it takes the
+// block's days=N. A record out of the cooldown also answers 0; ask CooldownOff
+// first.
+func (c *PackageConfig) CooldownDaysOverride() int {
+	if c.CooldownDays == nil {
+		return 0
+	}
+	return *c.CooldownDays
+}
+
+// validateCooldownFields checks one record's cooldown fields: a cooldown_days
+// from 0 to the bound that always carries a cooldown_reason (and a reason that
+// always has an override to justify), and a cooldown_with of sorted, distinct,
+// bare cat/pkg atoms that never names the record's own package.
 func validateCooldownFields(pkg string, cfg *PackageConfig) error {
-	if cfg.CooldownExempt != nil && strings.TrimSpace(*cfg.CooldownExempt) == "" {
-		return fmt.Errorf("package %s: cooldown_exempt must say why the package skips the cooldown", pkg)
+	if cfg.CooldownDays != nil {
+		if d := *cfg.CooldownDays; d < 0 || d > maxCooldownDays {
+			return fmt.Errorf("package %s: cooldown_days = %d must be a whole number of days from 0 (no cooldown) to %d", pkg, d, maxCooldownDays)
+		}
+		if cfg.CooldownReason == nil || strings.TrimSpace(*cfg.CooldownReason) == "" {
+			return fmt.Errorf("package %s: cooldown_days needs a cooldown_reason saying why the package does not wait the block's days", pkg)
+		}
+	} else if cfg.CooldownReason != nil {
+		return fmt.Errorf("package %s: cooldown_reason without cooldown_days justifies nothing: set cooldown_days, or drop the reason", pkg)
 	}
-	if cfg.CooldownDays < 0 || cfg.CooldownDays > maxCooldownDays {
-		return fmt.Errorf("package %s: cooldown_days = %d must be a whole number of days from 1 to %d", pkg, cfg.CooldownDays, maxCooldownDays)
-	}
-	if cfg.CooldownDays != 0 && cfg.CooldownExempt != nil {
-		return fmt.Errorf("package %s: cooldown_days and cooldown_exempt contradict each other: an exempt package has no cooldown to size", pkg)
+	if cfg.CooldownOff() && len(cfg.CooldownWith) > 0 {
+		return fmt.Errorf("package %s: cooldown_days = 0 cannot be combined with cooldown_with: a group is masked and released together, so no member can skip the cooldown alone", pkg)
 	}
 	self := keyAtom(pkg)
 	for i, t := range cfg.CooldownWith {
@@ -72,6 +93,11 @@ func validateCooldownGroups(pkgs map[string]PackageConfig) error {
 				return fmt.Errorf("package %s: cooldown_with names %s, which has no record in the registry", key, target)
 			}
 			for _, other := range records {
+				otherCfg := pkgs[other]
+				if a, b := cfg.CooldownDaysOverride(), otherCfg.CooldownDaysOverride(); a != b {
+					return fmt.Errorf("package %s: cooldown_days differs from %s's (%d vs %d; 0 is the block's): a cooldown_with group is released whole, so its members share one wait",
+						key, other, a, b)
+				}
 				have := append([]string{target}, pkgs[other].CooldownWith...)
 				for _, member := range group {
 					if member != target && !slices.Contains(have, member) {

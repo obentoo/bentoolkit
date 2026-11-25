@@ -5,10 +5,10 @@ package registry
 //
 // Contract: design.md "Registry fields" — `cooldown_with` ([]string of
 // cat/pkg: every target has a record, the relation is symmetric, no
-// self-reference, sorted) and `cooldown_exempt` (a non-empty reason; an empty
-// string is a load error), both appended to CanonicalFieldOrder after
+// self-reference, sorted), `cooldown_days` (0 = no cooldown) and
+// `cooldown_reason` (required with any cooldown_days), appended to CanonicalFieldOrder after
 // `published_path`, rendered and repaired like every other field. Field names
-// per the refined contract: CooldownWith []string, CooldownExempt *string.
+// per the refined contract: CooldownWith []string, CooldownDays *int, CooldownReason *string.
 //
 // "The registry load" is what every caller runs: decodePackagesConfig followed
 // by ValidateAll. A rule enforced by either half satisfies these tests.
@@ -74,26 +74,65 @@ func unnamed(text string, names ...string) []string {
 	return missing
 }
 
-// TestCooldownExempt_AnEmptyReasonFailsAndAReasonLoads: R5.2, hostile half
-// first — `cooldown_exempt = ""` fails the load naming the record — then the
-// benign half: a set reason survives verbatim, and an absent key stays nil
-// (the pointer is what tells "absent" from "set").
-func TestCooldownExempt_AnEmptyReasonFailsAndAReasonLoads(t *testing.T) {
-	_, err := loadRegistry(cooldownRecord("sys-apps/foo", `cooldown_exempt = ""`))
-	requireErrorNaming(t, err, "sys-apps/foo", "cooldown_exempt")
+// TestCooldownExempt_IsRejectedNamingItsReplacement: cooldown_exempt was
+// renamed before any registry used it (2026-11-25: "exempt" read as jargon), so
+// it is no longer claimed. Hostile half: the load fails, names the record and
+// says what replaced the key, so the maintainer is not left guessing a typo.
+func TestCooldownExempt_IsRejectedNamingItsReplacement(t *testing.T) {
+	_, err := loadRegistry(cooldownRecord("sys-apps/foo", `cooldown_exempt = "upstream CI rebuilds hourly"`))
+	requireErrorNaming(t, err, "sys-apps/foo", "cooldown_exempt", "cooldown_days = 0", "cooldown_reason")
+}
+
+// TestCooldownDays_ZeroIsNoCooldownAndNeedsAReason: cooldown_days is the one
+// knob for the wait; 0 takes the record out of the cooldown. Every override,
+// 0 included, must carry cooldown_reason, and a reason with no override
+// justifies nothing. An absent key stays nil: the pointer is what tells
+// "the block's days" from "zero days".
+func TestCooldownDays_ZeroIsNoCooldownAndNeedsAReason(t *testing.T) {
+	_, err := loadRegistry(cooldownRecord("sys-apps/foo", `cooldown_days = 0`))
+	requireErrorNaming(t, err, "sys-apps/foo", "cooldown_reason")
+	_, err = loadRegistry(cooldownRecord("sys-apps/foo", "cooldown_days = 2\ncooldown_reason = \"  \""))
+	requireErrorNaming(t, err, "sys-apps/foo", "cooldown_reason")
+	_, err = loadRegistry(cooldownRecord("sys-apps/foo", `cooldown_reason = "why"`))
+	requireErrorNaming(t, err, "sys-apps/foo", "cooldown_reason", "cooldown_days")
 
 	cfg, err := loadRegistry(
-		cooldownRecord("sys-apps/foo", `cooldown_exempt = "rebuilt hourly by upstream CI; a mask would always be stale"`) +
+		cooldownRecord("sys-apps/foo", "cooldown_days = 0\ncooldown_reason = \"our own signed release\"") +
 			cooldownRecord("sys-apps/bar", ""))
 	if err != nil {
 		t.Fatalf("load: %v", err)
 	}
-	got := cfg.Packages["sys-apps/foo"].CooldownExempt
-	if got == nil || *got != "rebuilt hourly by upstream CI; a mask would always be stale" {
-		t.Errorf("sys-apps/foo CooldownExempt = %v, want the reason", got)
+	foo := cfg.Packages["sys-apps/foo"]
+	if !foo.CooldownOff() || foo.CooldownReason == nil || *foo.CooldownReason != "our own signed release" {
+		t.Errorf("sys-apps/foo: CooldownOff=%v reason=%v, want off with the reason", foo.CooldownOff(), foo.CooldownReason)
 	}
-	if bar := cfg.Packages["sys-apps/bar"].CooldownExempt; bar != nil {
-		t.Errorf("sys-apps/bar CooldownExempt = %q, want nil (absent)", *bar)
+	bar := cfg.Packages["sys-apps/bar"]
+	if bar.CooldownDays != nil || bar.CooldownOff() || bar.CooldownDaysOverride() != 0 {
+		t.Errorf("sys-apps/bar: CooldownDays=%v off=%v override=%d, want unset", bar.CooldownDays, bar.CooldownOff(), bar.CooldownDaysOverride())
+	}
+}
+
+// TestCooldownDays_AGroupSharesOneWait: a cooldown_with group is released
+// whole, so its members cannot disagree on the wait, and none of them can be
+// out of the cooldown while the others are masked with it.
+func TestCooldownDays_AGroupSharesOneWait(t *testing.T) {
+	r := "cooldown_reason = \"security releases\"\n"
+	_, err := loadRegistry(
+		cooldownRecord("mail-client/a", "cooldown_with = [\"mail-client/b\"]\ncooldown_days = 2\n"+r) +
+			cooldownRecord("mail-client/b", "cooldown_with = [\"mail-client/a\"]\ncooldown_days = 3\n"+r))
+	requireErrorNaming(t, err, "mail-client/a", "mail-client/b", "cooldown_days")
+	_, err = loadRegistry(
+		cooldownRecord("mail-client/a", "cooldown_with = [\"mail-client/b\"]\ncooldown_days = 2\n"+r) +
+			cooldownRecord("mail-client/b", "cooldown_with = [\"mail-client/a\"]\n"))
+	requireErrorNaming(t, err, "mail-client/a", "mail-client/b", "cooldown_days")
+	_, err = loadRegistry(
+		cooldownRecord("mail-client/a", "cooldown_with = [\"mail-client/b\"]\ncooldown_days = 0\n"+r) +
+			cooldownRecord("mail-client/b", "cooldown_with = [\"mail-client/a\"]\ncooldown_days = 0\n"+r))
+	requireErrorNaming(t, err, "mail-client/a", "cooldown_with", "cooldown_days = 0")
+	if _, err := loadRegistry(
+		cooldownRecord("mail-client/a", "cooldown_with = [\"mail-client/b\"]\ncooldown_days = 2\n"+r) +
+			cooldownRecord("mail-client/b", "cooldown_with = [\"mail-client/a\"]\ncooldown_days = 2\n"+r)); err != nil {
+		t.Errorf("a group sharing one wait must load: %v", err)
 	}
 }
 
@@ -212,7 +251,7 @@ func TestCooldownFields_FollowPublishedPathInTheCanonicalOrder(t *testing.T) {
 	if !ok {
 		t.Fatal("published_path is not in CanonicalFieldOrder")
 	}
-	for _, f := range []string{"cooldown_with", "cooldown_exempt", "cooldown_days"} {
+	for _, f := range []string{"cooldown_with", "cooldown_days", "cooldown_reason"} {
 		r, ok := rank[f]
 		if !ok {
 			t.Errorf("%s is not in CanonicalFieldOrder", f)
@@ -228,13 +267,15 @@ func TestCooldownFields_FollowPublishedPathInTheCanonicalOrder(t *testing.T) {
 // the emitted text decodes to the same values.
 func TestCooldownFields_RenderAndReadBack(t *testing.T) {
 	reason := "upstream re-tags the same version; masking would hide a fix"
+	zero := 0
 	cfg := &PackageConfig{
 		URL: "https://example.org/a/releases", Parser: "regex", Pattern: `v([0-9.]+)`,
 		CooldownWith:   []string{"dev-lang/b", "dev-lang/c"},
-		CooldownExempt: &reason,
+		CooldownDays:   &zero,
+		CooldownReason: &reason,
 	}
 	text := RenderRecord("dev-lang/a", cfg)
-	for _, key := range []string{"cooldown_with", "cooldown_exempt"} {
+	for _, key := range []string{"cooldown_with", "cooldown_days = 0", "cooldown_reason"} {
 		if !strings.Contains(text, key) {
 			t.Errorf("RenderRecord omitted %s:\n%s", key, text)
 		}
@@ -247,8 +288,8 @@ func TestCooldownFields_RenderAndReadBack(t *testing.T) {
 	if strings.Join(got.CooldownWith, ",") != "dev-lang/b,dev-lang/c" {
 		t.Errorf("CooldownWith read back as %v", got.CooldownWith)
 	}
-	if got.CooldownExempt == nil || *got.CooldownExempt != reason {
-		t.Errorf("CooldownExempt read back as %v", got.CooldownExempt)
+	if !got.CooldownOff() || got.CooldownReason == nil || *got.CooldownReason != reason {
+		t.Errorf("CooldownDays/CooldownReason read back as %v/%v", got.CooldownDays, got.CooldownReason)
 	}
 }
 
@@ -261,7 +302,8 @@ func TestCooldownFields_LintFixReordersThemAndKeepsTheirValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := `["dev-lang/a"]
-cooldown_exempt = "a reason"
+cooldown_reason = "a reason"
+cooldown_days = 4
 cooldown_with = ["dev-lang/b"]
 url = "https://example.org/a/releases"
 parser = "regex"
@@ -272,6 +314,8 @@ url = "https://example.org/b/releases"
 parser = "regex"
 pattern = 'v([0-9.]+)'
 cooldown_with = ["dev-lang/a"]
+cooldown_days = 4
+cooldown_reason = "a reason"
 `
 	if err := os.WriteFile(filepath.Join(overlay, ".autoupdate", "packages.toml"), []byte(text), 0o644); err != nil {
 		t.Fatal(err)
@@ -288,7 +332,7 @@ cooldown_with = ["dev-lang/a"]
 	}
 	rec := res.Repaired[:end]
 	if strings.Index(rec, "cooldown_with") < strings.Index(rec, "pattern") ||
-		strings.Index(rec, "cooldown_exempt") < strings.Index(rec, "pattern") {
+		strings.Index(rec, "cooldown_reason") < strings.Index(rec, "cooldown_days") {
 		t.Errorf("the repaired record does not place the cooldown fields after the earlier canonical keys:\n%s", rec)
 	}
 	back, err := decodePackagesConfig([]byte(res.Repaired))
@@ -296,22 +340,23 @@ cooldown_with = ["dev-lang/a"]
 		t.Fatalf("the repaired registry does not decode: %v", err)
 	}
 	a := back.Packages["dev-lang/a"]
-	if a.CooldownExempt == nil || *a.CooldownExempt != "a reason" || strings.Join(a.CooldownWith, ",") != "dev-lang/b" {
+	if a.CooldownDaysOverride() != 4 || a.CooldownReason == nil || *a.CooldownReason != "a reason" || strings.Join(a.CooldownWith, ",") != "dev-lang/b" {
 		t.Errorf("repair changed the values: %+v", a)
 	}
 }
 
-func TestCooldownDays_RangeAndContradiction(t *testing.T) {
+func TestCooldownDays_Range(t *testing.T) {
 	reason := "security fixes only"
+	days := func(n int) *int { return &n }
 	for name, tc := range map[string]struct {
 		cfg     PackageConfig
 		wantErr string
 	}{
-		"in range":         {cfg: PackageConfig{CooldownDays: 3}},
-		"unset":            {cfg: PackageConfig{}},
-		"negative":         {cfg: PackageConfig{CooldownDays: -1}, wantErr: "cooldown_days"},
-		"above the bound":  {cfg: PackageConfig{CooldownDays: 3651}, wantErr: "cooldown_days"},
-		"exempt and sized": {cfg: PackageConfig{CooldownDays: 3, CooldownExempt: &reason}, wantErr: "contradict"},
+		"in range":        {cfg: PackageConfig{CooldownDays: days(3), CooldownReason: &reason}},
+		"zero":            {cfg: PackageConfig{CooldownDays: days(0), CooldownReason: &reason}},
+		"unset":           {cfg: PackageConfig{}},
+		"negative":        {cfg: PackageConfig{CooldownDays: days(-1), CooldownReason: &reason}, wantErr: "cooldown_days"},
+		"above the bound": {cfg: PackageConfig{CooldownDays: days(3651), CooldownReason: &reason}, wantErr: "cooldown_days"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := validateCooldownFields("dev-lang/a", &tc.cfg)
@@ -323,7 +368,7 @@ func TestCooldownDays_RangeAndContradiction(t *testing.T) {
 			}
 		})
 	}
-	cfg := &PackageConfig{URL: "https://example.org/a", Parser: "regex", Pattern: `v([0-9.]+)`, CooldownDays: 3}
+	cfg := &PackageConfig{URL: "https://example.org/a", Parser: "regex", Pattern: `v([0-9.]+)`, CooldownDays: days(3), CooldownReason: &reason}
 	if text := RenderRecord("dev-lang/a", cfg); !strings.Contains(text, "cooldown_days = 3") {
 		t.Errorf("cooldown_days not rendered:\n%s", text)
 	}

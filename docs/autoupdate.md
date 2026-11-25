@@ -492,8 +492,8 @@ from https to http is refused too, with or without a credential. Only loopback
 | `min_age_days` | Minimum age, in days, of the upstream release before it is offered as a bump. A younger candidate is kept back: the current version stays, `--check` reports the package as `held` with the line `held by min_age_days: <version> published <time>, eligible <time>`, and nothing is queued. Only the newest version is considered — the gate never steps down to an older release that would pass. Requires `published_path`; absent/`0` means no gate. |
 | `published_path` | JSON path, in the same response the version came from, to the candidate's publication time as an RFC 3339 string. `{version}` is replaced by the candidate and stays one member name even when the version holds dots, so npm's registry document reads `"time.{version}"`. A missing, non-string or unparseable time **holds** the candidate and the report says why. Requires `min_age_days` and `parser = "json"`. |
 | `cooldown_with` | Packages (bare `category/package`, sorted, never the record itself) masked and released **together** with this one by the [cooldown](#the-autoupdate-cooldown): a pair that cannot be installed apart, such as `sys-apps/ai-jail` and `sys-apps/ai-jail-bin`. Every target needs a record, and the relation is a clique — each member lists every other member — so the load and `--lint` fail naming both records of the first missing link. |
-| `cooldown_exempt` | Takes the package out of the [cooldown](#the-autoupdate-cooldown): its promotions land unmasked. The value is the reason and must say one — `cooldown_exempt = ""` fails the load. |
-| `cooldown_days` | The [cooldown](#the-autoupdate-cooldown)'s delay for this record's release line, overriding the block's `days=` (1 to 3650). Written on each entry as `days=N`. Contradicts `cooldown_exempt`, and the load says so. |
+| `cooldown_days` | The [cooldown](#the-autoupdate-cooldown)'s delay for this record's release line, overriding the block's `days=`: `0` takes the package out of the cooldown (its promotions land unmasked), `1` to `3650` sizes the wait. Written on each entry as `days=N`. Members of one `cooldown_with` group must share the same value, and `0` cannot be combined with `cooldown_with` (a group is released whole). It replaced `cooldown_exempt`, which now fails the load naming its replacement. |
+| `cooldown_reason` | Why the record does not wait the block's days. Required with any `cooldown_days`, and refused without one — a shorter wait trades away the users' protection, so the registry records why. |
 | `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |
 | `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
 
@@ -534,7 +534,7 @@ someone has built it:
   the overlay. If the block cannot be read or the write fails, the promotion is
   refused and the rest of the run continues — the one step of `--apply` that is
   not warn-only, because an unmasked bump is exactly what the cooldown exists to
-  prevent. A record with `cooldown_exempt` needs no entry and is promoted even
+  prevent. A record with `cooldown_days = 0` needs no entry and is promoted even
   under a malformed block.
 - **One candidate per release line.** A line is the registry record (`line=`
   is its key, so `app-editors/zed@stable` and `@preview` are two lines). A new
@@ -545,6 +545,14 @@ someone has built it:
   promotion never leaves it visible. A line therefore holds at most two
   versions: the installable one and the masked candidate. The summary lists
   the replaced atoms.
+- **The registry is read again before the release rules.** An entry keeps the
+  `cooldown_days` of the day it was masked unless the registry changes it: at
+  the start of every `--apply` and in `bentoo overlay cooldown sweep`, an entry
+  whose line (`line=`) now has `cooldown_days = 0` is lifted with reason
+  **registry**, and one whose line's `cooldown_days` changed takes the new
+  `days=` (dropping the key returns it to the block's). An entry with no line
+  (a `cooldown add`) and a line with no record are left as they are. A registry
+  that cannot be read skips this step with one warning; the rules below still run.
 - **Release rules**, applied at the start of every `--apply` (with or without
   pending bumps) and by `bentoo overlay cooldown sweep`, each entry once, in this
   order: **stale** (its ebuild is gone), **manual** (`cooldown confirm`),

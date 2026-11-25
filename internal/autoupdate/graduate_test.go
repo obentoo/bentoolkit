@@ -131,7 +131,7 @@ func TestCheckPackageCommitTrack_NoGraduationOutsideTheCooldown(t *testing.T) {
 		"no block": {mask: "", mutate: func(c *registry.PackageConfig, base string) { c.URL = base + "/repos/o/r/commits?sha=main" }},
 		"exempt record": {mask: cooldownEmptyBlock, mutate: func(c *registry.PackageConfig, base string) {
 			c.URL = base + "/repos/o/r/commits?sha=main"
-			c.CooldownExempt = &reason
+			c.CooldownDays, c.CooldownReason = cooldownDaysOf(0), &reason
 		}},
 		"single commit": {mask: cooldownEmptyBlock, mutate: func(c *registry.PackageConfig, base string) { c.URL = base + "/repos/o/r/commits/main" }},
 	} {

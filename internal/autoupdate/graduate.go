@@ -49,17 +49,17 @@ type checkerCooldown struct {
 }
 
 // cooldownDays returns the release delay the cooldown applies to the record,
-// or 0 when the record is not under the cooldown: no block, an exempt record.
+// or 0 when the record is not under the cooldown: no block, cooldown_days = 0.
 func (c *Checker) cooldownDays(cfg *registry.PackageConfig) int {
 	c.cooldownState.once.Do(func() {
 		c.cooldownState.block, _ = cooldown.Load(c.overlayPath)
 	})
 	b := c.cooldownState.block
-	if b == nil || cfg.CooldownExempt != nil {
+	if b == nil || cfg.CooldownOff() {
 		return 0
 	}
-	if cfg.CooldownDays > 0 {
-		return cfg.CooldownDays
+	if d := cfg.CooldownDaysOverride(); d > 0 {
+		return d
 	}
 	return b.Days
 }

@@ -380,7 +380,7 @@ func TestCooldownApply_AMalformedBlockRefusesOnlyWhatNeedsAnEntry(t *testing.T) 
 	f := newCooldownFixture(t,
 		[]cooldownBump{{"app-misc/cooldown-foo", "1.0", "1.1"}, {"app-misc/cooldown-exempt", "2.0", "2.1"}},
 		nil,
-		map[string]registry.PackageConfig{"app-misc/cooldown-exempt": {CooldownExempt: &reason}},
+		map[string]registry.PackageConfig{"app-misc/cooldown-exempt": {CooldownDays: cooldownDaysOf(0), CooldownReason: &reason}},
 		malformed)
 
 	results := applyAll(t, f)
@@ -412,7 +412,7 @@ func TestCooldownApply_AnExemptRecordIsPromotedUnmasked(t *testing.T) {
 	f := newCooldownFixture(t,
 		[]cooldownBump{{"app-misc/cooldown-exempt", "2.0", "2.1"}, {"app-misc/cooldown-foo", "1.0", "1.1"}},
 		nil,
-		map[string]registry.PackageConfig{"app-misc/cooldown-exempt": {CooldownExempt: &reason}},
+		map[string]registry.PackageConfig{"app-misc/cooldown-exempt": {CooldownDays: cooldownDaysOf(0), CooldownReason: &reason}},
 		cooldownEmptyBlock)
 
 	results := applyAll(t, f)
@@ -568,7 +568,7 @@ func TestCooldownLog_OnePerApplierAdd(t *testing.T) {
 	f := newCooldownFixture(t,
 		[]cooldownBump{{"app-misc/cooldown-foo", "1.0", "1.1"}, {"app-misc/cooldown-exempt", "2.0", "2.1"}},
 		nil,
-		map[string]registry.PackageConfig{"app-misc/cooldown-exempt": {CooldownExempt: &reason}},
+		map[string]registry.PackageConfig{"app-misc/cooldown-exempt": {CooldownDays: cooldownDaysOf(0), CooldownReason: &reason}},
 		cooldownEmptyBlock)
 
 	for pkg, r := range applyAll(t, f) {
