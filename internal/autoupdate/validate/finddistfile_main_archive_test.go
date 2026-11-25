@@ -17,6 +17,8 @@ func TestFindDistfile_TheReleaseArchiveWinsOverItsBundles(t *testing.T) {
 		{"trufflehog: a vendor bundle", "3.97.6", []string{"trufflehog-3.97.6-vendor.tar.xz", "trufflehog-3.97.6.tar.gz"}, "trufflehog-3.97.6.tar.gz"},
 		{"codex: a crates bundle", "0.169.0", []string{"codex-0.169.0.tar.gz", "codex-rust-v0.169.0-crates.tar.xz"}, "codex-0.169.0.tar.gz"},
 		{"a single .crate beside the release", "1.2.0", []string{"m-1.2.0.tar.gz", "m-1.2.0.crate"}, "m-1.2.0.tar.gz"},
+		{"parallel: a detached signature", "20261122", []string{"parallel-20261122.tar.bz2", "parallel-20261122.tar.bz2.sig"}, "parallel-20261122.tar.bz2"},
+		{"an armored signature", "2.0", []string{"m-2.0.tar.xz.asc", "m-2.0.tar.xz"}, "m-2.0.tar.xz"},
 	}
 	for _, c := range cases {
 		t.Run(c.desc, func(t *testing.T) {
@@ -67,5 +69,17 @@ func TestFindDistfile_AnUpstreamSpellingOfTheSuffixIsThisVersion(t *testing.T) {
 	pkgDir, distdir := s089vFixture(t, names, names)
 	if got, err := findDistfile(pkgDir, distdir, "27.0.0_pre20261112"); err == nil {
 		t.Errorf("another snapshot's archive %q was read as 27.0.0_pre20261112", got)
+	}
+}
+
+// TestFindDistfile_OnlyASignaturePresentSaysTheReleaseIsMissing: a signature
+// alone on disk is not the release, so the shortcut for a single present name
+// must not read it.
+func TestFindDistfile_OnlyASignaturePresentSaysTheReleaseIsMissing(t *testing.T) {
+	present := []string{"parallel-20261122.tar.bz2.sig"}
+	pkgDir, distdir := s089vFixture(t, append([]string{"parallel-20261122.tar.bz2"}, present...), present)
+	_, err := findDistfile(pkgDir, distdir, "20261122")
+	if err == nil || !strings.Contains(err.Error(), "no distfile") {
+		t.Errorf("err = %v; want a refusal saying no archive is present", err)
 	}
 }

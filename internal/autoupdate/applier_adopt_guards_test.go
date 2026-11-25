@@ -200,3 +200,29 @@ func TestApplyAdoptedTreeRefusesARootOutsideItsStagedPath(t *testing.T) {
 		}
 	})
 }
+
+// TestApplyAdoptedTreeRefusalNamesEveryDifferenceWithItsCopy: breakpad's
+// refusal named one patch at a time. Every differing path is named, each with
+// the command that carries it into the overlay.
+func TestApplyAdoptedTreeRefusalNamesEveryDifferenceWithItsCopy(t *testing.T) {
+	a, overlayDir, pkg, staged, _, _, _ := adoptedFixture(t, mockExecCommandSuccess)
+	pub := filepath.Join(overlayDir, "media-plugins", "gst-plugins-qt6")
+	stg := filepath.Join(staged, "media-plugins", "gst-plugins-qt6")
+	writeTestFile(t, filepath.Join(pub, "files/a.patch"), "old\n")
+	writeTestFile(t, filepath.Join(stg, "files/a.patch"), "new\n")
+	writeTestFile(t, filepath.Join(stg, "files/b.patch"), "added\n")
+	result, err := a.Apply(t.Context(), pkg)
+	if err == nil || result.Success {
+		t.Fatal("Apply promoted a tree whose files/ differs from the overlay")
+	}
+	msg := err.Error()
+	for _, want := range []string{
+		"2 paths differ (files/a.patch, files/b.patch)",
+		"cp " + filepath.Join(stg, "files/a.patch") + " " + filepath.Join(pub, "files/a.patch"),
+		"cp " + filepath.Join(stg, "files/b.patch") + " " + filepath.Join(pub, "files/b.patch"),
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal does not contain %q: %s", want, msg)
+		}
+	}
+}

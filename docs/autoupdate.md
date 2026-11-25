@@ -1199,7 +1199,8 @@ and tried, and the fixer's own record is left as it was:
 - Ctrl+C and SIGQUIT belong to the session; bentoo is not stopped by them.
 
 When the session exits, with any status, bentoo proves the edited tree the way
-`--check` does — manifest, then the gates, at no less than the depth recorded
+`--check` does — manifest (forced, since the kept tree's Manifest is already
+complete and would otherwise fetch nothing for the gates to read), then the gates, at no less than the depth recorded
 for the tree, and at `--depth=compile` when the bundle failed at the compile
 gate — with no LLM agent, and publishes nothing. A READY tree gets a proof
 record and its bundle is removed; publish it with
@@ -1212,8 +1213,10 @@ interrupted before it.
 
 `--apply` publishes only the ebuild and its Manifest. A repair that changes
 or adds a file under `files/`, or changes `metadata.xml`, in the staged tree is
-refused, naming the first differing path: carry that change into the overlay by
-hand, then run `--repair` again. A repair that only REMOVES a file (a patch
+refused, naming every differing path with the `cp` that carries each one into
+the published package directory: run those, then `--repair` again. The session
+is told this up front, so a fix that needs a rebased or new patch ends by
+listing the files to copy. A repair that only REMOVES a file (a patch
 upstream merged) is adopted: the overlay keeps its copy for the older ebuilds
 that name it, and the candidate was proven without it. The exception is a
 candidate that applies patches by a `${FILESDIR}` glob, which would pick the

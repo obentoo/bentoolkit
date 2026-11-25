@@ -269,3 +269,42 @@ func TestAnEmptyFixDistdirStillFallsBack(t *testing.T) {
 			"an empty private distdir means nothing was fetched, not that nothing is there:\n%s", fetched, said)
 	}
 }
+
+// TestStagedManifestForcesForAnAdoptedRepairTree: a tree a --repair session
+// left arrives with a complete Manifest. Without --force pkgdev fetches
+// nothing, and the 2026-11-24 revalidations of ai-jail, amd-gaia and liborcus
+// found no archive of the candidate. The private distdir is still created and
+// still seeded: only the argv changes.
+func TestStagedManifestForcesForAnAdoptedRepairTree(t *testing.T) {
+	env := stagedManifestFixture(t, false)
+	env.sweeper.forceManifest = true
+
+	got, err := env.sweeper.runStagedManifestIn(t.Context(), "", env.stagedPkg, "media-plugins/gst-plugins-qt6", "1.29.2")
+	if err != nil {
+		t.Fatalf("runStagedManifestIn: %v", err)
+	}
+	if got == "" {
+		t.Fatal("no private distdir was created for the adopted tree")
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(got) })
+	call := pkgdevCall(t, *env.calls)
+	if !containsArg(call.args, "--force") {
+		t.Errorf("--force absent from %v: the adopted tree's complete Manifest is not re-fetched", call.args)
+	}
+	if call.distdir != got {
+		t.Errorf("pkgdev was given --distdir %q, want the private %q", call.distdir, got)
+	}
+}
+
+// TestSweeperForForcesOnlyAnAdoptedTree: the flag follows the applier's
+// adopted root and nothing else.
+func TestSweeperForForcesOnlyAnAdoptedTree(t *testing.T) {
+	a := &Applier{}
+	if a.sweeperFor(nil).forceManifest {
+		t.Error("an applier with no adopted tree forces the manifest")
+	}
+	a.adoptedRoot = t.TempDir()
+	if !a.sweeperFor(nil).forceManifest {
+		t.Error("an applier adopting a repair tree does not force the manifest")
+	}
+}
