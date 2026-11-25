@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.46.2] - 2026-11-24
+
 ### Fixed
 
 - **A repair that drops an obsolete patch can be adopted.** Adoption refused a
@@ -25,8 +27,6 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   fails such a bump.
 - **A repair that ends WAIT says what would prove it** (install what is
   missing, or prove it where it is installed) instead of "run --repair again".
-
-### Fixed
 
 - **`--apply` no longer publishes a bump its check reported as WAIT.** A
   retained tree was promoted when one gate passed and the rest were SKIPPED,
@@ -2374,7 +2374,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.46.1...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.46.2...HEAD
+[0.46.2]: https://github.com/obentoo/bentoolkit/compare/v0.46.1...v0.46.2
 [0.46.1]: https://github.com/obentoo/bentoolkit/compare/v0.46.0...v0.46.1
 [0.46.0]: https://github.com/obentoo/bentoolkit/compare/v0.45.0...v0.46.0
 [0.45.0]: https://github.com/obentoo/bentoolkit/compare/v0.44.1...v0.45.0
