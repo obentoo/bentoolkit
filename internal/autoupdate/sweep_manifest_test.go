@@ -254,6 +254,12 @@ func TestRunManifestUsesResolvedDistdir(t *testing.T) {
 	createTestEbuildFile(t, overlayDir, pkg, "2.0.0")
 	distdir := t.TempDir()
 
+	// A private TMPDIR: os.TempDir() is shared with every other test binary of
+	// the run, and internal/common/distfiles creates and removes
+	// bentoo-distfiles-* there in parallel, so a count over the shared
+	// directory failed whenever one of those vanished between the two globs
+	// (ci-vm-gate on 590807e: before=[…/bentoo-distfiles-2546500299] after=[]).
+	t.Setenv("TMPDIR", t.TempDir())
 	before := tempDistdirsNow(t)
 	fake := &fakePkgdev{}
 	s := manifestSweeper(t, overlayDir, distdir, "", withSweeperExec(fake.seam()))
