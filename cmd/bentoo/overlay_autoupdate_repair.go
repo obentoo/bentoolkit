@@ -62,13 +62,21 @@ func (ar *autoupdateRun) refuseRepairMisuse() error {
 	return nil
 }
 
-// runRepair handles --repair under the overlay lock runAutoupdate holds. It
+// runRepair handles --repair under the overlay lock runAutoupdate holds; a
+// comma-separated list goes to one session for all of them (runBatchRepair). It
 // refuses a bundle it cannot trust or that no longer matches the pending
 // update before anything is shown or asked, starts the session only on the
 // operator's yes, and then re-validates the staged tree whatever the session's
 // exit status.
 func (ar *autoupdateRun) runRepair(ctx context.Context, overlayPath, configDir string, auCfg config.AutoupdateConfig) error {
-	return ar.runRepairFor(ctx, ar.opts.repair, overlayPath, configDir, auCfg)
+	pkgs := repairPackages(ar.opts.repair)
+	if len(pkgs) <= 1 {
+		return ar.runRepairFor(ctx, strings.TrimSpace(ar.opts.repair), overlayPath, configDir, auCfg)
+	}
+	if !ar.runBatchRepair(ctx, pkgs, overlayPath, configDir, auCfg) {
+		return failWith(1, fmt.Errorf("--repair %s: not every bump was proven; the summary above names each one", strings.Join(pkgs, ",")))
+	}
+	return nil
 }
 
 // runRepairFor is runRepair for pkg: --repair's own package, or one the check
@@ -186,33 +194,47 @@ func (ar *autoupdateRun) confirmRepairSession(ctx context.Context, pkgDir string
 // the session has ended: the returned error skips the re-validation.
 func (ar *autoupdateRun) runRepairSession(ctx context.Context, claudePath string, env []string, spec repair.SessionSpec) error {
 	pkg := spec.Bundle.Package
-	//nolint:gosec,noctx // a caught signal must not kill the operator's session; the argv is built by repair.SessionArgs
-	session := exec.Command(claudePath, repair.SessionArgs(spec)...)
-	session.Stdin, session.Stdout, session.Stderr = os.Stdin, os.Stdout, os.Stderr
-	session.Dir = spec.PkgDir
-	session.Env = env
-
-	resume, ok := policyFrom(ctx).suspendSignals()
+	received, ok := ar.runForegroundSession(ctx, claudePath, repair.SessionArgs(spec), spec.PkgDir, env, pkg)
 	if !ok {
 		return repairInterrupted(pkg, "before the session started", context.Canceled)
 	}
-	if err := session.Start(); err != nil {
-		if sig := resume(); sig != nil {
-			return ar.repairStoppedBy(pkg, sig)
-		}
-		ar.log().Warn("the repair session did not start; re-validating the staged tree as it is",
-			"package", pkg, "dir", spec.PkgDir, "err", err)
-		return nil
-	}
-	err := session.Wait()
-	received := resume()
-	ar.log().Info("the repair session ended",
-		"package", pkg, "exit_status", session.ProcessState.ExitCode(), "err", err)
 	if received != nil {
 		ar.markRepaired(spec.Bundle)
 		return ar.repairStoppedBy(pkg, received)
 	}
 	return nil
+}
+
+// runForegroundSession runs claude with argv in dir as runRepairSession
+// describes, for --repair's one bump and for the batch session alike; label
+// names the bump(s) in the log. It returns the SIGTERM or SIGHUP bentoo
+// received meanwhile, if any, and false when the signals could not be
+// suspended because the run is already stopping. A session that does not
+// start is a WARN and counts as ended: the trees are re-validated as they are.
+func (ar *autoupdateRun) runForegroundSession(ctx context.Context, claudePath string, argv []string, dir string, env []string, label string) (os.Signal, bool) {
+	//nolint:gosec,noctx // a caught signal must not kill the operator's session; the argv is built by package repair
+	session := exec.Command(claudePath, argv...)
+	session.Stdin, session.Stdout, session.Stderr = os.Stdin, os.Stdout, os.Stderr
+	session.Dir = dir
+	session.Env = env
+
+	resume, ok := policyFrom(ctx).suspendSignals()
+	if !ok {
+		return nil, false
+	}
+	if err := session.Start(); err != nil {
+		if sig := resume(); sig != nil {
+			return sig, true
+		}
+		ar.log().Warn("the repair session did not start; re-validating the staged tree as it is",
+			"package", label, "dir", dir, "err", err)
+		return nil, true
+	}
+	err := session.Wait()
+	received := resume()
+	ar.log().Info("the repair session ended",
+		"package", label, "exit_status", session.ProcessState.ExitCode(), "err", err)
+	return received, true
 }
 
 // repairStoppedBy is the exit-1 outcome of a run that received SIGTERM or
@@ -358,26 +380,11 @@ func (ar *autoupdateRun) loadRepairTarget(configDir, pkg string) (repairTarget, 
 	return repairTarget{bundle: b, bundlePath: bundlePath}, nil
 }
 
-// offerRepairs ends an interactive `--check --llm`: each bump the check left
-// to the maintainer (HUMAN) and that has a repair bundle is offered a --repair
-// session, one at a time, in the run's order. Each is the --repair flow
-// itself: the bundle is shown and "Start an interactive claude session?" is
-// asked, so "n" skips that bump. A repair's outcome is printed and never moves
-// the check's exit code. Nothing is offered under --yes, to a run without a
-// terminal on both stdin and stdout, or without claude on PATH: an unattended
-// run never stops to ask.
-func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDir string, auCfg config.AutoupdateConfig, validated report.Run) {
-	if ar.opts.yes || !ar.deps.checkInteractive() || !ar.deps.uiIsTerminal() {
-		return
-	}
-	if _, err := ar.deps.lookPath("claude"); err != nil {
-		return
-	}
-	payload, ok := validated.Payload.(report.AutoupdateCheck)
-	if !ok {
-		return
-	}
-	stagingRoot := filepath.Join(configDir, stagingDirName)
+// humanBumpsWithBundle lists, in the run's order, the bumps the check left to
+// the maintainer (HUMAN) that have a repair bundle: the ones offerRepairs
+// offers. It lives here because this file is the only one allowed to read
+// bundles: a guard test fails any other reader.
+func humanBumpsWithBundle(stagingRoot string, payload report.AutoupdateCheck) []string {
 	var offered []string
 	for _, row := range payload.Results {
 		if row.State != report.Human {
@@ -387,21 +394,5 @@ func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDi
 			offered = append(offered, row.Package)
 		}
 	}
-	if len(offered) == 0 {
-		return
-	}
-
-	fmt.Println()
-	output.Header.Println(i18n.T("Repair sessions"))
-	fmt.Printf(i18n.TCount("%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one.", len(offered))+"\n",
-		len(offered))
-	for i, pkg := range offered {
-		if ctx.Err() != nil {
-			return
-		}
-		fmt.Printf("\n[%d/%d] %s\n", i+1, len(offered), pkg)
-		if err := ar.runRepairFor(ctx, pkg, overlayPath, configDir, auCfg); err != nil {
-			output.Warning.Printf("  %s: %s\n", pkg, failureDiagnostic(err))
-		}
-	}
+	return offered
 }

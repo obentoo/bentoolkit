@@ -818,8 +818,8 @@ msgid "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"
 msgstr "通过从 ::gentoo 种子并对其进行版本提升来恢复孤立软件包，或者使用“all”来恢复所有可恢复的孤立软件包"
 
 #: cmd/bentoo/overlay_autoupdate.go
-msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH"
-msgstr "以交互方式修复失败的升级：显示因应用失败而留在其保留的暂存树旁边的修复捆绑包；经确认后，在那里启动一个 claude 会话，在执行每个命令前都进行询问；然后重新验证暂存树，并像 --apply 那样将其升级。需要在 stdin 和 stdout 上有一个终端，并且 PATH 上有 claude 可执行文件"
+msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Several packages, comma-separated, share one session and are re-validated one after the other. Needs a terminal on stdin and stdout and the claude executable on PATH"
+msgstr "以交互方式修复失败的升级：显示因应用失败而留在其保留的暂存树旁边的修复捆绑包；经确认后，在那里启动一个 claude 会话，在执行每个命令前都进行询问；然后重新验证暂存树，并像 --apply 那样将其升级。以逗号分隔的多个软件包共用一个会话，并依次重新验证。需要在 stdin 和 stdout 上有一个终端，并且 PATH 上有 claude 可执行文件"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass"
@@ -1576,14 +1576,42 @@ msgstr "使用“bentoo overlay autoupdate --apply %s”发布"
 msgid "%s is %s."
 msgstr "%s 是 %s。"
 
-#: cmd/bentoo/overlay_autoupdate_repair.go
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
 msgid "Repair sessions"
 msgstr "修复会话"
 
-#: cmd/bentoo/overlay_autoupdate_repair.go
-msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgstr[0] "%d 个升级需要您处理：每个升级都会提供一次交互式修复会话，一次处理一个。回答 n 以跳过一个。"
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "No repair session: its permission rules cannot carry the path %q: %v"
+msgstr "未启动修复会话：其权限规则无法容纳路径 %q：%v"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "No session started; the bundles and the staged trees are unchanged."
+msgstr "未启动会话；修复捆绑包和暂存树均未改变。"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Interrupted before the session started; the bundles and the staged trees are unchanged."
+msgstr "会话启动前已中断；修复捆绑包和暂存树均未改变。"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "The re-validation was skipped: the run is stopping. Each staged tree is kept as the session left it; run --repair with them again."
+msgstr "已跳过重新验证：运行正在停止。每个暂存树都保持会话留下的状态；请对它们再次运行 --repair。"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Repair summary"
+msgstr "修复摘要"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Publish the proven ones with 'bentoo overlay autoupdate --apply <cat/pkg>'"
+msgstr "使用 'bentoo overlay autoupdate --apply <cat/pkg>' 发布已证明的升级"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "The others keep their bundle: run --repair %s to repair them again in one session."
+msgstr "其余的保留其修复捆绑包：运行 --repair %s 以在一个会话中再次修复它们。"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Start ONE interactive claude session for these %d bump(s) in %s?"
+msgid_plural "Start ONE interactive claude session for these %d bump(s) in %s?"
+msgstr[0] "为这 %d 个升级在 %s 中启动一个交互式 claude 会话？"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
@@ -4990,3 +5018,7 @@ msgstr[0] "已删除 %d 个项目。"
 #: misc/safety/bentoo-secure-delete.desktop.in
 msgid "Delete permanently (Bentoo code)"
 msgstr "永久删除（Bentoo 代码）"
+
+#~ msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+#~ msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+#~ msgstr[0] "%d 个升级需要您处理：每个升级都会提供一次交互式修复会话，一次处理一个。回答 n 以跳过一个。"

@@ -1151,13 +1151,22 @@ is kept and a repair bundle, `.bentoo-repair.json`, is written at its root
 (mode 0600); the next step is
 `bentoo overlay autoupdate --repair <cat/pkg>`.
 
-An interactive check offers that step itself. After its report, and before
-the registry reconciliation, each HUMAN bump with a bundle goes through the
-`--repair` flow below, one at a time, in the run's order: the bundle is shown
-and the session question is asked, so `n` skips that bump. A repair's outcome
-is printed and never changes the check's exit code. Nothing is offered under
-`--yes`, to a run without a terminal on both stdin and stdout, or without
-`claude` on `PATH`.
+An interactive check offers that step itself, after its report and before
+the registry reconciliation. One HUMAN bump with a bundle goes through the
+`--repair` flow below. Several go through **one** session for all of them,
+the same flow as `--repair <a>,<b>,…`: every bundle is shown, one question is
+asked (`n` skips them all), and once the session exits every tree is
+re-validated in the run's order with nothing more to answer, ending with a
+summary of which are proven. A repair's outcome is printed and never changes
+the check's exit code. Nothing is offered under `--yes`, to a run without a
+terminal on both stdin and stdout, or without `claude` on `PATH`.
+
+The shared session runs in the staging root with one `--add-dir` per staged
+tree, the same permission mode, deny rules and environment as a single
+repair, and a prompt carrying every bundle. It resumes no fixer session:
+claude resumes one at most, so each bump's failure text is in the prompt
+instead. A bundle the session cannot take (refused as `--repair` refuses it)
+is reported and left out; the others still share the session.
 
 The bundle (schema 1) records the package, the current and candidate versions,
 the failed stage (`manifest`, `llm-fix`, `llm-build-fix`, `re-check`,
@@ -1179,7 +1188,9 @@ To give a repair up, delete the tree's `.bentoo-repair.json`. With the bundle
 gone, the next `--check` restages the package from scratch, and the staged
 sweep treats the tree like any other.
 
-`--repair <cat/pkg>` cannot be combined with another mode and needs a terminal
+`--repair <cat/pkg>[,<cat/pkg>…]` takes one package or a comma-separated list
+repaired in one shared session (above); a list is exit 0 only when every
+bump in it ends proven. It cannot be combined with another mode and needs a terminal
 on stdin and stdout and `claude` on `PATH`. It refuses, with exit 1 and before
 asking anything, when no bundle exists (it lists the packages that have one),
 when the bundle does not parse or names a tree that is gone or is not the
