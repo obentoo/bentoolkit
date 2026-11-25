@@ -29,6 +29,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   lifted (reason `registry`), a changed wait is written on its entries. An
   unreadable registry skips only this step, with a warning.
 
+- **A large source tree no longer trips the archive read cap.** The listing
+  counted every member name against the 4 MiB bomb guard, so
+  `thunderbird-161.0.source.tar.xz` made the options and review gates SKIP
+  with "archive output exceeds the read cap" (2026-11-25). The listing is now
+  filtered while it streams to the names a gate reads (Meson and CMake files,
+  build-system markers, one member per top-level entry), and the cap counts
+  only those: memory stays bounded, and an archive whose relevant names alone
+  pass the cap is still refused.
+
 ## [0.46.3] - 2026-11-25
 
 ### Fixed
