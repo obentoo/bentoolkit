@@ -53,13 +53,20 @@ func SessionArgs(s SessionSpec) []string {
 		"--add-dir", s.Bundle.StagedRoot,
 		"--permission-mode", "default",
 		"--append-system-prompt", s.Guidance,
-		// The leading "//" anchors a rule at the filesystem root.
-		"--disallowedTools", "Edit(/"+s.OverlayPath+"/**)",
 	)
-	for _, p := range s.Secrets {
-		args = append(args, "Read(/"+p+")", "Edit(/"+p+")")
+	return append(args, denyRules(s.OverlayPath, s.Secrets)...)
+}
+
+// denyRules is the --disallowedTools flag and its rules: no edit under the
+// published overlay, no read or edit of a secrets file. It must be the last
+// thing on the argv, since the flag is variadic.
+func denyRules(overlayPath string, secretPaths []string) []string {
+	// The leading "//" anchors a rule at the filesystem root.
+	rules := []string{"--disallowedTools", "Edit(/" + overlayPath + "/**)"}
+	for _, p := range secretPaths {
+		rules = append(rules, "Read(/"+p+")", "Edit(/"+p+")")
 	}
-	return args
+	return rules
 }
 
 // sessionPrompt renders the preamble followed by the bundle as indented JSON.

@@ -832,8 +832,8 @@ msgid "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"
 msgstr "Восстановить «сиротский» пакет, взяв его из ::gentoo и обновив версию, или «all» для всех подлежащих восстановлению «сиротских» пакетов."
 
 #: cmd/bentoo/overlay_autoupdate.go
-msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH"
-msgstr "Интерактивное исправление неудачного обновления: отображение пакета исправления, оставшегося после неудачного применения, рядом с сохранённым деревом в промежуточном состоянии; запуск сеанса claude в этом месте после подтверждения с запросом перед каждой командой; затем повторная проверка дерева в промежуточном состоянии и его продвижение, как это было бы сделано с помощью --apply. Требуется терминал на stdin и stdout, а также исполняемый файл claude в PATH"
+msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Several packages, comma-separated, share one session and are re-validated one after the other. Needs a terminal on stdin and stdout and the claude executable on PATH"
+msgstr "Интерактивное исправление неудачного обновления: отображение пакета исправления, оставшегося после неудачного применения, рядом с сохранённым деревом в промежуточном состоянии; запуск сеанса claude в этом месте после подтверждения с запросом перед каждой командой; затем повторная проверка дерева в промежуточном состоянии и его продвижение, как это было бы сделано с помощью --apply. Несколько пакетов через запятую обрабатываются в одном сеансе и проверяются повторно один за другим. Требуется терминал на stdin и stdout, а также исполняемый файл claude в PATH"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "With --check, also report revivable orphans (disabled+absent, upstream newer than ::gentoo) in the same pass"
@@ -1652,16 +1652,44 @@ msgstr "Опубликуйте его с помощью команды 'bentoo o
 msgid "%s is %s."
 msgstr "%s равно %s."
 
-#: cmd/bentoo/overlay_autoupdate_repair.go
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
 msgid "Repair sessions"
 msgstr "Сеансы восстановления"
 
-#: cmd/bentoo/overlay_autoupdate_repair.go
-msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgstr[0] "%d обновлению требуется ваше внимание: для каждого предлагается интерактивная сессия исправления, по одному за раз. Введите n, чтобы пропустить один."
-msgstr[1] "%d проблемы ждут вашего внимания: для каждой предлагается интерактивная сессия исправления, по одной за раз. Введите n, чтобы пропустить один."
-msgstr[2] "%d обновлений ждут вашего внимания: для каждого предлагается интерактивная сессия исправления, по одному за раз. Введите n, чтобы пропустить один."
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "No repair session: its permission rules cannot carry the path %q: %v"
+msgstr "Сеанс исправления не запущен: его правила доступа не допускают путь %q: %v"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "No session started; the bundles and the staged trees are unchanged."
+msgstr "Сеанс не запущен; пакеты исправления и промежуточные деревья не изменены."
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Interrupted before the session started; the bundles and the staged trees are unchanged."
+msgstr "Прервано до запуска сеанса; пакеты исправления и промежуточные деревья не изменены."
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "The re-validation was skipped: the run is stopping. Each staged tree is kept as the session left it; run --repair with them again."
+msgstr "Повторная проверка пропущена: выполнение останавливается. Каждое промежуточное дерево сохранено в том виде, в каком его оставил сеанс; снова запустите --repair для них."
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Repair summary"
+msgstr "Итоги исправления"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Publish the proven ones with 'bentoo overlay autoupdate --apply <cat/pkg>'"
+msgstr "Опубликуйте проверенные с помощью 'bentoo overlay autoupdate --apply <cat/pkg>'"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "The others keep their bundle: run --repair %s to repair them again in one session."
+msgstr "Остальные сохраняют пакет исправления: запустите --repair %s, чтобы снова исправить их в одном сеансе."
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Start ONE interactive claude session for these %d bump(s) in %s?"
+msgid_plural "Start ONE interactive claude session for these %d bump(s) in %s?"
+msgstr[0] "Запустить ОДИН интерактивный сеанс claude для %d обновления в %s?"
+msgstr[1] "Запустить ОДИН интерактивный сеанс claude для %d обновлений в %s?"
+msgstr[2] "Запустить ОДИН интерактивный сеанс claude для %d обновлений в %s?"
 
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
@@ -5329,3 +5357,9 @@ msgstr[2] "Удалено %d элементов."
 #: misc/safety/bentoo-secure-delete.desktop.in
 msgid "Delete permanently (Bentoo code)"
 msgstr "Удалить безвозвратно (код Bentoo)"
+
+#~ msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+#~ msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+#~ msgstr[0] "%d обновлению требуется ваше внимание: для каждого предлагается интерактивная сессия исправления, по одному за раз. Введите n, чтобы пропустить один."
+#~ msgstr[1] "%d проблемы ждут вашего внимания: для каждой предлагается интерактивная сессия исправления, по одной за раз. Введите n, чтобы пропустить один."
+#~ msgstr[2] "%d обновлений ждут вашего внимания: для каждого предлагается интерактивная сессия исправления, по одному за раз. Введите n, чтобы пропустить один."

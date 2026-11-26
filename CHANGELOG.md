@@ -9,6 +9,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **Several failed bumps are repaired in one claude session.** An interactive
+  `--check --llm` that leaves more than one bump HUMAN now asks once and
+  opens a single session over every staged tree, then re-validates each tree
+  in turn with nothing more to answer and prints a summary. One session per
+  bump made the operator wait out each session and its re-validation before
+  the next bump was shown. `--repair` takes a comma-separated list for the
+  same flow. A single bump still resumes the build fixer's session as before.
+
 ## [0.47.0] - 2026-11-25
 
 ### Changed

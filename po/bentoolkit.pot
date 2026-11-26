@@ -653,7 +653,7 @@ msgid "Revive an orphaned package by seeding from ::gentoo and bumping it, or \"
 msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
-msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Needs a terminal on stdin and stdout and the claude executable on PATH"
+msgid "Repair a failed bump interactively: show the repair bundle a failed apply left beside its kept staged tree, start a claude session there on confirmation, asking before every command, then re-validate the staged tree and promote it as --apply would. Several packages, comma-separated, share one session and are re-validated one after the other. Needs a terminal on stdin and stdout and the claude executable on PATH"
 msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate.go
@@ -1432,13 +1432,41 @@ msgstr ""
 msgid "%s is %s."
 msgstr ""
 
-#: cmd/bentoo/overlay_autoupdate_repair.go
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
 msgid "Repair sessions"
 msgstr ""
 
-#: cmd/bentoo/overlay_autoupdate_repair.go
-msgid "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
-msgid_plural "%d bump(s) need you: each is offered an interactive repair session, one at a time. Answer n to skip one."
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "No repair session: its permission rules cannot carry the path %q: %v"
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "No session started; the bundles and the staged trees are unchanged."
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Interrupted before the session started; the bundles and the staged trees are unchanged."
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "The re-validation was skipped: the run is stopping. Each staged tree is kept as the session left it; run --repair with them again."
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Repair summary"
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Publish the proven ones with 'bentoo overlay autoupdate --apply <cat/pkg>'"
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "The others keep their bundle: run --repair %s to repair them again in one session."
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "Start ONE interactive claude session for these %d bump(s) in %s?"
+msgid_plural "Start ONE interactive claude session for these %d bump(s) in %s?"
 msgstr[0] ""
 msgstr[1] ""
 
