@@ -65,7 +65,7 @@ func (r *applyRun) adoptCandidate(root string) error {
 	if err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: reading the candidate: %w", root, r.pkg, r.newVersion, err)
 	}
-	diffs, err := packageFileDifferences(cand.pkgDir, published.pkgDir, !filesDirGlob.Match(candidate))
+	diffs, err := packageFileDifferences(cand.pkgDir, published.pkgDir, filesDirReach(candidate))
 	if err != nil {
 		return fmt.Errorf("adopting the staged tree %s for %s-%s: comparing its package files with the published overlay: %w", root, r.pkg, r.newVersion, err)
 	}
@@ -91,7 +91,7 @@ func describeDifferences(diffs []string) string {
 
 // copyInstructions spells out, per differing path, what the operator runs: a
 // cp for a regular file the staged tree carries, a note for anything else (a
-// directory, a file only the published tree has, a metadata.xml to merge).
+// directory, a published-only file a FILESDIR path of the candidate reaches).
 func copyInstructions(stagedPkgDir, publishedPkgDir string, diffs []string) string {
 	steps := make([]string, 0, len(diffs))
 	for _, rel := range diffs {
@@ -100,7 +100,7 @@ func copyInstructions(stagedPkgDir, publishedPkgDir string, diffs []string) stri
 		info, err := os.Lstat(src)
 		switch {
 		case err != nil:
-			steps = append(steps, fmt.Sprintf("%s is only in the published directory: restore it in the staged tree or drop it from the overlay", rel))
+			steps = append(steps, fmt.Sprintf("%s is only in the published directory, where a ${FILESDIR} path of the candidate would pick it up: restore it in the staged tree or drop it from the overlay", rel))
 		case info.IsDir():
 			steps = append(steps, fmt.Sprintf("mkdir -p %s", dst))
 		case info.Mode().IsRegular():
@@ -152,10 +152,118 @@ func (r *applyRun) raiseDepthToRecord(root string) error {
 	return nil
 }
 
-// filesDirGlob matches a FILESDIR path holding a glob ("${FILESDIR}"/*.patch,
-// ${FILESDIR}/${PV}/*): an ebuild that names its files that way would apply a
-// file left in the published directory that the gates never saw.
-var filesDirGlob = regexp.MustCompile(`\$\{?FILESDIR\}?"?/[^\s"']*[*?\[]`)
+// filesDirRef finds each ${FILESDIR} or $FILESDIR reference in an ebuild.
+var filesDirRef = regexp.MustCompile(`\$(\{FILESDIR\}|FILESDIR\b)`)
+
+// filesDirReach reports, for a path relative to the package directory, whether
+// some ${FILESDIR} word of ebuild could name it or a directory above it. A word
+// is read as a shell word: quotes are dropped, every expansion ($V, ${...},
+// $(...), {a,b}) may stand for anything including a slash, and a glob
+// character stands for what it matches whether quoted or not. Each guess errs
+// towards reaching more, never less.
+//
+// A directory counts as reaching everything below it, because eapply applies
+// every patch in a directory it is given and doins -r copies the whole tree.
+func filesDirReach(ebuild []byte) func(rel string) bool {
+	var words []*regexp.Regexp
+	for _, loc := range filesDirRef.FindAllIndex(ebuild, -1) {
+		quoted := loc[0] > 0 && ebuild[loc[0]-1] == '"'
+		pattern := "^files" + filesDirWordPattern(ebuild[loc[1]:], quoted) + "(/.*)?$"
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			// Unreachable: filesDirWordPattern quotes every literal. Reach
+			// everything rather than let a file through unseen.
+			return func(string) bool { return true }
+		}
+		words = append(words, re)
+	}
+	return func(rel string) bool {
+		for _, re := range words {
+			if re.MatchString(rel) {
+				return true
+			}
+		}
+		return false
+	}
+}
+
+// filesDirWordPattern turns the rest of the shell word that follows a FILESDIR
+// reference into a regular expression, quoted reports whether that reference
+// sits inside double quotes.
+func filesDirWordPattern(rest []byte, quoted bool) string {
+	var b strings.Builder
+	dq, sq := quoted, false
+	for i := 0; i < len(rest); i++ {
+		c := rest[i]
+		switch {
+		case sq:
+			if c == '\'' {
+				sq = false
+			} else {
+				b.WriteString(regexp.QuoteMeta(string(c)))
+			}
+		case c == '"':
+			dq = !dq
+		case c == '\'' && !dq:
+			sq = true
+		case c == '\\' && i+1 < len(rest):
+			i++
+			b.WriteString(regexp.QuoteMeta(string(rest[i])))
+		case !dq && (c == ' ' || c == '\t' || c == '\n' || strings.IndexByte(";|&<>()", c) >= 0):
+			return b.String()
+		case c == '$' && i+1 < len(rest) && (rest[i+1] == '{' || rest[i+1] == '('):
+			i = skipBalanced(rest, i+1)
+			b.WriteString(".*")
+		case c == '$' && i+1 < len(rest) && isShellNameByte(rest[i+1]):
+			for i+1 < len(rest) && isShellNameByte(rest[i+1]) {
+				i++
+			}
+			b.WriteString(".*")
+		case c == '{' && !dq:
+			i = skipBalanced(rest, i)
+			b.WriteString(".*")
+		case c == '*':
+			b.WriteString("[^/]*")
+		case c == '?':
+			b.WriteString("[^/]")
+		case c == '[':
+			if end := strings.IndexByte(string(rest[i+1:]), ']'); end >= 0 {
+				i += end + 1
+			}
+			b.WriteString("[^/]")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(c)))
+		}
+	}
+	return b.String()
+}
+
+// skipBalanced returns the index of the bracket closing the one at rest[open],
+// or the last index when it is never closed.
+func skipBalanced(rest []byte, open int) int {
+	closer := byte('}')
+	if rest[open] == '(' {
+		closer = ')'
+	}
+	depth := 0
+	for i := open; i < len(rest); i++ {
+		switch rest[i] {
+		case rest[open]:
+			depth++
+		case closer:
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return len(rest) - 1
+}
+
+// isShellNameByte reports whether c may appear in a shell variable name.
+func isShellNameByte(c byte) bool {
+	return c == '_' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
+}
 
 // packageMetadataFile is the one file beside files/ that a staged package
 // directory may carry and promotion would not publish.
@@ -170,13 +278,15 @@ const packageMetadataFile = "metadata.xml"
 // difference is an edit. metadata.xml only counts when the staged directory has
 // one, because staging never copies it.
 //
-// allowRemovals lets a file the published directory carries be absent from the
-// staged one. A bump routinely drops a patch upstream merged (edk2 202611 and
-// its fix-gic-hvf patch, 2026-11-23), and the published copy must stay for the
-// older ebuilds that still name it. The gates built the candidate without the
-// file, so the file left behind changes nothing for it, unless the candidate
-// picks patches up by glob, which is why the caller passes false then.
-func packageFileDifferences(stagedPkgDir, publishedPkgDir string, allowRemovals bool) ([]string, error) {
+// A path only the published directory carries counts only when reaches says
+// the candidate could pick it up. A bump routinely drops a patch upstream
+// merged (edk2 202611 and its fix-gic-hvf patch, 2026-11-23), and the published
+// copy must stay for the older ebuilds that still name it. The gates built the
+// candidate without the file, so the file left behind changes nothing for it,
+// unless a ${FILESDIR} glob or directory of the candidate reaches it. Scoping
+// that to the paths each one reaches matters: edk2 installs
+// "${FILESDIR}"/descriptors/*.json, which can never pick up a top-level patch.
+func packageFileDifferences(stagedPkgDir, publishedPkgDir string, reaches func(rel string) bool) ([]string, error) {
 	staged, err := packageFileEntries(stagedPkgDir)
 	if err != nil {
 		return nil, err
@@ -194,7 +304,7 @@ func packageFileDifferences(stagedPkgDir, publishedPkgDir string, allowRemovals 
 		paths = append(paths, rel)
 	}
 	for rel := range published {
-		if _, ok := staged[rel]; !ok && !allowRemovals {
+		if _, ok := staged[rel]; !ok && reaches(rel) {
 			paths = append(paths, rel)
 		}
 	}

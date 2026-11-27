@@ -71,7 +71,7 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 		name      string
 		published map[string]string
 		staged    map[string]string
-		globs     bool   // the candidate applies "${FILESDIR}"/*.patch
+		line      string // appended to the candidate ebuild when set
 		want      string // "" means the apply must promote
 	}{
 		{name: "identical files promote", published: map[string]string{patch: "same\n"}, staged: map[string]string{patch: "same\n"}},
@@ -79,7 +79,22 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 		{name: "patch only in the staged tree", staged: map[string]string{"files/sub/fix.patch": "new\n"}, want: "files/sub"},
 		{name: "patch edited in the staged tree", published: map[string]string{patch: "old\n"}, staged: map[string]string{patch: "new\n"}, want: patch},
 		{name: "patch removed from the staged tree promotes", published: map[string]string{patch: "old\n"}},
-		{name: "patch removed while the candidate globs FILESDIR", published: map[string]string{patch: "old\n"}, globs: true, want: patch},
+		{name: "patch removed while the candidate globs FILESDIR", published: map[string]string{patch: "old\n"}, line: `PATCHES=( "${FILESDIR}"/*.patch )`, want: patch},
+		// edk2 202611, 2026-11-26: the candidate dropped a patch only older
+		// ebuilds use, and its one glob is under descriptors/.
+		{
+			name:      "patch removed while the candidate globs another FILESDIR directory promotes",
+			published: map[string]string{patch: "old\n", "files/descriptors/a.json": "{}\n"},
+			staged:    map[string]string{"files/descriptors/a.json": "{}\n"},
+			line:      `doins "${FILESDIR}"/descriptors/*"${TARGET_ARCH,,}"*.json`,
+		},
+		{
+			name:      "file removed under a directory the candidate globs",
+			published: map[string]string{"files/descriptors/old.json": "{}\n"},
+			line:      `doins "${FILESDIR}"/descriptors/*"${TARGET_ARCH,,}"*.json`,
+			want:      "files/descriptors/old.json",
+		},
+		{name: "patch removed under a directory the candidate applies whole", published: map[string]string{"files/1.29/a.patch": "old\n"}, line: `eapply "${FILESDIR}/${PV%.*}"`, want: "files/1.29/a.patch"},
 		{name: "metadata.xml edited in the staged tree", published: map[string]string{"metadata.xml": "<a/>\n"}, staged: map[string]string{"metadata.xml": "<b/>\n"}, want: "metadata.xml"},
 	}
 	for _, tt := range tests {
@@ -91,8 +106,8 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 			for rel, body := range tt.staged {
 				writeTestFile(t, filepath.Join(staged, "media-plugins", "gst-plugins-qt6", rel), body)
 			}
-			if tt.globs {
-				appendCandidateLine(t, staged, `PATCHES=( "${FILESDIR}"/*.patch )`)
+			if tt.line != "" {
+				appendCandidateLine(t, staged, tt.line)
 			}
 			if tt.want != "" {
 				assertAdoptRefused(t, a, overlayDir, pkg, staged, tt.want)
@@ -101,6 +116,40 @@ func TestApplyAdoptedTreeRefusesPackageFilesTheOverlayDoesNotCarry(t *testing.T)
 			result, err := a.Apply(t.Context(), pkg)
 			if err != nil || !result.Success {
 				t.Fatalf("Apply refused an adopted tree whose package files match the overlay: %v", err)
+			}
+		})
+	}
+}
+
+// TestFilesDirReach: a published-only path counts against an adoption only
+// when a ${FILESDIR} word of the candidate could name it or a directory above
+// it.
+func TestFilesDirReach(t *testing.T) {
+	tests := []struct {
+		name   string
+		ebuild string
+		rel    string
+		want   bool
+	}{
+		{name: "no FILESDIR reaches nothing", ebuild: `src_install() { default; }`, rel: "files/a.patch"},
+		{name: "explicit name reaches itself", ebuild: `PATCHES=( "${FILESDIR}"/${PN}-1-fix.patch )`, rel: "files/foo-1-fix.patch", want: true},
+		{name: "explicit name does not reach another", ebuild: `PATCHES=( "${FILESDIR}"/${PN}-1-fix.patch )`, rel: "files/foo-2-other.diff"},
+		{name: "top-level glob reaches a top-level patch", ebuild: `eapply "${FILESDIR}"/*.patch`, rel: "files/a.patch", want: true},
+		{name: "top-level glob does not cross a slash", ebuild: `eapply "${FILESDIR}"/*.patch`, rel: "files/sub/a.patch"},
+		{name: "subdirectory glob does not reach the top level", ebuild: `hprefixify "${FILESDIR}"/descriptors/*.json`, rel: "files/edk2-202608-fix-gic-hvf.patch"},
+		{name: "subdirectory glob reaches its own files", ebuild: `hprefixify "${FILESDIR}"/descriptors/*.json`, rel: "files/descriptors/x.json", want: true},
+		{name: "quoted glob still counts", ebuild: `eapply "${FILESDIR}/*.patch"`, rel: "files/a.patch", want: true},
+		{name: "bare directory reaches everything below it", ebuild: `eapply "${FILESDIR}/${PV}"`, rel: "files/1.0/deep/a.patch", want: true},
+		{name: "FILESDIR alone reaches everything", ebuild: `cp -r "${FILESDIR}" "${T}" || die`, rel: "files/x/y", want: true},
+		{name: "unbraced FILESDIR", ebuild: `eapply $FILESDIR/*.patch`, rel: "files/a.patch", want: true},
+		{name: "brace expansion may stand for anything", ebuild: `eapply "${FILESDIR}"/{a,b}.patch`, rel: "files/c.patch", want: true},
+		{name: "single quotes keep the literal", ebuild: `doins "${FILESDIR}"/'conf.d'`, rel: "files/conf.d", want: true},
+		{name: "a word ends at a separator", ebuild: `newinitd "${FILESDIR}"/foo.initd foo;doins *.patch`, rel: "files/a.patch"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := filesDirReach([]byte(tt.ebuild))(tt.rel); got != tt.want {
+				t.Fatalf("filesDirReach(%q)(%q) = %v, want %v", tt.ebuild, tt.rel, got, tt.want)
 			}
 		})
 	}

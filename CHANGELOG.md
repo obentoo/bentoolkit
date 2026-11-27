@@ -9,6 +9,18 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Fixed
+
+- **A repair that drops a patch only older ebuilds use is adopted even when
+  the ebuild globs another `files/` directory.** `--repair sys-firmware/edk2`
+  was refused because `files/edk2-202608-fix-gic-hvf.patch`, which the new
+  version no longer applies, stays in the overlay for `edk2-202608-r3`. Any
+  `${FILESDIR}` glob in the ebuild used to block every such removal; edk2's
+  only glob is `"${FILESDIR}"/descriptors/*.json`, which can never pick that
+  patch up. Now a file left only in the overlay blocks the repair only when a
+  `${FILESDIR}` glob or directory of the new ebuild would reach it. A file the
+  repair adds or changes under `files/` is still refused as before.
+
 ## [0.48.0] - 2026-11-26
 
 ### Changed
