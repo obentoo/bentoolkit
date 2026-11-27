@@ -1691,6 +1691,25 @@ msgstr[0] "Запустить ОДИН интерактивный сеанс cla
 msgstr[1] "Запустить ОДИН интерактивный сеанс claude для %d обновлений в %s?"
 msgstr[2] "Запустить ОДИН интерактивный сеанс claude для %d обновлений в %s?"
 
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Files to carry into the published overlay"
+msgstr "Файлы для переноса в опубликованный оверлей"
+
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Copy %d path(s) into %s now?"
+msgid_plural "Copy %d path(s) into %s now?"
+msgstr[0] "Скопировать %d путь в %s сейчас?"
+msgstr[1] "Скопировать %d пути в %s сейчас?"
+msgstr[2] "Скопировать %d путей в %s сейчас?"
+
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Nothing copied: the re-validation refuses the staged tree until these paths match."
+msgstr "Ничего не скопировано: повторная проверка отклоняет промежуточное дерево, пока эти пути не совпадут."
+
+#: cmd/bentoo/overlay_autoupdate_repair_verdict.go
+msgid "(the same cause as %s)"
+msgstr "(та же причина, что и у %s)"
+
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
 msgstr "Нечего очищать: каждый найденный невостребованный ebuild защищён — см. группы выше."

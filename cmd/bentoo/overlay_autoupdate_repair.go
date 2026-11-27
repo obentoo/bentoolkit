@@ -123,6 +123,7 @@ func (ar *autoupdateRun) runRepairFor(ctx context.Context, pkg, overlayPath, con
 		ar.markRepaired(b)
 		return failWith(1, fmt.Errorf("--repair %s: interrupted before the re-validation; the staged tree is kept as the session left it: %w", pkg, err))
 	}
+	ar.offerStagedCopies(ctx, overlayPath, b)
 	return ar.revalidateRepair(ctx, overlayPath, configDir, auCfg.LLM, b)
 }
 
@@ -306,12 +307,8 @@ func repairState(result validate.EbuildResult) report.State {
 func printRepairVerdict(pkg string, state report.State, result validate.EbuildResult) {
 	fmt.Println()
 	output.Header.Println(i18n.T("Re-validation"))
-	for _, g := range result.Gates {
-		fmt.Printf("    %-12s %s", g.Gate, g.Outcome)
-		if g.Reason != "" && g.Outcome != validate.OutcomePass {
-			fmt.Printf(": %s", g.Reason)
-		}
-		fmt.Println()
+	for _, line := range verdictReasons(result.Gates) {
+		fmt.Println(line)
 	}
 	if state == report.Ready {
 		output.Success.Printf("\n"+i18n.T("✓ %s is READY: the repaired tree is proven.")+"\n", pkg)

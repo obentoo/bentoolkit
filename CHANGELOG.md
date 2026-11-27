@@ -9,6 +9,20 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Changed
+
+- **A repair offers to copy the files it changed.** Once the session has
+  ended, and before the re-validation, `--repair` lists every path under
+  `files/` (or a staged `metadata.xml`) that the published package directory
+  lacks or holds differently, and asks once per package to copy it there. The
+  2026-11-26 batch re-validated breakpad the moment its session ended, so its
+  rebased patch could only be copied by hand and repaired again. The session
+  prompt now names each package's published directory: that session had
+  pointed its `cp` at `/var/db/repos/bentoo`.
+- **A refusal shared by every gate is printed once.** The re-validation names
+  the cause on the first gate and points the others at it, instead of
+  repeating the full text (and its `cp` lines) for each gate.
+
 ### Fixed
 
 - **A repair that drops a patch only older ebuilds use is adopted even when

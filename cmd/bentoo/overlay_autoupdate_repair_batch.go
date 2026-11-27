@@ -134,6 +134,11 @@ func (ar *autoupdateRun) runBatchRepair(ctx context.Context, pkgs []string, over
 		output.Warning.Println("  " + i18n.T("The re-validation was skipped: the run is stopping. Each staged tree is kept as the session left it; run --repair with them again."))
 		return false
 	}
+	// Every copy is asked for first, so the re-validations that follow run
+	// with nothing more to answer.
+	for _, b := range bundles {
+		ar.offerStagedCopies(ctx, overlayPath, b)
+	}
 	return ar.revalidateBatch(ctx, bundles, overlayPath, configDir, auCfg) && allLoaded
 }
 

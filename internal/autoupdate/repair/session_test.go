@@ -171,8 +171,8 @@ func TestSessionArgsResumesTheFixerSessionAsAFork(t *testing.T) {
 // were repaired on 2026-11-24 by editing patches under files/, and adoption
 // then refused both trees. The session is told up front.
 func TestSessionPromptSaysFilesUnderFilesDirAreNotPublished(t *testing.T) {
-	prompt := sessionPrompt(Bundle{Package: "dev-util/breakpad"})
-	for _, want := range []string{"Only the candidate ebuild and its Manifest are published", "files/", "cp command"} {
+	prompt := sessionPrompt(Bundle{Package: "dev-util/breakpad"}, "/home/u/overlay")
+	for _, want := range []string{"Only the candidate ebuild and its Manifest are published", "files/", "offers to copy", "/home/u/overlay/dev-util/breakpad", "Never copy into /var/db/repos"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the session prompt does not say %q", want)
 		}

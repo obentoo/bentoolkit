@@ -83,3 +83,22 @@ func TestBatchSessionArgsDenyRulesComeLast(t *testing.T) {
 		t.Errorf("deny rules = %q, want %q", rules, want)
 	}
 }
+
+// TestBatchPromptNamesEachPublishedPackageDirectory: the cp destination of
+// every package is its directory in the configured overlay, slot suffix
+// dropped, so a session cannot point at /var/db/repos (2026-11-26).
+func TestBatchPromptNamesEachPublishedPackageDirectory(t *testing.T) {
+	s := batchSpec()
+	s.OverlayPath = "/home/u/overlay"
+	s.Bundles[1].Package = "net-libs/nodejs:26"
+	prompt := BatchSessionArgs(s)[0]
+	for _, want := range []string{
+		"- dev-go/govulncheck: /home/u/overlay/dev-go/govulncheck\n",
+		"- net-libs/nodejs:26: /home/u/overlay/net-libs/nodejs\n",
+		"Never copy into /var/db/repos",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("the batch prompt lacks %q", want)
+		}
+	}
+}
