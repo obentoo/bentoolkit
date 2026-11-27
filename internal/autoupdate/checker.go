@@ -340,6 +340,10 @@ type Checker struct {
 
 	// nowFunc is the clock the min_age_days gate reads; nil means time.Now.
 	nowFunc func() time.Time
+	// registryReadOnly stops CheckAll from writing its packages.toml
+	// bookkeeping (the orphan disable and the re-enable of a returned
+	// ebuild). Set via WithoutRegistryWrites.
+	registryReadOnly bool
 	// cooldownState is the overlay's cooldown block, loaded once, which the
 	// commit-tracked check reads to queue a graduation target (graduate.go).
 	cooldownState checkerCooldown
@@ -584,6 +588,17 @@ func WithFetchCache(enabled bool) CheckerOption {
 		if c.bodies == nil {
 			c.bodies = fetch.NewDefaultBodyCache()
 		}
+		return nil
+	}
+}
+
+// WithoutRegistryWrites makes CheckAll leave packages.toml untouched: the
+// entries it would disable or re-enable are logged instead. The command sets it
+// when the overlay checkout is behind its upstream, so a check on a stale tree
+// reports without writing onto it.
+func WithoutRegistryWrites() CheckerOption {
+	return func(c *Checker) error {
+		c.registryReadOnly = true
 		return nil
 	}
 }
@@ -2579,7 +2594,10 @@ func (c *Checker) CheckAll(ctx context.Context, force bool) BatchResult[CheckRes
 	// batched write keeps the hand-maintained packages.toml's comments intact;
 	// a failure here is non-fatal — the run's results still stand and the entry
 	// is simply retried (and re-reported) next time.
-	if len(run.orphaned) > 0 {
+	if len(run.orphaned) > 0 && c.registryReadOnly {
+		c.logger().Info("packages.toml not written: would auto-disable package(s) whose ebuild is absent",
+			"count", len(run.orphaned), "packages", run.orphaned)
+	} else if len(run.orphaned) > 0 {
 		if err := c.DisableOrphans(run.orphaned); err != nil {
 			c.logger().Warn("failed to auto-disable orphaned package(s) in packages.toml", "count", len(run.orphaned), "err", err)
 		}
@@ -2683,7 +2701,11 @@ func (c *Checker) checkAllWorker(ctx context.Context, run *checkAllRun, sem chan
 // leaves frozen.
 func (c *Checker) reconcileDisabled() {
 	revived, frozen := c.disabledWithEbuild()
-	if len(revived) > 0 {
+	if len(revived) > 0 && c.registryReadOnly {
+		sort.Strings(revived)
+		c.logger().Info("packages.toml not written: would re-enable package(s) whose ebuild is present again",
+			"count", len(revived), "packages", revived)
+	} else if len(revived) > 0 {
 		sort.Strings(revived)
 		if err := c.ReviveDisabled(revived); err != nil {
 			c.logger().Warn("failed to re-enable package(s) whose ebuild reappeared in the overlay",

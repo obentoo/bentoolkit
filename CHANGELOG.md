@@ -9,6 +9,21 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+### Added
+
+- **Autoupdate and compare notice a checkout behind its upstream.** On
+  2026-11-26 the overlay's `master` was 6 commits behind `origin/master`:
+  `--check --llm` proposed bentoolkit 0.48.0 as READY although it was already
+  published, `compare` called virtual/dist-kernel 7.3.5_p1 "needs rebase", and
+  the registry reconciliation and `--clean` wrote onto the stale base. Every
+  autoupdate mode that writes (`--apply`, `--revive`, `--repair`, `--clean`,
+  `--lint --fix`, `--mark-auto-disabled`) now refuses before writing, naming
+  the count and `bentoo overlay pull`; `--check` warns and writes nothing to
+  the overlay or `packages.toml`; `compare` warns, and refuses
+  `--realign --depth`. `--allow-behind` overrides. The count uses the
+  remote-tracking ref as last fetched; `--fetch` refreshes it first, and a
+  failed fetch only warns.
+
 ### Changed
 
 - **A repair offers to copy the files it changed.** Once the session has
@@ -74,6 +89,7 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   patch up. Now a file left only in the overlay blocks the repair only when a
   `${FILESDIR}` glob or directory of the new ebuild would reach it. A file the
   repair adds or changes under `files/` is still refused as before.
+
 
 ## [0.48.0] - 2026-11-26
 

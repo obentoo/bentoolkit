@@ -1378,6 +1378,37 @@ of an `--apply` run.
 Out of scope: npm and cargo vendoring, packages that need another generator
 first, and the ebuild edit for a stale pinned tarball.
 
+#### A checkout behind its upstream
+
+Every mode that reads the overlay first counts the commits the checked-out
+branch lacks from its upstream (`HEAD..@{u}`, the count `bentoo overlay pull`
+uses). A run from a stale checkout proposes bumps that are already published
+and writes onto a base the next push has to reconcile, so:
+
+- `--apply`, `--revive`, `--repair`, `--clean`, `--lint --fix` and
+  `--mark-auto-disabled` **refuse before writing anything** (before the overlay
+  lock is taken), with an error naming the count and `bentoo overlay pull`.
+- `--check` warns on stderr and then runs **without writing**: the orphan
+  auto-disable and re-enable of `packages.toml`, the LLM registry fixer, the
+  repair sessions offered after the report and the registry reconciliation's
+  pin writes are all skipped. The reconciliation still prints its
+  divergences.
+- `--lint` only warns. `--list` (which reads `pending.json` alone) and
+  `--revive-list` (which compares disabled entries with ::gentoo) are not
+  checked.
+
+`--allow-behind` runs the mode anyway, with a one-line warning. Prefer `bentoo
+overlay pull`.
+
+The count reads the remote-tracking ref as the last fetch left it, which may
+itself be stale, and the warning says so. Nothing is fetched by default, so the
+check costs no network and works offline. `--fetch` fetches `overlay.remote`
+first, bounded to 60 seconds; a failed fetch logs one WARN and the count uses
+the local ref, so a network outage never fails the run. A diverged checkout
+(ahead and behind) counts as behind. An overlay that is not the top of a git
+checkout, a detached `HEAD` and a branch with no upstream skip the check
+(logged at DEBUG).
+
 #### Example Autoupdate Workflow
 
 ```bash

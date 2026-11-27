@@ -208,6 +208,21 @@ This command will:
   against the newest version
 - Display a table of outdated packages
 
+**A checkout behind its upstream.** Before it scans, compare counts the commits
+the checked-out branch lacks from its upstream (`HEAD..@{u}`, as `bentoo
+overlay pull` does). When there are any, it warns on stderr, naming the count
+and `bentoo overlay pull`: every verdict below describes the stale tree, so a
+bump already merged upstream reads as "needs rebase". A plain compare only
+warns. `--realign --depth`, which can publish realignments, is refused unless
+`--allow-behind` is given.
+
+The count reads the remote-tracking ref as the last fetch left it, which may
+itself be stale; the warning says so. `--fetch` refreshes it first
+(`overlay.remote`, bounded to 60 seconds); a failed fetch warns once and the
+count uses the local ref. A diverged checkout (ahead and behind) counts as
+behind. An overlay that is not the top of a git checkout, a detached `HEAD` and
+a branch with no upstream skip the check (logged at DEBUG).
+
 **Built-in Repositories:**
 
 | Name | Description | Provider |

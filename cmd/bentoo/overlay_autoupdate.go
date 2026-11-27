@@ -174,6 +174,11 @@ type autoupdateOptions struct {
 	// neither key can enable anything on a run where this flag is absent. The
 	// direction matters — the flag is where the cost is consented to.
 	llm bool
+	// allowBehind lets a writing mode run from a checkout behind its
+	// upstream (see guardOverlayUpstream); fetchUpstream refreshes the
+	// remote-tracking ref before that check.
+	allowBehind   bool
+	fetchUpstream bool
 }
 
 // autoupdateRun is everything one invocation resolved before its mode runs.
@@ -203,6 +208,11 @@ type autoupdateRun struct {
 	// token lookup the run makes. nil (a run built directly by a unit test)
 	// leaves each Checker warning on its own.
 	secrets *secretsWarning
+	// behindReadOnly is set when the overlay checkout is behind its upstream
+	// and --allow-behind was not given on a mode that only warns (--check):
+	// every write that mode would make to the overlay or its registry is
+	// skipped.
+	behindReadOnly bool
 }
 
 // checkerSecretsOption routes a Checker's GitHub token resolution error to the
@@ -442,6 +452,8 @@ Examples:
 	cmd.Flags().StringVar(&o.distdir, "distdir", "", i18n.N("Distfiles directory used by pkgdev (default: the host's own DISTDIR, as reported by portageq distdir; overrides the autoupdate.distdir config key)"))
 	cmd.Flags().StringVar(&o.distfilesCache, "distfiles-cache", distfiles.DefaultCache, i18n.N("Read-only distfiles cache consulted before download (\"\" disables; overrides the autoupdate.distfiles_cache config key)"))
 	cmd.Flags().BoolVar(&o.noFetchCache, "no-fetch-cache", false, i18n.N("Fetch each URL per record instead of sharing one response across records that declare it"))
+	cmd.Flags().BoolVar(&o.allowBehind, "allow-behind", false, i18n.N("Write even though the overlay checkout is behind its upstream. Without it --apply, --revive, --repair, --clean, --lint --fix and --mark-auto-disabled refuse before writing anything, and --check reports without writing to the overlay or packages.toml. Run 'bentoo overlay pull' instead whenever you can"))
+	cmd.Flags().BoolVar(&o.fetchUpstream, "fetch", false, i18n.N("Fetch the overlay's remote (overlay.remote, bounded to 60 seconds) before checking whether the checkout is behind its upstream. Without it the check reads the remote-tracking ref as the last fetch left it; a failed fetch warns and the run continues"))
 	cmd.Flags().BoolVar(&o.llm, "llm", false, i18n.N("With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"))
 	return cmd
 }
@@ -805,6 +817,12 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 		ar.log().Debug("the ambient UI mode did not resolve before the package work", "err", err)
 	}
 
+	// A checkout behind its upstream is refused before the lock and before any
+	// write: a bump proposed or a pin written from it lands on a stale base.
+	if err := ar.guardOverlayUpstream(runCtx, appCtx.Config, overlayPath); err != nil {
+		return failWith(1, err)
+	}
+
 	// One run per overlay: every mode that writes the overlay or
 	// the registry holds <overlay>/.autoupdate.bentoo-lock until it returns, so
 	// a cron run and a manual run never edit packages.toml and the ebuilds at
@@ -896,6 +914,20 @@ func runAutoupdate(cmd *cobra.Command, args []string, o *autoupdateOptions, d *d
 	}
 }
 
+// disableMissingEbuild auto-disables the entry of a package whose ebuild is
+// gone from the overlay, unless the checkout is behind its upstream: there the
+// ebuild may exist upstream, and the write would land on a stale base.
+func (ar *autoupdateRun) disableMissingEbuild(checker *autoupdate.Checker, pkg string) {
+	if ar.behindReadOnly {
+		ar.log().Info("package has no ebuild in the overlay; packages.toml not written: the checkout is behind its upstream", "package", pkg)
+		return
+	}
+	if err := checker.DisableOrphans([]string{pkg}); err != nil {
+		ar.log().Warn("failed to disable orphaned package", "package", pkg, "err", err)
+	}
+	ar.log().Info("package has no ebuild in the overlay — disabled in packages.toml", "package", pkg)
+}
+
 // resolveHTTPTimeout resolves the per-request HTTP timeout for --check and the
 // revive flows: the --timeout flag when positive, otherwise
 // autoupdate.http_timeout from config (which itself falls back to a 30s default).
@@ -971,6 +1003,9 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 	}
 	opts = append(opts, autoupdate.WithLLMProviderConfigured(llmCfg.Provider != ""))
 	opts = append(opts, autoupdate.WithGentooPath(gentooRepoPath()))
+	if ar.behindReadOnly {
+		opts = append(opts, autoupdate.WithoutRegistryWrites())
+	}
 
 	// Progress feedback: CheckAll fans out concurrently and otherwise prints
 	// nothing until the final table, so show a live [pct%] done/total counter on
@@ -1009,10 +1044,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 			// A removed ebuild is not a hard error: auto-disable the orphaned
 			// entry and report it as info so repeated runs stay quiet.
 			if errors.Is(err, ebuilds.ErrNoEbuildFound) {
-				if derr := checker.DisableOrphans([]string{pkg}); derr != nil {
-					ar.log().Warn("failed to disable orphaned package", "package", pkg, "err", derr)
-				}
-				ar.log().Info("package has no ebuild in the overlay — disabled in packages.toml", "package", pkg)
+				ar.disableMissingEbuild(checker, pkg)
 				return nil
 			}
 			return failWith(1, fmt.Errorf("failed to check package %s: %w", pkg, err))
@@ -1072,7 +1104,7 @@ func (ar *autoupdateRun) runCheck(ctx context.Context, overlayPath, configDir st
 		ar.log().Warn("LLM registry fixer unavailable; --check will not offer registry repair", "err", ferr)
 		fixer = nil
 	}
-	if fixer != nil && ar.deps.checkInteractive() {
+	if fixer != nil && ar.deps.checkInteractive() && !ar.behindReadOnly {
 		promptRegistryFixes(ctx, overlayPath, fixer, result.Failures, os.Stdin, newChecker)
 	}
 
@@ -1263,6 +1295,13 @@ func (ar *autoupdateRun) reconcileRegistryAfterCheck(overlayPath string) {
 		// directory is empty). There is no batch, so there is nothing to confirm:
 		// asking "write 0 pins?" would train the operator to say yes.
 		output.Info.Println("  " + i18n.T("Nothing to write: no entry's pin disagrees with the overlay."))
+		return
+	}
+
+	if ar.behindReadOnly {
+		// The pins were read from a stale tree; written, they would be
+		// committed on top of it. The divergences above stay the report.
+		output.Warning.Println("  " + i18n.T("Not written: the overlay checkout is behind its upstream. Run 'bentoo overlay pull', then --check again."))
 		return
 	}
 

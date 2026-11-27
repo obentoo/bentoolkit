@@ -29,7 +29,7 @@ import (
 // stdin and stdout, or without claude on PATH: an unattended run never stops
 // to ask.
 func (ar *autoupdateRun) offerRepairs(ctx context.Context, overlayPath, configDir string, auCfg config.AutoupdateConfig, validated report.Run) {
-	if ar.opts.yes || !ar.deps.checkInteractive() || !ar.deps.uiIsTerminal() {
+	if ar.opts.yes || ar.behindReadOnly || !ar.deps.checkInteractive() || !ar.deps.uiIsTerminal() {
 		return
 	}
 	if _, err := ar.deps.lookPath("claude"); err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/obentoo/bentoolkit/internal/autoupdate/registry"
 	"github.com/obentoo/bentoolkit/internal/autoupdate/validate"
 	"github.com/obentoo/bentoolkit/internal/common/config"
+	"github.com/obentoo/bentoolkit/internal/common/git"
 	"github.com/obentoo/bentoolkit/internal/common/output"
 	"github.com/obentoo/bentoolkit/internal/common/provider"
 	"github.com/obentoo/bentoolkit/internal/common/secrets"
@@ -159,6 +160,10 @@ type deps struct {
 	// newApplier is how every `overlay autoupdate` mode builds its Applier, so
 	// a test can read the option set each construction site ships with.
 	newApplier func(overlayPath, configDir string, opts ...autoupdate.ApplierOption) (*autoupdate.Applier, error)
+	// overlayGit builds the git runner the upstream guard of autoupdate and
+	// compare reads the overlay checkout through, so a test can script a
+	// checkout behind its upstream without a repository or a network.
+	overlayGit func(overlayPath string) git.GitExecutor
 }
 
 // defaultDeps returns the production wiring: the values the replaced package
@@ -202,6 +207,7 @@ func defaultDeps() *deps {
 		lookPath:                exec.LookPath,
 		confirmRepair:           confirmAction,
 		newApplier:              autoupdate.NewApplier,
+		overlayGit:              func(overlayPath string) git.GitExecutor { return git.NewGitRunner(overlayPath) },
 	}
 }
 
