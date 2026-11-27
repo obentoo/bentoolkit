@@ -380,6 +380,9 @@ type Applier struct {
 	// spillSweep runs sweepChildRunSpills once per Applier, on its first Apply.
 	// It is a pointer so the copies withoutAgents makes share it.
 	spillSweep *sync.Once
+	// siblings is the run's siblings repository (StageRunSiblings), held by
+	// pointer so the copies withoutAgents makes share it.
+	siblings *siblingsState
 	// configDir is the bentoo autoupdate config directory — in production
 	// ~/.config/bentoo/autoupdate — and it is held for exactly one purpose: the
 	// cache.json in it is where a host-caused build failure records the
@@ -1036,6 +1039,7 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 		envMu:            &sync.Mutex{},
 		validateUnproven: testsValidateUnproven,
 		spillSweep:       &sync.Once{},
+		siblings:         &siblingsState{},
 		overlayPath:      overlayPath,
 		logsDir:          logsDir,
 		configDir:        configDir,
@@ -3210,7 +3214,7 @@ func (a *Applier) refuseBuildFixOnMachineFault(pkg, version string, first buildA
 // package's own default, so a host with no `emerge` reaches the undetermined
 // branch through the real absence rather than through a substitute.
 func (a *Applier) buildDependencyAnswer(ctx context.Context, cand candidatePaths, pkg, version string) buildDependencyAnswer {
-	ok, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, validate.BuildDeps{
+	ok, missing, err := validate.DependenciesSatisfiedIn(ctx, cand.repoRoot, pkg, version, a.resolveScope(), validate.BuildDeps{
 		ExecCommand: a.backendCommand,
 	})
 	if err != nil {

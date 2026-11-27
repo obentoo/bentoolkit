@@ -26,6 +26,10 @@ import (
 // wave (applyWaves), so its requirement gate sees what the earlier one published.
 func (a *Applier) ApplyAll(ctx context.Context, updates []PendingUpdate, concurrency int) ([]*ApplyResult, int) {
 	results := make([]*ApplyResult, len(updates))
+	// Before the first wave, so every candidate's resolve sees every other one
+	// regardless of which worker reaches it first.
+	release := a.StageRunSiblings(updates)
+	defer release()
 
 	pins := func(pkg, atom string) string {
 		pin, ok := a.RequirePin(pkg, atom)
