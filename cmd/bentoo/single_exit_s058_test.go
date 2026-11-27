@@ -3,9 +3,9 @@ package main
 // Authored for story 058, sub-task 7.1 — R1.1, R1.4.
 //
 // Two whole-package sweeps. The first walks the tree newRootCmd builds and
-// requires the exact set of 33 runnable commands (27 at 6be73ec, plus
+// requires the exact set of 36 runnable commands (27 at 6be73ec, plus
 // notice new and notice revise from main at e051559, plus the four `overlay
-// cooldown` subcommands of bentoo story 003), each on RunE; the second
+// cooldown` subcommands of bentoo story 003, plus cooldown set and unset), each on RunE; the second
 // parses every production file of this package and requires that nothing but
 // func main ends the process (and that main does, exactly once). Both assert
 // what they swept, so a sweep that finds nothing cannot pass.
@@ -30,7 +30,8 @@ var s058AllRunnable = []string{
 	"completion", "distfile fetch",
 	"notice new", "notice revise",
 	"overlay add", "overlay analyze", "overlay autoupdate", "overlay commit", "overlay compare",
-	"overlay cooldown add", "overlay cooldown confirm", "overlay cooldown status", "overlay cooldown sweep",
+	"overlay cooldown add", "overlay cooldown confirm", "overlay cooldown set", "overlay cooldown status",
+	"overlay cooldown sweep", "overlay cooldown unset",
 	"overlay diff", "overlay init", "overlay log", "overlay manifest", "overlay prune",
 	"overlay pull", "overlay push", "overlay rename", "overlay staged clean", "overlay status",
 	"overlay targets",

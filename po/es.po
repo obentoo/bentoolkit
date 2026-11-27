@@ -1462,7 +1462,7 @@ msgstr[0] "packages.toml reparado: %d cambio escrito."
 msgstr[1] "packages.toml reparado: %d cambios escritos."
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
-#: cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go cmd/bentoo/overlay_cooldown_set.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
 msgstr "Revísalo antes de publicarlo: 'bentoo overlay diff'"
 
@@ -2269,6 +2269,115 @@ msgstr "nada que levantar"
 #: cmd/bentoo/overlay_cooldown.go
 msgid "lifted  %s (%s)\n"
 msgstr "elevado  %s (%s)\n"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "let a bare cat/pkg stand for every record of the package (each @series and :slot)"
+msgstr "hacer que un cat/pkg sin más valga por todos los registros del paquete (cada @series y :slot)"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "print the diff and write nothing"
+msgstr "imprimir el diff y no escribir nada"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "run the cooldown sweep right after the write"
+msgstr "ejecutar el sweep del cooldown justo después de la escritura"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "system root whose var/db/pkg releases entries by installation (with --sweep)"
+msgstr "raíz del sistema cuyo var/db/pkg libera entradas por instalación (con --sweep)"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "Set a registry record's cooldown_days and cooldown_reason"
+msgstr "Fijar cooldown_days y cooldown_reason de un registro del registry"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid ""
+"Write cooldown_days and cooldown_reason on the packages.toml records named\n"
+"(cat/pkg, cat/pkg@series or cat/pkg:slot), in place and keeping the file's\n"
+"layout. --days 0 takes the package out of the cooldown; 1 to 3650 sizes its\n"
+"wait. A record in a cooldown_with group brings every member of the group: a\n"
+"group is released whole, so its members share one wait.\n"
+"\n"
+"The change acts on the versions already masked at the next --apply or\n"
+"'bentoo overlay cooldown sweep'."
+msgstr ""
+"Escribe cooldown_days y cooldown_reason en los registros de packages.toml\n"
+"indicados (cat/pkg, cat/pkg@series o cat/pkg:slot), en su sitio y conservando\n"
+"el formato del archivo. --days 0 saca el paquete del cooldown; de 1 a 3650 fija\n"
+"la espera. Un registro de un grupo cooldown_with arrastra a todos los miembros\n"
+"del grupo: un grupo se libera entero, así que sus miembros comparten una espera.\n"
+"\n"
+"El cambio actúa sobre las versiones ya enmascaradas en el próximo --apply o\n"
+"'bentoo overlay cooldown sweep'."
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "the record's wait in days: 0 (out of the cooldown) to 3650"
+msgstr "la espera del registro en días: 0 (fuera del cooldown) a 3650"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "why the package does not wait the block's days (required)"
+msgstr "por qué el paquete no espera los días del bloque (obligatorio)"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "Drop a registry record's cooldown override: it waits the block's days again"
+msgstr "Quitar la excepción de cooldown de un registro: vuelve a esperar los días del bloque"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid ""
+"Remove cooldown_days and cooldown_reason from the packages.toml records named\n"
+"(cat/pkg, cat/pkg@series or cat/pkg:slot), so they wait the days= of the\n"
+"cooldown block again. A record in a cooldown_with group brings every member of\n"
+"the group.\n"
+"\n"
+"The change acts on the versions already masked at the next --apply or\n"
+"'bentoo overlay cooldown sweep'."
+msgstr ""
+"Quita cooldown_days y cooldown_reason de los registros de packages.toml\n"
+"indicados (cat/pkg, cat/pkg@series o cat/pkg:slot), para que vuelvan a esperar\n"
+"el days= del bloque de cooldown. Un registro de un grupo cooldown_with arrastra\n"
+"a todos los miembros del grupo.\n"
+"\n"
+"El cambio actúa sobre las versiones ya enmascaradas en el próximo --apply o\n"
+"'bentoo overlay cooldown sweep'."
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "packages.toml already says that: nothing to write"
+msgstr "packages.toml ya dice eso: nada que escribir"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "dry run: packages.toml is unchanged"
+msgstr "simulación: packages.toml no ha cambiado"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "packages.toml: %d record(s) changed"
+msgid_plural "packages.toml: %d record(s) changed"
+msgstr[0] "packages.toml: %d registro cambiado"
+msgstr[1] "packages.toml: %d registros cambiados"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "It acts on the versions already masked at the next --apply or 'bentoo overlay cooldown sweep'."
+msgstr "Actúa sobre las versiones ya enmascaradas en el próximo --apply o 'bentoo overlay cooldown sweep'."
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "cooldown_with group: also editing %s (a group is released whole, so its members share one wait)\n"
+msgstr ""
+"grupo cooldown_with: también se edita %s (un grupo se libera entero, así que sus miembros comparten una espera)\n"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "note: %s leaves %s as they are (name them too, or pass --all-lines)\n"
+msgstr "nota: %s deja %s como están (indíquelos también, o pase --all-lines)\n"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "(block's days)"
+msgstr "(días del bloque)"
+
+#: cmd/bentoo/overlay_cooldown_set.go cmd/bentoo/snapshot_list.go
+msgid "(none)"
+msgstr "(ninguno)"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "This overlay has no cooldown block yet: the value applies once one exists."
+msgstr "Este overlay aún no tiene bloque de cooldown: el valor se aplicará cuando exista uno."
 
 #: cmd/bentoo/overlay_diff.go
 msgid "Show diff of changes"
@@ -3749,10 +3858,6 @@ msgstr "Mostrar las instantáneas locales por subvolumen"
 #: cmd/bentoo/snapshot_list.go
 msgid "also list remote snapshots (btrbk targets, restic repository)"
 msgstr "también mostrar las instantáneas remotas (destinos de btrbk, repositorio de restic)"
-
-#: cmd/bentoo/snapshot_list.go
-msgid "(none)"
-msgstr "(ninguno)"
 
 #: cmd/bentoo/snapshot_list.go
 msgid "remote %s unavailable: %v"

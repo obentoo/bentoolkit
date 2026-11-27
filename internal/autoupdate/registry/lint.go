@@ -175,13 +175,19 @@ func LintPackagesConfig(log *slog.Logger, overlayPath string) ([]LintIssue, erro
 		}
 		return nil, fmt.Errorf("failed to read packages.toml: %w", err)
 	}
+	return lintRegistryData(log, overlayPath, data)
+}
 
+// lintRegistryData is LintPackagesConfig over text that need not be on disk
+// yet: a registry writer lints its candidate with the very rules `--lint`
+// applies before it is allowed to replace the file.
+func lintRegistryData(log *slog.Logger, overlayPath string, data []byte) ([]LintIssue, error) {
 	issues := LintRecordModel(string(data))
 
 	// Semantic validation needs the parsed config; a parse failure is fatal
 	// because the structural issues above were found by text scan alone and say
 	// nothing about whether the file loads.
-	cfg, err := LoadPackagesConfig(overlayPath)
+	cfg, err := decodePackagesConfig(data)
 	if err != nil {
 		// An unknown key is a lint finding in its own right, not merely a reason
 		// the file would not load: reported per record it reads like every other

@@ -23,6 +23,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `--realign --depth`. `--allow-behind` overrides. The count uses the
   remote-tracking ref as last fetched; `--fetch` refreshes it first, and a
   failed fetch only warns.
+- **`bentoo overlay cooldown set` and `unset` change a record's cooldown
+  from the command line.** `set <record-key>... --days N --reason TEXT`
+  writes `cooldown_days` and `cooldown_reason`, `unset` removes them, so
+  changing a wait no longer means hand-editing an 18,000-line
+  `packages.toml`. Only those lines change; the rewrite is checked against
+  the loader's and the linter's rules before it is written and rolled back if
+  the written file fails them. A bare `cat/pkg` matching several release lines
+  fails listing them unless `--all-lines` is given, and a record in a
+  `cooldown_with` group brings its whole group. `--dry-run` prints the diff;
+  `--sweep` runs the sweep right after.
 
 ### Changed
 
@@ -90,8 +100,6 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   `${FILESDIR}` glob or directory of the new ebuild would reach it. A file the
   repair adds or changes under `files/` is still refused as before.
 
-
-
 - **A bump that pins another candidate of the same run resolves.** Each
   candidate was resolved against its own staged repository only, so
   `media-libs/mesa` (which pins `~dev-util/mesa_clc-${PV}`) stayed WAIT with
@@ -121,7 +129,6 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   version (Rust crates, shared data archives) were never linked from the
   distfiles cache or DISTDIR, so a zed bump downloaded ~1450 crates it
   already had.
-
 
 ## [0.48.0] - 2026-11-26
 

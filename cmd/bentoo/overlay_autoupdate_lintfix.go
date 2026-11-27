@@ -229,10 +229,16 @@ func totalRepairs(result *registry.RepairResult) int {
 // path whose whole job is to show a human what is about to be published. Here it
 // is an error, and an error means write nothing.
 func repairDiff(result *registry.RepairResult) (string, error) {
-	edits := udiff.Lines(result.Original, result.Repaired)
-	diff, err := udiff.ToUnified("a/packages.toml", "b/packages.toml", result.Original, edits, udiff.DefaultContextLines)
+	return registryDiff(result.Path, result.Original, result.Repaired)
+}
+
+// registryDiff renders any rewrite of packages.toml as a unified diff, for
+// every registry writer that shows its change before or instead of writing it.
+func registryDiff(path, original, updated string) (string, error) {
+	edits := udiff.Lines(original, updated)
+	diff, err := udiff.ToUnified("a/packages.toml", "b/packages.toml", original, edits, udiff.DefaultContextLines)
 	if err != nil {
-		return "", fmt.Errorf("rendering the repair of %s as a unified diff: %w", result.Path, err)
+		return "", fmt.Errorf("rendering the rewrite of %s as a unified diff: %w", path, err)
 	}
 	return diff, nil
 }
