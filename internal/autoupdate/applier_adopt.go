@@ -93,20 +93,16 @@ func describeDifferences(diffs []string) string {
 // cp for a regular file the staged tree carries, a note for anything else (a
 // directory, a published-only file a FILESDIR path of the candidate reaches).
 func copyInstructions(stagedPkgDir, publishedPkgDir string, diffs []string) string {
-	steps := make([]string, 0, len(diffs))
-	for _, rel := range diffs {
-		src := filepath.Join(stagedPkgDir, filepath.FromSlash(rel))
-		dst := filepath.Join(publishedPkgDir, filepath.FromSlash(rel))
-		info, err := os.Lstat(src)
-		switch {
-		case err != nil:
-			steps = append(steps, fmt.Sprintf("%s is only in the published directory, where a ${FILESDIR} path of the candidate would pick it up: restore it in the staged tree or drop it from the overlay", rel))
-		case info.IsDir():
-			steps = append(steps, fmt.Sprintf("mkdir -p %s", dst))
-		case info.Mode().IsRegular():
-			steps = append(steps, fmt.Sprintf("cp %s %s", src, dst))
+	plan := planFileCopies(stagedPkgDir, publishedPkgDir, diffs)
+	steps := make([]string, 0, len(plan))
+	for _, c := range plan {
+		switch c.Action {
+		case CopyFile:
+			steps = append(steps, fmt.Sprintf("cp %s %s", c.Src, c.Dst))
+		case MakeDir:
+			steps = append(steps, fmt.Sprintf("mkdir -p %s", c.Dst))
 		default:
-			steps = append(steps, fmt.Sprintf("%s is not a regular file: reproduce it in the overlay by hand", rel))
+			steps = append(steps, c.Note)
 		}
 	}
 	return strings.Join(steps, "; ")

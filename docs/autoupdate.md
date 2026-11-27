@@ -1231,18 +1231,33 @@ SIGTERM or SIGHUP during the session (run `--repair` again), or the run was
 interrupted before it.
 
 `--apply` publishes only the ebuild and its Manifest. A repair that changes
-or adds a file under `files/`, or changes `metadata.xml`, in the staged tree is
-refused, naming every differing path with the `cp` that carries each one into
-the published package directory: run those, then `--repair` again. The session
-is told this up front, so a fix that needs a rebased or new patch ends by
-listing the files to copy. A repair that only REMOVES a file (a patch
-upstream merged) is adopted: the overlay keeps its copy for the older ebuilds
-that name it, and the candidate was proven without it. The exception is a
+or adds a file under `files/`, or changes `metadata.xml`, in the staged tree
+cannot be adopted until the published package directory carries the same
+bytes. So once the session has ended, and before the re-validation, `--repair`
+lists every such path for each package with the `cp` (or `mkdir -p`) that
+carries it into the published package directory, and asks `Copy N path(s)
+into <dir> now? [y/N]`, once per package; `--yes` never answers it. On `y` it
+copies them and never writes through a symbolic link; on anything else it
+copies nothing and the re-validation refuses the tree, naming the same `cp`
+lines. In a batch every copy is asked for first, so the re-validations still
+run with nothing more to answer. The copied files are ordinary changes in the
+overlay checkout: they are committed with the ebuild when you commit the
+`--apply`. The session is told this up front and is given each package's
+published directory, the overlay checkout bentoo publishes from, never
+`/var/db/repos`.
+
+A repair that only REMOVES a file (a patch upstream merged) is adopted: the
+overlay keeps its copy for the older ebuilds that name it, and the candidate was proven without it. The exception is a
 removed file that a `${FILESDIR}` path of the candidate would still pick up: a
 glob that matches it (`"${FILESDIR}"/*.patch`) or a directory above it handed
 whole to `eapply` or `doins -r`. That removal is refused like a change. A glob
 elsewhere does not count: `"${FILESDIR}"/descriptors/*.json` never picks up a
 patch at the top of `files/`.
+
+When a staged tree cannot be adopted, or its manifest step fails, every gate
+is declined with the same cause. The re-validation prints that cause once and
+the other gates point at the first one; the report keeps each gate's full
+reason.
 
 A re-validation that ends WAIT says so and names what would prove it: only the
 host stood in the way, so install what the gates name, or prove the tree where

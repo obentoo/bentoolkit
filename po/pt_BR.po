@@ -1652,6 +1652,24 @@ msgid_plural "Start ONE interactive claude session for these %d bump(s) in %s?"
 msgstr[0] "Iniciar UMA sessão interativa do claude para este %d bump em %s?"
 msgstr[1] "Iniciar UMA sessão interativa do claude para estes %d bumps em %s?"
 
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Files to carry into the published overlay"
+msgstr "Arquivos a levar para o overlay publicado"
+
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Copy %d path(s) into %s now?"
+msgid_plural "Copy %d path(s) into %s now?"
+msgstr[0] "Copiar %d caminho para %s agora?"
+msgstr[1] "Copiar %d caminhos para %s agora?"
+
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Nothing copied: the re-validation refuses the staged tree until these paths match."
+msgstr "Nada copiado: a revalidação recusa a árvore staged até que esses caminhos coincidam."
+
+#: cmd/bentoo/overlay_autoupdate_repair_verdict.go
+msgid "(the same cause as %s)"
+msgstr "(a mesma causa de %s)"
+
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
 msgstr "Nada a varrer: todos os ebuilds não reivindicados encontrados estão protegidos — veja os grupos acima."

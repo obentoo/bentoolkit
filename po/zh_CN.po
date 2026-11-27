@@ -1613,6 +1613,23 @@ msgid "Start ONE interactive claude session for these %d bump(s) in %s?"
 msgid_plural "Start ONE interactive claude session for these %d bump(s) in %s?"
 msgstr[0] "为这 %d 个升级在 %s 中启动一个交互式 claude 会话？"
 
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Files to carry into the published overlay"
+msgstr "需要带入已发布 overlay 的文件"
+
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Copy %d path(s) into %s now?"
+msgid_plural "Copy %d path(s) into %s now?"
+msgstr[0] "现在将 %d 个路径复制到 %s 吗？"
+
+#: cmd/bentoo/overlay_autoupdate_repair_copy.go
+msgid "Nothing copied: the re-validation refuses the staged tree until these paths match."
+msgstr "未复制任何内容：在这些路径一致之前，重新验证会拒绝该暂存树。"
+
+#: cmd/bentoo/overlay_autoupdate_repair_verdict.go
+msgid "(the same cause as %s)"
+msgstr "（与 %s 的原因相同）"
+
 #: cmd/bentoo/overlay_autoupdate_sweep.go
 msgid "Nothing to sweep: every unclaimed ebuild found is protected — see the groups above."
 msgstr "无需清理：找到的每个未认领的 ebuild 都受到保护 — 请参阅上方的组。"

@@ -17,7 +17,7 @@ Each repair bundle below records one package, the current and candidate versions
 
 Your goal: for every bundle, make ` + "`pkgdev manifest`" + ` and the failed stage pass inside that bundle's staged tree. Work through all of them in this one session; when two failures share a cause, fix the cause once and apply it to each tree. Work only inside the staged trees: never edit one package's fix into another package's tree, and never edit the published overlay. Every command, fetch and edit you make is approved by the operator first, so group the work into as few commands as you can. When this session ends, bentoo re-runs the manifest step and the gates on every staged tree and records a proof for each one that passes; the maintainer publishes it with --apply.
 
-Only each candidate ebuild and its Manifest are published. Dropping a file under files/ that a candidate no longer names is fine. A new or changed file under files/ (a rebased patch, a new one) or an edited metadata.xml is NOT published: bentoo refuses to adopt that staged tree until the operator copies the file into the published package directory. When a fix needs one, write it under files/ in that staged tree, and end the session by listing, per package, each such file with the exact cp command into the published overlay.
+Only each candidate ebuild and its Manifest are published. Dropping a file under files/ that a candidate no longer names is fine. A new or changed file under files/ (a rebased patch, a new one) or an edited metadata.xml is NOT published: bentoo refuses to adopt that staged tree until the operator copies the file into the published package directory. When a fix needs one, write it under files/ in that staged tree and leave it there: when this session ends, bentoo lists every such file and offers to copy it into the package's published directory named at the end of this prompt, before the re-validation. Name each such file, per package, in your last message. Never copy into /var/db/repos: that is what Portage synced, not the overlay checkout bentoo publishes from.
 
 End the session with one line per package saying whether you believe it is fixed, so the operator can read the outcome before the re-validation.
 
@@ -44,7 +44,7 @@ type BatchSessionSpec struct {
 // claude resumes one session at most, and picking one bump's history would
 // bias the session towards it; each bundle's failure text stays in the prompt.
 func BatchSessionArgs(s BatchSessionSpec) []string {
-	args := []string{batchPrompt(s.Bundles)}
+	args := []string{batchPrompt(s.Bundles, s.OverlayPath)}
 	for _, b := range s.Bundles {
 		args = append(args, "--add-dir", b.StagedRoot)
 	}
@@ -56,8 +56,9 @@ func BatchSessionArgs(s BatchSessionSpec) []string {
 }
 
 // batchPrompt renders the preamble followed by the bundles as one indented
-// JSON array, HTML escaping off as in sessionPrompt.
-func batchPrompt(bundles []Bundle) string {
+// JSON array and their published directories, HTML escaping off as in
+// sessionPrompt.
+func batchPrompt(bundles []Bundle, overlayPath string) string {
 	var buf bytes.Buffer
 	fmt.Fprintf(&buf, batchPreamble, len(bundles))
 	enc := json.NewEncoder(&buf)
@@ -65,7 +66,9 @@ func batchPrompt(bundles []Bundle) string {
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(bundles); err != nil {
 		// Only an out-of-range Created can fail to encode; keep every field.
-		return fmt.Sprintf(batchPreamble, len(bundles)) + fmt.Sprintf("%+v\n", bundles)
+		buf.Reset()
+		buf.WriteString(fmt.Sprintf(batchPreamble, len(bundles)) + fmt.Sprintf("%+v\n", bundles))
 	}
+	writePublishedDirs(&buf, bundles, overlayPath)
 	return buf.String()
 }
