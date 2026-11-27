@@ -1074,6 +1074,35 @@ Only one run uses the build environment at a time: a second `--check --llm`,
 `--revive` or `--repair` exits at once, naming the PID and start time of the
 run that holds `build-session.bentoo-lock` in the autoupdate state directory.
 
+#### How many manifest runs download at once, and when one is stopped
+
+The manifest step downloads the bump's distfiles before it digests them.
+However many packages `--concurrency` runs at once, only
+`autoupdate.manifest.concurrency` of them (default 4; `--manifest-concurrency`
+for one run) download together; the others wait for a slot, and the wait
+costs them none of their time. Forty runs downloading over one link each got
+a fortieth of it, so a large archive (zed's crates, vtk) could not finish in
+any fixed budget.
+
+A run is stopped by progress, not by the clock:
+
+- **Stall** — no output from `pkgdev` or its fetcher and no byte added to the
+  distdir for `autoupdate.manifest.stall_timeout` seconds (default 300). On
+  the host's shared DISTDIR another run's download counts as progress too,
+  which can only keep a run going longer.
+- **Ceiling** — `autoupdate.manifest.timeout` seconds (default 3600), however
+  steadily the run progresses.
+
+The error names the limit that fired and the key that raises it, for example
+`manifest step timed out: no download progress for 5m0s
+(autoupdate.manifest.stall_timeout raises it)`. Either one is the
+environment's failure, not the ebuild's: the bump is WAIT and the LLM
+manifest fixer is not called.
+
+A staged manifest also links the published Manifest's version-free distfiles
+(a Rust package's crates, a data archive every release shares) from the
+distfiles cache or the host DISTDIR, so a bump downloads only what changed.
+
 #### What `--check --llm` prints while it builds
 
 On a terminal, `--check --llm` draws a live region while its gates build,

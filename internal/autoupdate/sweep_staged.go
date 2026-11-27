@@ -2,10 +2,11 @@ package autoupdate
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"sort"
 
 	"github.com/obentoo/bentoolkit/internal/autoupdate/ebuilds"
 	"github.com/obentoo/bentoolkit/internal/common/distfiles"
@@ -84,6 +85,15 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 		}
 	}
 
+	// A download slot for everything below that fetches: the authenticated
+	// prefetch, the vendor tarball and pkgdev itself. Waiting for it spends none
+	// of the run's budget, because the watch starts once it is held.
+	release, err := s.takeManifestSlot(ctx, pkg)
+	if err != nil {
+		return distdir, fmt.Errorf("%w: staged manifest for %s-%s: %w", ErrManifestFailed, pkg, version, err)
+	}
+	defer release()
+
 	// Serial-gated packages: pkgdev cannot fetch their distfile from SRC_URI, so
 	// the vendor's download form is submitted with the serial and the file is put
 	// where pkgdev will digest it. A package without a [meta] fetch block, and a
@@ -111,11 +121,12 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 	}
 
 	// Bound the invocation exactly as the apply path does: a stalled distfile
-	// fetch must not hang a gate forever, and cancelling either the parent
-	// (SIGINT) or this child (timeout) stops pkgdev and every process it
-	// started, within procgroup.GracePeriod.
-	opCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
-	defer cancel()
+	// fetch must not hang a gate forever, a slow one is not stopped while it
+	// progresses, and cancelling either the parent (SIGINT) or the watch stops
+	// pkgdev and every process it started, within procgroup.GracePeriod. The
+	// distdir is private here, so its growth is this run's alone.
+	opCtx, watch := withManifestWatch(ctx, s.manifestLimits, func() int64 { return distdirBytes(distdir) })
+	defer watch.stop()
 
 	// `--force` ONLY where the caller supplied the directory. There it is the
 	// whole point — a complete Manifest is not re-manifested without it, so the
@@ -155,7 +166,7 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 				"package", pkg, "error", err)
 		}
 	}()
-	out := spill.tee(sc)
+	out := io.MultiWriter(spill.tee(sc), watch)
 	cmd.Stdout = out
 	cmd.Stderr = out
 	// A lingering helper after a 0 exit is a success, not exec.ErrWaitDelay.
@@ -173,9 +184,9 @@ func (s *sweeper) runStagedManifestIn(ctx context.Context, suppliedDistdir, stag
 			label = childRunManifestRecheck
 		}
 		run := s.newChildRunError(label, pkg, version, sc.Captured(), spill, runErr)
-		if errors.Is(opCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w after %s: %w",
-				ErrManifestFailed, pkg, version, stagedPkgDir, ErrManifestTimedOut, manifestTimeout, run)
+		if fired := manifestLimitFired(ctx, opCtx); fired != nil {
+			return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w: %w",
+				ErrManifestFailed, pkg, version, stagedPkgDir, fired, run)
 		}
 		return distdir, fmt.Errorf("%w: staged manifest for %s-%s in %s: %w",
 			ErrManifestFailed, pkg, version, stagedPkgDir, run)
@@ -201,7 +212,53 @@ func (s *sweeper) stagedExpectedDistfiles(pkg, version string) []string {
 	}
 	publishedDir := filepath.Join(s.overlayPath, category, pkgName)
 	manifestNames := distfiles.ParseManifestDistFilenames(filepath.Join(publishedDir, "Manifest"))
-	return s.expectedDistfiles(pkg, publishedDir, pkgName, manifestNames, []string{version})
+	expected := s.expectedDistfiles(pkg, publishedDir, pkgName, manifestNames, []string{version})
+	// Plus the published names that carry no version at all — the crates of a
+	// Rust package, a data archive shared by every release. expectedDistfiles
+	// keeps only names a version could be substituted into, so a new zed
+	// re-downloaded its ~1450 crates with every one already in the cache. Only
+	// here, where the names are only read FROM the shared directories into a
+	// private one; on the published path they would widen the lock, the
+	// quarantine and the cleanup scope over the host's DISTDIR.
+	olds := otherEbuildVersions(publishedDir, pkgName, []string{version})
+	free := versionFreeDistNames(manifestNames, olds)
+	if len(free) == 0 {
+		return expected
+	}
+	seen := make(map[string]bool, len(expected)+len(free))
+	out := make([]string, 0, len(expected)+len(free))
+	for _, name := range append(expected, free...) {
+		if !seen[name] {
+			seen[name] = true
+			out = append(out, name)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+// versionFreeDistNames returns the names in which none of the on-disk versions
+// olds occurs (with the same digit boundaries substituteVersion uses). With no
+// old version there is nothing to tell a versioned name from a free one, so it
+// returns nothing.
+func versionFreeDistNames(names, olds []string) []string {
+	if len(olds) == 0 {
+		return nil
+	}
+	var out []string
+	for _, name := range names {
+		versioned := false
+		for _, old := range olds {
+			if _, ok := replaceBounded(name, old, old); ok {
+				versioned = true
+				break
+			}
+		}
+		if !versioned {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // stagedDistfileSources lists the directories a staged manifest may READ already

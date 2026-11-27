@@ -133,6 +133,21 @@ type AutoupdateConfig struct {
 	Proof ProofConfig `yaml:"proof,omitempty"`
 	// Build says where the build gates run.
 	Build BuildConfig `yaml:"build,omitempty"`
+	// Manifest bounds the `pkgdev manifest` runs that download distfiles.
+	Manifest ManifestConfig `yaml:"manifest,omitempty"`
+}
+
+// ManifestConfig is the autoupdate.manifest block. Every field is optional;
+// unset or non-positive means the default the autoupdate package documents.
+type ManifestConfig struct {
+	// Concurrency is how many manifest runs may download at once, whatever
+	// --concurrency is. --manifest-concurrency overrides it for one run.
+	Concurrency int `yaml:"concurrency,omitempty"`
+	// StallTimeout stops a run that shows no download progress for this many
+	// SECONDS — the unit of http_timeout and validate.timeout.
+	StallTimeout int `yaml:"stall_timeout,omitempty"`
+	// Timeout is the absolute ceiling of one run, in seconds.
+	Timeout int `yaml:"timeout,omitempty"`
 }
 
 // BuildConfig is the autoupdate.build block.

@@ -1185,8 +1185,8 @@ func TestApply_ManifestTimeoutHonored(t *testing.T) {
 		Status:         StatusPending,
 	})
 
-	// Parent context with a ~100ms deadline. context.WithTimeout(ctx,
-	// manifestTimeout) inside runManifest inherits this shorter deadline.
+	// Parent context with a ~100ms deadline. The manifest watch's context
+	// inside runManifest inherits this shorter deadline.
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 

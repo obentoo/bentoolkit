@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -103,6 +104,13 @@ type sweeper struct {
 	// gates found no archive of the candidate (ai-jail, amd-gaia and liborcus on
 	// 2026-11-24). Set only for an adopted tree.
 	forceManifest bool
+	// manifestSlots bounds the manifest runs downloading at once; it is the
+	// Applier's channel, shared by every sweeper it builds. Nil is no bound,
+	// which is what a standalone sweep gets.
+	manifestSlots chan struct{}
+	// manifestLimits holds the stall timeout and the ceiling of one run; zero
+	// fields mean the defaults (manifest_limits.go).
+	manifestLimits ManifestLimits
 }
 
 // sweeperOption configures a sweeper at construction.
@@ -564,6 +572,15 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	manifestNames := distfiles.ParseManifestDistFilenames(filepath.Join(pkgDir, "Manifest"))
 	expected := s.expectedDistfiles(pkg, pkgDir, pkgName, manifestNames, versions)
 
+	// A download slot before the lock, so a run waiting for one holds no name
+	// another run could use, and before every fetch below. The wait spends none
+	// of the run's budget: the watch starts once the slot is held.
+	release, err := s.takeManifestSlot(ctx, pkg)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrManifestFailed, err)
+	}
+	defer release()
+
 	// Lock first: everything below reads or writes those names, and both the
 	// quarantine and the record/cleanup pair have a window between looking and
 	// acting. The claim is all-or-nothing and is held for the whole pkgdev
@@ -635,13 +652,13 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 		}
 	}
 
-	// Bound the manifest invocation: derive a child context from the parent
-	// context with a finite deadline so a stalled distfile fetch cannot hang the
-	// caller forever. Cancelling either the parent (SIGINT) or this child
-	// (timeout) stops pkgdev and every process it started (group mode, below),
-	// so the step returns within manifestTimeout plus procgroup.GracePeriod.
-	opCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
-	defer cancel()
+	// Bound the manifest invocation by progress, not by wall clock: the watch
+	// stops a run that shows no progress for the stall timeout, and any run at
+	// the ceiling. Cancelling either the parent (SIGINT) or the watch stops
+	// pkgdev and every process it started (group mode, below), so the step
+	// returns within the limit that fired plus procgroup.GracePeriod.
+	opCtx, watch := withManifestWatch(ctx, s.manifestLimits, func() int64 { return distdirBytes(distdir) })
+	defer watch.stop()
 
 	// Run pkgdev manifest from the package directory.
 	cmd := s.execCommand(opCtx, "pkgdev", "manifest", "--distdir", distdir)
@@ -666,12 +683,18 @@ func (s *sweeper) runManifest(ctx context.Context, pkg string, versions ...strin
 	// byte-identical. Under the default Noop reporter the TaskLine events are
 	// discarded, so behaviour is unchanged.
 	sc := tui.NewStreamCapture(s.reporter, pkg, tui.StreamStdout)
-	cmd.Stdout = sc
-	cmd.Stderr = sc
+	out := io.MultiWriter(sc, watch)
+	cmd.Stdout = out
+	cmd.Stderr = out
 	// Result: a pkgdev that exited 0 while a helper it left behind still held
 	// the pipe past the WaitDelay is a success, not exec.ErrWaitDelay.
 	runErr := procgroup.Result(cmd, cmd.Run())
 	_ = sc.Close()
+	if fired := manifestLimitFired(ctx, opCtx); runErr != nil && fired != nil {
+		// Which limit stopped the run, and the key that raises it, ahead of the
+		// exit status a killed pkgdev reports.
+		runErr = fmt.Errorf("%w: %w", fired, runErr)
+	}
 	if runErr != nil {
 		// Before the error goes anywhere: take away whatever this run created
 		// under a name that was absent when it started. A truncated distfile

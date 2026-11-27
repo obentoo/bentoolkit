@@ -151,6 +151,17 @@ autoupdate:
   #   # this host (qlop), or with no history, stops at configure. Unset: no cap.
   #   budget: 45m
 
+  # The `pkgdev manifest` runs that download distfiles. However many packages
+  # --concurrency runs at once, only `concurrency` of them download together,
+  # so a large distfile is not fetched over a link shared forty ways. A run is
+  # stopped when it shows no progress (no output, no byte added to the
+  # distdir) for `stall_timeout` seconds, and in any case after `timeout`
+  # seconds. --manifest-concurrency overrides `concurrency` for one run.
+  # manifest:
+  #   concurrency: 4        # runs downloading at once (default 4)
+  #   stall_timeout: 300    # seconds without progress (default 300)
+  #   timeout: 3600         # absolute ceiling of one run, seconds (default 3600)
+
   # --------------------------------------------------------------------------
   # vendor — the Go vendor-tarball step.
   #

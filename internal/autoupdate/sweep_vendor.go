@@ -185,7 +185,7 @@ func (s *sweeper) stagedMetadataEntry(ctx context.Context, stagedRoot, category,
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("remove stale md5-cache entry: %w", err)
 	}
-	runCtx, cancel := context.WithTimeout(ctx, manifestTimeout)
+	runCtx, cancel := context.WithTimeout(ctx, egencacheTimeout)
 	defer cancel()
 	// egencache refuses a versioned atom ("Atom is too specific"); the staged
 	// tree holds this one version only, so the package name selects it.

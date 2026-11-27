@@ -49,12 +49,6 @@ import (
 // Only tests replace it.
 var fixSandboxRoot = distfiles.TempRoot
 
-// manifestTimeout bounds a single `pkgdev manifest` invocation. The manifest
-// step touches the network (fetching SRC_URI distfiles to digest), so it gets a
-// generous-but-finite budget; without it a stalled fetch would hang Apply
-// indefinitely.
-const manifestTimeout = 5 * time.Minute
-
 // qaCheckTimeout bounds the advisory `pkgcheck scan` run after an LLM fix. It is
 // a local, read-only lint of a single package, so a tight budget is enough; the
 // scan is best-effort and never blocks the apply.
@@ -549,6 +543,9 @@ type Applier struct {
 	// buildLimit and llmLimit size slots; set by WithApplierBuildConcurrency
 	// and WithApplierLLMConcurrency, defaulted in NewApplier.
 	buildLimit, llmLimit int
+	// manifestLimits bounds the manifest runs: how many download at once
+	// (slots.manifest) and when one is stopped. Set by WithApplierManifestLimits.
+	manifestLimits ManifestLimits
 	// slots holds the per-stage limits Apply enforces, so ApplyAll can run every
 	// package concurrently (apply_slots.go).
 	slots applySlots
@@ -1065,7 +1062,8 @@ func NewApplier(overlayPath, configDir string, opts ...ApplierOption) (*Applier,
 	for _, opt := range opts {
 		opt(applier)
 	}
-	applier.slots = newApplySlots(applier.buildLimit, applier.llmLimit)
+	applier.manifestLimits = applier.manifestLimits.withDefaults()
+	applier.slots = newApplySlots(applier.buildLimit, applier.llmLimit, applier.manifestLimits.Concurrency)
 	if applier.cooldown == nil {
 		applier.cooldown = &cooldownState{}
 	}
@@ -2360,6 +2358,7 @@ func (a *Applier) sweeper() *sweeper {
 		withSweeperHTTPClient(a.httpClient),
 		withSweeperVendorHosts(a.vendorConfig.EffectiveHosts()),
 		withSweeperLogger(a.logger()),
+		withSweeperManifestLimits(a.slots.manifest, a.manifestLimits),
 	)
 }
 

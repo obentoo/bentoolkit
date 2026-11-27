@@ -106,6 +106,22 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   by a cooldown mask is reported as that answer instead of "could not be
   determined".
 
+- **Large distfiles no longer time out under `--concurrency 40`.** The
+  manifest step had a fixed 5-minute budget measured against a link every
+  worker shared, so zed, hermes-agent and vtk failed WAIT with "manifest step
+  timed out after 5m0s" on the 2026-11-26 run. Now at most
+  `autoupdate.manifest.concurrency` runs download at once (default 4,
+  `--manifest-concurrency` for one run; waiting costs no time), and a run is
+  stopped when it shows no progress for `autoupdate.manifest.stall_timeout`
+  seconds (default 300) or reaches `autoupdate.manifest.timeout` (default
+  3600). The error says which limit fired and which key raises it, and both
+  stay the environment's failure. A timeout of an unstaged `--apply`
+  manifest is now classified the same way.
+- **A staged manifest reuses cached crates.** Distfile names that carry no
+  version (Rust crates, shared data archives) were never linked from the
+  distfiles cache or DISTDIR, so a zed bump downloaded ~1450 crates it
+  already had.
+
 
 ## [0.48.0] - 2026-11-26
 

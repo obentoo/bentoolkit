@@ -794,6 +794,10 @@ msgid "max parallel checks/applies (1-100). A standalone --clean sweep does NOT 
 msgstr "最大并行检查/应用数（1-100）。独立的 --clean 清理不会采用此默认值：除非显式传递该标志，否则它一次只处理一个目录，因为从未测量过并发的 pkgdev 清单运行是在 DISTDIR 上竞争还是在 pkgdev 自身的锁定上竞争。"
 
 #: cmd/bentoo/overlay_autoupdate.go
+msgid "how many pkgdev manifest runs may download distfiles at once, whatever --concurrency is (0 = use config autoupdate.manifest.concurrency, default 4). A run waiting for a slot spends none of its time budget"
+msgstr "同时允许多少个 pkgdev manifest 运行下载 distfiles，与 --concurrency 无关（0 = 使用配置 autoupdate.manifest.concurrency，默认 4）。等待空位的运行不消耗其时间预算"
+
+#: cmd/bentoo/overlay_autoupdate.go
 msgid "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)"
 msgstr "--check、--revive 以及 --apply 的供应商源代码包探测的每次请求 HTTP 超时（以秒为单位）（0 = 使用配置 autoupdate.http_timeout，默认为 30）"
 
