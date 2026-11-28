@@ -91,6 +91,22 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   repair adds or changes under `files/` is still refused as before.
 
 
+
+- **A bump that pins another candidate of the same run resolves.** Each
+  candidate was resolved against its own staged repository only, so
+  `media-libs/mesa` (which pins `~dev-util/mesa_clc-${PV}`) stayed WAIT with
+  "there are no ebuilds to satisfy" while `dev-util/mesa_clc` at that version
+  was a READY candidate of the same run. `--check --llm` and `--apply` now
+  stage every candidate once into a siblings repository that each resolve sees
+  below its own tree, and name a listed sibling as a candidate of this run.
+- **A dependency held by the cooldown is named as one.** The skip said
+  "install dev-util/vulkan-utility-libraries-…" for a version the overlay's
+  cooldown still masks. It now names the cooldown and the way out
+  (`bentoo overlay cooldown confirm`, or a lab VM), and a resolve refused only
+  by a cooldown mask is reported as that answer instead of "could not be
+  determined".
+
+
 ## [0.48.0] - 2026-11-26
 
 ### Changed

@@ -176,7 +176,29 @@ func (d BuildDeps) attachedRunner() func(cmd *exec.Cmd) ([]byte, error) {
 // repos.conf fragment (root, racing runs, a leftover after a kill): nothing is
 // written anywhere.
 func DependenciesSatisfied(ctx context.Context, stagedRoot, atom, version string, deps BuildDeps) (ok bool, missing []string, err error) {
-	unsatisfied, err := unsatisfiedDependencies(ctx, stagedRoot, atom, version, deps)
+	return DependenciesSatisfiedIn(ctx, stagedRoot, atom, version, ResolveScope{}, deps)
+}
+
+// ResolveScope widens a pretend resolve beyond this host's repositories and the
+// candidate's own staged tree. The zero value widens nothing.
+type ResolveScope struct {
+	// Siblings is the run's siblings repository (see StageSiblings), registered
+	// at siblingsPriority so an exact-version dependency on another candidate of
+	// the same run resolves. A listed sibling is marked with siblingNote.
+	Siblings Siblings
+
+	// CooldownHeld are the category/package-version strings the overlay's
+	// cooldown block masks. They are overlay versions waiting for time, not
+	// broken ones, so a listed one is marked with cooldownNote, and a resolve
+	// that failed only because one of them is masked is an answer — the host
+	// lacks it — rather than an undetermined failure.
+	CooldownHeld map[string]bool
+}
+
+// DependenciesSatisfiedIn is DependenciesSatisfied with the resolve widened by
+// scope.
+func DependenciesSatisfiedIn(ctx context.Context, stagedRoot, atom, version string, scope ResolveScope, deps BuildDeps) (ok bool, missing []string, err error) {
+	unsatisfied, err := unsatisfiedDependencies(ctx, stagedRoot, atom, version, scope, deps)
 	if err != nil {
 		// The sentinel is applied HERE, at the single boundary, rather than at
 		// each return inside the body — the same shape, for the same reason, as
@@ -191,7 +213,7 @@ func DependenciesSatisfied(ctx context.Context, stagedRoot, atom, version string
 // unsatisfiedDependencies is DependenciesSatisfied's body, minus the sentinel.
 // It reports causes in their own words, and DependenciesSatisfied is its only
 // caller.
-func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version string, deps BuildDeps) ([]string, error) {
+func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version string, scope ResolveScope, deps BuildDeps) ([]string, error) {
 	stagedRoot = strings.TrimSpace(stagedRoot)
 	atom = strings.TrimSpace(atom)
 	version = strings.TrimSpace(version)
@@ -245,7 +267,7 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 	}
 
 	repoName := stagedRepoNameAt(stagedRoot, suffixedPkg, version)
-	repositories, err := composePortageRepositories(stagedRoot, repoName)
+	repositories, err := composePortageRepositories(stagedRoot, repoName, scope.Siblings)
 	if err != nil {
 		return nil, err
 	}
@@ -273,13 +295,19 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 		if blockers := blockersFrom(stdout.String()+"\n"+stderr.String(), cleanAtom); len(blockers) > 0 {
 			return blockers, nil
 		}
+		// Masked by the overlay's cooldown alone is an answer too: the version
+		// exists and is fine, it is waiting for time. Only on a host that does not
+		// unmask cooldown.unmask is it a resolve failure at all.
+		if held := cooldownMaskedFrom(stdout.String()+"\n"+stderr.String(), scope.CooldownHeld); len(held) > 0 {
+			return held, nil
+		}
 		return nil, fmt.Errorf("the pretend resolve of %s failed%s: %w", spec, diagnostic(stderr.String()), err)
 	}
 	// The CLEAN atom, matching the spec above: emerge's merge list names the
 	// package as Portage knows it, so the bump subtracts itself from the list
 	// only under its clean spelling — matched against the suffixed key, the
 	// candidate would count as its own unsatisfied dependency.
-	return unsatisfiedFrom(stdout.String(), cleanAtom), nil
+	return annotateUnsatisfied(unsatisfiedFrom(stdout.String(), cleanAtom), scope), nil
 }
 
 // stagedRepoNameAt answers by what name Portage will know the staged tree.
@@ -304,7 +332,7 @@ func stagedRepoNameAt(stagedRoot, pkg, version string) string {
 // composePortageRepositories renders the value portageRepositoriesVar carries:
 // this host's own repository configuration, plus one section for the staged
 // tree.
-func composePortageRepositories(stagedRoot, repoName string) (string, error) {
+func composePortageRepositories(stagedRoot, repoName string, siblings Siblings) (string, error) {
 	cfg, err := hostReposConfig()
 	if err != nil {
 		return "", err
@@ -329,6 +357,16 @@ func composePortageRepositories(stagedRoot, repoName string) (string, error) {
 	// into the tree must not be able to name different masters.
 	mastersKey, mastersValue, _ := strings.Cut(stagedMasters, "=")
 	cfg.set(repoName, strings.TrimSpace(mastersKey), strings.TrimSpace(mastersValue))
+
+	if siblings.Root != "" {
+		name := siblings.Name()
+		if cfg.has(name) {
+			return "", fmt.Errorf("this host already configures a repository named %q, so the run's siblings at %s cannot be registered under that name", name, siblings.Root)
+		}
+		cfg.set(name, "location", siblings.Root)
+		cfg.set(name, strings.TrimSpace(mastersKey), strings.TrimSpace(mastersValue))
+		cfg.set(name, "priority", siblingsPriority)
+	}
 
 	return cfg.render(), nil
 }
@@ -562,14 +600,81 @@ func unsatisfiedFrom(out, atom string) []string {
 // candidate's way rather than one to install.
 const blockerNote = " (blocks the candidate)"
 
+// siblingNote marks an unsatisfied entry that is another candidate of the same
+// run: it resolved from the siblings repository, so it is not published yet.
+const siblingNote = " (a candidate of this run)"
+
+// cooldownNote marks an unsatisfied entry that is an overlay version the
+// cooldown still masks.
+const cooldownNote = " (held by the cooldown)"
+
+// annotateUnsatisfied marks each entry that is a sibling candidate or a
+// cooldown-held version, so DependencyAction can name the right next step.
+// A sibling wins over the cooldown: a candidate is never in the block yet.
+func annotateUnsatisfied(entries []string, scope ResolveScope) []string {
+	for i, entry := range entries {
+		cpv, _, _ := strings.Cut(entry, "::")
+		switch {
+		case scope.Siblings.Holds(cpv):
+			entries[i] = cpv + siblingNote
+		case scope.CooldownHeld[cpv]:
+			entries[i] = cpv + cooldownNote
+		}
+	}
+	return entries
+}
+
+// cooldownMaskedFrom reads the masked-package list a refused resolve prints —
+//
+//   - dev-util/vulkan-utility-libraries-1.4.369_p20261123::bentoo (masked by: package.mask)
+//
+// — and returns, marked with cooldownNote, every listed version the cooldown
+// holds. A version masked for any other reason is not returned: the cooldown
+// releasing would not make it installable.
+func cooldownMaskedFrom(out string, held map[string]bool) []string {
+	if len(held) == 0 {
+		return nil
+	}
+	var found []string
+	seen := map[string]bool{}
+	for line := range strings.Lines(out) {
+		rest, listed := strings.CutPrefix(strings.TrimSpace(line), "- ")
+		if !listed || !strings.Contains(rest, "(masked by:") || !strings.Contains(rest, "package.mask") {
+			continue
+		}
+		fields := strings.Fields(rest)
+		if len(fields) == 0 {
+			continue
+		}
+		cpv, _, _ := strings.Cut(fields[0], "::")
+		if held[cpv] && !seen[cpv] {
+			seen[cpv] = true
+			found = append(found, cpv+cooldownNote)
+		}
+	}
+	return found
+}
+
 // DependencyAction is the operator's next step for an unsatisfied list:
 // install what is missing, remove what blocks. Saying "install" for a blocker
 // would send the operator the wrong way.
+//
+// A sibling candidate and a cooldown-held version are named as what they are:
+// "install X" for a version no host can install yet would send the operator
+// looking for a package that is not published, or is masked on purpose.
 func DependencyAction(missing []string) string {
-	var install, remove []string
+	var install, remove, siblings, held []string
 	for _, entry := range missing {
-		if atom, blocked := strings.CutSuffix(entry, blockerNote); blocked {
+		if atom, ok := strings.CutSuffix(entry, blockerNote); ok {
 			remove = append(remove, atom)
+			continue
+		}
+		if atom, ok := strings.CutSuffix(entry, siblingNote); ok {
+			siblings = append(siblings, atom)
+			continue
+		}
+		if atom, ok := strings.CutSuffix(entry, cooldownNote); ok {
+			held = append(held, atom)
 			continue
 		}
 		install = append(install, entry)
@@ -577,6 +682,19 @@ func DependencyAction(missing []string) string {
 	var steps []string
 	if len(install) > 0 {
 		steps = append(steps, "install "+strings.Join(install, ", "))
+	}
+	if len(siblings) > 0 {
+		steps = append(steps, "publish and install "+strings.Join(siblings, ", ")+
+			" (a candidate of this same run, so not published yet) first")
+	}
+	if len(held) > 0 {
+		confirm := make([]string, len(held))
+		for i, atom := range held {
+			confirm[i] = "=" + atom
+		}
+		steps = append(steps, "install "+strings.Join(held, ", ")+
+			" (an overlay version the cooldown still masks: `bentoo overlay cooldown confirm "+
+			strings.Join(confirm, " ")+"` releases it, or validate the bump in a lab VM)")
 	}
 	if len(remove) > 0 {
 		steps = append(steps, "remove "+strings.Join(remove, ", ")+", which blocks it,")

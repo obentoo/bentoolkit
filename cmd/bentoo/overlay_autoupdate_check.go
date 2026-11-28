@@ -506,6 +506,10 @@ func (ar *autoupdateRun) runPendingValidation(ctx context.Context, overlayPath, 
 		// reached the screen before this failed, so the caller must not repeat it.
 		return nothingValidated(), true
 	}
+	// Every candidate detected this run, staged once before the first gate, so
+	// a bump pinning another candidate's exact version resolves against it.
+	releaseSiblings := applier.StageRunSiblings(updates)
+	defer releaseSiblings()
 
 	finished := runValidationCheckLive(plan, func(entry validationPlanEntry) validate.EbuildResult {
 		// The ceiling one confirmation covered. It travels per entry so a

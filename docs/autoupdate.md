@@ -869,6 +869,35 @@ build gates of `--check --llm`, `--revive` and `--repair` run:
 A run never falls back to the host in silence. The backend that proved a bump
 is written into its stage record.
 
+##### The host backend's dependency resolve
+
+Before a build gate runs on the host, `emerge -p` resolves the candidate from
+its own staged repository (`bentoolkit-staging-<pkg>-<ver>`), registered
+through `PORTAGE_REPOSITORIES` next to this host's repositories. Nothing is
+written to `/etc/portage`. Whatever the resolve lists beyond the candidate is a
+dependency this host lacks, and the build gates are declined (WAIT) naming it.
+
+- **Candidates of the same run see each other.** Before the first candidate is
+  validated, `--check --llm` and `--apply` stage every candidate of the run into
+  one more repository, `bentoolkit-staging-siblings-<id>-run`, at `priority =
+  -1`: below the candidate's own tree, above gentoo. A bump that pins another
+  candidate's exact version, like `media-libs/mesa` on
+  `~dev-util/mesa_clc-${PV}`, then resolves instead of failing with "there are
+  no ebuilds to satisfy". It is built once and only read while the candidates
+  run, so the result does not depend on which worker staged what first. It
+  holds only the ebuilds, copied from the current ebuild as each candidate's
+  own tree is, and it is removed when the run ends. The build still needs the
+  sibling installed, so the bump stays WAIT with `publish and install
+  <sibling> (a candidate of this same run, so not published yet) first`.
+- **Versions held by the cooldown are named as such.** A dependency the
+  overlay's cooldown block masks is an overlay version waiting for time, not a
+  broken one. A host that links `.autoupdate/cooldown.unmask` resolves it and
+  only lacks it installed. A host that does not link it gets a refused resolve,
+  which is read as the same answer rather than "could not be determined". Either
+  way the reason names the cooldown and the two ways forward: release the
+  version with `bentoo overlay cooldown confirm =<atom>` and install it, or
+  validate the bump in a lab VM.
+
 ##### The host backend's sandbox
 
 A build runs code the bump brought in: configure scripts, build systems,

@@ -1132,7 +1132,7 @@ func skippedBuildReasons(gates []validate.GateResult) []string {
 // candidate's build dependencies, and returns the declined gates and true when
 // no build may run here.
 func (a *Applier) hostDependencyGates(ctx context.Context, cand candidatePaths, pkg, version string, depth validate.Depth, deps validate.BuildDeps) ([]validate.GateResult, bool) {
-	satisfied, missing, err := validate.DependenciesSatisfied(ctx, cand.repoRoot, pkg, version, deps)
+	satisfied, missing, err := validate.DependenciesSatisfiedIn(ctx, cand.repoRoot, pkg, version, a.resolveScope(), deps)
 	switch {
 	case err != nil:
 		if res, ok := a.requiredUseResolveFailure(pkg, version, err); ok {
