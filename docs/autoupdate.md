@@ -1179,7 +1179,11 @@ the registry reconciliation. One HUMAN bump with a bundle goes through the
 the same flow as `--repair <a>,<b>,…`: every bundle is shown, one question is
 asked (`n` skips them all), and once the session exits every tree is
 re-validated in the run's order with nothing more to answer, ending with a
-summary of which are proven. A repair's outcome is printed and never changes
+summary of which are proven. Each tree gets its own `[i/N] <cat/pkg>` block,
+whose verdict is headed `Re-validation: [i/N] <cat/pkg>`, and each one not
+proven is listed in the summary with why: its state (`HUMAN`, `WAIT`), or
+`not re-validated` with the cause printed in its block, as when the run is
+stopping. A repair's outcome is printed and never changes
 the check's exit code. Nothing is offered under `--yes`, to a run without a
 terminal on both stdin and stdout, or without `claude` on `PATH`.
 

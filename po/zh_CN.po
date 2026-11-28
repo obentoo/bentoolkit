@@ -1597,6 +1597,14 @@ msgid "The re-validation was skipped: the run is stopping. Each staged tree is k
 msgstr "已跳过重新验证：运行正在停止。每个暂存树都保持会话留下的状态；请对它们再次运行 --repair。"
 
 #: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "not re-validated: the run is stopping"
+msgstr "未重新验证：运行正在停止"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "not re-validated"
+msgstr "未重新验证"
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
 msgid "Repair summary"
 msgstr "修复摘要"
 

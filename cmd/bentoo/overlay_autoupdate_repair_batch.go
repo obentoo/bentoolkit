@@ -162,22 +162,32 @@ func (ar *autoupdateRun) loadBatchTargets(pkgs []string, configDir string) []rep
 
 // revalidateBatch proves every tree the session worked on, one after the
 // other, exactly as --repair proves its one tree, and ends with a summary.
-// A run stopped half-way marks the trees it did not reach. It reports whether
-// every tree ended proven.
+// Every bundle gets its "[i/N]" block and a summary line that says why it is
+// not proven: the 2026-11-28 batch of seven listed bundles as ✗ whose block
+// nobody could find, because a run stopping half-way marked the rest ✗ in
+// silence and a verdict block did not say which bundle it belonged to. It
+// reports whether every tree ended proven.
 func (ar *autoupdateRun) revalidateBatch(ctx context.Context, bundles []repair.Bundle, overlayPath, configDir string, auCfg config.AutoupdateConfig) bool {
-	var proven, notProven []string
+	var proven []string
+	var notProven []batchShortfall
 	for i, b := range bundles {
+		label := fmt.Sprintf("[%d/%d] %s", i+1, len(bundles), b.Package)
+		fmt.Printf("\n%s\n", label)
 		if ctx.Err() != nil {
-			for _, rest := range bundles[i:] {
-				ar.markRepaired(rest)
-				notProven = append(notProven, rest.Package)
-			}
-			break
+			ar.markRepaired(b)
+			why := i18n.T("not re-validated: the run is stopping")
+			output.Warning.Printf("  %s\n", why)
+			notProven = append(notProven, batchShortfall{pkg: b.Package, why: why})
+			continue
 		}
-		fmt.Printf("\n[%d/%d] %s\n", i+1, len(bundles), b.Package)
-		if err := ar.revalidateRepair(ctx, overlayPath, configDir, auCfg.LLM, b); err != nil {
+		state, err := ar.revalidateRepair(ctx, overlayPath, configDir, auCfg.LLM, b, label)
+		if err != nil {
 			output.Warning.Printf("  %s: %s\n", b.Package, failureDiagnostic(err))
-			notProven = append(notProven, b.Package)
+			why := string(state)
+			if state == "" {
+				why = i18n.T("not re-validated")
+			}
+			notProven = append(notProven, batchShortfall{pkg: b.Package, why: why})
 			continue
 		}
 		proven = append(proven, b.Package)
@@ -188,16 +198,24 @@ func (ar *autoupdateRun) revalidateBatch(ctx context.Context, bundles []repair.B
 	for _, pkg := range proven {
 		output.Success.Printf("  ✓ %s\n", pkg)
 	}
-	for _, pkg := range notProven {
-		output.Warning.Printf("  ✗ %s\n", pkg)
+	names := make([]string, 0, len(notProven))
+	for _, s := range notProven {
+		output.Warning.Printf("  ✗ %s — %s\n", s.pkg, s.why)
+		names = append(names, s.pkg)
 	}
 	if len(proven) > 0 {
 		output.Info.Println(i18n.T("Publish the proven ones with 'bentoo overlay autoupdate --apply <cat/pkg>'"))
 	}
 	if len(notProven) > 0 {
-		output.Info.Printf(i18n.T("The others keep their bundle: run --repair %s to repair them again in one session.")+"\n", strings.Join(notProven, ","))
+		output.Info.Printf(i18n.T("The others keep their bundle: run --repair %s to repair them again in one session.")+"\n", strings.Join(names, ","))
 	}
 	return len(notProven) == 0
+}
+
+// batchShortfall is a bundle the batch did not prove, and the summary's word
+// for why: the verdict's state, or why no verdict was reached.
+type batchShortfall struct {
+	pkg, why string
 }
 
 // confirmBatchSession asks once before the shared session starts, as

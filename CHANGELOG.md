@@ -47,6 +47,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   build offline by policy", the bump is HUMAN, and it is never published
   unbuilt. The container and vm backends build it as before.
 
+- **A batch repair accounts for every bundle.** The 2026-11-28 batch of
+  seven listed bundles as ✗ in its summary whose block could not be found: a
+  run stopping half-way marked the rest ✗ without a line about them, and a
+  verdict did not say which bundle it belonged to. Every bundle now prints its
+  `[i/N]` block, even when the run is stopping ("not re-validated: the run is
+  stopping"), its verdict is headed `Re-validation: [i/N] <cat/pkg>`, and each
+  ✗ in "Repair summary" carries its state or why it was not re-validated. A
+  single `--repair` heads its verdict with the package too.
+
 - **A repair that drops a patch only older ebuilds use is adopted even when
   the ebuild globs another `files/` directory.** `--repair sys-firmware/edk2`
   was refused because `files/edk2-202608-fix-gic-hvf.patch`, which the new
