@@ -176,9 +176,11 @@ func (a *Applier) cooldownMask(key, version, ebuildPath string, result *ApplyRes
 // cooldownAutoExempt returns why the version needs no cooldown entry, or "".
 //
 //   - --urgent named the package or its record: a security fix must not wait.
-//   - ::gentoo ships the very same version: the overlay copy (a PYTHON_COMPAT
-//     mirror, say) adds no release ::gentoo users do not already get, so
-//     holding it back protects nobody.
+//   - ::gentoo ships the very same version AND the candidate is ::gentoo's
+//     copy plus only a mirror's changes (derivedFromGentoo): such a copy (a
+//     PYTHON_COMPAT mirror, say) adds no release ::gentoo users do not already
+//     get, so holding it back protects nobody. A copy carried forward from our
+//     previous version is not that release, whatever its file is named.
 //   - the ebuild carries no KEYWORDS: Portage already refuses it without an
 //     explicit ** acceptance, which is a stronger gate than the cooldown.
 func (a *Applier) cooldownAutoExempt(pkg, key, name, version, ebuildPath string) string {
@@ -187,7 +189,8 @@ func (a *Applier) cooldownAutoExempt(pkg, key, name, version, ebuildPath string)
 	}
 	if a.gentooPath != "" {
 		category, _, _ := ebuilds.SplitPkgAtom(pkg)
-		if _, err := os.Stat(filepath.Join(a.gentooPath, category, name, name+"-"+version+".ebuild")); err == nil {
+		theirs := filepath.Join(a.gentooPath, category, name, name+"-"+version+".ebuild")
+		if _, err := os.Stat(theirs); err == nil && derivedFromGentooCopy(ebuildPath, theirs) {
 			return "same version in ::gentoo"
 		}
 	}
