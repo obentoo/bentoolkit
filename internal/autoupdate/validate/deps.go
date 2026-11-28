@@ -270,7 +270,7 @@ func unsatisfiedDependencies(ctx context.Context, stagedRoot, atom, version stri
 		}
 		// A block is an answer, not a failure to ask: the host cannot build the
 		// bump until the named package is out of the way.
-		if blockers := blockersFrom(stdout.String() + "\n" + stderr.String()); len(blockers) > 0 {
+		if blockers := blockersFrom(stdout.String()+"\n"+stderr.String(), cleanAtom); len(blockers) > 0 {
 			return blockers, nil
 		}
 		return nil, fmt.Errorf("the pretend resolve of %s failed%s: %w", spec, diagnostic(stderr.String()), err)
@@ -582,26 +582,6 @@ func DependencyAction(missing []string) string {
 		steps = append(steps, "remove "+strings.Join(remove, ", ")+", which blocks it,")
 	}
 	return strings.Join(steps, " and ")
-}
-
-// blockersFrom names every package a `[blocks …]` line of a pretend run says
-// is in the candidate's way, each marked with blockerNote.
-func blockersFrom(out string) []string {
-	var blockers []string
-	for line := range strings.Lines(out) {
-		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "[blocks") {
-			continue
-		}
-		_, rest, closed := strings.Cut(trimmed, "]")
-		if !closed {
-			continue
-		}
-		if fields := strings.Fields(rest); len(fields) > 0 {
-			blockers = append(blockers, fields[0]+blockerNote)
-		}
-	}
-	return blockers
 }
 
 // listedPackage reads one merge-list line — `[ebuild  N    ] cat/pkg-1.2.3` —
