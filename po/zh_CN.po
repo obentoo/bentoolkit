@@ -862,6 +862,14 @@ msgid "Fetch each URL per record instead of sharing one response across records 
 msgstr "为每个记录单独获取其URL，而不是在声明该URL的多个记录之间共享同一个响应"
 
 #: cmd/bentoo/overlay_autoupdate.go
+msgid "Write even though the overlay checkout is behind its upstream. Without it --apply, --revive, --repair, --clean, --lint --fix and --mark-auto-disabled refuse before writing anything, and --check reports without writing to the overlay or packages.toml. Run 'bentoo overlay pull' instead whenever you can"
+msgstr "即使 overlay 的 checkout 落后于其 upstream 也执行写入。没有此标志时，--apply、--revive、--repair、--clean、--lint --fix 和 --mark-auto-disabled 会在写入任何内容之前拒绝运行，而 --check 只报告，不写入 overlay 或 packages.toml。只要可以，请改为运行 'bentoo overlay pull'"
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_compare.go
+msgid "Fetch the overlay's remote (overlay.remote, bounded to 60 seconds) before checking whether the checkout is behind its upstream. Without it the check reads the remote-tracking ref as the last fetch left it; a failed fetch warns and the run continues"
+msgstr "在检查 checkout 是否落后于其 upstream 之前，先 fetch overlay 的 remote（overlay.remote，最多 60 秒）。没有此标志时，检查读取上一次 fetch 留下的远程跟踪 ref；fetch 失败会发出警告，运行继续"
+
+#: cmd/bentoo/overlay_autoupdate.go
 msgid "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"
 msgstr "使用 --check：在暂存树中验证每个待处理的升级 — 不使用此选项时，--check 仅读取版本。使用 --check 或 --revive：让已配置的 claude-code 代理参与验证。--apply 仅发布经检查验证的内容，并拒绝此标志。它启用了两种代理功能：一是版本更新审核器，它会读取两个版本之间的变化，并可能要求比深度策略所选的验证级别更高的验证；二是构建修复器，它会在构建失败后修复STAGED ebuild，然后重新运行相同的关卡以做出决定。将 autoupdate.validate.review 或 fix_on_failure 设置为 false 以将其中一个功能重新禁用；如果没有此标志，这两个键都不会启用任何功能。需要 PATH 中有 claude CLI 且 provider = \"claude-code\" — 否则运行会警告一次，且关卡将在没有代理的情况下运行"
 
@@ -876,6 +884,10 @@ msgstr "正在检查：[%3d%%] %d/%d"
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Nothing to write: no entry's pin disagrees with the overlay."
 msgstr "无内容可写入：没有条目的锁定与 overlay 不一致。"
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Not written: the overlay checkout is behind its upstream. Run 'bentoo overlay pull', then --check again."
+msgstr "未写入：overlay 的 checkout 落后于其 upstream。请运行 'bentoo overlay pull'，然后再次 --check。"
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "The registry was NOT updated: %v"
@@ -1958,6 +1970,10 @@ msgstr "对照其 ::gentoo 基线检查每个软件包（需要本地 gentoo 树
 #: cmd/bentoo/overlay_compare.go
 msgid "Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built"
 msgstr "通过将其构建到此阶梯的这一级来验证每个拟议的重新对齐操作——补丁、配置、编译或安装，每级都包括其前面的所有各级。需要 --realign，在 Overlay 之外的分阶段树中进行构建，并在第一次构建前询问一次。Absent 表示仅生成报告，不进行任何构建"
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Run --realign --depth, which can publish realignments, even though the overlay checkout is behind its upstream. Without it that run is refused, and every other compare only warns"
+msgstr "即使 overlay 的 checkout 落后于其 upstream，也运行可能发布重新对齐结果的 --realign --depth。没有此标志时该运行会被拒绝，其他 compare 仅发出警告"
 
 #: cmd/bentoo/overlay_compare.go
 msgid "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"
@@ -3291,6 +3307,24 @@ msgstr "    已被超越：overlay 包含 %s；将其镜像提升至 %s\n"
 msgid "%d package(s) lack a required implementation.\n"
 msgid_plural "%d package(s) lack a required implementation.\n"
 msgstr[0] "%d 个包缺少必需的实现。\n"
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "--allow-behind given: running on a checkout %d commit(s) behind %s."
+msgid_plural "--allow-behind given: running on a checkout %d commit(s) behind %s."
+msgstr[0] "已指定 --allow-behind：在落后 %d 个 commit 于 %s 的 checkout 上运行。"
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "The overlay checkout is %d commit(s) behind %s: this run reads a stale tree. Run 'bentoo overlay pull' first."
+msgid_plural "The overlay checkout is %d commit(s) behind %s: this run reads a stale tree. Run 'bentoo overlay pull' first."
+msgstr[0] "overlay 的 checkout 落后 %d 个 commit 于 %s：本次运行读取的是过时的树。请先运行 'bentoo overlay pull'。"
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "The count uses the remote-tracking ref as the last fetch left it, which may itself be stale; pass --fetch to refresh it."
+msgstr "该计数使用上一次 fetch 留下的远程跟踪 ref，它本身也可能已过时；传入 --fetch 以刷新它。"
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "Nothing will be written to the overlay or packages.toml by this run; pass --allow-behind to write anyway."
+msgstr "本次运行不会向 overlay 或 packages.toml 写入任何内容；传入 --allow-behind 以仍然写入。"
 
 #: cmd/bentoo/overlay_validate.go
 msgid "Check that each ebuild still matches the source it points at"

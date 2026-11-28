@@ -869,6 +869,14 @@ msgid "Fetch each URL per record instead of sharing one response across records 
 msgstr "Obtener cada URL por registro en lugar de compartir una sola respuesta entre los registros que la declaran"
 
 #: cmd/bentoo/overlay_autoupdate.go
+msgid "Write even though the overlay checkout is behind its upstream. Without it --apply, --revive, --repair, --clean, --lint --fix and --mark-auto-disabled refuse before writing anything, and --check reports without writing to the overlay or packages.toml. Run 'bentoo overlay pull' instead whenever you can"
+msgstr "Escribe aunque el checkout del overlay esté por detrás de su upstream. Sin él, --apply, --revive, --repair, --clean, --lint --fix y --mark-auto-disabled se niegan antes de escribir nada, y --check informa sin escribir en el overlay ni en packages.toml. Siempre que pueda, ejecute 'bentoo overlay pull' en su lugar"
+
+#: cmd/bentoo/overlay_autoupdate.go cmd/bentoo/overlay_compare.go
+msgid "Fetch the overlay's remote (overlay.remote, bounded to 60 seconds) before checking whether the checkout is behind its upstream. Without it the check reads the remote-tracking ref as the last fetch left it; a failed fetch warns and the run continues"
+msgstr "Hace fetch del remote del overlay (overlay.remote, limitado a 60 segundos) antes de comprobar si el checkout está por detrás de su upstream. Sin él, la comprobación lee la ref de seguimiento remoto tal como la dejó el último fetch; un fetch fallido avisa y la ejecución continúa"
+
+#: cmd/bentoo/overlay_autoupdate.go
 msgid "With --check: prove each pending bump in a staged tree — without it --check only reads versions. With --check or --revive: let the configured claude-code agent take part in validation. --apply only publishes what a check proved and refuses this flag. It enables BOTH agent capabilities — the bump reviewer, which reads what changed between the two versions and may ask for MORE validation than the depth policy chose, and the build fixer, which repairs the STAGED ebuild after a failed build and re-runs the same gate to decide. Set autoupdate.validate.review or fix_on_failure to false to switch one of them back off; neither key enables anything without this flag. Requires the claude CLI on PATH and provider = \"claude-code\" — otherwise the run warns once and the gates run without the agent"
 msgstr "Con --check: se comprueba cada actualización pendiente en un árbol staged; sin esta opción, --check solo lee las versiones. Con --check o --revive: permitir que el agente claude-code configurado participe en la validación. --apply solo publica lo que una comprobación ha demostrado y rechaza esta opción. Habilita AMBAS capacidades del agente: el revisor de actualizaciones, que lee qué ha cambiado entre las dos versiones y puede solicitar MÁS validación de la que eligió la política de profundidad, y el corrector de compilaciones, que repara el ebuild STAGED tras una compilación fallida y vuelve a ejecutar la misma puerta para tomar una decisión. Establezca autoupdate.validate.review o fix_on_failure en false para volver a desactivar una de ellas; ninguna de las dos claves habilita nada sin esta opción. Requiere que la CLI de Claude esté en PATH y que provider = \"claude-code\"; de lo contrario, la ejecución mostrará una advertencia una sola vez y las puertas se ejecutarán sin el agente."
 
@@ -883,6 +891,10 @@ msgstr "Comprobando: [%3d%%] %d/%d"
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "Nothing to write: no entry's pin disagrees with the overlay."
 msgstr "Nada que escribir: ningún pin de entrada discrepa con el overlay."
+
+#: cmd/bentoo/overlay_autoupdate.go
+msgid "Not written: the overlay checkout is behind its upstream. Run 'bentoo overlay pull', then --check again."
+msgstr "No escrito: el checkout del overlay está por detrás de su upstream. Ejecute 'bentoo overlay pull' y luego --check de nuevo."
 
 #: cmd/bentoo/overlay_autoupdate.go
 msgid "The registry was NOT updated: %v"
@@ -2005,6 +2017,10 @@ msgstr "Revisar cada paquete comparándolo con su línea de base ::gentoo (requi
 #: cmd/bentoo/overlay_compare.go
 msgid "Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built"
 msgstr "Demuestre cada realineación propuesta compilándola hasta este peldaño de la escala: parches, configuración, compilación o instalación, cada uno de los cuales incluye todos los peldaños anteriores. Requiere --realign, compila en un árbol por etapas fuera del overlay y pregunta una vez antes de la primera compilación. Si está ausente, solo se genera el informe y no se compila nada."
+
+#: cmd/bentoo/overlay_compare.go
+msgid "Run --realign --depth, which can publish realignments, even though the overlay checkout is behind its upstream. Without it that run is refused, and every other compare only warns"
+msgstr "Ejecuta --realign --depth, que puede publicar realineaciones, aunque el checkout del overlay esté por detrás de su upstream. Sin él esa ejecución se rechaza, y cualquier otro compare solo avisa"
 
 #: cmd/bentoo/overlay_compare.go
 msgid "Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"
@@ -3375,6 +3391,26 @@ msgid "%d package(s) lack a required implementation.\n"
 msgid_plural "%d package(s) lack a required implementation.\n"
 msgstr[0] "%d paquete carece de una implementación necesaria.\n"
 msgstr[1] "%d paquetes carecen de una implementación obligatoria.\n"
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "--allow-behind given: running on a checkout %d commit(s) behind %s."
+msgid_plural "--allow-behind given: running on a checkout %d commit(s) behind %s."
+msgstr[0] "--allow-behind indicado: ejecutando en un checkout %d commit por detrás de %s."
+msgstr[1] "--allow-behind indicado: ejecutando en un checkout %d commits por detrás de %s."
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "The overlay checkout is %d commit(s) behind %s: this run reads a stale tree. Run 'bentoo overlay pull' first."
+msgid_plural "The overlay checkout is %d commit(s) behind %s: this run reads a stale tree. Run 'bentoo overlay pull' first."
+msgstr[0] "El checkout del overlay está %d commit por detrás de %s: esta ejecución lee un árbol desactualizado. Ejecute 'bentoo overlay pull' primero."
+msgstr[1] "El checkout del overlay está %d commits por detrás de %s: esta ejecución lee un árbol desactualizado. Ejecute 'bentoo overlay pull' primero."
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "The count uses the remote-tracking ref as the last fetch left it, which may itself be stale; pass --fetch to refresh it."
+msgstr "El recuento usa la ref de seguimiento remoto tal como la dejó el último fetch, que también puede estar desactualizada; pase --fetch para actualizarla."
+
+#: cmd/bentoo/overlay_upstream_guard.go
+msgid "Nothing will be written to the overlay or packages.toml by this run; pass --allow-behind to write anyway."
+msgstr "Esta ejecución no escribirá nada en el overlay ni en packages.toml; pase --allow-behind para escribir de todos modos."
 
 #: cmd/bentoo/overlay_validate.go
 msgid "Check that each ebuild still matches the source it points at"

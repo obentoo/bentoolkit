@@ -148,6 +148,10 @@ Examples:
 	cmd.Flags().StringVar(&compareDepth, "depth", "",
 		i18n.N("Prove each proposed realignment by building it to this rung of the ladder — patches, configure, compile or install, each including every rung before it. "+
 			"Needs --realign, builds in a staged tree outside the overlay, and asks once before the first build. Absent means report only, and nothing is built"))
+	// Read back with GetBool in runCompare rather than bound to a variable:
+	// cmd/bentoo takes no new package-level flag variables.
+	cmd.Flags().Bool("allow-behind", false, i18n.N("Run --realign --depth, which can publish realignments, even though the overlay checkout is behind its upstream. Without it that run is refused, and every other compare only warns"))
+	cmd.Flags().Bool("fetch", false, i18n.N("Fetch the overlay's remote (overlay.remote, bounded to 60 seconds) before checking whether the checkout is behind its upstream. Without it the check reads the remote-tracking ref as the last fetch left it; a failed fetch warns and the run continues"))
 	cmd.Flags().BoolVar(&compareYes, "yes", false, i18n.N("Prove the whole plan without the prompt. Only --depth builds anything; publishing stays a separate per-package question, asked only in an interactive terminal and never answered by this flag"))
 	return cmd
 }
@@ -262,6 +266,16 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 
 	if err := checkCompareGitHubRateLimit(ctx, log, prov, repoName); err != nil {
 		return err
+	}
+
+	// A checkout behind its upstream makes every verdict below describe a
+	// stale tree (a bump already merged upstream reads as "needs rebase").
+	// Only --realign --depth can publish, so only it is refused. It runs
+	// here, after the repository is resolved, so an interrupt during the
+	// registry download still lands there first.
+	if err := guardCompareUpstream(ctx, log, cmd, d, cfg, overlayPath); err != nil {
+		log.Error("refusing to compare", "err", err)
+		return exitWith(1)
 	}
 
 	// Scan local overlay
@@ -530,6 +544,24 @@ func runCompare(cmd *cobra.Command, args []string, d *deps) error {
 	// after the export — because the report is still worth printing and worth
 	// exporting, `compare` did its job, and the status is returned only now.
 	return exitOnSkippedBaseline(report)
+}
+
+// guardCompareUpstream is the compare side of the upstream guard: it warns
+// when the checkout is behind, and refuses a run that may publish
+// (--realign --depth) unless --allow-behind is given.
+func guardCompareUpstream(ctx context.Context, log *slog.Logger, cmd *cobra.Command, d *deps, cfg *config.Config, overlayPath string) error {
+	allowBehind, err := cmd.Flags().GetBool("allow-behind")
+	if err != nil {
+		return fmt.Errorf("reading --allow-behind: %w", err)
+	}
+	fetch, err := cmd.Flags().GetBool("fetch")
+	if err != nil {
+		return fmt.Errorf("reading --fetch: %w", err)
+	}
+	writes := compareRealign && compareDepth != ""
+	status := overlayUpstreamStatus(ctx, log, d, cfg, overlayPath, fetch)
+	_, err = enforceOverlayUpstream(log, status, writes, allowBehind)
+	return err
 }
 
 // syncCompareRegistry refreshes the repository list for --sync. A failure is
