@@ -262,6 +262,13 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 			return declinedGates(req.Depth, label.clean(sandboxRefusedReason(label.pv, why)), DeclineHost), nil
 		}
 	}
+	ebuildPath := filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild")
+	if req.HostSandbox && ebuildRestrictsNetworkSandbox(ebuildPath) {
+		// DeclineCandidate: the ebuild's own declaration meets the sandbox's
+		// policy (sandbox_restrict.go). No retry on this host changes either, so
+		// it must not wait as the machine's fault, nor publish unbuilt.
+		return declinedGates(req.Depth, label.clean(networkSandboxRefusedReason(label.pv)), DeclineCandidate), nil
+	}
 	isolated, isolationReason := deps.isolationProbe()()
 	if req.HostSandbox {
 		// The sandbox has its own network namespace holding only loopback, so
@@ -298,7 +305,7 @@ func RunBuildGates(ctx context.Context, req BuildRequest, deps BuildDeps) ([]Gat
 	// `ebuild` discovers the repository from the path it is given and from its
 	// working directory, so Dir is what decides which tree is built: the staged
 	// one, never the published overlay.
-	name, args := "ebuild", []string{filepath.Join(stagedRoot, category, pkg, pkg+"-"+version+".ebuild"), "clean", phase.String()}
+	name, args := "ebuild", []string{ebuildPath, "clean", phase.String()}
 	var sandbox *buildSandbox
 	if req.HostSandbox {
 		sandbox, err = newBuildSandbox(ctx, req.SandboxTmpRoot)
