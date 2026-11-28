@@ -56,6 +56,15 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   ✗ in "Repair summary" carries its state or why it was not re-validated. A
   single `--repair` heads its verdict with the package too.
 
+- **A blocked bump names the installed package to remove.** When an
+  installed package's dependency blocks the candidate, the hint said
+  "remove app-editors/zed, which blocks it" for the zed bump itself, because
+  it read the blocker atom (which names the candidate) instead of the package
+  carrying it. It now reads the parents Portage lists on the `[blocks …]`
+  line and names the installed blocker, here `app-editors/zeo`; when the
+  candidate carries the blocker, it still names the installed package the
+  atom matches.
+
 - **A repair that drops a patch only older ebuilds use is adopted even when
   the ebuild globs another `files/` directory.** `--repair sys-firmware/edk2`
   was refused because `files/edk2-202608-fix-gic-hvf.patch`, which the new
