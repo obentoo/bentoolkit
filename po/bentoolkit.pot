@@ -1453,6 +1453,14 @@ msgid "The re-validation was skipped: the run is stopping. Each staged tree is k
 msgstr ""
 
 #: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "not re-validated: the run is stopping"
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
+msgid "not re-validated"
+msgstr ""
+
+#: cmd/bentoo/overlay_autoupdate_repair_batch.go
 msgid "Repair summary"
 msgstr ""
 

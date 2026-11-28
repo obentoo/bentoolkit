@@ -124,7 +124,8 @@ func (ar *autoupdateRun) runRepairFor(ctx context.Context, pkg, overlayPath, con
 		return failWith(1, fmt.Errorf("--repair %s: interrupted before the re-validation; the staged tree is kept as the session left it: %w", pkg, err))
 	}
 	ar.offerStagedCopies(ctx, overlayPath, b)
-	return ar.revalidateRepair(ctx, overlayPath, configDir, auCfg.LLM, b)
+	_, err = ar.revalidateRepair(ctx, overlayPath, configDir, auCfg.LLM, b, b.Package)
+	return err
 }
 
 // markRepaired sets the repair mark on b's bundle once a session has run and
@@ -251,8 +252,9 @@ func (ar *autoupdateRun) repairStoppedBy(pkg string, sig os.Signal) error {
 // the lock the run already holds, and publishes nothing: a READY verdict is a
 // proof `--apply` publishes, as for any checked bump. Adopting the tree
 // disables the LLM agents for the run. A READY tree has its bundle removed by
-// the check; any other verdict keeps it, marked, and is exit 1.
-func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig, b repair.Bundle) error {
+// the check; any other verdict keeps it, marked, and is exit 1. label heads
+// the printed verdict; the state is the verdict, "" when none was reached.
+func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, configDir string, llmCfg config.LLMConfig, b repair.Bundle, label string) (report.State, error) {
 	proved := false
 	defer func() {
 		if !proved {
@@ -272,29 +274,29 @@ func (ar *autoupdateRun) revalidateRepair(ctx context.Context, overlayPath, conf
 	extra = append(extra, live...)
 	applier, err := ar.newSingleApplier(overlayPath, configDir, llmCfg, extra...)
 	if err != nil {
-		return err
+		return "", err
 	}
 	result := applier.Validate(checkCtx, b.Package, validate.DepthNone)
 	release()
 	if err := checkCtx.Err(); err != nil {
-		return failWith(1, fmt.Errorf("--repair %s: interrupted during the re-validation; the staged tree is kept as the session left it: %w", b.Package, err))
+		return "", failWith(1, fmt.Errorf("--repair %s: interrupted during the re-validation; the staged tree is kept as the session left it: %w", b.Package, err))
 	}
 
 	state := repairState(result)
-	printRepairVerdict(b.Package, state, result)
+	printRepairVerdict(label, b.Package, state, result)
 	if state == report.Wait {
 		// Another repair cannot change the host: the liborcus (slot conflict)
 		// and amd-gaia (no python3_15 dependency) repairs of 2026-11-23 both
 		// ended WAIT and were told to repair again.
-		return failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s: only this host stood in the way (the gates above name what it lacks); "+
+		return state, failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s: only this host stood in the way (the gates above name what it lacks); "+
 			"the bundle is kept: install what is missing, or prove it where it is installed (a lab VM), then run --repair %s again",
 			b.Package, state, b.Package))
 	}
 	if state != report.Ready {
-		return failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s, not proven; the bundle is kept: run --repair %s again", b.Package, state, b.Package))
+		return state, failWith(1, fmt.Errorf("--repair %s: the repaired tree is %s, not proven; the bundle is kept: run --repair %s again", b.Package, state, b.Package))
 	}
 	proved = true
-	return nil
+	return state, nil
 }
 
 // repairState is the check's verdict on a re-validated tree.
@@ -303,10 +305,13 @@ func repairState(result validate.EbuildResult) report.State {
 	return report.StateOf(report.Classify(false, facts), facts)
 }
 
-// printRepairVerdict shows each gate's outcome and what to do next.
-func printRepairVerdict(pkg string, state report.State, result validate.EbuildResult) {
+// printRepairVerdict shows each gate's outcome and what to do next, headed by
+// label: it prints after the live region is released, so in a batch it is the
+// line that ties the block to its bundle even when the "[i/N]" line printed
+// before the region has scrolled away.
+func printRepairVerdict(label, pkg string, state report.State, result validate.EbuildResult) {
 	fmt.Println()
-	output.Header.Println(i18n.T("Re-validation"))
+	output.Header.Println(i18n.T("Re-validation") + ": " + label)
 	for _, line := range verdictReasons(result.Gates) {
 		fmt.Println(line)
 	}
