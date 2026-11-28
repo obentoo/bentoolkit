@@ -9,6 +9,8 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
 
 ## [Unreleased]
 
+## [0.49.0] - 2026-11-28
+
 ### Added
 
 - **Autoupdate and compare notice a checkout behind its upstream.** On
@@ -2559,7 +2561,8 @@ below for why that is a measurement rather than a hope.
   existing fixer messages are byte for byte what they were, because a review
   told "claude fixer aborted" would be told about an operation it never ran.
 
-[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.48.0...HEAD
+[Unreleased]: https://github.com/obentoo/bentoolkit/compare/v0.49.0...HEAD
+[0.49.0]: https://github.com/obentoo/bentoolkit/compare/v0.48.0...v0.49.0
 [0.48.0]: https://github.com/obentoo/bentoolkit/compare/v0.47.0...v0.48.0
 [0.47.0]: https://github.com/obentoo/bentoolkit/compare/v0.46.3...v0.47.0
 [0.46.3]: https://github.com/obentoo/bentoolkit/compare/v0.46.2...v0.46.3
