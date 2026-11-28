@@ -78,29 +78,32 @@ func TestCooldownApply_AnotherLineKeepsItsCandidate(t *testing.T) {
 // promote unmasked, say why on the result, and write no entry.
 func TestCooldownApply_AutomaticExemptions(t *testing.T) {
 	const pkg = "app-misc/cooldown-exempt"
+	var gentooDir string
 	cases := map[string]struct {
 		opts      func(t *testing.T) []ApplierOption
 		keywords  bool
 		wantWhy   string
 		wantEntry bool
+		// gentooCopy is ::gentoo's cooldown-exempt-1.1.ebuild: "derived" for the
+		// overlay's own 1.0 bytes (what a version-agnostic mirror bumps to),
+		// else the text given; "" writes none.
+		gentooCopy string
 	}{
 		"urgent": {
 			opts:     func(*testing.T) []ApplierOption { return []ApplierOption{WithApplierUrgent([]string{pkg})} },
 			keywords: true, wantWhy: "urgent",
 		},
-		"same version in gentoo": {
+		"same version in gentoo, our copy derived from it": {
 			opts: func(t *testing.T) []ApplierOption {
-				g := t.TempDir()
-				dir := filepath.Join(g, "app-misc", "cooldown-exempt")
-				if err := os.MkdirAll(dir, 0o755); err != nil {
-					t.Fatal(err)
-				}
-				if err := os.WriteFile(filepath.Join(dir, "cooldown-exempt-1.1.ebuild"), []byte("EAPI=8\n"), 0o644); err != nil {
-					t.Fatal(err)
-				}
-				return []ApplierOption{WithApplierGentooPath(g)}
+				return []ApplierOption{WithApplierGentooPath(gentooDir)}
 			},
-			keywords: true, wantWhy: "same version in ::gentoo",
+			keywords: true, wantWhy: "same version in ::gentoo", gentooCopy: "derived",
+		},
+		"same version in gentoo, our copy carried forward from our old version": {
+			opts: func(t *testing.T) []ApplierOption {
+				return []ApplierOption{WithApplierGentooPath(gentooDir)}
+			},
+			keywords: true, wantEntry: true, gentooCopy: "EAPI=8\nFIREFOX_PATCHSET=\"firefox-161-patches-01.tar.xz\"\n",
 		},
 		"unkeyworded": {
 			opts:     func(*testing.T) []ApplierOption { return nil },
@@ -113,10 +116,28 @@ func TestCooldownApply_AutomaticExemptions(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
+			gentooDir = t.TempDir()
 			f := newCooldownFixture(t, []cooldownBump{{pkg, "1.0", "1.1"}}, nil, nil, cooldownEmptyBlock, tc.opts(t)...)
 			if !tc.keywords {
 				createTestEbuildFileWithContent(t, f.overlay, pkg, "1.0",
 					"EAPI=8\nDESCRIPTION=\"x\"\nHOMEPAGE=\"https://example.com\"\nSRC_URI=\"\"\nLICENSE=\"MIT\"\nSLOT=\"0\"\n#KEYWORDS=\"~amd64\"\n")
+			}
+			if tc.gentooCopy != "" {
+				copyText := tc.gentooCopy
+				if copyText == "derived" {
+					ours, err := os.ReadFile(filepath.Join(f.overlay, "app-misc", "cooldown-exempt", "cooldown-exempt-1.0.ebuild"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					copyText = string(ours)
+				}
+				dir := filepath.Join(gentooDir, "app-misc", "cooldown-exempt")
+				if err := os.MkdirAll(dir, 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "cooldown-exempt-1.1.ebuild"), []byte(copyText), 0o644); err != nil {
+					t.Fatal(err)
+				}
 			}
 			r := applyOne(t, f, pkg)
 			if !r.Success {

@@ -578,8 +578,10 @@ someone has built it:
 - **Automatic exemptions.** A version is promoted unmasked, with the reason in
   the log and the summary, when `--urgent <pkg>` names it (a security fix that
   must not wait; `cat/pkg` or a record key, repeatable, only with `--apply` or
-  `--revive`), when ::gentoo ships the very same version (a mirror that only
-  widens `PYTHON_COMPAT` adds no release its users do not already get), or when
+  `--revive`), when ::gentoo ships the very same version and our ebuild is
+  ::gentoo's copy plus only comments, `PYTHON_COMPAT` and `KEYWORDS` (a mirror
+  that only widens `PYTHON_COMPAT` adds no release its users do not already
+  get; a copy carried forward from our previous version is masked as usual), or when
   its ebuild assigns no `KEYWORDS` (Portage already refuses it without `**`).
 - **`--clean` and `sweep` keep what is held**: every masked version, the highest
   unmasked version below the oldest masked one, and — for each release line
@@ -715,8 +717,8 @@ which it does when it fails on a version.
 
 #### When ::gentoo ships the version being bumped
 
-A bump copies the overlay's own ebuild to the new version; it never reads
-::gentoo. So when ::gentoo ships the exact version being left behind and its
+A bump copies the overlay's own ebuild to the new version; it never starts
+from ::gentoo's copy. So when ::gentoo ships the exact version being left behind and its
 copy differs from ours, `--check` and `--apply` print a stage line naming both
 files, for example:
 
@@ -731,6 +733,17 @@ set `BENTOO_GENTOO_REPO` to another path, or to an empty value to switch off
 every check that reads ::gentoo: this warning, the distfile digest
 cross-check below, and the requirement and target lookups that consult the
 master.
+
+A same-version mirror (an ebuild whose header says `Mirrored from ::gentoo`,
+or whose registry `patched` text does) is the exception. When ::gentoo already
+ships the candidate version (revisions ignored), the mirror's base is
+::gentoo's copy, not ours, so a candidate that differs from ::gentoo's copy in
+anything but comments, `PYTHON_COMPAT` and `KEYWORDS` is refused before any
+gate: the bump is HUMAN, nothing is published, and the reason names
+::gentoo's ebuild to re-derive it from, with the declared `BENTOO-DIVERGENCE`
+changes. Carried forward, mail-client/thunderbird-161.0 kept firefox-160's
+patchset and 160's Rust and NSS floors. A mirror whose ebuild never names its
+version passes, since carrying it forward already gives ::gentoo's copy.
 
 #### When a bump leaves ::gentoo behind
 

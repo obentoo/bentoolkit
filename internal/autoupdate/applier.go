@@ -2186,6 +2186,9 @@ func (a *Applier) applySubstitutions(ebuildPath, pkg string, update *PendingUpda
 	if err := a.convertMirrorBump(ebuildPath, pkg, update); err != nil {
 		return err
 	}
+	if err := a.refuseStaleGentooMirror(ebuildPath, pkg, update); err != nil {
+		return err
+	}
 	return a.rewriteRequirementPins(ebuildPath, pkg, update)
 }
 
