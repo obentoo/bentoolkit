@@ -1280,7 +1280,7 @@ msgid_plural "Repaired packages.toml: %d change(s) written."
 msgstr[0] ""
 msgstr[1] ""
 
-#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_lintfix.go cmd/bentoo/overlay_autoupdate_markauto.go cmd/bentoo/overlay_cooldown_set.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
 msgstr ""
 
@@ -2025,6 +2025,99 @@ msgstr ""
 
 #: cmd/bentoo/overlay_cooldown.go
 msgid "lifted  %s (%s)\n"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "let a bare cat/pkg stand for every record of the package (each @series and :slot)"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "print the diff and write nothing"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "run the cooldown sweep right after the write"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "system root whose var/db/pkg releases entries by installation (with --sweep)"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "Set a registry record's cooldown_days and cooldown_reason"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid ""
+"Write cooldown_days and cooldown_reason on the packages.toml records named\n"
+"(cat/pkg, cat/pkg@series or cat/pkg:slot), in place and keeping the file's\n"
+"layout. --days 0 takes the package out of the cooldown; 1 to 3650 sizes its\n"
+"wait. A record in a cooldown_with group brings every member of the group: a\n"
+"group is released whole, so its members share one wait.\n"
+"\n"
+"The change acts on the versions already masked at the next --apply or\n"
+"'bentoo overlay cooldown sweep'."
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "the record's wait in days: 0 (out of the cooldown) to 3650"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "why the package does not wait the block's days (required)"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "Drop a registry record's cooldown override: it waits the block's days again"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid ""
+"Remove cooldown_days and cooldown_reason from the packages.toml records named\n"
+"(cat/pkg, cat/pkg@series or cat/pkg:slot), so they wait the days= of the\n"
+"cooldown block again. A record in a cooldown_with group brings every member of\n"
+"the group.\n"
+"\n"
+"The change acts on the versions already masked at the next --apply or\n"
+"'bentoo overlay cooldown sweep'."
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "packages.toml already says that: nothing to write"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "dry run: packages.toml is unchanged"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "packages.toml: %d record(s) changed"
+msgid_plural "packages.toml: %d record(s) changed"
+msgstr[0] ""
+msgstr[1] ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "It acts on the versions already masked at the next --apply or 'bentoo overlay cooldown sweep'."
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "cooldown_with group: also editing %s (a group is released whole, so its members share one wait)\n"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "note: %s leaves %s as they are (name them too, or pass --all-lines)\n"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "(block's days)"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go cmd/bentoo/snapshot_list.go
+msgid "(none)"
+msgstr ""
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "This overlay has no cooldown block yet: the value applies once one exists."
 msgstr ""
 
 #: cmd/bentoo/overlay_diff.go
@@ -3228,10 +3321,6 @@ msgstr ""
 
 #: cmd/bentoo/snapshot_list.go
 msgid "also list remote snapshots (btrbk targets, restic repository)"
-msgstr ""
-
-#: cmd/bentoo/snapshot_list.go
-msgid "(none)"
 msgstr ""
 
 #: cmd/bentoo/snapshot_list.go

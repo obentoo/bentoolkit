@@ -1436,7 +1436,7 @@ msgid_plural "Repaired packages.toml: %d change(s) written."
 msgstr[0] "已修复 packages.toml：已写入 %d 项更改。"
 
 #: cmd/bentoo/overlay_autoupdate_lintfix.go
-#: cmd/bentoo/overlay_autoupdate_markauto.go
+#: cmd/bentoo/overlay_autoupdate_markauto.go cmd/bentoo/overlay_cooldown_set.go
 msgid "Review it before it is published: 'bentoo overlay diff'"
 msgstr "在发布前进行审核：“bentoo overlay diff”"
 
@@ -2218,6 +2218,109 @@ msgstr "无内容可解除"
 #: cmd/bentoo/overlay_cooldown.go
 msgid "lifted  %s (%s)\n"
 msgstr "已提升  %s (%s)\n"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "let a bare cat/pkg stand for every record of the package (each @series and :slot)"
+msgstr "让裸 cat/pkg 代表该软件包的所有记录（每个 @series 和 :slot）"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "print the diff and write nothing"
+msgstr "打印 diff，不写入任何内容"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "run the cooldown sweep right after the write"
+msgstr "写入后立即运行 cooldown sweep"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "system root whose var/db/pkg releases entries by installation (with --sweep)"
+msgstr "按安装情况释放条目所依据的 var/db/pkg 所在系统根（配合 --sweep）"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "Set a registry record's cooldown_days and cooldown_reason"
+msgstr "设置注册表记录的 cooldown_days 和 cooldown_reason"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid ""
+"Write cooldown_days and cooldown_reason on the packages.toml records named\n"
+"(cat/pkg, cat/pkg@series or cat/pkg:slot), in place and keeping the file's\n"
+"layout. --days 0 takes the package out of the cooldown; 1 to 3650 sizes its\n"
+"wait. A record in a cooldown_with group brings every member of the group: a\n"
+"group is released whole, so its members share one wait.\n"
+"\n"
+"The change acts on the versions already masked at the next --apply or\n"
+"'bentoo overlay cooldown sweep'."
+msgstr ""
+"在指定的 packages.toml 记录（cat/pkg、cat/pkg@series 或 cat/pkg:slot）上\n"
+"就地写入 cooldown_days 和 cooldown_reason，保留文件布局。--days 0 让软件包\n"
+"退出 cooldown；1 到 3650 设定等待天数。cooldown_with 组中的记录会带上组内\n"
+"所有成员：组是整体释放的，因此成员共享同一等待时间。\n"
+"\n"
+"此更改在下一次 --apply 或 'bentoo overlay cooldown sweep' 时作用于已屏蔽的版本。"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "the record's wait in days: 0 (out of the cooldown) to 3650"
+msgstr "记录的等待天数：0（不进入 cooldown）到 3650"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "why the package does not wait the block's days (required)"
+msgstr "该软件包为何不等待区块的天数（必填）"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "Drop a registry record's cooldown override: it waits the block's days again"
+msgstr "移除注册表记录的 cooldown 覆盖：恢复等待区块的天数"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid ""
+"Remove cooldown_days and cooldown_reason from the packages.toml records named\n"
+"(cat/pkg, cat/pkg@series or cat/pkg:slot), so they wait the days= of the\n"
+"cooldown block again. A record in a cooldown_with group brings every member of\n"
+"the group.\n"
+"\n"
+"The change acts on the versions already masked at the next --apply or\n"
+"'bentoo overlay cooldown sweep'."
+msgstr ""
+"从指定的 packages.toml 记录（cat/pkg、cat/pkg@series 或 cat/pkg:slot）中\n"
+"移除 cooldown_days 和 cooldown_reason，使其重新等待 cooldown 区块的 days=。\n"
+"cooldown_with 组中的记录会带上组内所有成员。\n"
+"\n"
+"此更改在下一次 --apply 或 'bentoo overlay cooldown sweep' 时作用于已屏蔽的版本。"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "packages.toml already says that: nothing to write"
+msgstr "packages.toml 已是如此：无需写入"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "dry run: packages.toml is unchanged"
+msgstr "试运行：packages.toml 未更改"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "packages.toml: %d record(s) changed"
+msgid_plural "packages.toml: %d record(s) changed"
+msgstr[0] "packages.toml：已更改 %d 条记录"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "It acts on the versions already masked at the next --apply or 'bentoo overlay cooldown sweep'."
+msgstr "它将在下一次 --apply 或 'bentoo overlay cooldown sweep' 时作用于已屏蔽的版本。"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "cooldown_with group: also editing %s (a group is released whole, so its members share one wait)\n"
+msgstr "cooldown_with 组：同时编辑 %s（组是整体释放的，因此成员共享同一等待时间）\n"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "note: %s leaves %s as they are (name them too, or pass --all-lines)\n"
+msgstr "注意：%s 不改动 %s（也请列出它们，或传入 --all-lines）\n"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "(block's days)"
+msgstr "（区块的天数）"
+
+#: cmd/bentoo/overlay_cooldown_set.go cmd/bentoo/snapshot_list.go
+msgid "(none)"
+msgstr "（无）"
+
+#: cmd/bentoo/overlay_cooldown_set.go
+msgid "This overlay has no cooldown block yet: the value applies once one exists."
+msgstr "此 overlay 尚无 cooldown 区块：区块存在后该值才生效。"
 
 #: cmd/bentoo/overlay_diff.go
 msgid "Show diff of changes"
@@ -3662,10 +3765,6 @@ msgstr "按子卷列出本地快照"
 #: cmd/bentoo/snapshot_list.go
 msgid "also list remote snapshots (btrbk targets, restic repository)"
 msgstr "也列出远程快照（btrbk 目标、restic 仓库）"
-
-#: cmd/bentoo/snapshot_list.go
-msgid "(none)"
-msgstr "（无）"
 
 #: cmd/bentoo/snapshot_list.go
 msgid "remote %s unavailable: %v"

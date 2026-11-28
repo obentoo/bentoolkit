@@ -1,0 +1,77 @@
+# Bentoo Autoupdate Package Configuration — SYNTHETIC COOLDOWN-EDIT FIXTURE
+#
+# Not the real registry. cooldown_set_input.toml is what `bentoo overlay
+# cooldown set/unset` reads; cooldown_set_golden.toml is the byte-for-byte file
+# it must leave after the edits TestCooldownEditGolden runs. Every line the
+# edits do not name has to come out unchanged, this header included.
+
+["app-misc/plain"]
+url = "https://api.github.com/repos/example/plain/releases/latest"
+parser = "json"
+path = "tag_name"
+transform = [['^v', ""]]
+cooldown_days = 3
+cooldown_reason = "upstream ships \"hotfix\" releases"
+headers = { "User-Agent" = "bentoo-autoupdate" }
+version = "1.0"
+comments = """
+No override yet: set inserts cooldown_days and cooldown_reason after transform,
+before headers (CanonicalFieldOrder).
+"""
+# END
+
+["app-misc/override"]
+url = "https://api.github.com/repos/example/override/releases/latest"
+parser = "json"
+path = "tag_name"
+cooldown_days = 3
+cooldown_reason = "upstream ships \"hotfix\" releases"
+version = "2.0"
+comments = """
+Has an override: set rewrites both lines in place.
+"""
+# END
+
+["app-misc/dropme"]
+url = "https://api.github.com/repos/example/dropme/releases/latest"
+parser = "json"
+path = "tag_name"
+type = "bin"
+comments = """
+unset removes both cooldown lines and nothing else.
+"""
+# END
+
+["app-editors/multi@stable"]
+url = "https://api.github.com/repos/example/multi/releases/latest"
+parser = "json"
+path = "tag_name"
+cooldown_days = 3
+cooldown_reason = "upstream ships \"hotfix\" releases"
+series = "^1\\."
+comments = """
+One release line of two: only it is named.
+"""
+# END
+
+["app-editors/multi@preview"]
+url = "https://api.github.com/repos/example/multi/releases"
+parser = "json"
+path = "[0].tag_name"
+series = "^2\\."
+comments = """
+The other release line: left alone.
+"""
+# END
+
+["dev-libs/docs-only"]
+url = "https://example.invalid/docs-only.json"
+parser = "json"
+path = "version"
+cooldown_days = 3
+cooldown_reason = "upstream ships \"hotfix\" releases"
+comments = """
+Every field ranks before the cooldown keys except comments: the insertion lands
+right above it.
+"""
+# END

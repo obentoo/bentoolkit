@@ -26,7 +26,7 @@ import (
 // cooldown block: there is nothing to confirm, add to or sweep.
 var errCooldownDisabled = errors.New("cooldown disabled for this overlay: profiles/package.mask has no `# BEGIN bentoo-cooldown` block")
 
-// newCooldownCmd builds `overlay cooldown` and its four subcommands.
+// newCooldownCmd builds `overlay cooldown` and its subcommands.
 func newCooldownCmd(d *deps) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "cooldown",
@@ -36,7 +36,8 @@ profiles/package.mask (the managed bentoo-cooldown block) until it is released:
 by time (days= on the BEGIN line), by installation from ::bentoo, or by hand.
 .autoupdate/cooldown.unmask lists the same atoms for a host that wants them now.`),
 	}
-	cmd.AddCommand(newCooldownStatusCmd(d), newCooldownConfirmCmd(), newCooldownAddCmd(), newCooldownSweepCmd(d))
+	cmd.AddCommand(newCooldownStatusCmd(d), newCooldownConfirmCmd(), newCooldownAddCmd(), newCooldownSweepCmd(d),
+		newCooldownSetCmd(d), newCooldownUnsetCmd(d))
 	return cmd
 }
 

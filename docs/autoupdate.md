@@ -492,7 +492,7 @@ from https to http is refused too, with or without a credential. Only loopback
 | `min_age_days` | Minimum age, in days, of the upstream release before it is offered as a bump. A younger candidate is kept back: the current version stays, `--check` reports the package as `held` with the line `held by min_age_days: <version> published <time>, eligible <time>`, and nothing is queued. Only the newest version is considered — the gate never steps down to an older release that would pass. Requires `published_path`; absent/`0` means no gate. |
 | `published_path` | JSON path, in the same response the version came from, to the candidate's publication time as an RFC 3339 string. `{version}` is replaced by the candidate and stays one member name even when the version holds dots, so npm's registry document reads `"time.{version}"`. A missing, non-string or unparseable time **holds** the candidate and the report says why. Requires `min_age_days` and `parser = "json"`. |
 | `cooldown_with` | Packages (bare `category/package`, sorted, never the record itself) masked and released **together** with this one by the [cooldown](#the-autoupdate-cooldown): a pair that cannot be installed apart, such as `sys-apps/ai-jail` and `sys-apps/ai-jail-bin`. Every target needs a record, and the relation is a clique — each member lists every other member — so the load and `--lint` fail naming both records of the first missing link. |
-| `cooldown_days` | The [cooldown](#the-autoupdate-cooldown)'s delay for this record's release line, overriding the block's `days=`: `0` takes the package out of the cooldown (its promotions land unmasked), `1` to `3650` sizes the wait. Written on each entry as `days=N`. Members of one `cooldown_with` group must share the same value, and `0` cannot be combined with `cooldown_with` (a group is released whole). It replaced `cooldown_exempt`, which now fails the load naming its replacement. |
+| `cooldown_days` | The [cooldown](#the-autoupdate-cooldown)'s delay for this record's release line, overriding the block's `days=`: `0` takes the package out of the cooldown (its promotions land unmasked), `1` to `3650` sizes the wait. Written on each entry as `days=N`. Members of one `cooldown_with` group must share the same value, and `0` cannot be combined with `cooldown_with` (a group is released whole). Set it with `bentoo overlay cooldown set` and drop it with `unset` instead of editing the file (see the cooldown commands below). It replaced `cooldown_exempt`, which now fails the load naming its replacement. |
 | `cooldown_reason` | Why the record does not wait the block's days. Required with any `cooldown_days`, and refused without one — a shorter wait trades away the users' protection, so the registry records why. |
 | `comments` | The record's documentation, as its last field — see [The record model](#the-record-model). |
 | `revision` | The `-rN` suffix to write on a freshly bumped ebuild. Only for multi-slot packages that use the revision to tell their SLOTs apart — see [Multi-slot packages](#multi-slot-packages). Absent/`0` writes a plain PV, which is what an ordinary package wants. |
@@ -596,9 +596,27 @@ someone has built it:
   =cat/pkg-N…` releases that version and every older one (a whole group for a
   grouped package) and fails naming an atom not in the block. `add
   =cat/pkg-PVR` masks an ebuild already in the overlay (`origin=manual`). `sweep
-  [--dry-run] [--pkgdb-root DIR]` runs the release rules outside an apply. The
-  writing subcommands take the apply's overlay lock and exit 1 naming its holder
-  while an apply runs.
+  [--dry-run] [--pkgdb-root DIR]` runs the release rules outside an apply.
+  `set <record-key>... --days N --reason TEXT` writes `cooldown_days` and
+  `cooldown_reason` on registry records, and `unset <record-key>...` removes
+  both (the record waits the block's `days=` again). They edit
+  `packages.toml` in place: only the two lines change, an absent key lands at
+  its canonical position, and every other line — `comments` blocks included —
+  is left as it was. A key is the exact record key (`cat/pkg`, `cat/pkg@series`,
+  `cat/pkg:slot`); a bare `cat/pkg` that is not itself a key but matches several
+  records fails listing them, unless `--all-lines` takes them all. A record in a
+  `cooldown_with` group brings **the whole group** (its members share one wait),
+  said in the output, and `--days 0` on a group is refused naming the members.
+  The values follow the loader's rules (`0` to `3650`, a reason is required);
+  the rewrite must decode to the old registry with only those fields changed and
+  lint with no new finding before it is written, and the file is linted again
+  after the write and restored if that fails. The output lists each record's
+  old → new values; `--dry-run` prints the diff and writes nothing; `--sweep`
+  runs the sweep right after the write. Like the other registry writers they
+  only edit the file: review it with `bentoo overlay diff`. The change acts on
+  versions already masked at the next `--apply` or `sweep`. The writing
+  subcommands take the apply's overlay lock and exit 1 naming its holder while
+  an apply runs.
 - Every add and lift is one structured log record (`package`, `version`,
   `reason`), and `--apply` ends with `Cooldown: N added, N replaced, N
   graduated, N lifted, N unmasked`.
