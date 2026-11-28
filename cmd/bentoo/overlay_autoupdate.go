@@ -72,6 +72,9 @@ type autoupdateOptions struct {
 	// buildBackend is --build-backend: where the build gates run for this run.
 	buildBackend string
 	buildBudget  time.Duration
+	// manifestConcurrency is --manifest-concurrency: how many manifest runs
+	// download at once for this run (autoupdate.manifest.concurrency).
+	manifestConcurrency int
 	// clean removes the old ebuild after a successful apply, keeping
 	// only the newly created version
 	clean bool
@@ -301,6 +304,9 @@ type autoupdateValidatePolicy struct {
 	// Budget is --build-budget, else autoupdate.build.budget, with this
 	// host's build history read once; a zero Limit is no budget.
 	Budget validate.BuildBudget
+	// Manifest is autoupdate.manifest with --manifest-concurrency applied:
+	// how many manifest runs download at once and when one is stopped.
+	Manifest autoupdate.ManifestLimits
 }
 
 // newAutoupdateCmd builds `overlay autoupdate`. d is the tree's dependencies;
@@ -391,6 +397,7 @@ Examples:
 	cmd.Flags().BoolVar(&o.requireIsolation, "require-isolation", false, i18n.N("SKIP the compile gate rather than run it without a verified network namespace. Without this an unisolated compile still runs, and its pass is labelled \"unverified isolation\" — creating the namespace needs privilege an ordinary user does not have, and Portage reports network-sandbox in FEATURES either way"))
 	cmd.Flags().BoolVarP(&o.clean, "clean", "c", false, i18n.N("With --apply: sweep that package's directory after a successful apply. WITHOUT --apply: sweep the whole overlay — every package directory holding an ebuild no registry entry claims — optionally narrowed by a positional <category> or <category/package>. The full plan is printed BEFORE the confirmation, and the ebuilds are DELETED from an overlay that auto-commits and pushes, which is why an unattended sweep requires --yes. A directory whose entry has no version pin, or that no entry claims, is reported and left alone"))
 	cmd.Flags().IntVar(&o.concurrency, "concurrency", autoupdate.DefaultConcurrency, i18n.N("max parallel checks/applies (1-100). A standalone --clean sweep does NOT take this default: it runs one directory at a time unless the flag is passed explicitly, because whether concurrent pkgdev manifest runs contend on DISTDIR or on pkgdev's own locking was never measured"))
+	cmd.Flags().IntVar(&o.manifestConcurrency, "manifest-concurrency", 0, i18n.N("how many pkgdev manifest runs may download distfiles at once, whatever --concurrency is (0 = use config autoupdate.manifest.concurrency, default 4). A run waiting for a slot spends none of its time budget"))
 	cmd.Flags().IntVar(&o.timeout, "timeout", 0, i18n.N("per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)"))
 	cmd.Flags().StringVar(&o.only, "only", "", i18n.N("Restrict --check to packages of this type: \"bin\" or \"source\""))
 	cmd.Flags().BoolVar(&o.reviveList, "revive-list", false, i18n.N("List disabled (orphaned) packages whose upstream is newer than ::gentoo"))
@@ -1820,6 +1827,19 @@ func (o *autoupdateOptions) resolveAutoupdateValidatePolicy(cfg *config.Config, 
 		policy.Budget = validate.BuildBudget{Limit: limit, History: readBuildHistory(contextOrBackground(cmd.Context()))}
 	}
 
+	manifestCfg := cfg.Autoupdate.Manifest
+	policy.Manifest = autoupdate.ManifestLimits{
+		Concurrency:  manifestCfg.Concurrency,
+		StallTimeout: time.Duration(manifestCfg.StallTimeout) * time.Second,
+		Timeout:      time.Duration(manifestCfg.Timeout) * time.Second,
+	}
+	if cmd.Flags().Changed("manifest-concurrency") {
+		if o.manifestConcurrency < 1 {
+			return policy, errors.New("--manifest-concurrency: at least one manifest run must be allowed")
+		}
+		policy.Manifest.Concurrency = o.manifestConcurrency
+	}
+
 	spelled, err := cmd.Flags().GetString("depth")
 	if err != nil {
 		return policy, fmt.Errorf("reading --depth: %w", err)
@@ -1859,6 +1879,7 @@ func (ar *autoupdateRun) applierValidateOptions(configDir string) []autoupdate.A
 		autoupdate.WithApplierRequireProof(ar.validate.RequireProof),
 		autoupdate.WithApplierBuildBackend(ar.validate.Backend),
 		autoupdate.WithApplierBuildBudget(ar.validate.Budget),
+		autoupdate.WithApplierManifestLimits(ar.validate.Manifest),
 	}
 	if ar.validate.Depth != nil {
 		opts = append(opts, autoupdate.WithApplierDepth(*ar.validate.Depth))

@@ -801,6 +801,10 @@ msgid "max parallel checks/applies (1-100). A standalone --clean sweep does NOT 
 msgstr "máximo de verificações/APLICAÇÕES paralelas (1-100). Uma limpeza --clean independente NÃO adota este padrão: ela é executada em um diretório de cada vez, a menos que o flag seja passado explicitamente, porque nunca foi medido se as execuções simultâneas do manifesto do pkgdev entram em conflito no DISTDIR ou no próprio bloqueio do pkgdev."
 
 #: cmd/bentoo/overlay_autoupdate.go
+msgid "how many pkgdev manifest runs may download distfiles at once, whatever --concurrency is (0 = use config autoupdate.manifest.concurrency, default 4). A run waiting for a slot spends none of its time budget"
+msgstr "quantas execuções de pkgdev manifest podem baixar distfiles ao mesmo tempo, independentemente de --concurrency (0 = usar a config autoupdate.manifest.concurrency, padrão 4). Uma execução aguardando uma vaga não gasta nada do seu limite de tempo"
+
+#: cmd/bentoo/overlay_autoupdate.go
 msgid "per-request HTTP timeout in seconds for --check, --revive and the vendor-tarball probe of --apply (0 = use config autoupdate.http_timeout, default 30)"
 msgstr "tempo limite HTTP por solicitação, em segundos, para --check, --revive e para a sondagem do vendor-tarball de --apply (0 = usar config autoupdate.http_timeout, padrão 30)"
 

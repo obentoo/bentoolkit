@@ -159,9 +159,9 @@ func TestRunStagedManifestCancelStopsPkgdevGroup(t *testing.T) {
 	assertManifestStopped(t, done, stoppedAt, grandchild, "R2.2")
 }
 
-// The deadline half of R2.3. manifestTimeout (5 min) is a constant; the same
-// derived context expires when the PARENT's deadline passes, so a 200 ms parent
-// deadline exercises the identical stop path without a 5-minute wait.
+// The deadline half of R2.3. The manifest watch's derived context also expires
+// when the PARENT's deadline passes, so a 200 ms parent deadline exercises the
+// identical stop path without waiting for a stall or the ceiling.
 func TestRunManifestDeadlineStopsPkgdevGroup(t *testing.T) {
 	overlayDir := filepath.Join(t.TempDir(), "overlay")
 	pkg := "test-cat/test-pkg"

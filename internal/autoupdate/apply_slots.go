@@ -24,12 +24,16 @@ type applySlots struct {
 	build chan struct{}
 	// llm bounds the LLM agents.
 	llm chan struct{}
+	// manifest bounds the manifest runs downloading distfiles; the sweepers
+	// an Applier builds share it (manifest_limits.go).
+	manifest chan struct{}
 }
 
-func newApplySlots(build, llm int) applySlots {
+func newApplySlots(build, llm, manifest int) applySlots {
 	return applySlots{
-		build: make(chan struct{}, max(build, 1)),
-		llm:   make(chan struct{}, max(llm, 1)),
+		build:    make(chan struct{}, max(build, 1)),
+		llm:      make(chan struct{}, max(llm, 1)),
+		manifest: make(chan struct{}, max(manifest, 1)),
 	}
 }
 
