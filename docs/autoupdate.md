@@ -893,6 +893,15 @@ Because the network is cut, a sandboxed pass counts as isolated, and
 `--require-isolation` is satisfied on a host whose Portage cannot create a
 network namespace by itself.
 
+The network stays cut even for an ebuild that declares
+`RESTRICT="network-sandbox"` (one that fetches during the build, such as a Go
+package running `go mod download` in `src_unpack`): such a build could only
+die offline. Its build gates are not run on the host backend; they are SKIPPED
+over the candidate, naming the restriction, so the bump is HUMAN and never
+published unbuilt. Prove it with the `container` or `vm` backend, where
+Portage's own sandbox honours the restriction, or remove the network need (for
+a Go package, a vendor tarball).
+
 When `bwrap` is missing, or the kernel does not let it create user
 namespaces, the build is not run: every build gate is SKIPPED with the reason,
 as a host cause, and nothing runs unsandboxed. Install `sys-apps/bubblewrap`,

@@ -37,6 +37,16 @@ Releases 0.1.0 to 0.29.1 are in the [changelog archive](docs/changelog/0.1.0-0.2
   ::gentoo" exemption applies only to a candidate that is ::gentoo's copy in
   that sense; any other is masked like every bump.
 
+- **A build that needs the network is no longer blamed on the host.** The
+  host backend's sandbox runs builds offline, so `sci-ml/llama-swap`, whose
+  ebuild declares `RESTRICT="network-sandbox"` for `go mod download`, died in
+  unpack and was reported as "the build failed on the environment", which no
+  retry could change. Such an ebuild's build gates are now not run on the host
+  backend: they are skipped over the candidate with the reason "the ebuild
+  declares `RESTRICT="network-sandbox"` … the host backend's sandbox runs every
+  build offline by policy", the bump is HUMAN, and it is never published
+  unbuilt. The container and vm backends build it as before.
+
 - **A repair that drops a patch only older ebuilds use is adopted even when
   the ebuild globs another `files/` directory.** `--repair sys-firmware/edk2`
   was refused because `files/edk2-202608-fix-gic-hvf.patch`, which the new
